@@ -26,7 +26,6 @@ jobs:
         os:
           - nscloud-ubuntu-22.04-amd64-4x8-with-cache
           - nscloud-ubuntu-22.04-arm64-4x8-with-cache
-          - nscloud-macos-sequoia-arm64-4x8-with-cache
     runs-on:
       - ${{ matrix.os }}
       - nscloud-cache-size-50gb
