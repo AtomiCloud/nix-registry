@@ -15,7 +15,7 @@ let
   archive_fmt = "tar.gz";
 
   sha256 = {
-    x86_64-linux = "sha256-t/DBGXsUaAjNDDAigeexJpxc1+iVJ/1xdoBF3ArH3yk=";
+    x86_64-linux = "sha256-GP7n7oTuecRwstUOguaOhHx9HiwNoFO0BSWX2/AB6LI=";
     aarch64-linux = "sha256-WExPypRI9eDpUXoCNkAeO5rsDHULZbpBWLYQxRdvN7I=";
 
     x86_64-darwin = "sha256-Llui3SXZl15YBtjrr1PbWtyDRBGWdKvMQ8zTqgwgc8s=";
