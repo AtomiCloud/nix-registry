@@ -19,6 +19,21 @@ jobs:
       - name: Run pre-commit
         run: nix develop .#ci -c ./scripts/ci/pre-commit.sh
 
+  build:
+    name: Pre-commit Check
+    runs-on:
+      - nscloud-ubuntu-22.04-amd64-4x8-with-cache
+      - nscloud-cache-size-50gb
+      - nscloud-cache-tag-nix-registry-nix-build-store-cache
+      - nscloud-git-mirror-1gb
+    steps:
+      # Setup
+      - uses: AtomiCloud/actions.setup-nix@v1.2.1
+
+      # pre commit
+      - name: Nix Build
+        run: nix build
+
   release:
     name: Semantic Release
     needs:
