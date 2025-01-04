@@ -38,6 +38,7 @@ jobs:
     name: Semantic Release
     needs:
       - precommit
+      - build
     if: github.ref == 'refs/heads/main'
     runs-on:
       - nscloud-ubuntu-22.04-amd64-4x8-with-cache
