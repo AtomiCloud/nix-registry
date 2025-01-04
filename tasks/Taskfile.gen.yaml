@@ -1,0 +1,74 @@
+version: '3'
+
+tasks:
+  go:sha:
+    desc: Calculate SHA of Go module using the GitHub information
+    summary: |
+      Calculate SHA of Go module using the GitHub information
+
+      Usage:
+      pls gen:go:sha -- <nix-identifier> <path to nix file in golang>
+
+      example:
+      1. In default.nix
+         { narwhal = import golang/narwhal/default.nix ... }
+
+         command to run: pls gen:go:sha -- narwhal narwhal/default
+
+      2. In default.nix
+         { narwhal_0_3_11 = import ./golang/narwhal/0.3.11.nix ...}
+
+         command to run: pls gen:go:sha -- narwhal_0_3_11 narwhal/0.3.11
+    cmds:
+      - ./scripts/local/go-sha.sh {{.CLI_ARGS}}
+
+  go:vendor:sha:
+    desc: Calculate SHA of Go module's vendor (depedency/go.sum)'s packages
+    summary: |
+      Calculate SHA of Go module using the GitHub information
+
+      Usage:
+      pls gen:go:vendor:sha -- <nix-identifier> <path to nix file in golang>
+
+      example:
+      1. In default.nix
+         { narwhal = import golang/narwhal/default.nix ... }
+
+         command to run: pls get:go:vendor:sha -- narwhal narwhal/default
+
+      2. In default.nix
+         { narwhal_0_3_11 = import ./golang/narwhal/0.3.11.nix ...}
+
+         command to run: pls get:go:vendor:sha -- narwhal_0_3_11 narwhal/0.3.11
+    cmds:
+      - ./scripts/local/golang-vendor.sh {{.CLI_ARGS}}
+
+  node:base:
+    desc: Generates Node package Nix files as CLI binaries
+    internal: true
+    cmds:
+      - node2nix -i ./node/{{.NODE_VER}}/node-packages.json -e ./node/{{.NODE_VER}}/node-env.nix -o ./node/{{.NODE_VER}}/node-packages.nix -c ./node/{{.NODE_VER}}/composition.nix
+  node:22:
+    desc: Generate Node 22 packages Nix files as CLI binaries
+    cmds:
+      - task: node:base
+        vars:
+          NODE_VER: 22
+  node:
+    desc: Generate all Node packages
+    deps:
+      - node:22
+
+  gem:
+    desc: Generate Gem package Nix files as CLI binaries
+    summary: |
+      Generate lock files for a specific ruby and gemset.nix
+
+      Usage:
+        pls gen:gem -- <app>
+
+      Example:
+        For file in ruby/bashly
+        pls gen:gem -- bashly
+    cmds:
+      - cd "./ruby/{{.CLI_ARGS}}" && bundix -l

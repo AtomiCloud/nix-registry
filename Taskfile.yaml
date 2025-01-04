@@ -1,0 +1,10 @@
+version: '3'
+
+includes:
+  gen: tasks/Taskfile.gen.yaml
+
+tasks:
+  build:
+    desc: Build the nix flake
+    cmds:
+      - nix build {{.CLI_ARGS}}

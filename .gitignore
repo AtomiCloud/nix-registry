@@ -1,0 +1,8 @@
+.pre-commit-config.yaml
+.idea
+result*
+.releaserc
+target
+tmp
+.direnv
+.DS_Store
