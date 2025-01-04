@@ -20,7 +20,7 @@ jobs:
         run: nix develop .#ci -c ./scripts/ci/pre-commit.sh
 
   build:
-    name: Pre-commit Check
+    name: Nix Build
     runs-on:
       - nscloud-ubuntu-22.04-amd64-4x8-with-cache
       - nscloud-cache-size-50gb
