@@ -38,16 +38,16 @@ jobs:
       #
       - name: Nix Build
         run: >-
-          nix shell .#sg .#upstash .#action_docs 
+          nix shell nixpkgs#bash .#sg .#upstash .#action_docs 
           .#typescript_json_schema .#swagger_typescript_api
           .#dotnetsay .#dotnet-ef .#mirrord .#pls .#toml-cli
           .#nix-share .#aws-export-credentials .#cyanprint
-          -c sg --version && upstash --version && action-docs --version
+          -c bash -c 'sg --version && upstash --version && action-docs --version
           typescript-json-schema --version &&
           swagger-typescript-api --version && 
           dotnetsay && dotnet-ef --version &&
           mirrord --version && pls --version &&
-          toml --version && nix-share && cyanprint --version
+          toml --version && nix-share && cyanprint --version'
 
   release:
     name: Semantic Release
