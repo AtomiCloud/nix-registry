@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/AtomiCloud/nix-registry/compare/v1.0.0...v1.0.1) (2025-01-09)
+
+
+### 🐛 Bug Fixes 🐛
+
+* sg incorrect binding ([1db974d](https://github.com/AtomiCloud/nix-registry/commit/1db974d33ee410c6916befbb1dfd56e312bc6a83))
+
 ## 1.0.0 (2025-01-04)
 
 
