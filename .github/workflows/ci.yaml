@@ -35,9 +35,19 @@ jobs:
       # Setup
       - uses: AtomiCloud/actions.setup-nix@v1.2.1
 
-      # pre commit
+      #
       - name: Nix Build
-        run: nix build
+        run: >-
+          nix shell .#sg .#upstash .#action_docs 
+          .#typescript_json_schema .#swagger_typescript_api
+          .#dotnetsay .#dotnet-ef .#mirrord .#pls .#toml-cli
+          .#nix-share .#aws-export-credentials .#cyanprint
+          -c "sg --version && upstash --version && action-docs --version
+          typescript-json-schema --version &&
+          swagger-typescript-api --version && 
+          dotnetsay && dotnet-ef --version &&
+          mirrord --version && pls --version &&
+          toml --version && nix-share && cyanprint --version"
 
   release:
     name: Semantic Release

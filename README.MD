@@ -17,7 +17,6 @@ AtomiCloud's Nix Registry for custom built packages.
 - toml-cli
 - nix-share
 - aws-export-credentials
-- bashly
 - cyanprint
 
 # Installation

@@ -18,9 +18,6 @@ let
   # dotnet
   dotnet = import ./nuget/default.nix { inherit nixpkgs; };
 
-  # ruby
-  ruby = import ./ruby/default.nix { inherit nixpkgs; };
-
   # bin wrapper
   bin = {
     mirrord = import ./binWrapper/mirrord.nix { inherit nixpkgs; };
@@ -33,7 +30,6 @@ in
 shell
 // python
 // golang
-// ruby
 // node22
 // bin
 // rust

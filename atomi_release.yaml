@@ -37,6 +37,14 @@ plugins:
         - Changelog.md
         - docs/developer/CommitConventions.md
 
+  # Generate Major and Major Minor tags
+  - module: 'semantic-release-major-tag'
+    version: 0.3.2
+    config:
+      customTags:
+        - 'v${major}'
+        - 'v${major}.${minor}'
+
   # Github Release
   - module: '@semantic-release/github'
     version: 10.3.5
