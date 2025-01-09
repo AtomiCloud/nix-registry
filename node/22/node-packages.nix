@@ -418,13 +418,13 @@ let
         sha512 = "oGB+UxlgWcgQkgwo8GcEGwemoTFt3FIO9ababBmaGwXIoBKZ+GTy0pP185beGg7Llih/NSHSV2XAs1lnznocSg==";
       };
     };
-    "@swc/core-1.10.4" = {
+    "@swc/core-1.10.6" = {
       name = "_at_swc_slash_core";
       packageName = "@swc/core";
-      version = "1.10.4";
+      version = "1.10.6";
       src = fetchurl {
-        url = "https://registry.npmjs.org/@swc/core/-/core-1.10.4.tgz";
-        sha512 = "ut3zfiTLORMxhr6y/GBxkHmzcGuVpwJYX4qyXWuBKkpw/0g0S5iO1/wW7RnLnZbAi8wS/n0atRZoaZlXWBkeJg==";
+        url = "https://registry.npmjs.org/@swc/core/-/core-1.10.6.tgz";
+        sha512 = "zgXXsI6SAVwr6XsXyMnqlyLoa1lT+r09bAWI1xT3679ejWqI1Vnl14eJG0GjWYXCEMKHCNytfMq3OOQ62C39QQ==";
       };
     };
     "@swc/counter-0.1.3" = {
@@ -454,13 +454,13 @@ let
         sha512 = "V5gRru+aD8YVyCOMAjMpWR1Ui577DD5KSJsHP8RAxopAH22jFz6GZd/qxqjO6MJHQhcsjvjOFXyDhyLQUnMveQ==";
       };
     };
-    "@swc/wasm-1.10.4" = {
+    "@swc/wasm-1.10.6" = {
       name = "_at_swc_slash_wasm";
       packageName = "@swc/wasm";
-      version = "1.10.4";
+      version = "1.10.6";
       src = fetchurl {
-        url = "https://registry.npmjs.org/@swc/wasm/-/wasm-1.10.4.tgz";
-        sha512 = "C4BWVWIVNuC/mgMYYuB6SGPOmGSDv9FEeh+SJUq+AxHBhGuzmd6CJO05Gf1VlnUgb1rGPSNZojjrNQy4TMtElQ==";
+        url = "https://registry.npmjs.org/@swc/wasm/-/wasm-1.10.6.tgz";
+        sha512 = "4cxNIvuPoi2HZwXk2Iz2xCM9DkhaooMrZuivHsu+izAeL2Sh79LGAiIjSKO8HvbpKxhjoiLg2Bys7rBHUMQcdw==";
       };
     };
     "@tokenizer/token-0.3.0" = {
@@ -535,13 +535,13 @@ let
         sha512 = "QpLcX9ZSsq3YYUUnD3nFDY8H7wctAhQj/TFKL8Ya8v5fMm3CFXxo8zStsLAl780ltoYoo1WvKUVGBQK+1ifr7g==";
       };
     };
-    "@types/node-18.19.69" = {
+    "@types/node-18.19.70" = {
       name = "_at_types_slash_node";
       packageName = "@types/node";
-      version = "18.19.69";
+      version = "18.19.70";
       src = fetchurl {
-        url = "https://registry.npmjs.org/@types/node/-/node-18.19.69.tgz";
-        sha512 = "ECPdY1nlaiO/Y6GUnwgtAAhLNaQ53AyIVz+eILxpEo5OvuqE6yWkqWBIb5dU0DqhKQtMeny+FBD3PK6lm7L5xQ==";
+        url = "https://registry.npmjs.org/@types/node/-/node-18.19.70.tgz";
+        sha512 = "RE+K0+KZoEpDUbGGctnGdkrLFwi1eYKTlIHNl2Um98mUkGsm1u2Ff6Ltd0e8DktTtC98uy7rSj+hO8t/QuLoVQ==";
       };
     };
     "@types/normalize-package-data-2.4.4" = {
@@ -1498,13 +1498,13 @@ let
         sha512 = "f3qQ9oQy9j2AhBe/H9VC91wLmKBCCU/gDOnKNAYG5hswO7BLKj09Hc5HYNz9cGI++xlpDCIgDaitVs03ATR84Q==";
       };
     };
-    "fast-glob-3.3.2" = {
+    "fast-glob-3.3.3" = {
       name = "fast-glob";
       packageName = "fast-glob";
-      version = "3.3.2";
+      version = "3.3.3";
       src = fetchurl {
-        url = "https://registry.npmjs.org/fast-glob/-/fast-glob-3.3.2.tgz";
-        sha512 = "oX2ruAFQwf/Orj8m737Y5adxDQO0LAB7/S5MnxCdTNDd4p6BsyIVsv9JQsATbTSq8KHRpLwIHbVlUNatxd+1Ow==";
+        url = "https://registry.npmjs.org/fast-glob/-/fast-glob-3.3.3.tgz";
+        sha512 = "7MptL8U0cqcFdzIzwOTHoilX9x5BrNqye7Z/LuC7kCMRio1EMSyqRK3BEAUD7sXRq4iT4AzTVuZdhgQ2TCvYLg==";
       };
     };
     "fast-json-stable-stringify-2.1.0" = {
@@ -4310,17 +4310,17 @@ in
       sources."@jridgewell/resolve-uri-3.1.2"
       sources."@jridgewell/sourcemap-codec-1.5.0"
       sources."@jridgewell/trace-mapping-0.3.9"
-      sources."@swc/core-1.10.4"
+      sources."@swc/core-1.10.6"
       sources."@swc/counter-0.1.3"
       sources."@swc/helpers-0.5.15"
       sources."@swc/types-0.1.17"
-      sources."@swc/wasm-1.10.4"
+      sources."@swc/wasm-1.10.6"
       sources."@tsconfig/node10-1.0.11"
       sources."@tsconfig/node12-1.0.11"
       sources."@tsconfig/node14-1.0.3"
       sources."@tsconfig/node16-1.0.4"
       sources."@types/json-schema-7.0.15"
-      sources."@types/node-18.19.69"
+      sources."@types/node-18.19.70"
       sources."acorn-8.14.0"
       sources."acorn-walk-8.3.4"
       sources."ansi-regex-5.0.1"
@@ -4625,7 +4625,7 @@ in
       sources."extend-3.0.2"
       sources."extsprintf-1.3.0"
       sources."fast-deep-equal-3.1.3"
-      sources."fast-glob-3.3.2"
+      sources."fast-glob-3.3.3"
       sources."fast-json-stable-stringify-2.1.0"
       sources."fastq-1.18.0"
       sources."favicons-6.2.2"
