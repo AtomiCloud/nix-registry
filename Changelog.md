@@ -1,3 +1,12 @@
+## [1.0.2](https://github.com/AtomiCloud/nix-registry/compare/v1.0.1...v1.0.2) (2025-01-09)
+
+
+### 🐛 Bug Fixes 🐛
+
+* check pkgs ([9d0be4a](https://github.com/AtomiCloud/nix-registry/commit/9d0be4a230b5153a288f817543383e01475bc24a))
+* ci failing ([aee3a40](https://github.com/AtomiCloud/nix-registry/commit/aee3a409eb88f0a17350e826ce818d9614ef0fde))
+* improve CI to check build ([56ece41](https://github.com/AtomiCloud/nix-registry/commit/56ece417b5f1f53b6fe5fdfacd8d6e30c9fc29cd))
+
 ## [1.0.1](https://github.com/AtomiCloud/nix-registry/compare/v1.0.0...v1.0.1) (2025-01-09)
 
 
