@@ -11,8 +11,6 @@
     # registry
     nixpkgs.url = "nixpkgs/nixos-unstable";
     nixpkgs-2411.url = "nixpkgs/nixos-24.11";
-    atomipkgs.url = "github:AtomiCloud/nix-registry/v1";
-
   };
   outputs =
     { self
@@ -25,7 +23,6 @@
     , fenix
 
       # registries
-    , atomipkgs
     , nixpkgs
     , nixpkgs-2411
 
@@ -37,7 +34,6 @@
           pkgs = nixpkgs.legacyPackages.${system};
           pkgs-2411 = nixpkgs-2411.legacyPackages.${system};
           fenixpkgs = fenix.packages.${system};
-          atomi = atomipkgs.packages.${system};
           cyanprint = cyanprintpkgs.packages.${system};
           pre-commit-lib = pre-commit-hooks.lib.${system};
         in
@@ -51,7 +47,8 @@
           };
           registry = import ./nix/registry.nix
             {
-              inherit pkgs pkgs-2411 atomi;
+              inherit pkgs pkgs-2411;
+              atomi = packages;
             };
           env = import ./nix/env.nix {
             inherit pkgs;
