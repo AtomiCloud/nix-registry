@@ -1,3 +1,10 @@
+## [1.0.3](https://github.com/AtomiCloud/nix-registry/compare/v1.0.2...v1.0.3) (2025-01-22)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **drv:** self reference to remove dependency on old atomi ([1cb3ab0](https://github.com/AtomiCloud/nix-registry/commit/1cb3ab060a9be7ed6a4a665aec0ab05ea9329d20))
+
 ## [1.0.2](https://github.com/AtomiCloud/nix-registry/compare/v1.0.1...v1.0.2) (2025-01-09)
 
 
