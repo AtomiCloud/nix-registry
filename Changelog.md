@@ -1,3 +1,10 @@
+## [1.0.4](https://github.com/AtomiCloud/nix-registry/compare/v1.0.3...v1.0.4) (2025-01-28)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **drv:** temp rm cyanprint to remove ref to old atomi ([b2e7f50](https://github.com/AtomiCloud/nix-registry/commit/b2e7f5026b4a83ad04ffb6b3332071229847a6b7))
+
 ## [1.0.3](https://github.com/AtomiCloud/nix-registry/compare/v1.0.2...v1.0.3) (2025-01-22)
 
 
