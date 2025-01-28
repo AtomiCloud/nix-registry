@@ -6,7 +6,7 @@
     treefmt-nix.url = "github:numtide/treefmt-nix";
     pre-commit-hooks.url = "github:cachix/pre-commit-hooks.nix";
     fenix.url = "github:nix-community/fenix";
-    # cyanprintpkgs.url = "github:AtomiCloud/sulfone.iridium";
+    cyanprintpkgs.url = "github:AtomiCloud/sulfone.iridium";
 
     # registry
     nixpkgs.url = "nixpkgs/nixos-unstable";
@@ -19,7 +19,7 @@
     , flake-utils
     , treefmt-nix
     , pre-commit-hooks
-      # , cyanprintpkgs
+    , cyanprintpkgs
     , fenix
 
       # registries
@@ -34,7 +34,7 @@
           pkgs = nixpkgs.legacyPackages.${system};
           pkgs-2411 = nixpkgs-2411.legacyPackages.${system};
           fenixpkgs = fenix.packages.${system};
-          # cyanprint = cyanprintpkgs.packages.${system};
+          cyanprint = cyanprintpkgs.packages.${system};
           pre-commit-lib = pre-commit-hooks.lib.${system};
         in
         with rec {
@@ -69,7 +69,7 @@
               nixpkgs = pkgs;
               nixpkgs-2411 = pkgs-2411;
             } // {
-            # cyanprint = cyanprint.default;
+            cyanprint = cyanprint.default;
           };
           defaultPackage = pkgs.symlinkJoin {
             name = "all";
