@@ -1,3 +1,10 @@
+## [1.0.5](https://github.com/AtomiCloud/nix-registry/compare/v1.0.4...v1.0.5) (2025-01-28)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **drv:** include cyanprint back into registry ([7aea611](https://github.com/AtomiCloud/nix-registry/commit/7aea611df762f100156532eeade6d3f699deaf1e))
+
 ## [1.0.4](https://github.com/AtomiCloud/nix-registry/compare/v1.0.3...v1.0.4) (2025-01-28)
 
 
