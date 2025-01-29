@@ -1,3 +1,10 @@
+## [1.1.0](https://github.com/AtomiCloud/nix-registry/compare/v1.0.5...v1.1.0) (2025-01-29)
+
+
+### ✨ New Packages ✨
+
+* **atomiutils:** extend version of coreutils for atomicloud ([0df3c5a](https://github.com/AtomiCloud/nix-registry/commit/0df3c5a5f15f11f5f9b967db783b9bea018cb001))
+
 ## [1.0.5](https://github.com/AtomiCloud/nix-registry/compare/v1.0.4...v1.0.5) (2025-01-28)
 
 
