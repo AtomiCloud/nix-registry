@@ -19,10 +19,13 @@ let
   dotnet = import ./nuget/default.nix { inherit nixpkgs; };
 
   # bin wrapper
-  bin = {
+  bin = rec {
     mirrord = import ./binWrapper/mirrord.nix { inherit nixpkgs; };
     atomiutils = import ./binWrapper/atomiutils.nix { inherit nixpkgs; };
+    infrautils = import ./binWrapper/infrautils.nix { inherit nixpkgs gardenio mirrord; };
+    infralint = import ./binWrapper/infralint.nix { inherit nixpkgs; };
     gardenio = import ./binWrapper/gardenio.nix { inherit nixpkgs; };
+
   };
 
   rust = import ./rust/default.nix { inherit nixpkgs fenix; };
