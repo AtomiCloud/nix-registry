@@ -53,6 +53,8 @@ jobs:
           .#cyanprint
           .#atomiutils
           .#gardenio
+          .#infrautils
+          .#infralint
           -c bash -c '
           sg --version && 
           upstash --version && 
