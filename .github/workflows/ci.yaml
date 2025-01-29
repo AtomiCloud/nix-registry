@@ -13,7 +13,7 @@ jobs:
       - nscloud-git-mirror-1gb
     steps:
       # Setup
-      - uses: AtomiCloud/actions.setup-nix@v1.2.1
+      - uses: AtomiCloud/actions.setup-nix@v1
 
       # pre commit
       - name: Run pre-commit
@@ -33,7 +33,7 @@ jobs:
       - nscloud-git-mirror-1gb
     steps:
       # Setup
-      - uses: AtomiCloud/actions.setup-nix@v1.2.1
+      - uses: AtomiCloud/actions.setup-nix@v1
 
       #
       - name: Nix Build
@@ -83,13 +83,9 @@ jobs:
       - nscloud-git-mirror-1gb
     steps:
       # Setup
-      - uses: AtomiCloud/actions.setup-nix@v1.2.1
-      - uses: AtomiCloud/actions.cache-npm@v1.0.1
+      - uses: AtomiCloud/actions.setup-nix@v1
+      - uses: AtomiCloud/actions.cache-npm@v1
 
-      # action
-      - uses: rlespinasse/github-slug-action@v5.x
-        with:
-          short-length: 8
       - name: Release
         env:
           # needed for releaser
