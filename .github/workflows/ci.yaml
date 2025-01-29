@@ -53,6 +53,7 @@ jobs:
           .#aws-export-credentials
           .#cyanprint
           .#atomiutils
+          .#gardenio
           -c bash -c '
           sg --version && 
           upstash --version && 
@@ -66,6 +67,7 @@ jobs:
           toml --version && 
           nix-share &&
           cyanprint --version &&
+          garden version &&
           echo "🎉 Done"'
 
   release:
