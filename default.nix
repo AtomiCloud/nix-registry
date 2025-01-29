@@ -21,6 +21,7 @@ let
   # bin wrapper
   bin = {
     mirrord = import ./binWrapper/mirrord.nix { inherit nixpkgs; };
+    atomiutils = import ./binWrapper/atomiutils.nix { inherit nixpkgs; };
   };
 
   rust = import ./rust/default.nix { inherit nixpkgs fenix; };
