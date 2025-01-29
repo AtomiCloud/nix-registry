@@ -1,3 +1,10 @@
+## [1.2.0](https://github.com/AtomiCloud/nix-registry/compare/v1.1.0...v1.2.0) (2025-01-29)
+
+
+### ✨ New Packages ✨
+
+* **garden:** Automation for Kubernetes development and testing ([1674072](https://github.com/AtomiCloud/nix-registry/commit/1674072ca9c98e2be23efb32da13d9a4a9fc4df8))
+
 ## [1.1.0](https://github.com/AtomiCloud/nix-registry/compare/v1.0.5...v1.1.0) (2025-01-29)
 
 
