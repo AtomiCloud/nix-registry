@@ -51,6 +51,8 @@ jobs:
           .#toml-cli
           .#nix-share 
           .#aws-export-credentials
+          .#cyanprint
+          .#atomiutils
           -c bash -c '
           sg --version && 
           upstash --version && 
@@ -62,7 +64,9 @@ jobs:
           mirrord --version && 
           pls --version &&
           toml --version && 
-          nix-share'
+          nix-share &&
+          cyanprint --version &&
+          echo "🎉 Done"'
 
   release:
     name: Semantic Release
