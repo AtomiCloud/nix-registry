@@ -1,3 +1,15 @@
+## [2.0.0](https://github.com/AtomiCloud/nix-registry/compare/v1.2.0...v2.0.0) (2025-02-02)
+
+
+### ✨ New Packages ✨
+
+* **infra:** infralint and infrautils, bundling of infra related tools ([0dd96d5](https://github.com/AtomiCloud/nix-registry/commit/0dd96d58808c6f68d2b2e5cb103c99f4d882e5d2))
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **sg:** update sg to 0.11.0 ([c2097c8](https://github.com/AtomiCloud/nix-registry/commit/c2097c8f683c5c886f49b3f34b122d58b3418996))
+
 ## [1.2.0](https://github.com/AtomiCloud/nix-registry/compare/v1.1.0...v1.2.0) (2025-01-29)
 
 
