@@ -7,7 +7,7 @@ conventionMarkdown:
     id: commit-conventions
     title: Commit Conventions
     ---
-    var__convention_docs__
+    var___convention_docs___
 keywords:
   - BREAKING CHANGE
   - BREAKING CHANGES
