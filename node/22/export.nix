@@ -6,7 +6,6 @@ with n;
 (rec {
   sg_raw = n."@kirinnee/semantic-generator".override {
     buildInputs = [
-      nixpkgs.vips
       nixpkgs.nodePackages.npm
     ];
     nativeBuildInputs = [ nixpkgs.pkg-config ];
