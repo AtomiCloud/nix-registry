@@ -17,6 +17,6 @@ pkgs.runCommand "infralint"
   cp ${pkgs.helm-docs}/bin/* $out/bin/
 
   cp ${pkgs.terraform-docs}/bin/* $out/bin/
-  cp ${pkgs.tfsec-docs}/bin/* $out/bin/
-  cp ${pkgs.tflint-docs}/bin/* $out/bin/
+  cp ${pkgs.tfsec}/bin/* $out/bin/
+  cp ${pkgs.tflint}/bin/* $out/bin/
 ''
