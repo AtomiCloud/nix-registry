@@ -65,9 +65,12 @@ Release a new package
 
 Update a package's version
 
-| Scope   | Description                | Bump    |
-| ------- | -------------------------- | ------- |
-| default | Update a package's version | `major` |
+| Scope   | Description                      | Bump    |
+| ------- | -------------------------------- | ------- |
+| default | Update a package's version       | `nil`   |
+| `patch` | Update a package's patch version | `patch` |
+| `minor` | Update a package's minor version | `minor` |
+| `major` | Update a package's major version | `major` |
 
 ## remove
 

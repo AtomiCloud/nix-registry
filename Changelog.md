@@ -1,3 +1,18 @@
+## [2.0.1](https://github.com/AtomiCloud/nix-registry/compare/v2.0.0...v2.0.1) (2025-02-14)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **infralint:** incorrect moving binary in install script ([e056b31](https://github.com/AtomiCloud/nix-registry/commit/e056b31e97d34b088e6cd8b067140eb9abb699a7))
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **atomi_release:** add patch, minor, and major version update types ([5bbf7e4](https://github.com/AtomiCloud/nix-registry/commit/5bbf7e4dde01889f61a5387e376161d3adda55b9))
+* **infrautils:** include opentofu ([c4a152f](https://github.com/AtomiCloud/nix-registry/commit/c4a152f1845f25b1f384f93a3a3ed53e29db337e))
+* **atomiutils:** include tar, awk, gomplate ([e9218da](https://github.com/AtomiCloud/nix-registry/commit/e9218da74ffe00e1eda590b1a62c388a47aee329))
+* **infralint:** include terraform tools ([69942b0](https://github.com/AtomiCloud/nix-registry/commit/69942b0c8f52bf24d5aa84f76e52c5b7aec2c318))
+
 ## [2.0.0](https://github.com/AtomiCloud/nix-registry/compare/v1.2.0...v2.0.0) (2025-02-02)
 
 
