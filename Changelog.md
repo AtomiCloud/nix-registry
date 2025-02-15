@@ -1,3 +1,12 @@
+## [2.1.0](https://github.com/AtomiCloud/nix-registry/compare/v2.0.1...v2.1.0) (2025-02-15)
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **default:** bump for all atomi updates ([e0c3e11](https://github.com/AtomiCloud/nix-registry/commit/e0c3e1137f7a769302ecf541e0a26625d42b3aed))
+* **infrauitls:** to include skopeo ([86f11e2](https://github.com/AtomiCloud/nix-registry/commit/86f11e2b08ba43ebf546fb1d9fc462052123bba3))
+* **atomiutils:** update atomiutils to use include toybox ([e555f87](https://github.com/AtomiCloud/nix-registry/commit/e555f87851050ae9e3deda96d7609fe4ef0d41d3))
+
 ## [2.0.1](https://github.com/AtomiCloud/nix-registry/compare/v2.0.0...v2.0.1) (2025-02-14)
 
 
