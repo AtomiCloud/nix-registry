@@ -87,7 +87,7 @@ types:
     scopes:
       default:
         desc: Update a package's version
-        release: false
+        release: minor
       patch:
         desc: Update a package's patch version
         release: patch
