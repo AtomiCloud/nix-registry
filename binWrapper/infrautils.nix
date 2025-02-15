@@ -11,6 +11,7 @@ pkgs.runCommand "infrautils"
 
     pkgs.docker
     pkgs.tilt
+    pkgs.skopeo
 
     pkgs.opentofu
 
