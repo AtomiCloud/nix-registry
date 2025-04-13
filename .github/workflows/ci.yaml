@@ -55,6 +55,7 @@ jobs:
           .#gardenio
           .#infrautils
           .#infralint
+          .#codecov
           -c bash -c '
           sg --version && 
           upstash --version && 
@@ -69,6 +70,7 @@ jobs:
           nix-share &&
           cyanprint --version &&
           garden version &&
+          codecov --version &&
           echo "🎉 Done"'
 
   release:

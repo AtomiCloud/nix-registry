@@ -25,7 +25,7 @@ let
     infrautils = import ./binWrapper/infrautils.nix { inherit nixpkgs gardenio mirrord; };
     infralint = import ./binWrapper/infralint.nix { inherit nixpkgs; };
     gardenio = import ./binWrapper/gardenio.nix { inherit nixpkgs; };
-
+    codecov = import ./binWrapper/codecov.nix { inherit nixpkgs; };
   };
 
   rust = import ./rust/default.nix { inherit nixpkgs fenix; };
