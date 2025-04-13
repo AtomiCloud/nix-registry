@@ -1,3 +1,10 @@
+## [2.2.0](https://github.com/AtomiCloud/nix-registry/compare/v2.1.0...v2.2.0) (2025-04-13)
+
+
+### ✨ New Packages ✨
+
+* **codecov:** Codecov CLI tool for code coverage reporting ([40f3985](https://github.com/AtomiCloud/nix-registry/commit/40f398523f167c0330c6b949b785a9931d3e139a))
+
 ## [2.1.0](https://github.com/AtomiCloud/nix-registry/compare/v2.0.1...v2.1.0) (2025-02-15)
 
 
