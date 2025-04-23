@@ -57,6 +57,7 @@ jobs:
           .#infralint
           .#codecov
           .#dotnetlint
+          .#helmlint
           -c bash -c '
           sg --version && 
           upstash --version && 
@@ -73,6 +74,7 @@ jobs:
           garden version &&
           codecov --version &&
           dotnetlint --version &&
+          helmlint --version &&
           echo "🎉 Done"'
 
   release:
