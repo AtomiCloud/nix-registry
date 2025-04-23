@@ -1,3 +1,11 @@
+## [2.3.0](https://github.com/AtomiCloud/nix-registry/compare/v2.2.0...v2.3.0) (2025-04-23)
+
+
+### ✨ New Packages ✨
+
+* **dotnetlint:** recursively run dotnet lint ([f3fc876](https://github.com/AtomiCloud/nix-registry/commit/f3fc876bf6b14f98d403a99bcdd2fd1ccdd7b08c))
+* **helmlint:** recursively run helm lint ([bb5ca77](https://github.com/AtomiCloud/nix-registry/commit/bb5ca77a4c92a59c844c11a8eda3ea0f9296dab5))
+
 ## [2.2.0](https://github.com/AtomiCloud/nix-registry/compare/v2.1.0...v2.2.0) (2025-04-13)
 
 
