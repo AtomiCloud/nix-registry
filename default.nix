@@ -23,7 +23,7 @@ let
     mirrord = import ./binWrapper/mirrord.nix { inherit nixpkgs; };
     atomiutils = import ./binWrapper/atomiutils.nix { inherit nixpkgs; };
     infrautils = import ./binWrapper/infrautils.nix { inherit nixpkgs gardenio mirrord; };
-    infralint = import ./binWrapper/infralint.nix { inherit nixpkgs; };
+    infralint = import ./binWrapper/infralint.nix { inherit nixpkgs; helmlint = shell.helmlint; };
     gardenio = import ./binWrapper/gardenio.nix { inherit nixpkgs; };
     codecov = import ./binWrapper/codecov.nix { inherit nixpkgs; };
   };

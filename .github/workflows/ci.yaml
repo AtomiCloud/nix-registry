@@ -56,6 +56,8 @@ jobs:
           .#infrautils
           .#infralint
           .#codecov
+          .#dotnetlint
+          .#helmlint
           -c bash -c '
           sg --version && 
           upstash --version && 
@@ -71,6 +73,8 @@ jobs:
           cyanprint --version &&
           garden version &&
           codecov --version &&
+          dotnetlint --version &&
+          helmlint --version &&
           echo "🎉 Done"'
 
   release:
