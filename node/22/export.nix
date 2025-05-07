@@ -22,5 +22,6 @@ with n;
   action_docs = n."action-docs";
   typescript_json_schema = n."typescript-json-schema";
   swagger_typescript_api = n."swagger-typescript-api";
+  openapi_to_postmanv2 = n."openapi-to-postmanv2";
 
 })
