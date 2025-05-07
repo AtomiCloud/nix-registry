@@ -1,3 +1,10 @@
+## [2.4.0](https://github.com/AtomiCloud/nix-registry/compare/v2.3.0...v2.4.0) (2025-05-07)
+
+
+### ✨ New Packages ✨
+
+* **openapi2postmanv2:** convert openapi to postman ([f47a429](https://github.com/AtomiCloud/nix-registry/commit/f47a429e0ac7ed2adf7082e9a473879fb47d2be6))
+
 ## [2.3.0](https://github.com/AtomiCloud/nix-registry/compare/v2.2.0...v2.3.0) (2025-04-23)
 
 
