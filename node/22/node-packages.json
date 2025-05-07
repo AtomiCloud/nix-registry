@@ -1,1 +1,8 @@
-["@upstash/cli", "action-docs", "typescript-json-schema", "swagger-typescript-api", "@kirinnee/semantic-generator"]
+[
+  "@upstash/cli",
+  "action-docs",
+  "typescript-json-schema",
+  "swagger-typescript-api",
+  "@kirinnee/semantic-generator",
+  "openapi-to-postmanv2"
+]
