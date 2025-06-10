@@ -1,3 +1,15 @@
+## [2.5.0](https://github.com/AtomiCloud/nix-registry/compare/v2.4.0...v2.5.0) (2025-06-10)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **toml-cli:** incorrect cargo hash ([c10b156](https://github.com/AtomiCloud/nix-registry/commit/c10b1563094ee0b51208fba538bf4f71f6409333))
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **cyanprint:** to v2.1.0 ([dbd864d](https://github.com/AtomiCloud/nix-registry/commit/dbd864d406da91e5843e3a0a57cfc16b2a68b8e8))
+
 ## [2.4.0](https://github.com/AtomiCloud/nix-registry/compare/v2.3.0...v2.4.0) (2025-05-07)
 
 
