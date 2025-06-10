@@ -1,7 +1,7 @@
-{ nixpkgs, nixpkgs-2411, fenix }:
+{ nixpkgs, nixpkgs-2505, fenix }:
 let trivialBuilders = import ./trivial.nix { inherit nixpkgs; }; in
 let
-  node22 = import ./node/22/export.nix { inherit trivialBuilders; nixpkgs = nixpkgs-2411; nodejs = nixpkgs-2411.nodejs_22; };
+  node22 = import ./node/22/export.nix { inherit trivialBuilders; nixpkgs = nixpkgs-2505; nodejs = nixpkgs-2505.nodejs_22; };
   # Shell
   shell = (import ./shellWrapper/default.nix { inherit nixpkgs trivialBuilders; });
 

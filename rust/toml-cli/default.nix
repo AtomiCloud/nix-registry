@@ -18,7 +18,7 @@ with nixpkgs;
     openssl
   ] ++ lib.optionals stdenv.isDarwin [ darwin.Security ]);
 
-  cargoHash = "sha256-v+GBn9mmiWcWnxmpH6JRPVz1fOSrsjWoY+l+bdzKtT4=";
+  cargoHash = "sha256-PoqVMTCRmSTt7UhCpMF3ixmAfVtpkaOfaTTmDNhrpLA=";
 
   doCheck = false;
   checkPhase = "";

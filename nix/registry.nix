@@ -1,4 +1,4 @@
-{ pkgs, pkgs-2411, atomi }:
+{ pkgs, pkgs-2505, atomi }:
 let
 
   all = {
@@ -14,8 +14,8 @@ let
       with pkgs;
       { }
     );
-    nix-2411 = (
-      with pkgs-2411;
+    nix-2505 = (
+      with pkgs-2505;
       {
         node2nix = nodePackages.node2nix;
         yq = yq-go;
@@ -39,6 +39,6 @@ let
   };
 in
 with all;
-nix-2411 //
+nix-2505 //
 nix-unstable //
 atomipkgs

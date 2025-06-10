@@ -10,7 +10,7 @@
 
     # registry
     nixpkgs.url = "nixpkgs/nixos-unstable";
-    nixpkgs-2411.url = "nixpkgs/nixos-24.11";
+    nixpkgs-2505.url = "nixpkgs/nixos-25.05";
   };
   outputs =
     { self
@@ -24,7 +24,7 @@
 
       # registries
     , nixpkgs
-    , nixpkgs-2411
+    , nixpkgs-2505
 
     } @inputs:
     (flake-utils.lib.eachDefaultSystem
@@ -32,7 +32,7 @@
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
-          pkgs-2411 = nixpkgs-2411.legacyPackages.${system};
+          pkgs-2505 = nixpkgs-2505.legacyPackages.${system};
           fenixpkgs = fenix.packages.${system};
           cyanprint = cyanprintpkgs.packages.${system};
           pre-commit-lib = pre-commit-hooks.lib.${system};
@@ -47,7 +47,7 @@
           };
           registry = import ./nix/registry.nix
             {
-              inherit pkgs pkgs-2411;
+              inherit pkgs pkgs-2505;
               atomi = packages;
             };
           env = import ./nix/env.nix {
@@ -67,7 +67,7 @@
             {
               fenix = fenixpkgs;
               nixpkgs = pkgs;
-              nixpkgs-2411 = pkgs-2411;
+              nixpkgs-2505 = pkgs-2505;
             } // {
             cyanprint = cyanprint.default;
           };
