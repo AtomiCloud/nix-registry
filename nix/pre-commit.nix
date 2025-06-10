@@ -7,6 +7,7 @@ pre-commit-lib.run {
     # formatter
     treefmt = {
       enable = true;
+      package = formatter;
       excludes = [
         ".*(Changelog|README|CommitConventions).+(MD|md)"
       ];
@@ -73,11 +74,5 @@ pre-commit-lib.run {
       pass_filenames = true;
     };
 
-  };
-
-  settings = {
-    treefmt = {
-      package = formatter;
-    };
   };
 }
