@@ -58,6 +58,7 @@ jobs:
           .#codecov
           .#dotnetlint
           .#helmlint
+          .#attic
           -c bash -c '
           sg --version && 
           upstash --version && 
@@ -75,6 +76,7 @@ jobs:
           codecov --version &&
           dotnetlint --version &&
           helmlint --version &&
+          attic --version &&
           echo "🎉 Done"'
 
   release:
