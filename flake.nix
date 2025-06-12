@@ -7,6 +7,7 @@
     pre-commit-hooks.url = "github:cachix/pre-commit-hooks.nix";
     fenix.url = "github:nix-community/fenix";
     cyanprintpkgs.url = "github:AtomiCloud/sulfone.iridium";
+    atticpkgs.url = "github:zhaofengli/attic";
 
     # registry
     nixpkgs.url = "nixpkgs/nixos-unstable";
@@ -21,7 +22,7 @@
     , pre-commit-hooks
     , cyanprintpkgs
     , fenix
-
+    , atticpkgs
       # registries
     , nixpkgs
     , nixpkgs-2505
@@ -35,8 +36,10 @@
           pkgs-2505 = nixpkgs-2505.legacyPackages.${system};
           fenixpkgs = fenix.packages.${system};
           cyanprint = cyanprintpkgs.packages.${system};
+          attic = atticpkgs.packages.${system};
           pre-commit-lib = pre-commit-hooks.lib.${system};
         in
+
         with rec {
           pre-commit = import ./nix/pre-commit.nix {
             inherit pre-commit-lib formatter;
@@ -70,6 +73,7 @@
               nixpkgs-2505 = pkgs-2505;
             } // {
             cyanprint = cyanprint.default;
+            attic = attic.default;
           };
           defaultPackage = pkgs.symlinkJoin {
             name = "all";
