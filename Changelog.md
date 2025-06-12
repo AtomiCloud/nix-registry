@@ -1,3 +1,10 @@
+## [2.6.0](https://github.com/AtomiCloud/nix-registry/compare/v2.5.0...v2.6.0) (2025-06-12)
+
+
+### ✨ New Packages ✨
+
+* **attic:** self-hosted nix binary cache ([71f3d52](https://github.com/AtomiCloud/nix-registry/commit/71f3d52dc1cc466b267b249b6f80c67aacfb3a07))
+
 ## [2.5.0](https://github.com/AtomiCloud/nix-registry/compare/v2.4.0...v2.5.0) (2025-06-10)
 
 
