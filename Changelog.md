@@ -1,3 +1,10 @@
+## [2.6.1](https://github.com/AtomiCloud/nix-registry/compare/v2.6.0...v2.6.1) (2025-06-25)
+
+
+### 🐛 Bug Fixes 🐛
+
+* upgrade infrastructure and upstream ([91d5f5c](https://github.com/AtomiCloud/nix-registry/commit/91d5f5ce5c4da945fb108870234d95b1454e4ec7))
+
 ## [2.6.0](https://github.com/AtomiCloud/nix-registry/compare/v2.5.0...v2.6.0) (2025-06-12)
 
 
