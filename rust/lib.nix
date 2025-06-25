@@ -9,6 +9,6 @@ with fenix; {
     stable.rust-std
     openssl
 
-  ] ++ lib.optionals stdenv.isDarwin [ nixpkgs.darwin.Security libiconv ]);
+  ]);
 
 }

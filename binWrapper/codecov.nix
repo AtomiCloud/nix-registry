@@ -7,7 +7,7 @@ let
   plat = {
     x86_64-linux = "linux";
     aarch64-linux = "linux-arm64";
-
+    aarch64-darwin = "macos";
     x86_64-darwin = "macos";
   }.${system} or throwSystem;
 
@@ -15,7 +15,7 @@ let
   sha256 = {
     x86_64-linux = "0f7aadde579ebde1443ad2f977beada703f562997fdda603f213faf2a8559868";
     aarch64-linux = "a26e29f6c9480a1226a850c57f80bc79f0ea0c9e59e6440530577bd3d11fef2f";
-
+    aarch64-darwin = "1627507cf5b4d2f7c86247428cc2b6d02fbfa6aa380847cd047a33949d3bdbe1";
     x86_64-darwin = "1627507cf5b4d2f7c86247428cc2b6d02fbfa6aa380847cd047a33949d3bdbe1";
   }.${system} or throwSystem;
 in
@@ -55,6 +55,6 @@ stdenv.mkDerivation (finalAttrs: {
     homepage = "https://codecov.io/";
     downloadPage = "https://github.com/codecov/codecov-cli/releases";
     license = licenses.mit;
-    platforms = [ "x86_64-linux" "x86_64-darwin" "aarch64-linux" ];
+    platforms = [ "x86_64-linux" "x86_64-darwin" "aarch64-linux" "aarch64-darwin" ];
   };
 })

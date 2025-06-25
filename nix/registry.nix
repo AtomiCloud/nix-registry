@@ -1,4 +1,4 @@
-{ pkgs, pkgs-2505, atomi }:
+{ pkgs, pkgs-2505, pkgs-unstable, atomi }:
 let
 
   all = {
@@ -11,7 +11,7 @@ let
       }
     );
     nix-unstable = (
-      with pkgs;
+      with pkgs-unstable;
       { }
     );
     nix-2505 = (
