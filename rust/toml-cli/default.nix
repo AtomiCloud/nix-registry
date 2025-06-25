@@ -16,7 +16,7 @@ with nixpkgs;
 
   buildInputs = ([
     openssl
-  ] ++ lib.optionals stdenv.isDarwin [ darwin.Security ]);
+  ]);
 
   cargoHash = "sha256-PoqVMTCRmSTt7UhCpMF3ixmAfVtpkaOfaTTmDNhrpLA=";
 
