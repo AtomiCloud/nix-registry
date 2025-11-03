@@ -31,31 +31,49 @@ The platform naming varies by project. Common patterns in existing wrappers:
 
 ### 3. Download and Calculate SHA256 for Each Platform
 
-For each of the 4 platforms, you need to:
+For each of the 4 platforms, you need to download the file and calculate its SHA256 hash.
 
-1. Download the binary/archive
-2. Calculate its SHA256 hash
-3. Convert to Nix format (base64 with `sha256-` prefix)
+**IMPORTANT**: Use `nix store prefetch-file` (preferred) or `nix-prefetch-url` WITHOUT `--unpack`. The hash must be of the downloaded file itself, NOT the unpacked contents. `builtins.fetchurl` downloads the file as-is, so we need the hash of the tarball/binary file, not what's inside it.
 
-Use this script pattern:
+#### Method 1: Using `nix store prefetch-file` (Recommended)
+
+This command downloads the file and outputs the hash in SRI format directly (ready to use):
 
 ```bash
-# For a direct binary download:
+nix store prefetch-file --json <url>
+```
+
+**Example for garden 0.14.9** - Run for ALL 4 platforms:
+
+```bash
+nix store prefetch-file --json https://download.garden.io/core/0.14.9/garden-0.14.9-linux-amd64.tar.gz
+nix store prefetch-file --json https://download.garden.io/core/0.14.9/garden-0.14.9-linux-arm64.tar.gz
+nix store prefetch-file --json https://download.garden.io/core/0.14.9/garden-0.14.9-macos-amd64.tar.gz
+nix store prefetch-file --json https://download.garden.io/core/0.14.9/garden-0.14.9-macos-arm64.tar.gz
+```
+
+The output will include `"hash":"sha256-..."` which you can use directly.
+
+#### Method 2: Using `nix-prefetch-url` (Alternative)
+
+```bash
+# Download and get hash (base32 format)
 nix-prefetch-url --type sha256 <url>
 
-# For a tarball/zip:
-nix-prefetch-url --type sha256 --unpack <url>
+# Convert to SRI format
+nix-hash --to-sri --type sha256 <base32-hash>
 ```
 
-**Important**: Run this for ALL 4 platforms:
+**CRITICAL**: Do NOT use `--unpack` flag! That hashes the unpacked contents, not the file itself.
 
-```bash
-# Example for garden 0.13.50
-nix-prefetch-url --type sha256 --unpack https://download.garden.io/core/0.13.50/garden-0.13.50-linux-amd64.tar.gz
-nix-prefetch-url --type sha256 --unpack https://download.garden.io/core/0.13.50/garden-0.13.50-linux-arm64.tar.gz
-nix-prefetch-url --type sha256 --unpack https://download.garden.io/core/0.13.50/garden-0.13.50-macos-amd64.tar.gz
-nix-prefetch-url --type sha256 --unpack https://download.garden.io/core/0.13.50/garden-0.13.50-macos-arm64.tar.gz
-```
+#### Method 3: Let Nix Tell You (Fallback)
+
+If the above methods fail, you can put a fake hash in the nix file and let Nix tell you the correct one:
+
+1. Use a fake hash like `sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=`
+2. Try to build: `nix build .#package-name`
+3. Nix will fail and show you the expected hash (in base32 format)
+4. Convert it to SRI: `nix-hash --to-sri --type sha256 <hash-from-error>`
 
 ### 4. Update or Create the Nix File
 
@@ -190,10 +208,13 @@ Use conventional commit format:
 
 ## Common Issues
 
-1. **Wrong SHA**: If you get a hash mismatch, Nix will show you the expected hash - use that.
-2. **Platform naming**: Check the actual download URLs to determine correct platform strings.
-3. **Archive format**: Use `--unpack` for tar.gz/zip, omit for raw binaries.
-4. **Universal binaries**: Some projects (like mirrord) use universal binaries for macOS - both darwin platforms use the same SHA.
+1. **Wrong SHA / Hash Mismatch**: If you get a hash mismatch error, Nix will show you the correct hash in base32 format. Convert it to SRI format using `nix-hash --to-sri --type sha256 <hash>`.
+
+2. **Using `--unpack` flag incorrectly**: DO NOT use `nix-prefetch-url --unpack` for files fetched with `builtins.fetchurl`. The `--unpack` flag hashes the unpacked contents, but `builtins.fetchurl` needs the hash of the archive file itself. Always use `nix store prefetch-file` or `nix-prefetch-url` without `--unpack`.
+
+3. **Platform naming**: Check the actual download URLs to determine correct platform strings. Each project uses different naming conventions (e.g., `linux-amd64` vs `linux_x86_64`).
+
+4. **Universal binaries**: Some projects (like mirrord) use universal binaries for macOS - both darwin platforms use the same SHA in these cases.
 
 ## Adding to default.nix
 
