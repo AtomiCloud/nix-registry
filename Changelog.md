@@ -1,3 +1,15 @@
+## [2.7.0](https://github.com/AtomiCloud/nix-registry/compare/v2.6.1...v2.7.0) (2025-11-04)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **drv:** incorrect hash ([fbf1151](https://github.com/AtomiCloud/nix-registry/commit/fbf115191b2b0e6bdc6ffb857cbae04bae6ee264))
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **garden:** from 0.13.50 to 0.14.9 ([0c2cb63](https://github.com/AtomiCloud/nix-registry/commit/0c2cb639325f7b02e40be8dbeaef9762be7a1b94))
+
 ## [2.6.1](https://github.com/AtomiCloud/nix-registry/compare/v2.6.0...v2.6.1) (2025-06-25)
 
 
