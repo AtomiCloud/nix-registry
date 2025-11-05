@@ -1,3 +1,10 @@
+## [2.8.0](https://github.com/AtomiCloud/nix-registry/compare/v2.7.0...v2.8.0) (2025-11-05)
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **mirrord:** to 3.171.0 ([1d8b8ae](https://github.com/AtomiCloud/nix-registry/commit/1d8b8ae4d02f31be0a20bd91d0d292ec216ccc00))
+
 ## [2.7.0](https://github.com/AtomiCloud/nix-registry/compare/v2.6.1...v2.7.0) (2025-11-04)
 
 
