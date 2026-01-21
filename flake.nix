@@ -7,6 +7,7 @@
     pre-commit-hooks.url = "github:cachix/pre-commit-hooks.nix";
     fenix.url = "github:nix-community/fenix";
     cyanprintpkgs.url = "github:AtomiCloud/sulfone.iridium";
+    worktrunkpkgs.url = "github:max-sixty/worktrunk";
     atticpkgs.url = "github:zhaofengli/attic";
 
     # registry
@@ -21,6 +22,7 @@
     , treefmt-nix
     , pre-commit-hooks
     , cyanprintpkgs
+    , worktrunkpkgs
     , fenix
     , atticpkgs
       # registries
@@ -35,6 +37,7 @@
           pkgs-2511 = nixpkgs-2511.legacyPackages.${system};
           fenixpkgs = fenix.packages.${system};
           cyanprint = cyanprintpkgs.packages.${system};
+          worktrunk = worktrunkpkgs.packages.${system};
           attic = atticpkgs.packages.${system};
           pre-commit-lib = pre-commit-hooks.lib.${system};
         in
@@ -73,6 +76,7 @@
               nixpkgs-unstable = pkgs-unstable;
             } // {
             cyanprint = cyanprint.default;
+            worktrunk = worktrunk.default;
             attic = attic.default;
           };
           defaultPackage = pkgs.symlinkJoin {
