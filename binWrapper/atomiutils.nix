@@ -16,6 +16,7 @@ pkgs.runCommand "atomiutils"
     pkgs.gnugrep
     pkgs.gnutar
     pkgs.gawk
+    pkgs.wget
 
     pkgs.curl
     pkgs.gomplate

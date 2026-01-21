@@ -9,20 +9,20 @@ let
     aarch64-linux = "linux_aarch64";
 
     x86_64-darwin = "mac_universal";
-    aarch64-darwin = "mac_universal";
+    aarch64-darwin = "linux_x86_64";
   }.${system} or throwSystem;
 
   archive_fmt = "tar.gz";
 
   sha256 = {
-    x86_64-linux = "sha256-Xzy8Qvsw/nVTa6PRRdsBbOZHfPGKzRimbOVDa6qqVXc=";
-    aarch64-linux = "sha256-7h7eRqypiqv0Ri9Bc61+AkYVm12GPwsPQKYYtMoyLho=";
+    x86_64-linux = "sha256-Qm1+qI5WMgoDwudvxynv+He1g7RgqCfbsTjKwYxzCLk=";
+    aarch64-linux = "sha256-3Jfv1HUV/jOApA0XJQkK1W/W83KyD59A6jr3TcLUJo4=";
 
-    x86_64-darwin = "sha256-rvlU8erkgb/Sdythejl02w76gaZXB8CmfiW0FMadcA4=";
-    aarch64-darwin = "sha256-rvlU8erkgb/Sdythejl02w76gaZXB8CmfiW0FMadcA4=";
+    x86_64-darwin = "sha256-+0NXyGjJ7HJmLVYPgIVjbXuFidnPmHmDY6hFf3CABxA=";
+    aarch64-darwin = "sha256-+0NXyGjJ7HJmLVYPgIVjbXuFidnPmHmDY6hFf3CABxA=";
   }.${system} or throwSystem;
 in
-let version = "3.171.0"; in
+let version = "3.182.0"; in
 let
   binary = fetchurl {
     url = "https://github.com/metalbear-co/mirrord/releases/download/${version}/mirrord_${plat}";
