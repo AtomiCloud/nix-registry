@@ -10,8 +10,8 @@
     atticpkgs.url = "github:zhaofengli/attic";
 
     # registry
-    nixpkgs-unstable.url = "nixpkgs/nixos-unstable";
-    nixpkgs-2505.url = "nixpkgs/nixos-25.05";
+    nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
+    nixpkgs-2511.url = "github:nixos/nixpkgs/nixos-25.11";
   };
   outputs =
     { self
@@ -24,7 +24,7 @@
     , fenix
     , atticpkgs
       # registries
-    , nixpkgs-2505
+    , nixpkgs-2511
     , nixpkgs-unstable
     } @inputs:
     (flake-utils.lib.eachDefaultSystem
@@ -32,13 +32,13 @@
         system:
         let
           pkgs-unstable = nixpkgs-unstable.legacyPackages.${system};
-          pkgs-2505 = nixpkgs-2505.legacyPackages.${system};
+          pkgs-2511 = nixpkgs-2511.legacyPackages.${system};
           fenixpkgs = fenix.packages.${system};
           cyanprint = cyanprintpkgs.packages.${system};
           attic = atticpkgs.packages.${system};
           pre-commit-lib = pre-commit-hooks.lib.${system};
         in
-        let pkgs = pkgs-2505; in
+        let pkgs = pkgs-2511; in
         with rec {
           pre-commit = import ./nix/pre-commit.nix {
             inherit pre-commit-lib formatter;
@@ -49,7 +49,7 @@
           };
           registry = import ./nix/registry.nix
             {
-              inherit pkgs pkgs-2505 pkgs-unstable;
+              inherit pkgs pkgs-2511 pkgs-unstable;
               atomi = packages;
             };
           env = import ./nix/env.nix {
@@ -69,7 +69,8 @@
             {
               fenix = fenixpkgs;
               nixpkgs = pkgs;
-              nixpkgs-2505 = pkgs-2505;
+              nixpkgs-2511 = pkgs-2511;
+              nixpkgs-unstable = pkgs-unstable;
             } // {
             cyanprint = cyanprint.default;
             attic = attic.default;
