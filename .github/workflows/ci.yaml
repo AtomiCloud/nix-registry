@@ -73,7 +73,7 @@ jobs:
           toml --version &&
           nix-share &&
           cyanprint --version &&
-          worktrunk --version &&
+          wt --version &&
           garden version &&
           codecov --version &&
           dotnetlint --version &&
