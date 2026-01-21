@@ -1,3 +1,15 @@
+## [2.11.0](https://github.com/AtomiCloud/nix-registry/compare/v2.10.0...v2.11.0) (2026-01-21)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **ci:** incorrect worktrunk ci check ([be18d23](https://github.com/AtomiCloud/nix-registry/commit/be18d23fa800b91d60fc72f6ada05ac5bd191809))
+
+
+### ✨ New Packages ✨
+
+* **worktrunk:** CLI for git worktree management ([18466aa](https://github.com/AtomiCloud/nix-registry/commit/18466aab08506f5bb7382fc367113530455c40ca))
+
 ## [2.10.0](https://github.com/AtomiCloud/nix-registry/compare/v2.9.0...v2.10.0) (2026-01-21)
 
 
