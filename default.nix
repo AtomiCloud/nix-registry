@@ -26,6 +26,7 @@ let
     infralint = import ./binWrapper/infralint.nix { inherit nixpkgs; helmlint = shell.helmlint; };
     gardenio = import ./binWrapper/gardenio.nix { inherit nixpkgs; };
     codecov = import ./binWrapper/codecov.nix { inherit nixpkgs; };
+    cliproxyapi = import ./binWrapper/cliproxyapi.nix { inherit nixpkgs; };
   };
 
   rust = import ./rust/default.nix { inherit nixpkgs fenix; };
