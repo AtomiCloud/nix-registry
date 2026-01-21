@@ -1,3 +1,10 @@
+## [2.10.0](https://github.com/AtomiCloud/nix-registry/compare/v2.9.0...v2.10.0) (2026-01-21)
+
+
+### ✨ New Packages ✨
+
+* **cliproxyapi:** extend claudecode to use any model ([cf6c1e6](https://github.com/AtomiCloud/nix-registry/commit/cf6c1e6a97a5541b76ae2608c6860eba50696ef6))
+
 ## [2.9.0](https://github.com/AtomiCloud/nix-registry/compare/v2.8.0...v2.9.0) (2026-01-21)
 
 ### ⬆️ Packages Updated ⬆️
