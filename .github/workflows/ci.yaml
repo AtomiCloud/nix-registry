@@ -50,6 +50,7 @@ jobs:
           .#nix-share 
           .#aws-export-credentials
           .#cyanprint
+          .#worktrunk
           .#atomiutils
           .#gardenio
           .#infrautils
@@ -71,6 +72,7 @@ jobs:
           toml --version && 
           nix-share &&
           cyanprint --version &&
+          worktrunk --version &&
           garden version &&
           codecov --version &&
           dotnetlint --version &&
