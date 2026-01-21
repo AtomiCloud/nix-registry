@@ -36,18 +36,18 @@ jobs:
 
       - name: Nix Build
         run: >-
-          nix shell nixpkgs#bash 
-          .#sg 
-          .#upstash 
-          .#action_docs 
-          .#typescript_json_schema 
+          nix shell nixpkgs#bash
+          .#sg
+          .#upstash
+          .#action_docs
+          .#typescript_json_schema
           .#swagger_typescript_api
-          .#dotnetsay 
-          .#dotnet-ef 
-          .#mirrord 
-          .#pls 
+          .#dotnetsay
+          .#dotnet-ef
+          .#mirrord
+          .#pls
           .#toml-cli
-          .#nix-share 
+          .#nix-share
           .#aws-export-credentials
           .#cyanprint
           .#worktrunk
@@ -59,17 +59,18 @@ jobs:
           .#dotnetlint
           .#helmlint
           .#attic
+          .#cliproxyapi
           -c bash -c '
-          sg --version && 
-          upstash --version && 
+          sg --version &&
+          upstash --version &&
           action-docs --version
           typescript-json-schema --version &&
-          swagger-typescript-api --version && 
-          dotnetsay && 
+          swagger-typescript-api --version &&
+          dotnetsay &&
           dotnet-ef --version &&
-          mirrord --version && 
+          mirrord --version &&
           pls --version &&
-          toml --version && 
+          toml --version &&
           nix-share &&
           cyanprint --version &&
           worktrunk --version &&
@@ -78,6 +79,7 @@ jobs:
           dotnetlint --version &&
           helmlint --version &&
           attic --version &&
+          cli-proxy-api --help &&
           echo "🎉 Done"'
 
   release:
