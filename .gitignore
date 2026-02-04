@@ -6,4 +6,4 @@ target
 tmp
 .direnv
 .DS_Store
-.kagent/
+.kagent
