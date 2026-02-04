@@ -40,9 +40,9 @@ pre-commit-lib.run {
       enable = true;
       name = "Gitlint";
       description = "Lints git commit message";
-      entry = "${packages.gitlint}/bin/gitlint --staged --msg-filename .git/COMMIT_EDITMSG";
+      entry = "${packages.gitlint}/bin/gitlint --staged --msg-filename";
       language = "system";
-      pass_filenames = false;
+      pass_filenames = true;
       stages = [ "commit-msg" ];
     };
 
