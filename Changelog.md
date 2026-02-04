@@ -1,3 +1,11 @@
+## [2.12.0](https://github.com/AtomiCloud/nix-registry/compare/v2.11.0...v2.12.0) (2026-02-04)
+
+
+### ✨ New Packages ✨
+
+* **deadcode:** go deadcode wrapper that fails on deadcode findings ([2d703ab](https://github.com/AtomiCloud/nix-registry/commit/2d703ab1ab57abd7e42cbfdaeb4285ade77dbbfb))
+* **deadcode:** go deadcode wrapper that fails on deadcode findings ([54e5d97](https://github.com/AtomiCloud/nix-registry/commit/54e5d972c304cd26b75d27e6bf47f60b5c9716f0))
+
 ## [2.11.0](https://github.com/AtomiCloud/nix-registry/compare/v2.10.0...v2.11.0) (2026-01-21)
 
 
