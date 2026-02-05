@@ -9,7 +9,7 @@ let
     aarch64-linux = "linux_aarch64";
 
     x86_64-darwin = "mac_universal";
-    aarch64-darwin = "linux_x86_64";
+    aarch64-darwin = "mac_universal";
   }.${system} or throwSystem;
 
   archive_fmt = "tar.gz";
