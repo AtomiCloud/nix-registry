@@ -57,9 +57,11 @@ jobs:
           .#infralint
           .#codecov
           .#dotnetlint
+          .#dn-inspect
           .#helmlint
           .#attic
           .#cliproxyapi
+          .#deadcode
           -c bash -c '
           sg --version &&
           upstash --version &&
@@ -77,6 +79,8 @@ jobs:
           garden version &&
           codecov --version &&
           dotnetlint --version &&
+          dn-inspect --version &&
+          deadcode --version &&
           helmlint --version &&
           attic --version &&
           cli-proxy-api --help &&
