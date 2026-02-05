@@ -57,6 +57,7 @@ jobs:
           .#infralint
           .#codecov
           .#dotnetlint
+          .#dn-inspect
           .#helmlint
           .#attic
           .#cliproxyapi
@@ -77,6 +78,7 @@ jobs:
           garden version &&
           codecov --version &&
           dotnetlint --version &&
+          dn-inspect --version &&
           helmlint --version &&
           attic --version &&
           cli-proxy-api --help &&
