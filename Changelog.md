@@ -1,3 +1,15 @@
+## [2.13.0](https://github.com/AtomiCloud/nix-registry/compare/v2.12.0...v2.13.0) (2026-02-05)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **ci:** missing check for deadcode ([c841e21](https://github.com/AtomiCloud/nix-registry/commit/c841e212899acc51629d51170f15c6f1ddaa498d))
+
+
+### ✨ New Packages ✨
+
+* **dn-inspect:** friendly jetbrains analyzer for csharp ([80c6fe4](https://github.com/AtomiCloud/nix-registry/commit/80c6fe40f5011843a11de4a9ed2fd4e959572ea2))
+
 ## [2.12.0](https://github.com/AtomiCloud/nix-registry/compare/v2.11.0...v2.12.0) (2026-02-04)
 
 ### ✨ New Packages ✨
