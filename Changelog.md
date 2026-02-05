@@ -1,3 +1,10 @@
+## [2.13.1](https://github.com/AtomiCloud/nix-registry/compare/v2.13.0...v2.13.1) (2026-02-05)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **mirrord:** incorrect darwin-arm slug ([38fd8e7](https://github.com/AtomiCloud/nix-registry/commit/38fd8e75b302ea7a18ee19fefe9de09be2c1a24b))
+
 ## [2.13.0](https://github.com/AtomiCloud/nix-registry/compare/v2.12.0...v2.13.0) (2026-02-05)
 
 
