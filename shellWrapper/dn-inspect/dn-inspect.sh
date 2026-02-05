@@ -2,7 +2,7 @@
 set -eou pipefail
 
 # Handle --version
-[ "${1:-}" = "--version" ] && echo "ℹ️ dn-inspect 0.1.0" && exit 0
+[ "${1:-}" = "--version" ] && echo "ℹ️ dn-inspect 0.2.0" && exit 0
 
 # Find .sln in current directory
 solution=$(find . -maxdepth 1 -name '*.sln' -print -quit 2>/dev/null)
@@ -10,6 +10,8 @@ solution="${solution#./}"
 filter=""
 use_projects=false
 projects=""
+no_build=false
+include_patterns=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -17,6 +19,20 @@ while [ "$#" -gt 0 ]; do
     shift
     [ -z "${1:-}" ] && echo "❌ Error: --filter requires a pattern" >&2 && exit 1
     filter="$1"
+    shift
+    ;;
+  --no-build)
+    no_build=true
+    shift
+    ;;
+  --include=*)
+    include_patterns="$include_patterns --include=${1#--include=}"
+    shift
+    ;;
+  --include)
+    shift
+    [ -z "${1:-}" ] && echo "❌ Error: --include requires a pattern" >&2 && exit 1
+    include_patterns="$include_patterns --include=$1"
     shift
     ;;
   --projects)
@@ -79,7 +95,12 @@ else
   echo "🔍 Running inspectcode"
 fi
 
-dotnet jb inspectcode "$sln_file" --format=Sarif --output="$report_file"
+inspectcode_args="$sln_file --format=Sarif --output=$report_file"
+[ "$no_build" = true ] && inspectcode_args="$inspectcode_args --no-build"
+[ -n "$include_patterns" ] && inspectcode_args="$inspectcode_args$include_patterns"
+
+# shellcheck disable=SC2086
+dotnet jb inspectcode $inspectcode_args
 
 [ ! -s "$report_file" ] && echo "✅ No SARIF output produced" && echo "📊 Total: 0 issue(s)" && exit 0
 
