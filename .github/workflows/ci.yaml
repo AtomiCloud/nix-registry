@@ -61,6 +61,7 @@ jobs:
           .#helmlint
           .#attic
           .#cliproxyapi
+          .#deadcode
           -c bash -c '
           sg --version &&
           upstash --version &&
@@ -79,6 +80,7 @@ jobs:
           codecov --version &&
           dotnetlint --version &&
           dn-inspect --version &&
+          deadcode --version &&
           helmlint --version &&
           attic --version &&
           cli-proxy-api --help &&
