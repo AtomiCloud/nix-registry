@@ -1,3 +1,10 @@
+## [2.14.0](https://github.com/AtomiCloud/nix-registry/compare/v2.13.1...v2.14.0) (2026-02-05)
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **dn-inspect:** v0.2.0 allowing include and no-build flag ([7208a14](https://github.com/AtomiCloud/nix-registry/commit/7208a14ae0e2bed4355f53beba17a81f3c931fa0))
+
 ## [2.13.1](https://github.com/AtomiCloud/nix-registry/compare/v2.13.0...v2.13.1) (2026-02-05)
 
 
