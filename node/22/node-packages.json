@@ -4,5 +4,6 @@
   "typescript-json-schema",
   "swagger-typescript-api",
   "@kirinnee/semantic-generator",
-  "openapi-to-postmanv2"
+  "openapi-to-postmanv2",
+  "happy-coder"
 ]
