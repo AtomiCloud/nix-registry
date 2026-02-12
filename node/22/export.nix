@@ -23,5 +23,14 @@ with n;
   typescript_json_schema = n."typescript-json-schema";
   swagger_typescript_api = n."swagger-typescript-api";
   openapi_to_postmanv2 = n."openapi-to-postmanv2";
+  happy_coder_raw = n."happy-coder";
+  happy_coder = trivialBuilders.writeShellScriptBin {
+    name = "happy";
+    version = happy_coder_raw.version;
+    text = ''
+      export PATH="${nodejs}/bin:$PATH"
+      ${happy_coder_raw}/lib/node_modules/happy-coder/bin/happy.mjs "$@"
+    '';
+  };
 
 })
