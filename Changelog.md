@@ -1,3 +1,10 @@
+## [2.15.0](https://github.com/AtomiCloud/nix-registry/compare/v2.14.0...v2.15.0) (2026-02-12)
+
+
+### ✨ New Packages ✨
+
+* **happy:** lets you control AI agents from anywhere ([41ad0b0](https://github.com/AtomiCloud/nix-registry/commit/41ad0b0ca86e2ba3258cec6c386439680ceb700e))
+
 ## [2.14.0](https://github.com/AtomiCloud/nix-registry/compare/v2.13.1...v2.14.0) (2026-02-05)
 
 
