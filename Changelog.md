@@ -1,35 +1,30 @@
 ## [2.15.0](https://github.com/AtomiCloud/nix-registry/compare/v2.14.0...v2.15.0) (2026-02-12)
 
-
 ### ✨ New Packages ✨
 
-* **happy:** lets you control AI agents from anywhere ([41ad0b0](https://github.com/AtomiCloud/nix-registry/commit/41ad0b0ca86e2ba3258cec6c386439680ceb700e))
+- **happy:** lets you control AI agents from anywhere ([41ad0b0](https://github.com/AtomiCloud/nix-registry/commit/41ad0b0ca86e2ba3258cec6c386439680ceb700e))
 
 ## [2.14.0](https://github.com/AtomiCloud/nix-registry/compare/v2.13.1...v2.14.0) (2026-02-05)
 
-
 ### ⬆️ Packages Updated ⬆️
 
-* **dn-inspect:** v0.2.0 allowing include and no-build flag ([7208a14](https://github.com/AtomiCloud/nix-registry/commit/7208a14ae0e2bed4355f53beba17a81f3c931fa0))
+- **dn-inspect:** v0.2.0 allowing include and no-build flag ([7208a14](https://github.com/AtomiCloud/nix-registry/commit/7208a14ae0e2bed4355f53beba17a81f3c931fa0))
 
 ## [2.13.1](https://github.com/AtomiCloud/nix-registry/compare/v2.13.0...v2.13.1) (2026-02-05)
 
-
 ### 🐛 Bug Fixes 🐛
 
-* **mirrord:** incorrect darwin-arm slug ([38fd8e7](https://github.com/AtomiCloud/nix-registry/commit/38fd8e75b302ea7a18ee19fefe9de09be2c1a24b))
+- **mirrord:** incorrect darwin-arm slug ([38fd8e7](https://github.com/AtomiCloud/nix-registry/commit/38fd8e75b302ea7a18ee19fefe9de09be2c1a24b))
 
 ## [2.13.0](https://github.com/AtomiCloud/nix-registry/compare/v2.12.0...v2.13.0) (2026-02-05)
 
-
 ### 🐛 Bug Fixes 🐛
 
-* **ci:** missing check for deadcode ([c841e21](https://github.com/AtomiCloud/nix-registry/commit/c841e212899acc51629d51170f15c6f1ddaa498d))
-
+- **ci:** missing check for deadcode ([c841e21](https://github.com/AtomiCloud/nix-registry/commit/c841e212899acc51629d51170f15c6f1ddaa498d))
 
 ### ✨ New Packages ✨
 
-* **dn-inspect:** friendly jetbrains analyzer for csharp ([80c6fe4](https://github.com/AtomiCloud/nix-registry/commit/80c6fe40f5011843a11de4a9ed2fd4e959572ea2))
+- **dn-inspect:** friendly jetbrains analyzer for csharp ([80c6fe4](https://github.com/AtomiCloud/nix-registry/commit/80c6fe40f5011843a11de4a9ed2fd4e959572ea2))
 
 ## [2.12.0](https://github.com/AtomiCloud/nix-registry/compare/v2.11.0...v2.12.0) (2026-02-04)
 
