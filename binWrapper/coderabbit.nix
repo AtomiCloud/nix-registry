@@ -53,7 +53,7 @@ stdenv.mkDerivation (finalAttrs: {
     mainProgram = "coderabbit";
     homepage = "https://coderabbit.ai/";
     downloadPage = "https://github.com/coderabbitai/coderabbit-cli/releases";
-    license = licenses.unfree;
+    license = licenses.mit;
     platforms = [ "x86_64-linux" "x86_64-darwin" "aarch64-linux" "aarch64-darwin" ];
   };
 })
