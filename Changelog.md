@@ -1,3 +1,15 @@
+## [2.16.0](https://github.com/AtomiCloud/nix-registry/compare/v2.15.0...v2.16.0) (2026-02-25)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **coderabbit:** change license from unfree to MIT [CU-86ewqguc4] ([e4ac687](https://github.com/AtomiCloud/nix-registry/commit/e4ac68718d8b86cd452cdd4744d4ed537d9d469d))
+
+
+### ✨ New Packages ✨
+
+* **coderabbit:** add coderabbit-cli as binWrapper package [CU-86ewqguc4] ([733b840](https://github.com/AtomiCloud/nix-registry/commit/733b840004e30ed06f4ca46a4028b0ae456b29a1))
+
 ## [2.15.0](https://github.com/AtomiCloud/nix-registry/compare/v2.14.0...v2.15.0) (2026-02-12)
 
 ### ✨ New Packages ✨
