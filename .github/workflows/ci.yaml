@@ -63,6 +63,7 @@ jobs:
           .#cliproxyapi
           .#deadcode
           .#coderabbit
+          .#ccc
           -c bash -c '
           sg --version &&
           upstash --version &&
@@ -83,6 +84,7 @@ jobs:
           dn-inspect --version &&
           deadcode --version &&
           coderabbit --version &&
+          ccc --version &&
           helmlint --version &&
           attic --version &&
           cli-proxy-api --help &&
