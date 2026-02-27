@@ -12,17 +12,17 @@ Add `ccc` (Claude Code Companion) as a Go package to the nix-registry using `bui
 
 ## Acceptance Criteria
 
-- [ ] Package builds successfully with `nix build .#ccc`
-- [ ] Binary runs correctly with `nix shell .#ccc -c ccc --help`
-- [ ] Package added to CI verification workflow
-- [ ] Commit follows convention: `new(ccc): chat with claude code on telegram`
+- [x] Package builds successfully with `nix build .#ccc`
+- [x] Binary runs correctly with `nix shell .#ccc -c ccc --help`
+- [x] Package added to CI verification workflow
+- [x] Commit follows convention: `new(ccc): chat with claude code on telegram`
 
 ## Definition of Done
 
-- [ ] All acceptance criteria met
-- [ ] No lint errors (nix fmt passes)
-- [ ] Ticket ID included in commit message
-- [ ] PR created and ready for review
+- [x] All acceptance criteria met
+- [x] No lint errors (nix fmt passes)
+- [x] Ticket ID included in commit message
+- [x] PR created and ready for review
 
 ## Out of Scope
 
