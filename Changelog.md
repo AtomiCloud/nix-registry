@@ -1,3 +1,21 @@
+## [2.17.0](https://github.com/AtomiCloud/nix-registry/compare/v2.16.0...v2.17.0) (2026-02-27)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **ccc:** address coderabbit local review findings [CU-86ewrbfra] ([e6077e6](https://github.com/AtomiCloud/nix-registry/commit/e6077e6cba8a1ebb2a4479d621e07335fe48601b))
+
+
+### ✨ New Packages ✨
+
+* **ccc:** chat with claude code on telegram [CU-86ewrbfra] ([eac106a](https://github.com/AtomiCloud/nix-registry/commit/eac106aa45c5f8b27624037443626b9ccefdfcd5))
+
+
+### Documentation Updates
+
+* add task spec for CU-86ewrbfra ([cae8b97](https://github.com/AtomiCloud/nix-registry/commit/cae8b97981727f55e7de071bd366e2d7cd3d6c71))
+* mark acceptance criteria as complete [CU-86ewrbfra] ([da958fa](https://github.com/AtomiCloud/nix-registry/commit/da958fa477524455545e23e14ad6cd1e5227985e))
+
 ## [2.16.0](https://github.com/AtomiCloud/nix-registry/compare/v2.15.0...v2.16.0) (2026-02-25)
 
 
