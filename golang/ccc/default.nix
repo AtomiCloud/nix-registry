@@ -18,5 +18,5 @@ buildGoModule rec {
 
   doCheck = false;
 
-  ldflags = [ "-w" "-s" "-a" ];
+  ldflags = [ "-w" "-s" ];
 }
