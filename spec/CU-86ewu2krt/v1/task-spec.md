@@ -46,7 +46,7 @@ This approach:
 - [ ] Create `bunWrapper/md-mermaid-lint/default.nix` using trivialBuilders
 - [ ] Create `bunWrapper/md-mermaid-lint/src/index.ts` with:
   - Markdown parsing via remark-parse
-  - Mermaid block extraction (`mermaid and `mmd)
+  - Mermaid block extraction (`mermaid` and `mmd`)
   - Syntax validation via mermaid.parse()
   - CLI interface with glob support
   - `--version` flag for CI verification
