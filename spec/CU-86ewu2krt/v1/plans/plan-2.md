@@ -22,8 +22,8 @@ in
 trivialBuilders.writeBunScriptBin {
   name = "md-mermaid-lint";
   inherit version;
-  src = ./src;
-  bunDeps = [ ];  # Will be populated from node_modules
+  src = ./.;
+  buildInputs = [ ];  # Optional additional build dependencies
 }
 ```
 
@@ -74,7 +74,7 @@ cd bunWrapper/md-mermaid-lint
 bun install
 ```
 
-This generates `bun.lockb`.
+This generates `bun.lock`.
 
 ### Step 5: Update default.nix (root)
 
@@ -113,7 +113,7 @@ nix run .#md-mermaid-lint -- /tmp/test.md
 
 ## Expected Output
 
-```
+```text
 ✅ /tmp/test.md:1 - Valid mermaid diagram
 ```
 
@@ -124,7 +124,7 @@ nix run .#md-mermaid-lint -- /tmp/test.md
 | bunWrapper/md-mermaid-lint/default.nix     | Create           |
 | bunWrapper/md-mermaid-lint/package.json    | Create           |
 | bunWrapper/md-mermaid-lint/src/index.ts    | Create           |
-| bunWrapper/md-mermaid-lint/bun.lockb       | Generate         |
+| bunWrapper/md-mermaid-lint/bun.lock        | Generate         |
 | default.nix                                | Modify (add bun) |
 | .github/workflows/ci.yaml                  | Modify           |
 | docs/developer/packaging/CIVerification.md | Modify           |

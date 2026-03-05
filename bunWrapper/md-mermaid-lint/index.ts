@@ -346,75 +346,96 @@ async function validateMermaid(code: string): Promise<{ valid: boolean; error?: 
 async function lintFile(filePath: string): Promise<LintResult[]> {
   const results: LintResult[] = [];
 
-  if (!existsSync(filePath)) {
+  try {
+    if (!existsSync(filePath)) {
+      results.push({
+        file: filePath,
+        line: 0,
+        message: `File not found: ${filePath}`,
+        severity: 'error',
+      });
+      return results;
+    }
+
+    const stats = statSync(filePath);
+    if (!stats.isFile()) {
+      results.push({
+        file: filePath,
+        line: 0,
+        message: `Not a file: ${filePath}`,
+        severity: 'warning',
+      });
+      return results;
+    }
+
+    const content = readFileSync(filePath, 'utf-8');
+
+    // Parse markdown using remark-parse
+    const tree = unified().use(remarkParse).parse(content);
+
+    // Find all mermaid code blocks
+    const mermaidBlocks: { code: string; line: number }[] = [];
+
+    visit(tree, 'code', (node: CodeNode) => {
+      const lang = node.lang?.toLowerCase();
+      if (lang === 'mermaid' || lang === 'mmd') {
+        const line = node.position?.start?.line ?? 1;
+        const code = node.value ?? '';
+        mermaidBlocks.push({ code, line });
+      }
+    });
+
+    // If no mermaid blocks found, return empty results
+    if (mermaidBlocks.length === 0) {
+      return results;
+    }
+
+    // Initialize mermaid if not already done
+    await initMermaid();
+
+    // Validate each mermaid block
+    for (const { code, line } of mermaidBlocks) {
+      // Check for empty diagram
+      if (!code.trim()) {
+        results.push({
+          file: filePath,
+          line,
+          message: 'Empty mermaid diagram',
+          severity: 'error',
+        });
+        continue;
+      }
+
+      // Validate mermaid syntax
+      const validation = await validateMermaid(code);
+
+      if (validation.valid) {
+        results.push({
+          file: filePath,
+          line,
+          message: 'Valid mermaid diagram',
+          severity: 'success',
+        });
+      } else {
+        results.push({
+          file: filePath,
+          line,
+          message: validation.error ?? 'Invalid mermaid syntax',
+          severity: 'error',
+        });
+      }
+    }
+
+    return results;
+  } catch (err) {
     results.push({
       file: filePath,
       line: 0,
-      message: `File not found: ${filePath}`,
+      message: `Failed to lint file: ${err instanceof Error ? err.message : String(err)}`,
       severity: 'error',
     });
     return results;
   }
-
-  const content = readFileSync(filePath, 'utf-8');
-
-  // Parse markdown using remark-parse
-  const tree = unified().use(remarkParse).parse(content);
-
-  // Find all mermaid code blocks
-  const mermaidBlocks: { code: string; line: number }[] = [];
-
-  visit(tree, 'code', (node: CodeNode) => {
-    const lang = node.lang?.toLowerCase();
-    if (lang === 'mermaid' || lang === 'mmd') {
-      const line = node.position?.start?.line ?? 1;
-      const code = node.value ?? '';
-      mermaidBlocks.push({ code, line });
-    }
-  });
-
-  // If no mermaid blocks found, return empty results
-  if (mermaidBlocks.length === 0) {
-    return results;
-  }
-
-  // Initialize mermaid if not already done
-  await initMermaid();
-
-  // Validate each mermaid block
-  for (const { code, line } of mermaidBlocks) {
-    // Check for empty diagram
-    if (!code.trim()) {
-      results.push({
-        file: filePath,
-        line,
-        message: 'Empty mermaid diagram',
-        severity: 'error',
-      });
-      continue;
-    }
-
-    // Validate mermaid syntax
-    const validation = await validateMermaid(code);
-
-    if (validation.valid) {
-      results.push({
-        file: filePath,
-        line,
-        message: 'Valid mermaid diagram',
-        severity: 'success',
-      });
-    } else {
-      results.push({
-        file: filePath,
-        line,
-        message: validation.error ?? 'Invalid mermaid syntax',
-        severity: 'error',
-      });
-    }
-  }
-
-  return results;
 }
 
 /**

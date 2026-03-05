@@ -25,7 +25,7 @@ Bun wrappers use the `trivialBuilders.writeBunScriptBin` function to create exec
 
 Create your wrapper in the `bunWrapper/<name>/` directory:
 
-```
+```text
 bunWrapper/
   default.nix           # Imports all bun wrappers
   trivialBuilders.nix   # Builder functions

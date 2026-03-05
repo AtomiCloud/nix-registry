@@ -44,14 +44,14 @@ This approach:
 
 - [ ] Create `bunWrapper/md-mermaid-lint/` directory
 - [ ] Create `bunWrapper/md-mermaid-lint/default.nix` using trivialBuilders
-- [ ] Create `bunWrapper/md-mermaid-lint/src/index.ts` with:
+- [ ] Create `bunWrapper/md-mermaid-lint/index.ts` with:
   - Markdown parsing via remark-parse
   - Mermaid block extraction (`mermaid` and `mmd`)
   - Syntax validation via mermaid.parse()
   - CLI interface with glob support
   - `--version` flag for CI verification
 - [ ] Create `bunWrapper/md-mermaid-lint/package.json` with dependencies
-- [ ] Create `bunWrapper/md-mermaid-lint/bun.lockb` (via `bun install`)
+- [ ] Create `bunWrapper/md-mermaid-lint/bun.lock` (via `bun install`)
 
 ### AC3: Skill Creation
 
@@ -81,9 +81,8 @@ bunWrapper/
 └── md-mermaid-lint/
     ├── default.nix          # Package derivation
     ├── package.json         # Bun dependencies
-    ├── bun.lockb            # Lock file
-    └── src/
-        └── index.ts         # CLI implementation
+    ├── bun.lock             # Lock file
+    └── index.ts             # CLI implementation
 ```
 
 ### Dependencies
@@ -131,17 +130,27 @@ md-mermaid-lint --help
 { nixpkgs, bun }:
 
 {
-  writeBunScriptBin = { name, version, src, bunDeps ? [] }:
+  writeBunScriptBin = { name, version, src, buildInputs ? [] }:
     nixpkgs.stdenv.mkDerivation {
-      inherit name version src;
-      buildInputs = [ bun ] ++ bunDeps;
+      inherit name version src buildInputs;
+
+      nativeBuildInputs = [ bun ];
+      buildPhase = ''
+        export HOME=$TMPDIR
+        ${bun}/bin/bun install --frozen-lockfile --production
+      '';
+
       installPhase = ''
-        bun install --frozen-lockfile
+        # Copy source files and node_modules to $out/lib for runtime access
+        mkdir -p $out/lib/${name}
+        cp -r . $out/lib/${name}/
+
+        # Create the wrapper script that references the installed lib directory
         mkdir -p $out/bin
-        cat > $out/bin/${name} << 'EOF'
+        cat > $out/bin/${name} << SCRIPT
         #!/bin/sh
-        ${bun}/bin/bun run ${src}/index.ts "$@"
-        EOF
+        exec ${bun}/bin/bun run $out/lib/${name}/index.ts "\$@"
+        SCRIPT
         chmod +x $out/bin/${name}
       '';
     };

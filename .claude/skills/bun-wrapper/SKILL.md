@@ -10,7 +10,7 @@ Guide for working with Bun-based wrapper packages.
 
 > **Note:** This project uses `pls` instead of `task` for running Taskfile commands.
 
-See [BunWrapper Guide](../../docs/developer/packaging/BunWrapper.md) for complete documentation on:
+See [BunWrapper Guide](../../../docs/developer/packaging/BunWrapper.md) for complete documentation on:
 
 - Adding new bunWrapper packages
 - Using trivialBuilders.writeBunScriptBin
