@@ -64,6 +64,7 @@ jobs:
           .#deadcode
           .#coderabbit
           .#ccc
+          .#md-mermaid-lint
           -c bash -c '
           sg --version &&
           upstash --version &&
@@ -85,6 +86,7 @@ jobs:
           deadcode --version &&
           coderabbit --version &&
           ccc --version &&
+          md-mermaid-lint --version &&
           helmlint --version &&
           attic --version &&
           cli-proxy-api --help &&

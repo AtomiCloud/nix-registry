@@ -1,0 +1,23 @@
+{
+  "name": "md-mermaid-lint",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Lint markdown files with mermaid diagrams",
+  "main": "index.ts",
+  "bin": {
+    "md-mermaid-lint": "./index.ts"
+  },
+  "scripts": {
+    "start": "bun run index.ts"
+  },
+  "dependencies": {
+    "unified": "^11.0.0",
+    "remark-parse": "^11.0.0",
+    "unist-util-visit": "^5.0.0",
+    "mermaid": "^11.0.0",
+    "glob": "^11.0.0"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

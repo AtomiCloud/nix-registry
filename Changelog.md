@@ -1,32 +1,27 @@
 ## [2.17.0](https://github.com/AtomiCloud/nix-registry/compare/v2.16.0...v2.17.0) (2026-02-27)
 
-
 ### 🐛 Bug Fixes 🐛
 
-* **ccc:** address coderabbit local review findings [CU-86ewrbfra] ([e6077e6](https://github.com/AtomiCloud/nix-registry/commit/e6077e6cba8a1ebb2a4479d621e07335fe48601b))
-
+- **ccc:** address coderabbit local review findings [CU-86ewrbfra] ([e6077e6](https://github.com/AtomiCloud/nix-registry/commit/e6077e6cba8a1ebb2a4479d621e07335fe48601b))
 
 ### ✨ New Packages ✨
 
-* **ccc:** chat with claude code on telegram [CU-86ewrbfra] ([eac106a](https://github.com/AtomiCloud/nix-registry/commit/eac106aa45c5f8b27624037443626b9ccefdfcd5))
-
+- **ccc:** chat with claude code on telegram [CU-86ewrbfra] ([eac106a](https://github.com/AtomiCloud/nix-registry/commit/eac106aa45c5f8b27624037443626b9ccefdfcd5))
 
 ### Documentation Updates
 
-* add task spec for CU-86ewrbfra ([cae8b97](https://github.com/AtomiCloud/nix-registry/commit/cae8b97981727f55e7de071bd366e2d7cd3d6c71))
-* mark acceptance criteria as complete [CU-86ewrbfra] ([da958fa](https://github.com/AtomiCloud/nix-registry/commit/da958fa477524455545e23e14ad6cd1e5227985e))
+- add task spec for CU-86ewrbfra ([cae8b97](https://github.com/AtomiCloud/nix-registry/commit/cae8b97981727f55e7de071bd366e2d7cd3d6c71))
+- mark acceptance criteria as complete [CU-86ewrbfra] ([da958fa](https://github.com/AtomiCloud/nix-registry/commit/da958fa477524455545e23e14ad6cd1e5227985e))
 
 ## [2.16.0](https://github.com/AtomiCloud/nix-registry/compare/v2.15.0...v2.16.0) (2026-02-25)
 
-
 ### 🐛 Bug Fixes 🐛
 
-* **coderabbit:** change license from unfree to MIT [CU-86ewqguc4] ([e4ac687](https://github.com/AtomiCloud/nix-registry/commit/e4ac68718d8b86cd452cdd4744d4ed537d9d469d))
-
+- **coderabbit:** change license from unfree to MIT [CU-86ewqguc4] ([e4ac687](https://github.com/AtomiCloud/nix-registry/commit/e4ac68718d8b86cd452cdd4744d4ed537d9d469d))
 
 ### ✨ New Packages ✨
 
-* **coderabbit:** add coderabbit-cli as binWrapper package [CU-86ewqguc4] ([733b840](https://github.com/AtomiCloud/nix-registry/commit/733b840004e30ed06f4ca46a4028b0ae456b29a1))
+- **coderabbit:** add coderabbit-cli as binWrapper package [CU-86ewqguc4] ([733b840](https://github.com/AtomiCloud/nix-registry/commit/733b840004e30ed06f4ca46a4028b0ae456b29a1))
 
 ## [2.15.0](https://github.com/AtomiCloud/nix-registry/compare/v2.14.0...v2.15.0) (2026-02-12)
 

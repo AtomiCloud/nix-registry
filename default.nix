@@ -33,6 +33,9 @@ let
 
   rust = import ./rust/default.nix { inherit nixpkgs fenix; };
 
+  # bun wrapper
+  bun = import ./bunWrapper { inherit nixpkgs; bun = nixpkgs-unstable.bun; };
+
 in
 
 shell
@@ -41,4 +44,5 @@ shell
 // node22
 // bin
 // rust
-  // dotnet
+// dotnet
+  // bun
