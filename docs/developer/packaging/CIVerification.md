@@ -40,6 +40,7 @@ The following packages are verified in CI with their respective commands:
 | attic                  | `attic --version`                  | Attic binary cache client                   |
 | cliproxyapi            | `cli-proxy-api --help`             | Only has --help, no --version               |
 | aws-export-credentials | `aws-export-credentials --version` | AWS credential exporter                     |
+| md-mermaid-lint        | `md-mermaid-lint --version`        | Mermaid diagram linter                      |
 | infrautils             | (removed from CI)                  | -                                           |
 | infralint              | (removed from CI)                  | -                                           |
 
@@ -189,6 +190,8 @@ Here is the current CI verification configuration from `.github/workflows/ci.yam
     .#attic
     .#cliproxyapi
     .#deadcode
+    .#coderabbit
+    .#md-mermaid-lint
     -c bash -c '
     sg --version &&
     upstash --version &&
@@ -208,6 +211,8 @@ Here is the current CI verification configuration from `.github/workflows/ci.yam
     dotnetlint --version &&
     dn-inspect --version &&
     deadcode --version &&
+    coderabbit --version &&
+    md-mermaid-lint --version &&
     helmlint --version &&
     attic --version &&
     cli-proxy-api --help &&

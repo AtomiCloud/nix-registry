@@ -7,7 +7,8 @@ let
       {
         inherit
           sg
-          pls;
+          pls
+          md-mermaid-lint;
       }
     );
     nix-unstable = (
