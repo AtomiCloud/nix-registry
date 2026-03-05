@@ -1,3 +1,23 @@
+## [2.18.0](https://github.com/AtomiCloud/nix-registry/compare/v2.17.0...v2.18.0) (2026-03-05)
+
+
+### 🐛 Bug Fixes 🐛
+
+* address coderabbit local review findings ([11e4fc3](https://github.com/AtomiCloud/nix-registry/commit/11e4fc3ae9ff41ad68a67a869023ae1211cd1556))
+* **coderabbit:** address review feedback for md-mermaid-lint ([71ae23f](https://github.com/AtomiCloud/nix-registry/commit/71ae23fbc59c8934194f9d4949cd56176309af29))
+
+
+### ✨ New Packages ✨
+
+* **bunWrapper:** add md-mermaid-lint package to nix-registry ([a9faf83](https://github.com/AtomiCloud/nix-registry/commit/a9faf83aec90a26f04d648c27acecac5a1312175))
+* **bunWrapper:** implement md-mermaid-lint package with CI integration ([5527df7](https://github.com/AtomiCloud/nix-registry/commit/5527df78fcd8d627129327855e1cac85cc199d48))
+
+
+### Documentation Updates
+
+* **spec:** add task spec for CU-86ewu2krt ([a80a43a](https://github.com/AtomiCloud/nix-registry/commit/a80a43a88ccd06650328d2aecb4bd9f48aaee3fa))
+* **spec:** fix path references in plan-2.md ([2978d79](https://github.com/AtomiCloud/nix-registry/commit/2978d79e77b0b2577bc7f1f2558cc33702038718))
+
 ## [2.17.0](https://github.com/AtomiCloud/nix-registry/compare/v2.16.0...v2.17.0) (2026-02-27)
 
 ### 🐛 Bug Fixes 🐛
