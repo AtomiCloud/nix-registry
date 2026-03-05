@@ -37,7 +37,7 @@ trivialBuilders.writeBunScriptBin {
   "version": "1.0.0",
   "type": "module",
   "bin": {
-    "md-mermaid-lint": "./src/index.ts"
+    "md-mermaid-lint": "./index.ts"
   },
   "dependencies": {
     "unified": "^11.0.0",
@@ -51,7 +51,7 @@ trivialBuilders.writeBunScriptBin {
 
 ### Step 3: Create CLI Implementation
 
-**bunWrapper/md-mermaid-lint/src/index.ts:**
+**bunWrapper/md-mermaid-lint/index.ts:**
 
 Key implementation details:
 
@@ -123,7 +123,7 @@ nix run .#md-mermaid-lint -- /tmp/test.md
 | ------------------------------------------ | ---------------- |
 | bunWrapper/md-mermaid-lint/default.nix     | Create           |
 | bunWrapper/md-mermaid-lint/package.json    | Create           |
-| bunWrapper/md-mermaid-lint/src/index.ts    | Create           |
+| bunWrapper/md-mermaid-lint/index.ts        | Create           |
 | bunWrapper/md-mermaid-lint/bun.lock        | Generate         |
 | default.nix                                | Modify (add bun) |
 | .github/workflows/ci.yaml                  | Modify           |
