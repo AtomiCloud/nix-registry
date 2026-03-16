@@ -185,11 +185,11 @@
         "treefmt-nix": "treefmt-nix_6"
       },
       "locked": {
-        "lastModified": 1773563534,
-        "narHash": "sha256-q7meDdz1lKLkH4H1TopOnC1oiuO1Q7NSsuBqWAOqFYI=",
+        "lastModified": 1773629406,
+        "narHash": "sha256-AxyvtPbYXQHytfbLeXu9FHeshkTOb9iTcJo+AFI63GA=",
         "owner": "AtomiCloud",
         "repo": "sulfone.iridium",
-        "rev": "c854e169fad538c2ae8d0d8a56b898d58a1e35a4",
+        "rev": "5aeaa1eee8e40b3bf73a12bf9af03c8758a5087a",
         "type": "github"
       },
       "original": {
@@ -2065,11 +2065,11 @@
         "rust-overlay": "rust-overlay"
       },
       "locked": {
-        "lastModified": 1773597921,
-        "narHash": "sha256-xOS7lSiYZJC0qDzi2F3EcW1pExCDbrpGSY2J5LCXp6s=",
+        "lastModified": 1773625553,
+        "narHash": "sha256-RmEGt1yGgdEPk7JSx4Ft0cxrOAYNbqJHAbsLftRo5n0=",
         "owner": "max-sixty",
         "repo": "worktrunk",
-        "rev": "209bc29b4f2505e369791a75d97e34cd7aabc9ca",
+        "rev": "5e5dec4d8c08f2c11541a1ef5744a877d60885b6",
         "type": "github"
       },
       "original": {
