@@ -1,3 +1,10 @@
+## [2.21.0](https://github.com/AtomiCloud/nix-registry/compare/v2.20.0...v2.21.0) (2026-03-17)
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **cyanprint:** update CyanPrint to latest version ([3f4d441](https://github.com/AtomiCloud/nix-registry/commit/3f4d4417368ab3b2c109babca25ef7e6bd8c53e6))
+
 ## [2.20.0](https://github.com/AtomiCloud/nix-registry/compare/v2.19.0...v2.20.0) (2026-03-16)
 
 
