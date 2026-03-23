@@ -1,3 +1,15 @@
+## [2.22.0](https://github.com/AtomiCloud/nix-registry/compare/v2.21.0...v2.22.0) (2026-03-23)
+
+
+### 🐛 Bug Fixes 🐛
+
+* address coderabbit local review findings ([16120dc](https://github.com/AtomiCloud/nix-registry/commit/16120dca610d8549a34692a1b1a756cd552f8a81))
+
+
+### ✨ New Packages ✨
+
+* **clickup-cli:** Add @krodak/clickup-cli for ClickUp task management ([4de7b2d](https://github.com/AtomiCloud/nix-registry/commit/4de7b2da339e912e6d74293fbb313151b5406f82))
+
 ## [2.21.0](https://github.com/AtomiCloud/nix-registry/compare/v2.20.0...v2.21.0) (2026-03-17)
 
 
