@@ -7,8 +7,7 @@
 
 ## Description
 
-Add clickup-cli to
-nix-registryregistry.
+Add clickup-cli to nix-registry.
 
 ## Comments
 
