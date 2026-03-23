@@ -32,5 +32,14 @@ with n;
       ${happy_coder_raw}/lib/node_modules/happy-coder/bin/happy.mjs "$@"
     '';
   };
+  clickup_cli_raw = n."@krodak/clickup-cli";
+  clickup_cli = trivialBuilders.writeShellScriptBin {
+    name = "cup";
+    version = clickup_cli_raw.version;
+    text = ''
+      export PATH="${nodejs}/bin:$PATH"
+      ${clickup_cli_raw}/bin/cup "$@"
+    '';
+  };
 
 })
