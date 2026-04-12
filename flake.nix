@@ -33,8 +33,14 @@
       (
         system:
         let
+          allowUnfreePredicate =
+            pkg:
+            builtins.elem (nixpkgs-2511.lib.getName pkg) [ "inspect" ];
           pkgs-unstable = nixpkgs-unstable.legacyPackages.${system};
-          pkgs-2511 = nixpkgs-2511.legacyPackages.${system};
+          pkgs-2511 = import nixpkgs-2511 {
+            inherit system;
+            config.allowUnfreePredicate = allowUnfreePredicate;
+          };
           fenixpkgs = fenix.packages.${system};
           cyanprint = cyanprintpkgs.packages.${system};
           worktrunk = worktrunkpkgs.packages.${system};

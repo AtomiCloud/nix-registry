@@ -66,6 +66,7 @@ jobs:
           .#ccc
           .#md-mermaid-lint
           .#clickup_cli
+          .#inspect
           -c bash -c '
           sg --version &&
           upstash --version &&
@@ -90,6 +91,7 @@ jobs:
           md-mermaid-lint --version &&
           cup --version &&
           helmlint --version &&
+          inspect --help &&
           attic --version &&
           cli-proxy-api --help &&
           echo "🎉 Done"'
