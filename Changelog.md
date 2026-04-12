@@ -1,62 +1,53 @@
 ## [2.23.0](https://github.com/AtomiCloud/nix-registry/compare/v2.22.0...v2.23.0) (2026-03-29)
 
-
 ### ⬆️ Packages Updated ⬆️
 
-* **cyanprint:** Update CyanPrint to 2.20.0 in nix-registry ([7669c62](https://github.com/AtomiCloud/nix-registry/commit/7669c628a4973af05a6d70171ad93eee937bf334))
+- **cyanprint:** Update CyanPrint to 2.20.0 in nix-registry ([7669c62](https://github.com/AtomiCloud/nix-registry/commit/7669c628a4973af05a6d70171ad93eee937bf334))
 
 ## [2.22.0](https://github.com/AtomiCloud/nix-registry/compare/v2.21.0...v2.22.0) (2026-03-23)
 
-
 ### 🐛 Bug Fixes 🐛
 
-* address coderabbit local review findings ([16120dc](https://github.com/AtomiCloud/nix-registry/commit/16120dca610d8549a34692a1b1a756cd552f8a81))
-
+- address coderabbit local review findings ([16120dc](https://github.com/AtomiCloud/nix-registry/commit/16120dca610d8549a34692a1b1a756cd552f8a81))
 
 ### ✨ New Packages ✨
 
-* **clickup-cli:** Add @krodak/clickup-cli for ClickUp task management ([4de7b2d](https://github.com/AtomiCloud/nix-registry/commit/4de7b2da339e912e6d74293fbb313151b5406f82))
+- **clickup-cli:** Add @krodak/clickup-cli for ClickUp task management ([4de7b2d](https://github.com/AtomiCloud/nix-registry/commit/4de7b2da339e912e6d74293fbb313151b5406f82))
 
 ## [2.21.0](https://github.com/AtomiCloud/nix-registry/compare/v2.20.0...v2.21.0) (2026-03-17)
 
-
 ### ⬆️ Packages Updated ⬆️
 
-* **cyanprint:** update CyanPrint to latest version ([3f4d441](https://github.com/AtomiCloud/nix-registry/commit/3f4d4417368ab3b2c109babca25ef7e6bd8c53e6))
+- **cyanprint:** update CyanPrint to latest version ([3f4d441](https://github.com/AtomiCloud/nix-registry/commit/3f4d4417368ab3b2c109babca25ef7e6bd8c53e6))
 
 ## [2.20.0](https://github.com/AtomiCloud/nix-registry/compare/v2.19.0...v2.20.0) (2026-03-16)
 
-
 ### ⬆️ Packages Updated ⬆️
 
-* **cyanprint:** update CyanPrint to latest version ([df9f826](https://github.com/AtomiCloud/nix-registry/commit/df9f826f22b33dadd874fac37a1744dc19879a6b))
+- **cyanprint:** update CyanPrint to latest version ([df9f826](https://github.com/AtomiCloud/nix-registry/commit/df9f826f22b33dadd874fac37a1744dc19879a6b))
 
 ## [2.19.0](https://github.com/AtomiCloud/nix-registry/compare/v2.18.0...v2.19.0) (2026-03-15)
 
-
 ### ⬆️ Packages Updated ⬆️
 
-* **cyanprint:** update CyanPrint to latest version ([d925467](https://github.com/AtomiCloud/nix-registry/commit/d9254678fb4cdc2f599a7405782b9e976be8f237))
+- **cyanprint:** update CyanPrint to latest version ([d925467](https://github.com/AtomiCloud/nix-registry/commit/d9254678fb4cdc2f599a7405782b9e976be8f237))
 
 ## [2.18.0](https://github.com/AtomiCloud/nix-registry/compare/v2.17.0...v2.18.0) (2026-03-05)
 
-
 ### 🐛 Bug Fixes 🐛
 
-* address coderabbit local review findings ([11e4fc3](https://github.com/AtomiCloud/nix-registry/commit/11e4fc3ae9ff41ad68a67a869023ae1211cd1556))
-* **coderabbit:** address review feedback for md-mermaid-lint ([71ae23f](https://github.com/AtomiCloud/nix-registry/commit/71ae23fbc59c8934194f9d4949cd56176309af29))
-
+- address coderabbit local review findings ([11e4fc3](https://github.com/AtomiCloud/nix-registry/commit/11e4fc3ae9ff41ad68a67a869023ae1211cd1556))
+- **coderabbit:** address review feedback for md-mermaid-lint ([71ae23f](https://github.com/AtomiCloud/nix-registry/commit/71ae23fbc59c8934194f9d4949cd56176309af29))
 
 ### ✨ New Packages ✨
 
-* **bunWrapper:** add md-mermaid-lint package to nix-registry ([a9faf83](https://github.com/AtomiCloud/nix-registry/commit/a9faf83aec90a26f04d648c27acecac5a1312175))
-* **bunWrapper:** implement md-mermaid-lint package with CI integration ([5527df7](https://github.com/AtomiCloud/nix-registry/commit/5527df78fcd8d627129327855e1cac85cc199d48))
-
+- **bunWrapper:** add md-mermaid-lint package to nix-registry ([a9faf83](https://github.com/AtomiCloud/nix-registry/commit/a9faf83aec90a26f04d648c27acecac5a1312175))
+- **bunWrapper:** implement md-mermaid-lint package with CI integration ([5527df7](https://github.com/AtomiCloud/nix-registry/commit/5527df78fcd8d627129327855e1cac85cc199d48))
 
 ### Documentation Updates
 
-* **spec:** add task spec for CU-86ewu2krt ([a80a43a](https://github.com/AtomiCloud/nix-registry/commit/a80a43a88ccd06650328d2aecb4bd9f48aaee3fa))
-* **spec:** fix path references in plan-2.md ([2978d79](https://github.com/AtomiCloud/nix-registry/commit/2978d79e77b0b2577bc7f1f2558cc33702038718))
+- **spec:** add task spec for CU-86ewu2krt ([a80a43a](https://github.com/AtomiCloud/nix-registry/commit/a80a43a88ccd06650328d2aecb4bd9f48aaee3fa))
+- **spec:** fix path references in plan-2.md ([2978d79](https://github.com/AtomiCloud/nix-registry/commit/2978d79e77b0b2577bc7f1f2558cc33702038718))
 
 ## [2.17.0](https://github.com/AtomiCloud/nix-registry/compare/v2.16.0...v2.17.0) (2026-02-27)
 

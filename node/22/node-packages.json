@@ -5,6 +5,6 @@
   "swagger-typescript-api",
   "@kirinnee/semantic-generator",
   "openapi-to-postmanv2",
-  "happy-coder",
-  "@krodak/clickup-cli"
+  "@krodak/clickup-cli",
+  "pagerduty-cli"
 ]

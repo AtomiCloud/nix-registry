@@ -66,6 +66,7 @@ jobs:
           .#ccc
           .#md-mermaid-lint
           .#clickup_cli
+          .#pagerduty_cli
           -c bash -c '
           sg --version &&
           upstash --version &&
@@ -89,6 +90,7 @@ jobs:
           ccc --version &&
           md-mermaid-lint --version &&
           cup --version &&
+          pd --version &&
           helmlint --version &&
           attic --version &&
           cli-proxy-api --help &&
