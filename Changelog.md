@@ -1,3 +1,10 @@
+## [2.24.0](https://github.com/AtomiCloud/nix-registry/compare/v2.23.0...v2.24.0) (2026-04-12)
+
+
+### ✨ New Packages ✨
+
+* **inspect:** Add inspect CLI for entity-level code review ([de079d8](https://github.com/AtomiCloud/nix-registry/commit/de079d87024c154e2fc85de010207c30d8767cb1))
+
 ## [2.23.0](https://github.com/AtomiCloud/nix-registry/compare/v2.22.0...v2.23.0) (2026-03-29)
 
 ### ⬆️ Packages Updated ⬆️
