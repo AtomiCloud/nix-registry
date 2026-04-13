@@ -1,3 +1,13 @@
+## [2.25.0](https://github.com/AtomiCloud/nix-registry/compare/v2.24.0...v2.25.0) (2026-04-13)
+
+
+### ✨ New Packages ✨
+
+* **pagerduty-cli:** Add PagerDuty CLI for incident management ([0547add](https://github.com/AtomiCloud/nix-registry/commit/0547add87c99b2be076d52e3150b83877f6001fa))
+* **pagerduty-cli:** Add PagerDuty CLI for incident management ([3365ab8](https://github.com/AtomiCloud/nix-registry/commit/3365ab8dd4cf1b6fff1e02a3ce549efb269d029d))
+* **pagerduty-cli:** Add spec and planning docs ([1567f41](https://github.com/AtomiCloud/nix-registry/commit/1567f4175b874f7675fb8ceba6398fcd984708af))
+* **pagerduty-cli:** Add spec and planning docs ([fdc9c7d](https://github.com/AtomiCloud/nix-registry/commit/fdc9c7dcef65bf77b8c1f5d3e31495d0077e3a3d))
+
 ## [2.24.0](https://github.com/AtomiCloud/nix-registry/compare/v2.23.0...v2.24.0) (2026-04-12)
 
 
