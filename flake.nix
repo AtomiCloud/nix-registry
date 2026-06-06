@@ -12,6 +12,9 @@
 
     # registry
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
+    nixpkgs-2605.url = "github:nixos/nixpkgs/nixos-26.05";
+    # node2nix and the nodePackages set were removed from nixpkgs as of 26.05,
+    # so the node/22 ecosystem is sourced from the last release that still has them.
     nixpkgs-2511.url = "github:nixos/nixpkgs/nixos-25.11";
   };
   outputs =
@@ -26,6 +29,7 @@
     , fenix
     , atticpkgs
       # registries
+    , nixpkgs-2605
     , nixpkgs-2511
     , nixpkgs-unstable
     } @inputs:
@@ -35,19 +39,22 @@
         let
           allowUnfreePredicate =
             pkg:
-            builtins.elem (nixpkgs-2511.lib.getName pkg) [ "inspect" ];
+            builtins.elem (nixpkgs-2605.lib.getName pkg) [ "inspect" ];
           pkgs-unstable = nixpkgs-unstable.legacyPackages.${system};
-          pkgs-2511 = import nixpkgs-2511 {
+          # inspect (built from the primary pkgs, now 26.05) is unfree, so the
+          # predicate is applied here rather than to the node-only 25.11 set.
+          pkgs-2605 = import nixpkgs-2605 {
             inherit system;
             config.allowUnfreePredicate = allowUnfreePredicate;
           };
+          pkgs-2511 = nixpkgs-2511.legacyPackages.${system};
           fenixpkgs = fenix.packages.${system};
           cyanprint = cyanprintpkgs.packages.${system};
           worktrunk = worktrunkpkgs.packages.${system};
           attic = atticpkgs.packages.${system};
           pre-commit-lib = pre-commit-hooks.lib.${system};
         in
-        let pkgs = pkgs-2511; in
+        let pkgs = pkgs-2605; in
         with rec {
           pre-commit = import ./nix/pre-commit.nix {
             inherit pre-commit-lib formatter;
@@ -58,7 +65,7 @@
           };
           registry = import ./nix/registry.nix
             {
-              inherit pkgs pkgs-2511 pkgs-unstable;
+              inherit pkgs pkgs-2605 pkgs-2511 pkgs-unstable;
               atomi = packages;
             };
           env = import ./nix/env.nix {
@@ -78,6 +85,7 @@
             {
               fenix = fenixpkgs;
               nixpkgs = pkgs;
+              nixpkgs-2605 = pkgs-2605;
               nixpkgs-2511 = pkgs-2511;
               nixpkgs-unstable = pkgs-unstable;
             } // {

@@ -1,4 +1,4 @@
-{ pkgs, pkgs-2511, pkgs-unstable, atomi }:
+{ pkgs, pkgs-2605, pkgs-2511, pkgs-unstable, atomi }:
 let
 
   all = {
@@ -15,10 +15,9 @@ let
       with pkgs-unstable;
       { }
     );
-    nix-2511 = (
-      with pkgs-2511;
+    nix-2605 = (
+      with pkgs-2605;
       {
-        node2nix = nodePackages.node2nix;
         yq = yq-go;
         inherit
           coreutils
@@ -37,9 +36,18 @@ let
           ;
       }
     );
+    # node2nix and the nodePackages set were removed from nixpkgs as of 26.05,
+    # so it is sourced from the last release (25.11) that still has them.
+    nix-2511 = (
+      with pkgs-2511;
+      {
+        node2nix = nodePackages.node2nix;
+      }
+    );
   };
 in
 with all;
+nix-2605 //
 nix-2511 //
 nix-unstable //
 atomipkgs
