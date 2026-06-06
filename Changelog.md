@@ -1,3 +1,10 @@
+## [2.26.0](https://github.com/AtomiCloud/nix-registry/compare/v2.25.0...v2.26.0) (2026-06-06)
+
+
+### ⬆️ Packages Updated ⬆️
+
+* all packages to 26.05 ([3be5e32](https://github.com/AtomiCloud/nix-registry/commit/3be5e32f280968a64c757872ac19129871997357))
+
 ## [2.25.0](https://github.com/AtomiCloud/nix-registry/compare/v2.24.0...v2.25.0) (2026-04-13)
 
 
