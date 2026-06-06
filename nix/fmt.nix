@@ -7,6 +7,8 @@ let
     programs = {
       nixpkgs-fmt.enable = true;
       prettier.enable = true;
+      # nodePackages was removed from nixpkgs as of 26.05; prettier now lives at the top level.
+      prettier.package = pkgs.prettier;
       shfmt.enable = true;
       actionlint.enable = true;
     };
