@@ -23,15 +23,6 @@ with n;
   typescript_json_schema = n."typescript-json-schema";
   swagger_typescript_api = n."swagger-typescript-api";
   openapi_to_postmanv2 = n."openapi-to-postmanv2";
-  happy_coder_raw = n."happy-coder";
-  happy_coder = trivialBuilders.writeShellScriptBin {
-    name = "happy";
-    version = happy_coder_raw.version;
-    text = ''
-      export PATH="${nodejs}/bin:$PATH"
-      ${happy_coder_raw}/lib/node_modules/happy-coder/bin/happy.mjs "$@"
-    '';
-  };
   clickup_cli_raw = n."@krodak/clickup-cli";
   clickup_cli = trivialBuilders.writeShellScriptBin {
     name = "cup";
@@ -39,6 +30,15 @@ with n;
     text = ''
       export PATH="${nodejs}/bin:$PATH"
       ${clickup_cli_raw}/bin/cup "$@"
+    '';
+  };
+  pagerduty_cli_raw = n."pagerduty-cli";
+  pagerduty_cli = trivialBuilders.writeShellScriptBin {
+    name = "pd";
+    version = pagerduty_cli_raw.version;
+    text = ''
+      export PATH="${nodejs}/bin:$PATH"
+      ${pagerduty_cli_raw}/bin/pd "$@"
     '';
   };
 

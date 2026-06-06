@@ -31,6 +31,7 @@ let
     codecov = import ./binWrapper/codecov.nix { inherit nixpkgs; };
     coderabbit = import ./binWrapper/coderabbit.nix { inherit nixpkgs; };
     cliproxyapi = import ./binWrapper/cliproxyapi.nix { inherit nixpkgs; };
+    inspect = import ./binWrapper/inspect.nix { inherit nixpkgs; };
   };
 
   rust = import ./rust/default.nix { inherit nixpkgs fenix; };

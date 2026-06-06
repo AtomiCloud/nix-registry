@@ -37,8 +37,16 @@
       (
         system:
         let
+          allowUnfreePredicate =
+            pkg:
+            builtins.elem (nixpkgs-2605.lib.getName pkg) [ "inspect" ];
           pkgs-unstable = nixpkgs-unstable.legacyPackages.${system};
-          pkgs-2605 = nixpkgs-2605.legacyPackages.${system};
+          # inspect (built from the primary pkgs, now 26.05) is unfree, so the
+          # predicate is applied here rather than to the node-only 25.11 set.
+          pkgs-2605 = import nixpkgs-2605 {
+            inherit system;
+            config.allowUnfreePredicate = allowUnfreePredicate;
+          };
           pkgs-2511 = nixpkgs-2511.legacyPackages.${system};
           fenixpkgs = fenix.packages.${system};
           cyanprint = cyanprintpkgs.packages.${system};
