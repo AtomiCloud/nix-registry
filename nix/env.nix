@@ -18,7 +18,8 @@ with packages;
 
   main = [
     infisical
-    node2nix
+    nodejs_22
+    prefetch-npm-deps
     nix-prefetch
     bundix
   ];

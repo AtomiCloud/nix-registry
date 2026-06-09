@@ -1,9 +1,8 @@
-{ nixpkgs, nixpkgs-2605, nixpkgs-2511, nixpkgs-unstable, fenix }:
+{ nixpkgs, nixpkgs-2605, nixpkgs-unstable, fenix }:
 let trivialBuilders = import ./trivial.nix { inherit nixpkgs; }; in
 let
-  # node2nix and the nodePackages set were removed from nixpkgs as of 26.05,
-  # so the generated node/22 packages are built against the last release (25.11) that still has them.
-  node22 = import ./node/22/export.nix { inherit trivialBuilders; nixpkgs = nixpkgs-2511; nodejs = nixpkgs-2511.nodejs_22; };
+  # Node.js 22 CLI packages, built the official nixpkgs way via buildNpmPackage.
+  node22 = import ./node/22/export.nix { nixpkgs = nixpkgs; nodejs = nixpkgs.nodejs_22; };
   # Shell
   shell = (import ./shellWrapper/default.nix { inherit nixpkgs trivialBuilders; });
 
