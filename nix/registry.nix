@@ -1,4 +1,4 @@
-{ pkgs, pkgs-2605, pkgs-2511, pkgs-unstable, atomi }:
+{ pkgs, pkgs-2605, pkgs-unstable, atomi }:
 let
 
   all = {
@@ -33,21 +33,16 @@ let
           shellcheck
           nix-prefetch
           bundix
+          # Node.js + prefetch-npm-deps regenerate the vendored npm lockfiles
+          # and npm-deps hashes consumed by buildNpmPackage (see `pls gen:node:22`).
+          nodejs_22
+          prefetch-npm-deps
           ;
-      }
-    );
-    # node2nix and the nodePackages set were removed from nixpkgs as of 26.05,
-    # so it is sourced from the last release (25.11) that still has them.
-    nix-2511 = (
-      with pkgs-2511;
-      {
-        node2nix = nodePackages.node2nix;
       }
     );
   };
 in
 with all;
 nix-2605 //
-nix-2511 //
 nix-unstable //
 atomipkgs

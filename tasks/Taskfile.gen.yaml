@@ -44,12 +44,12 @@ tasks:
       - ./scripts/local/golang-vendor.sh {{.CLI_ARGS}}
 
   node:base:
-    desc: Generates Node package Nix files as CLI binaries
+    desc: Regenerates vendored npm lockfiles and hashes for buildNpmPackage
     internal: true
     cmds:
-      - node2nix -i ./node/{{.NODE_VER}}/node-packages.json -e ./node/{{.NODE_VER}}/node-env.nix -o ./node/{{.NODE_VER}}/node-packages.nix -c ./node/{{.NODE_VER}}/composition.nix
+      - ./scripts/local/gen-node.sh {{.NODE_VER}}
   node:22:
-    desc: Generate Node 22 packages Nix files as CLI binaries
+    desc: Regenerate Node 22 npm lockfiles and hashes (buildNpmPackage)
     cmds:
       - task: node:base
         vars:

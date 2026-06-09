@@ -1,10 +1,51 @@
-[
-  "@upstash/cli",
-  "action-docs",
-  "typescript-json-schema",
-  "swagger-typescript-api",
-  "@kirinnee/semantic-generator",
-  "openapi-to-postmanv2",
-  "@krodak/clickup-cli",
-  "pagerduty-cli"
-]
+{
+  "upstash": {
+    "npm": "@upstash/cli",
+    "version": "0.3.0",
+    "tarballHash": "sha256-RVzx3RW2lhzJ/n0nr7t/pfEsANrt+zSA1natHUb4Feo=",
+    "npmDepsHash": "sha256-BuFe4KnBpyWrnfMZMGmPG4f6YSPC37Hqf5Ac2NCGIdg="
+  },
+  "action_docs": {
+    "npm": "action-docs",
+    "version": "2.5.1",
+    "tarballHash": "sha256-99k0M6bT5TKzCz/AaPomPRb3w42pFCJFBQe0ab02pko=",
+    "npmDepsHash": "sha256-Q/gRlwLFnnqASf9F8D4YPgw4Prr08U9f9jVCgPpbkwk="
+  },
+  "typescript_json_schema": {
+    "npm": "typescript-json-schema",
+    "version": "0.67.1",
+    "tarballHash": "sha256-9nz6kDQ2d5YIJloa5/u8leiwmRvyL2pgs1WoNGBY6ao=",
+    "npmDepsHash": "sha256-ROzXkaW9JvRhGSrYa2b8AZZOID9nYrpfZwKV9as6e4E="
+  },
+  "swagger_typescript_api": {
+    "npm": "swagger-typescript-api",
+    "version": "13.6.8",
+    "tarballHash": "sha256-Odea+28RbxsuZuO3SCYDg+q7+58uMDRC/y+B7dp9IPE=",
+    "npmDepsHash": "sha256-9et8bTp8snh1SzhzCf7Fv46IWWHFxWF5Q44rIMSqIws="
+  },
+  "sg": {
+    "npm": "@kirinnee/semantic-generator",
+    "version": "0.11.0",
+    "tarballHash": "sha256-SIuhHnavcwU+0W3WcWtlU6Yx5LnDnglBpGpiqnFCsyA=",
+    "npmDepsHash": "sha256-ZPEnR+SwM85VH1zBARzw9CzTQhr8odA6XOmYAe/G8G8=",
+    "legacyPeerDeps": true
+  },
+  "openapi_to_postmanv2": {
+    "npm": "openapi-to-postmanv2",
+    "version": "6.0.0",
+    "tarballHash": "sha256-AE6cXk7Eu15ZSpLgMkMAyvCqYvWaJPLzlDU6Xe8Zxnw=",
+    "npmDepsHash": "sha256-5XJoS35ORNl0HHa7mRyiiSA71D56dhlGfLlQIx6yBjM="
+  },
+  "clickup_cli": {
+    "npm": "@krodak/clickup-cli",
+    "version": "1.23.1",
+    "tarballHash": "sha256-JTE7qajHbZorJ+qkReK9UTO933oi0ILGHDbJY+SKtgM=",
+    "npmDepsHash": "sha256-aYCOVGDhPXnmXZLBKhPiYN5eqg1aodDdg/PufmvQD5w="
+  },
+  "pagerduty_cli": {
+    "npm": "pagerduty-cli",
+    "version": "0.1.18",
+    "tarballHash": "sha256-0U561gLfYfiBj6Ank0bbRNPIPN73BkSfF012Y4iWxIE=",
+    "npmDepsHash": "sha256-jFu48NdLv4sEZCxGE1maOCfIxYu0QUqNfgwWx8a69qE="
+  }
+}
