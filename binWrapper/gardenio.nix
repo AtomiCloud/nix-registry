@@ -15,14 +15,14 @@ let
   archive_fmt = "tar.gz";
 
   sha256 = {
-    x86_64-linux = "sha256:06fv422y4580rvh12cdl72ngm5a0ff6pjg347kmmha18775j418h";
-    aarch64-linux = "sha256:1n9apliadjmhjkda2f6x83z9s5h39fdm4gla5ahi82a7g1rzylx0";
+    x86_64-linux = "sha256-g+FISR4Ay1yoMcrrQBo9G8XLjWa5chUK+WoSmreqxQU=";
+    aarch64-linux = "sha256-ehlnl2JezQGxPHkICaj/0t58C2M2v/mQuNhbmNNC284=";
 
-    x86_64-darwin = "sha256:01ylmyvb4z0i0kb39ry0nzccz0h4g9cjxcqyxb9zclsj1gghb1b4";
-    aarch64-darwin = "sha256:1cj9xl4i6sq28vwmfhi6fdgp2d31q919x6lcrg9axbq6w294nfrj";
+    x86_64-darwin = "sha256-b4ljBeJ9LtakT3ues4WFGu1WoH0EmD1Do+maYWdQGd4=";
+    aarch64-darwin = "sha256-iXnkrpdj3p9W1lCPCLDnCXMaGlonzJIu8QQVWF5zDk4=";
   }.${system} or throwSystem;
 in
-let version = "0.14.13"; in
+let version = "0.14.20"; in
 
 stdenv.mkDerivation (finalAttrs: {
   pname = "gardenio";
