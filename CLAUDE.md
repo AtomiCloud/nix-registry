@@ -24,7 +24,7 @@ Packages are organized by language/type in directories:
 
 - `binWrapper/`: Binary wrapper packages (mirrord, gardenio, atomiutils, infrautils, infralint, codecov)
 - `shellWrapper/`: Shell script wrappers (pls, helmlint, dotnetlint)
-- `node/22/`: Node.js 22 packages (uses node2nix)
+- `node/22/`: Node.js 22 packages (uses nixpkgs `buildNpmPackage`)
 - `python/`: Python packages (aws-export-credentials)
 - `golang/`: Go packages (nix-share)
 - `rust/`: Rust packages (toml-cli)
@@ -83,7 +83,7 @@ nix fmt
 ### Package Generation
 
 ```bash
-# Generate Node.js package definitions (Node 22)
+# Regenerate Node 22 npm lockfiles + hashes (buildNpmPackage)
 task gen:node:22
 
 # Calculate Go module SHA
