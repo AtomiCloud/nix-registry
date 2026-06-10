@@ -1,3 +1,10 @@
+## [2.27.0](https://github.com/AtomiCloud/nix-registry/compare/v2.26.0...v2.27.0) (2026-06-10)
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **gardenio:** update garden to 0.14.20 ([cfbd805](https://github.com/AtomiCloud/nix-registry/commit/cfbd805aefdfdb29d052e9304338adc1731318f6))
+
 ## [2.26.0](https://github.com/AtomiCloud/nix-registry/compare/v2.25.0...v2.26.0) (2026-06-06)
 
 
