@@ -50,10 +50,18 @@ jobs:
     steps:
       # Setup
       - uses: AtomiCloud/actions.setup-nix@v3
+        with:
+          # Pull AtomiCloud-built packages (cyanprint, etc.) from attic instead
+          # of compiling them. The per-arch caches start cold on first run, and
+          # building cyanprint's rust closure from source OOMs the 4x8 runners.
+          attic: 'true'
+          attic-token: ${{ secrets.ATTIC_TOKEN }}
 
+      # --max-jobs/--cores cap peak memory for any residual source builds
+      # (e.g. worktrunk, attic) that aren't in attic, so they don't OOM.
       - name: Nix Build
         run: >-
-          nix shell nixpkgs#bash
+          nix shell --max-jobs 2 --cores 2 nixpkgs#bash
           .#sg
           .#upstash
           .#action_docs
