@@ -21,22 +21,29 @@ jobs:
   build:
     name: Nix Build
     strategy:
+      # Per-arch caches are independent, so one arch failing/cold-building
+      # should not cancel the others.
+      fail-fast: false
       matrix:
         # Each architecture gets its OWN cache tag. amd64 and arm64 previously
         # shared one tag (nix-registry-nix-build-store-cache); since both jobs
         # mount and persist the same Namespace volume concurrently, the slower
         # job's store would overwrite the faster one's, so the two arches kept
         # clobbering each other's cache (one warm, the other cold every run).
+        #
+        # Linux runners are 8x16 (16GB): on a cold cache the heavy rust
+        # workspaces (cyanprint, worktrunk, attic) are built from source, and a
+        # single one needs more than the old 4x8 (8GB) runner had.
         platform:
           - name: Linux x86_64
             os:
-              - nscloud-ubuntu-22.04-amd64-4x8-with-cache
+              - nscloud-ubuntu-22.04-amd64-8x16-with-cache
               - nscloud-cache-size-50gb
               - nscloud-cache-tag-nix-registry-nix-build-store-cache-amd64
               - nscloud-git-mirror-1gb
           - name: Linux aarch64
             os:
-              - nscloud-ubuntu-22.04-arm64-4x8-with-cache
+              - nscloud-ubuntu-22.04-arm64-8x16-with-cache
               - nscloud-cache-size-50gb
               - nscloud-cache-tag-nix-registry-nix-build-store-cache-arm64
               - nscloud-git-mirror-1gb
@@ -54,8 +61,8 @@ jobs:
       # The per-arch caches start cold on first run, so the heavy rust
       # workspaces (cyanprint, worktrunk, attic) are compiled from source.
       # --max-jobs 1 serialises derivations so only one of those links at a
-      # time — building two concurrently OOMs the 4x8 (8GB) runners. Once the
-      # Namespace /nix cache is warm this run is ~1 min regardless.
+      # time, keeping peak memory within the 16GB runner. Once the Namespace
+      # /nix cache is warm this run is ~1 min regardless.
       - name: Nix Build
         run: >-
           nix shell --max-jobs 1 --cores 2 nixpkgs#bash
