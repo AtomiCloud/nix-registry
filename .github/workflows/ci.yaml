@@ -51,12 +51,14 @@ jobs:
       # Setup
       - uses: AtomiCloud/actions.setup-nix@v3
 
-      # The per-arch caches start cold on first run, so the rust closure
-      # (cyanprint, etc.) is compiled from source. --max-jobs/--cores cap peak
-      # memory so those builds don't OOM the 4x8 runners.
+      # The per-arch caches start cold on first run, so the heavy rust
+      # workspaces (cyanprint, worktrunk, attic) are compiled from source.
+      # --max-jobs 1 serialises derivations so only one of those links at a
+      # time — building two concurrently OOMs the 4x8 (8GB) runners. Once the
+      # Namespace /nix cache is warm this run is ~1 min regardless.
       - name: Nix Build
         run: >-
-          nix shell --max-jobs 2 --cores 2 nixpkgs#bash
+          nix shell --max-jobs 1 --cores 2 nixpkgs#bash
           .#sg
           .#upstash
           .#action_docs
