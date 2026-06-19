@@ -13,7 +13,7 @@ jobs:
       - nscloud-git-mirror-1gb
     steps:
       # Setup
-      - uses: AtomiCloud/actions.setup-nix@v2
+      - uses: AtomiCloud/actions.setup-nix@v3
       # pre commit
       - name: Run pre-commit
         run: nix develop .#ci -c ./scripts/ci/pre-commit.sh
@@ -22,17 +22,34 @@ jobs:
     name: Nix Build
     strategy:
       matrix:
-        os:
-          - nscloud-ubuntu-22.04-amd64-4x8-with-cache
-          - nscloud-ubuntu-22.04-arm64-4x8-with-cache
-    runs-on:
-      - ${{ matrix.os }}
-      - nscloud-cache-size-50gb
-      - nscloud-cache-tag-nix-registry-nix-build-store-cache
-      - nscloud-git-mirror-1gb
+        # Each architecture gets its OWN cache tag. amd64 and arm64 previously
+        # shared one tag (nix-registry-nix-build-store-cache); since both jobs
+        # mount and persist the same Namespace volume concurrently, the slower
+        # job's store would overwrite the faster one's, so the two arches kept
+        # clobbering each other's cache (one warm, the other cold every run).
+        platform:
+          - name: Linux x86_64
+            os:
+              - nscloud-ubuntu-22.04-amd64-4x8-with-cache
+              - nscloud-cache-size-50gb
+              - nscloud-cache-tag-nix-registry-nix-build-store-cache-amd64
+              - nscloud-git-mirror-1gb
+          - name: Linux aarch64
+            os:
+              - nscloud-ubuntu-22.04-arm64-4x8-with-cache
+              - nscloud-cache-size-50gb
+              - nscloud-cache-tag-nix-registry-nix-build-store-cache-arm64
+              - nscloud-git-mirror-1gb
+          - name: MacOS aarch64
+            os:
+              - nscloud-macos-sequoia-arm64-6x14-with-cache
+              - nscloud-cache-size-50gb
+              - nscloud-cache-tag-nix-registry-nix-build-store-cache-macos-arm64
+              - nscloud-git-mirror-1gb
+    runs-on: ${{ matrix.platform.os }}
     steps:
       # Setup
-      - uses: AtomiCloud/actions.setup-nix@v2
+      - uses: AtomiCloud/actions.setup-nix@v3
 
       - name: Nix Build
         run: >-
@@ -111,7 +128,7 @@ jobs:
       - nscloud-git-mirror-1gb
     steps:
       # Setup
-      - uses: AtomiCloud/actions.setup-nix@v2
+      - uses: AtomiCloud/actions.setup-nix@v3
         with:
           auth-bot-app-id: ${{ vars.AUTH_BOT_APP_ID }}
           auth-bot-secret-key: ${{ secrets.AUTH_BOT_SECRET_KEY }}

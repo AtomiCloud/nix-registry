@@ -53,12 +53,16 @@ Every binWrapper package must include:
 
 ## Platform-Specific SHA256 Handling
 
-BinWrapper packages must support all four platforms:
+BinWrapper packages must support all three supported platforms:
 
 - `x86_64-linux` - AMD64 Linux
 - `aarch64-linux` - ARM64 Linux
-- `x86_64-darwin` - Intel macOS
 - `aarch64-darwin` - Apple Silicon macOS
+
+> Intel macOS (`x86_64-darwin`) was dropped in v3.0.0. The illustrative
+> snippets further down may still show a four-platform map as an example of
+> the per-platform mapping pattern; new packages should target the three
+> platforms above.
 
 ### Platform Mapping
 
