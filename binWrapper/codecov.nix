@@ -34,6 +34,12 @@ stdenv.mkDerivation (finalAttrs: {
   # We don't need to build anything
   buildPhase = "true";
 
+  # codecov is a PyInstaller binary: the Python runtime and app are appended to
+  # the executable as a ~23MB archive. macOS `strip` (run in fixupPhase) discards
+  # that appended archive, leaving a ~170KB stub that fails at runtime with
+  # "Could not load PyInstaller's embedded PKG archive". Keep the binary intact.
+  dontStrip = true;
+
   installPhase = ''
     mkdir -p $out/bin
     cp $src $out/bin/codecov
