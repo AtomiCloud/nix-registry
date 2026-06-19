@@ -35,7 +35,9 @@
     , nixpkgs-2605
     , nixpkgs-unstable
     } @inputs:
-    (flake-utils.lib.eachDefaultSystem
+    # Intel macOS (x86_64-darwin) was dropped in v3.0.0; the registry now targets
+    # Linux (x86_64, aarch64) and Apple Silicon (aarch64-darwin) only.
+    (flake-utils.lib.eachSystem [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ]
       (
         system:
         let

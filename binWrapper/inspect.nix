@@ -7,14 +7,12 @@ let
   plat = {
     x86_64-linux = "linux-x86_64";
     aarch64-linux = "linux-aarch64";
-    x86_64-darwin = "macos-x86_64";
     aarch64-darwin = "macos-aarch64";
   }.${system} or throwSystem;
 
   sha256 = {
     x86_64-linux = "99cf4ea2a2a1048d8e9369a6a5a11e5f84ee3f3c706e0bde072f9b2bd44e96ba";
     aarch64-linux = "2327c1de10ecf40e5199c15fdc4c4b3c173735640294e779c635f4c15771e4f6";
-    x86_64-darwin = "51751be22f6128229c5dea30dc54e8816b81eb90b53d42b318b11b3afee831d2";
     aarch64-darwin = "e7fed5722af6e14dc668279dd7854109f9778484d48b1a42ead5d2c71b8bb90d";
   }.${system} or throwSystem;
 in
@@ -62,6 +60,6 @@ stdenv.mkDerivation (finalAttrs: {
     homepage = "https://inspect.ataraxy-labs.com";
     downloadPage = "https://github.com/Ataraxy-Labs/inspect/releases";
     license = licenses.fsl11Asl20;
-    platforms = [ "x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin" ];
+    platforms = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
   };
 })

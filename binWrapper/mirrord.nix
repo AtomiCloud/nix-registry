@@ -8,7 +8,6 @@ let
     x86_64-linux = "linux_x86_64";
     aarch64-linux = "linux_aarch64";
 
-    x86_64-darwin = "mac_universal";
     aarch64-darwin = "mac_universal";
   }.${system} or throwSystem;
 
@@ -18,7 +17,6 @@ let
     x86_64-linux = "sha256-Qm1+qI5WMgoDwudvxynv+He1g7RgqCfbsTjKwYxzCLk=";
     aarch64-linux = "sha256-3Jfv1HUV/jOApA0XJQkK1W/W83KyD59A6jr3TcLUJo4=";
 
-    x86_64-darwin = "sha256-+0NXyGjJ7HJmLVYPgIVjbXuFidnPmHmDY6hFf3CABxA=";
     aarch64-darwin = "sha256-+0NXyGjJ7HJmLVYPgIVjbXuFidnPmHmDY6hFf3CABxA=";
   }.${system} or throwSystem;
 in
@@ -57,6 +55,6 @@ stdenv.mkDerivation (finalAttrs: {
     homepage = "https://mirrord.dev/";
     downloadPage = "https://github.com/metalbear-co/mirrord/releases";
     license = licenses.mit;
-    platforms = [ "x86_64-linux" "x86_64-darwin" "aarch64-darwin" "aarch64-linux" ];
+    platforms = [ "x86_64-linux" "aarch64-darwin" "aarch64-linux" ];
   };
 })

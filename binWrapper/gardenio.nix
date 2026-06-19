@@ -8,7 +8,6 @@ let
     x86_64-linux = "linux-amd64";
     aarch64-linux = "linux-arm64";
 
-    x86_64-darwin = "macos-amd64";
     aarch64-darwin = "macos-arm64";
   }.${system} or throwSystem;
 
@@ -18,7 +17,6 @@ let
     x86_64-linux = "sha256-g+FISR4Ay1yoMcrrQBo9G8XLjWa5chUK+WoSmreqxQU=";
     aarch64-linux = "sha256-ehlnl2JezQGxPHkICaj/0t58C2M2v/mQuNhbmNNC284=";
 
-    x86_64-darwin = "sha256-b4ljBeJ9LtakT3ues4WFGu1WoH0EmD1Do+maYWdQGd4=";
     aarch64-darwin = "sha256-iXnkrpdj3p9W1lCPCLDnCXMaGlonzJIu8QQVWF5zDk4=";
   }.${system} or throwSystem;
 in
@@ -48,6 +46,6 @@ stdenv.mkDerivation (finalAttrs: {
     homepage = "https://garden.io/";
     downloadPage = "https://github.com/garden-io/garden/releases";
     license = licenses.mit;
-    platforms = [ "x86_64-linux" "x86_64-darwin" "aarch64-darwin" "aarch64-linux" ];
+    platforms = [ "x86_64-linux" "aarch64-darwin" "aarch64-linux" ];
   };
 })
