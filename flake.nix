@@ -6,7 +6,13 @@
     treefmt-nix.url = "github:numtide/treefmt-nix";
     pre-commit-hooks.url = "github:cachix/pre-commit-hooks.nix";
     fenix.url = "github:nix-community/fenix";
-    cyanprintpkgs.url = "github:AtomiCloud/sulfone.iridium";
+    # Pinned to f587c48 (release 2.20.0), the last good commit. The tip 7aeed0e
+    # (2.21.0) fails to build: cyanprint/Cargo.toml declares `bollard = "*"`, and
+    # the semantic-release commit regenerated Cargo.lock floating bollard to
+    # 0.21.0, which renamed MountTypeEnum -> MountType, while
+    # cyanprint/src/coord.rs still imports the old name. Unpin once upstream fixes
+    # the bollard import.
+    cyanprintpkgs.url = "github:AtomiCloud/sulfone.iridium/f587c48";
     worktrunkpkgs.url = "github:max-sixty/worktrunk";
     atticpkgs.url = "github:zhaofengli/attic";
 
