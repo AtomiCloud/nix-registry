@@ -185,16 +185,15 @@
         "treefmt-nix": "treefmt-nix_6"
       },
       "locked": {
-        "lastModified": 1774482969,
-        "narHash": "sha256-oPM7Gq5ggEXhqEL88lSHDuLUlvpYMrWRadDc7b4kkZA=",
+        "lastModified": 1781893012,
+        "narHash": "sha256-+FhqqUCVrHJDDl59wbvPX6ctgiYmcppRa1GuqQNpyXI=",
         "owner": "AtomiCloud",
         "repo": "sulfone.iridium",
-        "rev": "f587c488b3efa77627dc774a2b687efe20106933",
+        "rev": "3a4e637938c5a9c7e5b4d853c438a4805997262c",
         "type": "github"
       },
       "original": {
         "owner": "AtomiCloud",
-        "ref": "f587c48",
         "repo": "sulfone.iridium",
         "type": "github"
       }

@@ -8,14 +8,12 @@ let
     x86_64-linux = "linux_amd64";
     aarch64-linux = "linux_arm64";
     aarch64-darwin = "darwin_arm64";
-    x86_64-darwin = "darwin_amd64";
   }.${system} or throwSystem;
 
   sha256 = {
     x86_64-linux = "b5a2af814e270854f35bb44b2b75d1bdba50c867f0bee732f82d7825406a3fce";
     aarch64-linux = "2ffd1b98f339e7188fecc23fb3e8825ef247c39ade0b60ca680ecec6a39574ed";
     aarch64-darwin = "610e416f8db1a53b3812273ac295110b9d394380a1293ff2cf0e48c7c902a124";
-    x86_64-darwin = "a44e23b073bbd66ad5ac43f3632554d26c2babe18065c527a4aeabaf66ba5551";
   }.${system} or throwSystem;
 in
 let version = "v6.7.16"; in
@@ -61,6 +59,6 @@ stdenv.mkDerivation (finalAttrs: {
     homepage = "https://help.router-for.me/";
     downloadPage = "https://github.com/router-for-me/CLIProxyAPI/releases";
     license = licenses.mit;
-    platforms = [ "x86_64-linux" "x86_64-darwin" "aarch64-linux" "aarch64-darwin" ];
+    platforms = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
   };
 })

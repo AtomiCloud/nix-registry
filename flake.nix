@@ -6,13 +6,7 @@
     treefmt-nix.url = "github:numtide/treefmt-nix";
     pre-commit-hooks.url = "github:cachix/pre-commit-hooks.nix";
     fenix.url = "github:nix-community/fenix";
-    # Pinned to f587c48 (release 2.20.0), the last good commit. The tip 7aeed0e
-    # (2.21.0) fails to build: cyanprint/Cargo.toml declares `bollard = "*"`, and
-    # the semantic-release commit regenerated Cargo.lock floating bollard to
-    # 0.21.0, which renamed MountTypeEnum -> MountType, while
-    # cyanprint/src/coord.rs still imports the old name. Unpin once upstream fixes
-    # the bollard import.
-    cyanprintpkgs.url = "github:AtomiCloud/sulfone.iridium/f587c48";
+    cyanprintpkgs.url = "github:AtomiCloud/sulfone.iridium";
     worktrunkpkgs.url = "github:max-sixty/worktrunk";
     atticpkgs.url = "github:zhaofengli/attic";
 
@@ -35,7 +29,9 @@
     , nixpkgs-2605
     , nixpkgs-unstable
     } @inputs:
-    (flake-utils.lib.eachDefaultSystem
+    # Intel macOS (x86_64-darwin) was dropped in v3.0.0; the registry now targets
+    # Linux (x86_64, aarch64) and Apple Silicon (aarch64-darwin) only.
+    (flake-utils.lib.eachSystem [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ]
       (
         system:
         let

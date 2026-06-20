@@ -32,7 +32,7 @@ with nixpkgs;
     homepage = "https://github.com/gnprice/toml-cli";
     downloadPage = "https://github.com/gnprice/toml-cli/releases";
     license = licenses.mit;
-    platforms = [ "x86_64-linux" "x86_64-darwin" "aarch64-darwin" "aarch64-linux" ];
+    platforms = [ "x86_64-linux" "aarch64-darwin" "aarch64-linux" ];
   };
 
 }

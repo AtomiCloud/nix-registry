@@ -7,14 +7,12 @@ let
   plat = {
     x86_64-linux = "linux-x64";
     aarch64-linux = "linux-arm64";
-    x86_64-darwin = "darwin-x64";
     aarch64-darwin = "darwin-arm64";
   }.${system} or throwSystem;
 
   sha256 = {
     x86_64-linux = "sha256-X87wVqXBjaZaPz/ER/ExyV5EqZqE7IudlRF2cOFL04A=";
     aarch64-linux = "sha256-XDmdcQHoEBqq1Z6OGrRa96/oXRNpCnPr4P0pa40wPEo=";
-    x86_64-darwin = "sha256-daJTcCypYbZGqQa2Z3BshaeoxrdtMxTJSUXgDbILu/4=";
     aarch64-darwin = "sha256-s5A/FDmEQ28kGyQniV5entMAdjeLIR+/oC/DiJocw6k=";
   }.${system} or throwSystem;
 in
@@ -54,6 +52,6 @@ stdenv.mkDerivation (finalAttrs: {
     homepage = "https://coderabbit.ai/";
     downloadPage = "https://github.com/coderabbitai/coderabbit-cli/releases";
     license = licenses.mit;
-    platforms = [ "x86_64-linux" "x86_64-darwin" "aarch64-linux" "aarch64-darwin" ];
+    platforms = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
   };
 })
