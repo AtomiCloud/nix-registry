@@ -1,3 +1,30 @@
+## [3.0.0](https://github.com/AtomiCloud/nix-registry/compare/v2.27.0...v3.0.0) (2026-06-20)
+
+
+### ⚠ BREAKING CHANGES
+
+* **darwin-intel:** x86_64-darwin (Intel macOS) is no longer a supported
+system. Intel Mac users must stay on a release <= v2.27.0.
+
+Claude-Session: https://claude.ai/code/session_01Rio8HNDX5jrx2T34Sn2UYa
+
+### 🐛 Bug Fixes 🐛
+
+* **ci:** drop attic from build job, keep parallelism cap ([bbba7e4](https://github.com/AtomiCloud/nix-registry/commit/bbba7e49e8bdae8bf071b7fccd864d14a123fbc5))
+* **drv:** keep codecov pyinstaller archive intact on macos ([ac08805](https://github.com/AtomiCloud/nix-registry/commit/ac088055d7480dfcb1c28efc7883a05fa37faae1))
+* **ci:** serialise nix build to one job to fit cold-cache build in 8GB ([2727c3c](https://github.com/AtomiCloud/nix-registry/commit/2727c3cd7b97015a3cfc60347b0ba3f57bd97033))
+* **ci:** use attic and cap parallelism to avoid cold-cache OOM ([8906a16](https://github.com/AtomiCloud/nix-registry/commit/8906a167bb4aa6de94acf88f38747796b3772ca4))
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **cyanprint:** upgrade to 2.21.1, unpin from 2.20.0 ([aa9f084](https://github.com/AtomiCloud/nix-registry/commit/aa9f084261da51225fb01626e9e34af132dada6c)), closes [#88](https://github.com/AtomiCloud/nix-registry/issues/88)
+
+
+### ❌ Removed Packages ❌
+
+* **darwin-intel:** drop x86_64-darwin (Intel macOS) support ([a46bb2d](https://github.com/AtomiCloud/nix-registry/commit/a46bb2d5cc7b0d7d1bdbf630132b84c89bb80d47))
+
 ## [2.27.0](https://github.com/AtomiCloud/nix-registry/compare/v2.26.0...v2.27.0) (2026-06-10)
 
 
