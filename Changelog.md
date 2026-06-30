@@ -1,3 +1,10 @@
+## [3.2.0](https://github.com/AtomiCloud/nix-registry/compare/v3.1.0...v3.2.0) (2026-06-30)
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **dn-inspect:** configurable .NET SDK, default to .NET 10 ([483c01b](https://github.com/AtomiCloud/nix-registry/commit/483c01be738610aca56327bd5b465ffd103a2026))
+
 ## [3.1.0](https://github.com/AtomiCloud/nix-registry/compare/v3.0.0...v3.1.0) (2026-06-23)
 
 
