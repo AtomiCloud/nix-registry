@@ -5,7 +5,7 @@
 
 let
   # Version of the dn-inspect tool (keep in sync with dn-inspect.sh).
-  version = "0.3.0";
+  version = "0.4.0";
 
   # Create a function that takes dotnetPackage as an argument so the .NET SDK is
   # configurable (mirrors shellWrapper/dotnetlint/default.nix). Defaults to .NET 10.
@@ -14,7 +14,9 @@ let
       name = "dn-inspect";
       inherit version;
       text = ''
-        export PATH="${nixpkgs.lib.makeBinPath [ dotnetPackage nixpkgs.jq nixpkgs.coreutils nixpkgs.findutils ]}:$PATH"
+        # gawk + gnused are used by dn-inspect.sh (the inspectcode stderr noise
+        # filter and quote_arg's single-quote escaping), so bundle them too.
+        export PATH="${nixpkgs.lib.makeBinPath [ dotnetPackage nixpkgs.jq nixpkgs.coreutils nixpkgs.findutils nixpkgs.gawk nixpkgs.gnused ]}:$PATH"
         export DN_INSPECT_DOTNET="${dotnetPackage}"
         ${./dn-inspect.sh} "$@"
       '';
