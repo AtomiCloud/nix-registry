@@ -1,3 +1,10 @@
+## [3.3.0](https://github.com/AtomiCloud/nix-registry/compare/v3.2.0...v3.3.0) (2026-06-30)
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **dn-inspect:** support .slnx solutions and standalone project mode ([a7b0118](https://github.com/AtomiCloud/nix-registry/commit/a7b011817ed6900670237c9324272c8db348534e))
+
 ## [3.2.0](https://github.com/AtomiCloud/nix-registry/compare/v3.1.0...v3.2.0) (2026-06-30)
 
 
