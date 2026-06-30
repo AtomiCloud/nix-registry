@@ -52,7 +52,11 @@ jobs:
               - nscloud-macos-sequoia-arm64-6x14-with-cache
               - nscloud-cache-size-50gb
               - nscloud-cache-tag-nix-registry-nix-build-store-cache-macos-arm64
-              - nscloud-git-mirror-1gb
+              # No git mirror: the macOS-arm64 Namespace mirror lags on freshly
+              # pushed feature branches, so actions/checkout cannot resolve the
+              # branch SHA ("ref does not point to the expected commit") and the
+              # build never runs. The Linux pools keep the mirror; macOS clones
+              # directly from GitHub instead.
     runs-on: ${{ matrix.platform.os }}
     steps:
       # Setup
