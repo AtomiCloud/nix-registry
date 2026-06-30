@@ -2,7 +2,11 @@
 set -eou pipefail
 
 # Handle --version
-[ "${1:-}" = "--version" ] && echo "ℹ️ dn-inspect 0.2.0" && exit 0
+if [ "${1:-}" = "--version" ]; then
+  echo "ℹ️ dn-inspect 0.3.0"
+  echo "using dotnet: $("${DN_INSPECT_DOTNET:+$DN_INSPECT_DOTNET/bin/}dotnet" --version)"
+  exit 0
+fi
 
 # Find .sln in current directory
 solution=$(find . -maxdepth 1 -name '*.sln' -print -quit 2>/dev/null)
