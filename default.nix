@@ -23,6 +23,7 @@ let
   # bin wrapper
   bin = rec {
     mirrord = import ./binWrapper/mirrord.nix { inherit nixpkgs; };
+    cyanprint = import ./binWrapper/cyanprint.nix { inherit nixpkgs; };
     atomiutils = import ./binWrapper/atomiutils.nix { inherit nixpkgs; };
     infrautils = import ./binWrapper/infrautils.nix { inherit nixpkgs gardenio mirrord; };
     infralint = import ./binWrapper/infralint.nix { inherit nixpkgs; helmlint = shell.helmlint; };

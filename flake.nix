@@ -6,7 +6,6 @@
     treefmt-nix.url = "github:numtide/treefmt-nix";
     pre-commit-hooks.url = "github:cachix/pre-commit-hooks.nix";
     fenix.url = "github:nix-community/fenix";
-    cyanprintpkgs.url = "github:AtomiCloud/sulfone.iridium";
     worktrunkpkgs.url = "github:max-sixty/worktrunk";
     atticpkgs.url = "github:zhaofengli/attic";
 
@@ -21,7 +20,6 @@
     , flake-utils
     , treefmt-nix
     , pre-commit-hooks
-    , cyanprintpkgs
     , worktrunkpkgs
     , fenix
     , atticpkgs
@@ -46,7 +44,6 @@
             config.allowUnfreePredicate = allowUnfreePredicate;
           };
           fenixpkgs = fenix.packages.${system};
-          cyanprint = cyanprintpkgs.packages.${system};
           worktrunk = worktrunkpkgs.packages.${system};
           attic = atticpkgs.packages.${system};
           pre-commit-lib = pre-commit-hooks.lib.${system};
@@ -85,7 +82,6 @@
               nixpkgs-2605 = pkgs-2605;
               nixpkgs-unstable = pkgs-unstable;
             } // {
-            cyanprint = cyanprint.default;
             worktrunk = worktrunk.default;
             attic = attic.default;
           };
