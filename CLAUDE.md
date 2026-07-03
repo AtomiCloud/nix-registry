@@ -15,14 +15,13 @@ The repository uses Nix flakes with the following input sources:
 - **nixpkgs-2505**: Primary package set (NixOS 25.05)
 - **nixpkgs-unstable**: Unstable packages when needed
 - **fenix**: Rust toolchain management
-- **cyanprintpkgs**: Custom AtomiCloud package (sulfone.iridium)
 - **atticpkgs**: Attic binary cache
 
 ### Package Organization
 
 Packages are organized by language/type in directories:
 
-- `binWrapper/`: Binary wrapper packages (mirrord, gardenio, atomiutils, infrautils, infralint, codecov)
+- `binWrapper/`: Binary wrapper packages (mirrord, cyanprint, gardenio, atomiutils, infrautils, infralint, codecov)
 - `shellWrapper/`: Shell script wrappers (pls, helmlint, dotnetlint)
 - `node/22/`: Node.js 22 packages (uses nixpkgs `buildNpmPackage`)
 - `python/`: Python packages (aws-export-credentials)
