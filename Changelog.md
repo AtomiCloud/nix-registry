@@ -1,3 +1,10 @@
+## [3.4.0](https://github.com/AtomiCloud/nix-registry/compare/v3.3.0...v3.4.0) (2026-07-04)
+
+
+### ✨ New Packages ✨
+
+* **dashboard-linter:** package grafana/dashboard-linter v0.2.0 ([b61cb47](https://github.com/AtomiCloud/nix-registry/commit/b61cb477792b7e5c0cc4e79dee0dc2196a53184f))
+
 ## [3.3.0](https://github.com/AtomiCloud/nix-registry/compare/v3.2.0...v3.3.0) (2026-06-30)
 
 
