@@ -97,6 +97,7 @@ jobs:
           .#clickup_cli
           .#inspect
           .#pagerduty_cli
+          .#dashboard-linter
           -c bash -c '
           sg --version &&
           upstash --version &&
@@ -125,6 +126,7 @@ jobs:
           inspect --help &&
           attic --version &&
           cli-proxy-api --help &&
+          dashboard-linter --help &&
           echo "🎉 Done"'
 
   release:

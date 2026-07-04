@@ -15,6 +15,7 @@ let
   golang = {
     nix-share = import ./golang/nix-share/default.nix { inherit nixpkgs; };
     ccc = import ./golang/ccc/default.nix { inherit nixpkgs; };
+    dashboard-linter = import ./golang/dashboard-linter/default.nix { inherit nixpkgs; };
   };
 
   # dotnet
