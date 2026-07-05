@@ -1,3 +1,11 @@
+## [3.5.0](https://github.com/AtomiCloud/nix-registry/compare/v3.4.0...v3.5.0) (2026-07-05)
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **cyanprint:** source from sulfone.lite v4.5.0 via local binWrapper ([9fecfe9](https://github.com/AtomiCloud/nix-registry/commit/9fecfe91d8dd8431a434cea73e9b72410df16d9b))
+* **cyanprint:** upgrade to sulfone.lite v4.7.0 ([9372ff9](https://github.com/AtomiCloud/nix-registry/commit/9372ff9b6d644d68a6d069f97eeeb709ac859ca0))
+
 ## [3.4.0](https://github.com/AtomiCloud/nix-registry/compare/v3.3.0...v3.4.0) (2026-07-04)
 
 
