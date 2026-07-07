@@ -1,3 +1,10 @@
+## [3.6.0](https://github.com/AtomiCloud/nix-registry/compare/v3.5.0...v3.6.0) (2026-07-07)
+
+
+### ✨ New Packages ✨
+
+* **nsc:** add Namespace Cloud CLI (nsc) ([1eab07d](https://github.com/AtomiCloud/nix-registry/commit/1eab07da3b985afa3a0f7431e49fb6d99f2c37ce))
+
 ## [3.5.0](https://github.com/AtomiCloud/nix-registry/compare/v3.4.0...v3.5.0) (2026-07-05)
 
 
