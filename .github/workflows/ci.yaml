@@ -78,6 +78,7 @@ jobs:
           .#toml-cli
           .#nix-share
           .#aws-export-credentials
+          .#codemagic-cli-tools
           .#cyanprint
           .#worktrunk
           .#atomiutils
@@ -129,6 +130,7 @@ jobs:
           cli-proxy-api --help &&
           dashboard-linter --help &&
           nsc version &&
+          app-store-connect --version &&
           echo "🎉 Done"'
 
   release:
