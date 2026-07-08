@@ -1,3 +1,10 @@
+## [3.7.0](https://github.com/AtomiCloud/nix-registry/compare/v3.6.0...v3.7.0) (2026-07-08)
+
+
+### ✨ New Packages ✨
+
+* **codemagic-cli-tools:** add codemagic-cli-tools Python package ([f961ff3](https://github.com/AtomiCloud/nix-registry/commit/f961ff32ce5931dae8a56411eedfd1a35597aa2a))
+
 ## [3.6.0](https://github.com/AtomiCloud/nix-registry/compare/v3.5.0...v3.6.0) (2026-07-07)
 
 
