@@ -6,13 +6,17 @@
 # `pls gen:node:22`) and copy it in during postPatch. Since the published
 # tarball is already built, we skip the build step (dontNpmBuild) and only
 # fetch runtime dependencies (--ignore-scripts).
+#
+# Packages with a native dependency (e.g. better-sqlite3) set `nativeBuild =
+# true` in node-packages.json to opt into compiling that dependency from source
+# (see the nativeBuild levers below); pure-JS packages leave it unset.
 { nixpkgs, nodejs }:
-{ attr, npm, version, tarballHash, npmDepsHash, ... }:
+{ attr, npm, version, tarballHash, npmDepsHash, nativeBuild ? false, ... }:
 let
   inherit (nixpkgs) lib;
   base = lib.last (lib.splitString "/" npm);
 in
-nixpkgs.buildNpmPackage {
+nixpkgs.buildNpmPackage ({
   pname = attr;
   inherit version nodejs npmDepsHash;
 
@@ -35,9 +39,27 @@ nixpkgs.buildNpmPackage {
     cp ${./pkgs + "/${attr}/package-lock.json"} package-lock.json
   '';
 
-  # Only install runtime dependencies; do not rebuild from source.
+  # The tarball already ships built JS, so never rebuild the root package.
+  dontNpmBuild = true;
+
+  # npmFlags controls buildNpmPackage's unconditional dependency `npm rebuild`:
   #   - --legacy-peer-deps: install exactly what the vendored lock pins without
   #     trying to fetch unmet peer deps (which aren't in the offline cache).
-  dontNpmBuild = true;
-  npmFlags = [ "--ignore-scripts" "--legacy-peer-deps" ];
+  #   - --ignore-scripts (pure-JS default): suppress the `npm rebuild`, so no
+  #     native module ever compiles. Native packages OMIT it so that rebuild
+  #     runs and compiles their native deps (e.g. better-sqlite3) from source.
+  npmFlags =
+    if nativeBuild
+    then [ "--legacy-peer-deps" ]
+    else [ "--ignore-scripts" "--legacy-peer-deps" ];
 }
+  # Opt-in native build. Only reached when nativeBuild == true, so the pure-JS
+  # default path above is byte-identical to before this attribute set existed.
+  # The C/C++ compiler comes from stdenv/buildNpmPackage and better-sqlite3
+  # bundles its own node-gyp, so only python3 is needed. build_from_source forces
+  # the bundled SQLite amalgamation instead of prebuild-install, which cannot
+  # reach the network in the sandbox.
+  // lib.optionalAttrs nativeBuild {
+  nativeBuildInputs = [ nixpkgs.python3 ];
+  npm_config_build_from_source = "true";
+})
