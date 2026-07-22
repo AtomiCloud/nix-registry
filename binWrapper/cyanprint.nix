@@ -28,6 +28,14 @@ stdenv.mkDerivation (finalAttrs: {
   # gardenio's, so stdenv can't infer a sourceRoot to cd into.
   sourceRoot = ".";
 
+  # The upstream binary is dynamically linked and its ELF interpreter points at
+  # a Nix-store glibc that is not otherwise in this package's closure, so it
+  # fails with "cannot execute: required file not found" on any clean machine
+  # (e.g. CI runners). autoPatchelfHook rewrites the interpreter/RPATH to the
+  # glibc + libgcc we depend on here, pulling them into the runtime closure.
+  nativeBuildInputs = [ autoPatchelfHook ];
+  buildInputs = [ stdenv.cc.cc.lib glibc ];
+
   installPhase = ''
     mkdir -p $out/bin
     cp cyanprint $out/bin/cyanprint
