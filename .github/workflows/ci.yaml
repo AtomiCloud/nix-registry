@@ -100,6 +100,7 @@ jobs:
           .#pagerduty_cli
           .#dashboard-linter
           .#nsc
+          .#obsidian_headless
           -c bash -c '
           sg --version &&
           upstash --version &&
@@ -131,6 +132,7 @@ jobs:
           dashboard-linter --help &&
           nsc version &&
           app-store-connect --version &&
+          ob --version &&
           echo "🎉 Done"'
 
   release:

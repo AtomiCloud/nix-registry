@@ -47,5 +47,12 @@
     "version": "0.1.18",
     "tarballHash": "sha256-0U561gLfYfiBj6Ank0bbRNPIPN73BkSfF012Y4iWxIE=",
     "npmDepsHash": "sha256-jFu48NdLv4sEZCxGE1maOCfIxYu0QUqNfgwWx8a69qE="
+  },
+  "obsidian_headless": {
+    "npm": "obsidian-headless",
+    "version": "0.0.13",
+    "tarballHash": "sha256-m44a05F6ZdU8WrdNBqz17I2UHjsCvZvV0DXWgA5TMZg=",
+    "npmDepsHash": "sha256-oqgxPhBJlconDk3XX2/TJZcE96hkzqrplci6WmMOiZY=",
+    "nativeBuild": true
   }
 }
