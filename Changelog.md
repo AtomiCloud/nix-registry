@@ -1,3 +1,16 @@
+## [3.8.0](https://github.com/AtomiCloud/nix-registry/compare/v3.7.0...v3.8.0) (2026-07-23)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **cyanprint:** autopatchelf so glibc is in the runtime closure ([4052a7b](https://github.com/AtomiCloud/nix-registry/commit/4052a7bd5486bb3c4540887ee39a6cafaea85ac6))
+* **cyanprint:** guard autopatchelf/glibc to Linux only ([1c6716a](https://github.com/AtomiCloud/nix-registry/commit/1c6716ab9e1bd64e0dd9a0a39c24d4775132d60b))
+
+
+### ✨ New Packages ✨
+
+* **obsidian_headless:** package Obsidian headless sync CLI ([30f8fc5](https://github.com/AtomiCloud/nix-registry/commit/30f8fc55338f1a5af6d8c1211c513cdce2182e90))
+
 ## [3.7.0](https://github.com/AtomiCloud/nix-registry/compare/v3.6.0...v3.7.0) (2026-07-08)
 
 
