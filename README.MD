@@ -18,6 +18,7 @@ AtomiCloud's Nix Registry for custom built packages.
 - nix-share
 - aws-export-credentials
 - cyanprint
+- releaser
 
 # Installation
 
