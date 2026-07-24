@@ -1,3 +1,10 @@
+## [3.9.0](https://github.com/AtomiCloud/nix-registry/compare/v3.8.0...v3.9.0) (2026-07-24)
+
+
+### ✨ New Packages ✨
+
+* **mmoney-cli:** package Monarch Money CLI ([5aacc81](https://github.com/AtomiCloud/nix-registry/commit/5aacc813d6e479e859a4ed538d3909da75a1c955))
+
 ## [3.8.0](https://github.com/AtomiCloud/nix-registry/compare/v3.7.0...v3.8.0) (2026-07-23)
 
 
