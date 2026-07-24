@@ -10,6 +10,7 @@ let
   python = {
     aws-export-credentials = import ./python/aws-export-credentials/default.nix { inherit nixpkgs; };
     codemagic-cli-tools = import ./python/codemagic-cli-tools/default.nix { inherit nixpkgs; };
+    mmoney-cli = import ./python/mmoney-cli/default.nix { inherit nixpkgs; };
   };
 
   # Go
