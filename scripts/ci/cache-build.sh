@@ -26,6 +26,7 @@ TO_PUSH=$(nix build \
   .#toml-cli \
   .#nix-share \
   .#aws-export-credentials \
+  .#mmoney-cli \
   .#cyanprint \
   .#atomiutils \
   .#gardenio \

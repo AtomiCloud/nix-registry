@@ -40,6 +40,7 @@ The following packages are verified in CI with their respective commands:
 | attic                  | `attic --version`                  | Attic binary cache client                   |
 | cliproxyapi            | `cli-proxy-api --help`             | Only has --help, no --version               |
 | aws-export-credentials | `aws-export-credentials --version` | AWS credential exporter                     |
+| mmoney-cli             | `mmoney --version`                 | Monarch Money CLI (binary is `mmoney`)      |
 | md-mermaid-lint        | `md-mermaid-lint --version`        | Mermaid diagram linter                      |
 | infrautils             | (removed from CI)                  | -                                           |
 | infralint              | (removed from CI)                  | -                                           |
@@ -177,6 +178,7 @@ Here is the current CI verification configuration from `.github/workflows/ci.yam
     .#toml-cli
     .#nix-share
     .#aws-export-credentials
+    .#mmoney-cli
     .#cyanprint
     .#worktrunk
     .#atomiutils
@@ -205,6 +207,7 @@ Here is the current CI verification configuration from `.github/workflows/ci.yam
     toml --version &&
     nix-share &&
     cyanprint --version &&
+    mmoney --version &&
     wt --version &&
     garden version &&
     codecov --version &&
