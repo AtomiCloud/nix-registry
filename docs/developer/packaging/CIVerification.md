@@ -41,6 +41,7 @@ The following packages are verified in CI with their respective commands:
 | cliproxyapi            | `cli-proxy-api --help`             | Only has --help, no --version               |
 | aws-export-credentials | `aws-export-credentials --version` | AWS credential exporter                     |
 | mmoney-cli             | `mmoney --version`                 | Monarch Money CLI (binary is `mmoney`)      |
+| releaser               | `releaser --version`               | AtomiCloud release + commit-lint CLI        |
 | md-mermaid-lint        | `md-mermaid-lint --version`        | Mermaid diagram linter                      |
 | infrautils             | (removed from CI)                  | -                                           |
 | infralint              | (removed from CI)                  | -                                           |

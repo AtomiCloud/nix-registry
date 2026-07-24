@@ -125,6 +125,22 @@ trivialBuilders.writeBunScriptBin {
 }
 ```
 
+## Pattern: Compiled Binary from a Pinned Source Tag
+
+For upstream Bun CLIs published as a tagged repository (rather than local
+TypeScript in this repo), skip `writeBunScriptBin` and compile a standalone
+executable from an immutable source pin instead. See
+`bunWrapper/releaser/default.nix` for the reference implementation:
+
+- `fetchFromGitHub` pins the exact release tag commit with a real source hash.
+- A fixed-output `deps` derivation runs
+  `bun install --frozen-lockfile --production` so dependency resolution stays
+  reproducible (production-only keeps `node_modules` platform-independent, so
+  one `outputHash` covers Linux and Darwin).
+- The main derivation runs `bun build <entry> --compile` and installs the
+  resulting self-contained binary. Use `dontFixup = true;` — stripping corrupts
+  the bytecode blob Bun embeds in the executable.
+
 ## Importing the Wrapper
 
 Add your wrapper to `bunWrapper/default.nix`:
