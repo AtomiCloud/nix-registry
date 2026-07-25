@@ -38,6 +38,18 @@ stdenv.mkDerivation (finalAttrs: {
   nativeBuildInputs = lib.optionals stdenv.hostPlatform.isLinux [ autoPatchelfHook ];
   buildInputs = lib.optionals stdenv.hostPlatform.isLinux [ stdenv.cc.cc.lib glibc ];
 
+  # cyanprint ships as a Bun single-file executable: the whole application is
+  # APPENDED to the Bun runtime, past the end of the ELF's sections, and located at
+  # startup from a trailer. stdenv's default fixup runs `strip`, which rewrites the
+  # file and drops that trailing payload — the binary stays executable and keeps its
+  # size to within a few KiB, so nothing fails loudly; it simply degrades into a bare
+  # Bun runtime. `cyanprint --version` then prints Bun's version and `cyanprint probe`
+  # dies with `error: Script not found "probe"`.
+  # This bit every release packaged since autoPatchelfHook was introduced, 4.7.0
+  # included. Keep the binary unstripped; there are no symbols worth reclaiming in a
+  # prebuilt artifact anyway.
+  dontStrip = true;
+
   installPhase = ''
     mkdir -p $out/bin
     cp cyanprint $out/bin/cyanprint
