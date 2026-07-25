@@ -1,3 +1,15 @@
+## [3.10.0](https://github.com/AtomiCloud/nix-registry/compare/v3.9.0...v3.10.0) (2026-07-25)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **cyanprint:** keep the Bun payload by disabling strip ([5d3b53e](https://github.com/AtomiCloud/nix-registry/commit/5d3b53e5416cd0aaa5907d8b6c9a569353c454e5))
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **cyanprint:** upgrade to sulfone.lite v4.9.1 ([d995a5d](https://github.com/AtomiCloud/nix-registry/commit/d995a5db021fe62757f19cc226a888aefa0935b3)), closes [AtomiCloud/sulfone.lite#24](https://github.com/AtomiCloud/sulfone.lite/issues/24)
+
 ## [3.9.0](https://github.com/AtomiCloud/nix-registry/compare/v3.8.0...v3.9.0) (2026-07-24)
 
 
