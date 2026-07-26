@@ -1,3 +1,10 @@
+## [3.11.0](https://github.com/AtomiCloud/nix-registry/compare/v3.10.0...v3.11.0) (2026-07-26)
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **cyanprint:** upgrade to sulfone.lite v4.9.2 ([98b4c57](https://github.com/AtomiCloud/nix-registry/commit/98b4c57f251ab5434b160ce885bb47bd201fcd25)), closes [AtomiCloud/sulfone.lite#26](https://github.com/AtomiCloud/sulfone.lite/issues/26)
+
 ## [3.10.0](https://github.com/AtomiCloud/nix-registry/compare/v3.9.0...v3.10.0) (2026-07-25)
 
 
