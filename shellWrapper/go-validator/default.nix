@@ -7,7 +7,6 @@ trivialBuilders.writeShellApplication {
   name = "go-validator";
   inherit version;
   runtimeShell = nixpkgs.runtimeShell;
-  # Keep these individual. A bundle plus a member can collide in buildEnv.
   runtimeInputs = with nixpkgs; [
     bash
     coreutils

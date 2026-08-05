@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-# Every mutation below asserts the real wrapper's refusal text. The final
-# control deliberately expects an impossible string, proving this harness can
-# go red instead of merely reporting a command's exit code.
 set -euo pipefail
 unset CDPATH
 
@@ -51,6 +48,8 @@ expect() {
 
 expect positive-offline-environment 0 "file://${proxy}" \
   "${validator}" run --proxy "${proxy}" -- go env GOPROXY
+expect goprivate-cannot-bypass-proxy 0 "none" \
+  env GOPRIVATE=example.invalid "${validator}" run --proxy "${proxy}" -- go env GONOPROXY
 expect unknown-command 1 "unknown command 'lint'" "${validator}" lint
 expect missing-proxy-flag 1 "requires '--proxy" "${validator}" run
 expect absent-proxy 1 "does not exist" \

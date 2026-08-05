@@ -1,6 +1,4 @@
 # shellcheck shell=bash
-# The consumer owns its source and vendor hash; this wrapper owns the offline
-# Go runtime contract shared by lint and dead-code commands.
 set -euo pipefail
 
 usage() {
@@ -36,5 +34,5 @@ shift
 
 cache="${TMPDIR:-/tmp}/go-validator-mod-cache"
 mkdir -p "${cache}" || refuse "could not create module cache '${cache}'"
-export CGO_ENABLED=0 GOPROXY="file://${proxy}" GOSUMDB=off GOMODCACHE="${cache}"
+export CGO_ENABLED=0 GOPROXY="file://${proxy}" GONOPROXY=none GOSUMDB=off GOMODCACHE="${cache}"
 exec "$@"
