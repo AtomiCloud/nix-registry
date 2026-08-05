@@ -40,6 +40,11 @@ CHECK=""
 CFG_FILE=""
 WORK_DIR=""
 
+# The checks dlint ships, in the order --all-configured runs them. The
+# dispatcher, the --all-configured enumerator and the usage text all read this
+# one list, so they cannot drift into disagreeing about what dlint has.
+readonly DLINT_CHECKS="action-pins exec-bits ci-wiring skills-fresh toolchain-smoke"
+
 # --------------------------------------------------------------------------- #
 # reporting
 # --------------------------------------------------------------------------- #
@@ -55,7 +60,7 @@ refuse() {
 
 usage_error() {
   printf '❌ %s\n' "$1" >&2
-  printf "Run 'dlint --help' for the five checks dlint supports.\n" >&2
+  printf "Run 'dlint --help' for the checks dlint supports.\n" >&2
   exit "${EXIT_USAGE}"
 }
 
@@ -80,10 +85,30 @@ dlint ${DLINT_VERSION} — repo-agnostic repository linters
 
 Usage:
   dlint <check> [args]
+  dlint --check <check> [--check <check>]...
+  dlint --all-configured
   dlint --help
   dlint --version
 
-Checks (there are exactly five; there is no 'all'):
+Running several checks in ONE invocation:
+
+  --check <check>     May be repeated. Each value is one check and its arguments,
+                      e.g. --check 'action-pins trusted' --check exec-bits.
+  --all-configured    Runs every check DLINT SHIPS, in the order listed below,
+                      reading each one's subject from '.checks'. The population is
+                      dlint's own list and not the keys the file happens to carry,
+                      so deleting a section refuses (exit 3) instead of quietly
+                      going unenforced; '"<check>": false' stays the one way to opt
+                      out. 'action-pins' runs BOTH trust classes, because enforcing
+                      one and reporting green leaves the other unasserted.
+
+  Every requested check RUNS, even after one refuses, so one invocation reports
+  every fault rather than only the first. The invocation's exit code is the
+  HIGHEST of theirs — the codes below are ordered by severity, so a check that
+  could not be trusted (3, 4, 5) outranks a known violation (1). An invocation
+  that would inspect nothing refuses; it is never a pass.
+
+Checks (there is no 'all' check — the flag is --all-configured):
   action-pins <trusted|non-trusted>
       Every GitHub Action reference carries the pin its authored trust
       classification demands: a major tag for trusted actions, an exact 40-hex
@@ -149,11 +174,11 @@ require_git_repo() {
     tool_failure "dlint ${CHECK} needs a git work tree; '${PWD}' is not inside one"
 }
 
-# Loads the configuration and selects this check's section. Exits 3 when the
-# file or the section is absent, 4 when either is malformed, and 0 when the
-# section is an explicit `false`.
-load_check_config() {
-  CHECK="$1"
+# Loads the configuration FILE and validates everything that is not specific to
+# one check, so that selecting a section and enumerating every section apply the
+# same rules to the same file. Exits 3 when the file is absent and 4 when it is
+# malformed.
+load_config_file() {
   CFG_FILE="${DLINT_CONFIG:-${DLINT_CONFIG_DEFAULT}}"
 
   [ -f "${CFG_FILE}" ] ||
@@ -173,6 +198,14 @@ load_check_config() {
     config_invalid "dlint configuration '${CFG_FILE}': could not read '.checks'"
   [ "${checks_type}" = "object" ] ||
     config_invalid "dlint configuration '${CFG_FILE}': '.checks' must be an object, found ${checks_type}"
+}
+
+# Loads the configuration and selects this check's section. Exits 3 when the
+# file or the section is absent, 4 when either is malformed, and 0 when the
+# section is an explicit `false`.
+load_check_config() {
+  CHECK="$1"
+  load_config_file
 
   local section_type=""
   section_type="$(jq -r --arg c "${CHECK}" '.checks[$c] | type' "${CFG_FILE}")" ||
@@ -611,6 +644,157 @@ check_toolchain_smoke() {
 }
 
 # --------------------------------------------------------------------------- #
+# dispatch
+# --------------------------------------------------------------------------- #
+
+# Runs exactly one check. Called directly for a single-check invocation, and in a
+# SUBSHELL for each check of a multi-check one: every check reports by exiting, so
+# without that subshell the first one to finish would end the whole invocation and
+# the checks after it would never run at all.
+dispatch_check() {
+  local check="$1"
+  shift
+  case "${check}" in
+  action-pins) check_action_pins "$@" ;;
+  exec-bits) check_exec_bits "$@" ;;
+  ci-wiring) check_ci_wiring "$@" ;;
+  skills-fresh) check_skills_fresh "$@" ;;
+  toolchain-smoke) check_toolchain_smoke "$@" ;;
+  *)
+    usage_error "unknown check '${check}'; dlint has these: ${DLINT_CHECKS}"
+    ;;
+  esac
+}
+
+# The specs one configured check expands into. A configured `action-pins` section
+# means BOTH trust classes: the check enforces one class per invocation, so
+# running only `trusted` would leave every non-trusted pin unasserted while the
+# invocation reported green.
+specs_for_check() {
+  case "$1" in
+  action-pins)
+    printf 'action-pins trusted\n'
+    printf 'action-pins non-trusted\n'
+    ;;
+  *) printf '%s\n' "$1" ;;
+  esac
+}
+
+# Runs every spec it is given and exits with the HIGHEST code any of them
+# produced. The exit codes are ordered by severity, so this reports a check that
+# could not be trusted (3, 4, 5) ahead of a known violation (1) — the opposite
+# would hide an unrunnable check behind a lesser, more reassuring answer.
+run_specs() {
+  # An invocation that inspects nothing is the vacuous pass this tool exists to
+  # refuse, so it is a tool failure rather than a silent 0.
+  [ "$#" -gt 0 ] ||
+    tool_failure "dlint was asked to run no check at all, so it would report success without inspecting anything"
+
+  local spec="" rc=0 worst=0 ran=0 failed=0
+  local -a argv=()
+  for spec in "$@"; do
+    # Splitting on whitespace is what turns 'action-pins trusted' into a check
+    # and its argument; an empty spec would split to nothing and silently run no
+    # check, so it is refused rather than skipped.
+    read -r -a argv <<<"${spec}"
+    [ "${#argv[@]}" -gt 0 ] ||
+      usage_error "a requested check is empty; every '--check' needs a check name"
+
+    printf '\n── dlint %s\n' "${spec}"
+    rc=0
+    (dispatch_check "${argv[@]}") || rc=$?
+    # A code dlint does not define (a signal, a missing interpreter) is a tool
+    # failure, not a violation: clamping keeps an unknown fault from reading as
+    # the milder answer.
+    [ "${rc}" -le 5 ] || rc=5
+    ran=$((ran + 1))
+    [ "${rc}" -eq 0 ] || failed=$((failed + 1))
+    [ "${rc}" -le "${worst}" ] || worst="${rc}"
+  done
+
+  printf '\nℹ️ checks run: %s (did not pass: %s)\n' "${ran}" "${failed}"
+  if [ "${worst}" -ne 0 ]; then
+    printf '❌ %s\n' "dlint: ${failed} of ${ran} check(s) did not pass; exiting with the highest code, ${worst}" >&2
+    exit "${worst}"
+  fi
+  ok "every requested check passed (${ran})"
+}
+
+# dlint --check <check> [--check <check>]...
+run_selected() {
+  local -a specs=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+    --check)
+      [ "$#" -ge 2 ] || usage_error "'--check' needs a check to run"
+      [ -n "$2" ] || usage_error "'--check' needs a check to run, got an empty value"
+      specs+=("$2")
+      shift 2
+      ;;
+    *)
+      usage_error "unexpected argument '$1'; combine checks with a repeated '--check <check>'"
+      ;;
+    esac
+  done
+  run_specs "${specs[@]}"
+}
+
+# dlint --all-configured
+run_all_configured() {
+  [ "$#" -eq 0 ] || usage_error "--all-configured takes no arguments, got '$1'"
+
+  load_config_file
+
+  # Every key is validated against the checks dlint actually has. A key dlint
+  # does not know is a configuration error, never something to pass over: a
+  # misspelled check would otherwise be silently unenforced while
+  # --all-configured reported green.
+  local enabled=""
+  enabled="$(jq -r '[.checks | to_entries[] | select(.value != false)] | length' "${CFG_FILE}")" ||
+    config_invalid "dlint configuration '${CFG_FILE}': could not read '.checks'"
+  [ "${enabled}" -gt 0 ] ||
+    config_absent "dlint configuration '${CFG_FILE}' has no check left enabled under '.checks', so --all-configured would assert nothing at all. That is never a pass; enable a check, or do not run dlint."
+
+  # A configured key dlint does not know is a configuration error, never
+  # something to pass over: a misspelled check would otherwise sit in the file
+  # looking enforced while nothing ran it.
+  local keys_file="${WORK_DIR}/configured-checks.txt"
+  jq -r '.checks | keys_unsorted[]' "${CFG_FILE}" >"${keys_file}" ||
+    config_invalid "dlint configuration '${CFG_FILE}': could not list the keys of '.checks'"
+
+  local key="" known="" candidate=""
+  while IFS= read -r key; do
+    [ -n "${key}" ] || continue
+    known=0
+    for candidate in ${DLINT_CHECKS}; do
+      [ "${key}" != "${candidate}" ] || known=1
+    done
+    [ "${known}" -eq 1 ] ||
+      config_invalid "dlint configuration '${CFG_FILE}': '.checks[\"${key}\"]' is not a dlint check. dlint has these: ${DLINT_CHECKS}"
+  done <"${keys_file}"
+
+  # The population is the checks DLINT SHIPS, never the keys the configuration
+  # happens to carry. Deriving it from the file would mean a deleted section
+  # quietly stopped being enforced while this invocation still reported green —
+  # the vacuous pass every other refusal in this tool exists to prevent. Read
+  # from dlint's own list, an absent section reaches its normal exit-3 refusal
+  # and `false` stays the one way to opt a check out.
+  local specs_file="${WORK_DIR}/requested-specs.txt"
+  : >"${specs_file}"
+  for candidate in ${DLINT_CHECKS}; do
+    specs_for_check "${candidate}" >>"${specs_file}"
+  done
+
+  local -a specs=()
+  mapfile -t specs <"${specs_file}"
+  [ "${#specs[@]}" -gt 0 ] ||
+    tool_failure "dlint lists no check to run, so --all-configured would inspect nothing"
+
+  log_info "running every check dlint ships (${#specs[@]}) against '${CFG_FILE}'"
+  run_specs "${specs[@]}"
+}
+
+# --------------------------------------------------------------------------- #
 # entrypoint
 # --------------------------------------------------------------------------- #
 
@@ -637,14 +821,9 @@ main() {
   trap "rm -rf '${WORK_DIR}'" EXIT
 
   case "${command}" in
-  action-pins) check_action_pins "$@" ;;
-  exec-bits) check_exec_bits "$@" ;;
-  ci-wiring) check_ci_wiring "$@" ;;
-  skills-fresh) check_skills_fresh "$@" ;;
-  toolchain-smoke) check_toolchain_smoke "$@" ;;
-  *)
-    usage_error "unknown check '${command}'; dlint has exactly five: action-pins, exec-bits, ci-wiring, skills-fresh, toolchain-smoke"
-    ;;
+  --all-configured) run_all_configured "$@" ;;
+  --check) run_selected --check "$@" ;;
+  *) dispatch_check "${command}" "$@" ;;
   esac
 }
 
