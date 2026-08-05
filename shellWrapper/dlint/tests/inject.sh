@@ -316,6 +316,7 @@ m_section_removed_action_pins() { edit_config 'del(.checks["action-pins"])'; }
 m_section_removed_exec_bits() { edit_config 'del(.checks["exec-bits"])'; }
 m_section_removed_ci_wiring() { edit_config 'del(.checks["ci-wiring"])'; }
 m_section_removed_skills_fresh() { edit_config 'del(.checks["skills-fresh"])'; }
+m_section_removed_toolchain_smoke() { edit_config 'del(.checks["toolchain-smoke"])'; }
 
 m_section_disabled_exec_bits() { edit_config '.checks["exec-bits"] = false'; }
 m_section_true_exec_bits() { edit_config '.checks["exec-bits"] = true'; }
@@ -324,6 +325,20 @@ m_trust_map_key_missing() { edit_config 'del(.checks["action-pins"].trustMap)'; 
 m_trust_map_key_wrong_type() { edit_config '.checks["action-pins"].trustMap = 7'; }
 m_orchestrators_empty() { edit_config '.checks["ci-wiring"].orchestrators = []'; }
 m_paths_empty() { edit_config '.checks["skills-fresh"].paths = []'; }
+
+# -- toolchain-smoke ------------------------------------------------------- #
+
+m_toolchain_binary_missing() {
+  edit_config '.checks["toolchain-smoke"].binaries = ["definitely-not-a-real-binary"]'
+}
+
+m_toolchain_binaries_empty() {
+  edit_config '.checks["toolchain-smoke"].binaries = []'
+}
+
+m_toolchain_shell_invalid() {
+  edit_config '.checks["toolchain-smoke"].shell = "not a shell"'
+}
 
 # -- exec-bits -------------------------------------------------------------- #
 
@@ -469,6 +484,7 @@ arm "action-pins/non-trusted baseline" m_none 0 "✅ non-trusted action pins con
 arm "exec-bits baseline" m_none 0 "✅ Tracked shell scripts are executable" -- exec-bits
 arm "ci-wiring baseline" m_none 0 "✅ Workflow jobs resolve to existing CI scripts" -- ci-wiring
 arm "skills-fresh baseline" m_none 0 "✅ Vendored tree is fresh" -- skills-fresh
+arm "toolchain-smoke baseline" m_none 0 "✅ Declared shell 'fixture' resolves every required binary" -- toolchain-smoke
 
 printf '\naction-pins mutations\n'
 arm "trusted action pinned to a SHA" m_trusted_pinned_to_sha 1 \
@@ -546,6 +562,14 @@ arm "regeneration command fails" m_regeneration_fails 1 \
 arm "paths list empty" m_paths_empty 4 \
   "must name at least one tracked path" -- skills-fresh
 
+printf '\ntoolchain-smoke mutations\n'
+arm "declared binary missing" m_toolchain_binary_missing 1 \
+  "declared shell 'fixture' is missing binary" -- toolchain-smoke
+arm "binary list empty" m_toolchain_binaries_empty 4 \
+  "must name at least one binary" -- toolchain-smoke
+arm "shell name invalid" m_toolchain_shell_invalid 4 \
+  "must name one shell" -- toolchain-smoke
+
 printf '\nconfiguration arms (an absent subject is never a pass)\n'
 arm "config file absent / action-pins" m_config_deleted 3 \
   "configuration '.dlint.json' is missing" -- action-pins trusted
@@ -555,6 +579,8 @@ arm "config file absent / ci-wiring" m_config_deleted 3 \
   "configuration '.dlint.json' is missing" -- ci-wiring
 arm "config file absent / skills-fresh" m_config_deleted 3 \
   "configuration '.dlint.json' is missing" -- skills-fresh
+arm "config file absent / toolchain-smoke" m_config_deleted 3 \
+  "configuration '.dlint.json' is missing" -- toolchain-smoke
 arm "config section absent / action-pins" m_section_removed_action_pins 3 \
   "An absent section is never a pass" -- action-pins trusted
 arm "config section absent / exec-bits" m_section_removed_exec_bits 3 \
@@ -563,6 +589,8 @@ arm "config section absent / ci-wiring" m_section_removed_ci_wiring 3 \
   "An absent section is never a pass" -- ci-wiring
 arm "config section absent / skills-fresh" m_section_removed_skills_fresh 3 \
   "An absent section is never a pass" -- skills-fresh
+arm "config section absent / toolchain-smoke" m_section_removed_toolchain_smoke 3 \
+  "An absent section is never a pass" -- toolchain-smoke
 arm "explicit opt-out is honoured" m_section_disabled_exec_bits 0 \
   "⏭️ dlint exec-bits is disabled" -- exec-bits
 arm "section true configures nothing" m_section_true_exec_bits 4 \
@@ -580,9 +608,9 @@ arm "required key wrong type" m_trust_map_key_wrong_type 4 \
 
 printf '\nentrypoint arms\n'
 arm "unknown check" m_none 2 \
-  "dlint has exactly four" -- not-a-check
+  "dlint has exactly five" -- not-a-check
 arm "there is no 'all'" m_none 2 \
-  "dlint has exactly four" -- all
+  "dlint has exactly five" -- all
 arm "no check at all" m_none 2 \
   "dlint needs a check to run" --
 arm "exec-bits rejects arguments" m_none 2 \
@@ -600,6 +628,7 @@ arm "action-pins/non-trusted rebaseline" m_none 0 "✅ non-trusted action pins c
 arm "exec-bits rebaseline" m_none 0 "✅ Tracked shell scripts are executable" -- exec-bits
 arm "ci-wiring rebaseline" m_none 0 "✅ Workflow jobs resolve to existing CI scripts" -- ci-wiring
 arm "skills-fresh rebaseline" m_none 0 "✅ Vendored tree is fresh" -- skills-fresh
+arm "toolchain-smoke rebaseline" m_none 0 "✅ Declared shell 'fixture' resolves every required binary" -- toolchain-smoke
 
 printf '\narms: %s/%s passed\n' "${ARMS_PASSED}" "${ARMS_RUN}"
 if [ "${FAILURES}" -ne 0 ]; then
