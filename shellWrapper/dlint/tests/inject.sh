@@ -317,6 +317,7 @@ m_section_removed_exec_bits() { edit_config 'del(.checks["exec-bits"])'; }
 m_section_removed_ci_wiring() { edit_config 'del(.checks["ci-wiring"])'; }
 m_section_removed_skills_fresh() { edit_config 'del(.checks["skills-fresh"])'; }
 m_section_removed_toolchain_smoke() { edit_config 'del(.checks["toolchain-smoke"])'; }
+m_section_removed_workflow_policy() { edit_config 'del(.checks["workflow-policy"])'; }
 
 m_section_disabled_exec_bits() { edit_config '.checks["exec-bits"] = false'; }
 m_section_true_exec_bits() { edit_config '.checks["exec-bits"] = true'; }
@@ -482,6 +483,93 @@ m_violation_and_absent_section() {
   edit_config 'del(.checks["ci-wiring"])'
 }
 
+# -- workflow-policy -------------------------------------------------------- #
+#
+# The first five mirror, one for one, the sabotages the validator this check
+# replaces catches: its four release-trigger assertions and its one
+# release-concurrency assertion. The sixth mirrors dotnet's workflow-names mode.
+
+m_release_trigger_not_upstream() {
+  replace_in ci/workflows/release.yaml 'workflows: [Main]' 'workflows: [Something-Else]'
+}
+
+m_release_trigger_any_branch() {
+  replace_in ci/workflows/release.yaml 'branches: [trunk]' 'branches: [any]'
+}
+
+m_release_trigger_wrong_type() {
+  replace_in ci/workflows/release.yaml 'types: [completed]' 'types: [requested]'
+}
+
+m_release_job_without_success_gate() {
+  replace_in ci/workflows/release.yaml \
+    "if: github.event.workflow_run.conclusion == 'success'" \
+    "if: always()"
+}
+
+m_release_concurrency_group_dropped() {
+  replace_in ci/workflows/release.yaml '  group: release' '  group: deploy'
+}
+
+# The whole concurrency block removed, so the PATH is absent rather than wrong.
+# An absent path gets its own refusal: comparing a missing field would otherwise
+# be indistinguishable from a field that is correctly null.
+m_release_concurrency_absent() {
+  require_match ci/workflows/release.yaml 'concurrency:'
+  local tmp=""
+  tmp="$(mktemp)"
+  awk '/^concurrency:/ { skip = 2; next } skip > 0 { skip--; next } { print }' \
+    ci/workflows/release.yaml >"${tmp}"
+  cat "${tmp}" >ci/workflows/release.yaml
+  rm -f "${tmp}"
+}
+
+m_workflow_name_drifted() {
+  replace_in ci/workflows/main.yaml 'name: Main' 'name: Continuous'
+}
+
+m_release_workflow_deleted() {
+  require_file ci/workflows/release.yaml
+  rm -f ci/workflows/release.yaml
+}
+
+# A workflow file that is not parseable YAML. The value this arm protects is that
+# an unreadable subject is UNKNOWN (exit 5), never a pass: the validator this
+# check replaces piped yq into jq, took its status from jq, and could exit 0 with
+# yq's failure only on stderr.
+m_release_workflow_unparseable() {
+  require_file ci/workflows/release.yaml
+  printf 'name: Release\n  bad: [indentation\n    worse:\n' >ci/workflows/release.yaml
+}
+
+m_policy_assertions_empty() {
+  edit_config '.checks["workflow-policy"].assertions = []'
+}
+
+m_policy_assertions_not_array() {
+  edit_config '.checks["workflow-policy"].assertions = "release-trigger"'
+}
+
+m_policy_assertion_without_reason() {
+  edit_config 'del(.checks["workflow-policy"].assertions[0].reason)'
+}
+
+m_policy_assertion_without_file() {
+  edit_config 'del(.checks["workflow-policy"].assertions[0].file)'
+}
+
+m_policy_assertion_null_expectation() {
+  edit_config '.checks["workflow-policy"].assertions[0].equals = null'
+}
+
+m_policy_assertion_bad_path() {
+  edit_config '.checks["workflow-policy"].assertions[0].path = "on.workflow_run"'
+}
+
+m_policy_declared_file_missing() {
+  edit_config '.checks["workflow-policy"].assertions[0].file = "ci/workflows/no-such.yaml"'
+}
+
 # -- repo-agnosticism ------------------------------------------------------- #
 
 # Move the whole GitHub-shaped layout to the documented DEFAULT workflow
@@ -594,6 +682,48 @@ arm "binary list empty" m_toolchain_binaries_empty 4 \
 arm "shell name invalid" m_toolchain_shell_invalid 4 \
   "must name one shell" -- toolchain-smoke
 
+printf '\nworkflow-policy mutations\n'
+arm "workflow-policy baseline" m_none 0 \
+  "✅ Workflow policy conforms" -- workflow-policy
+arm "release does not trigger from upstream" m_release_trigger_not_upstream 1 \
+  "release must trigger from the Main workflow" -- workflow-policy
+arm "release is not limited to one branch" m_release_trigger_any_branch 1 \
+  "release must be limited to trunk" -- workflow-policy
+arm "release workflow_run type drifted" m_release_trigger_wrong_type 1 \
+  "release workflow_run type must be completed" -- workflow-policy
+arm "release job drops its success gate" m_release_job_without_success_gate 1 \
+  "release job must require upstream success" -- workflow-policy
+arm "release concurrency group drifted" m_release_concurrency_group_dropped 1 \
+  "release concurrency group must be release" -- workflow-policy
+arm "release concurrency block absent" m_release_concurrency_absent 1 \
+  "is absent" -- workflow-policy
+arm "workflow name drifted" m_workflow_name_drifted 1 \
+  "workflow name must be exactly Main" -- workflow-policy
+# The refusal names the observed value as well as the expected one, so the
+# message is actionable without re-reading the file.
+arm "a refusal names what it found" m_release_concurrency_group_dropped 1 \
+  'expected "release"' -- workflow-policy
+arm "declared workflow file deleted" m_release_workflow_deleted 3 \
+  "does not exist" -- workflow-policy
+arm "declared workflow file unparseable is UNKNOWN" m_release_workflow_unparseable 5 \
+  "which is not a pass" -- workflow-policy
+arm "assertion list empty" m_policy_assertions_empty 4 \
+  "must declare at least one assertion" -- workflow-policy
+arm "assertion list is not an array" m_policy_assertions_not_array 4 \
+  "must be an array of assertions" -- workflow-policy
+arm "assertion without a reason" m_policy_assertion_without_reason 4 \
+  "needs a non-empty 'reason'" -- workflow-policy
+arm "assertion without a file" m_policy_assertion_without_file 4 \
+  "needs a non-empty 'file'" -- workflow-policy
+arm "assertion expecting null" m_policy_assertion_null_expectation 4 \
+  "null is reserved for reporting an absent path" -- workflow-policy
+arm "assertion path not rooted at '.'" m_policy_assertion_bad_path 4 \
+  "must start with '.'" -- workflow-policy
+arm "assertion names a missing file" m_policy_declared_file_missing 3 \
+  "does not exist" -- workflow-policy
+arm "workflow-policy rejects arguments" m_none 2 \
+  "workflow-policy takes no arguments" -- workflow-policy release-trigger
+
 printf '\nconfiguration arms (an absent subject is never a pass)\n'
 arm "config file absent / action-pins" m_config_deleted 3 \
   "configuration '.dlint.json' is missing" -- action-pins trusted
@@ -605,6 +735,8 @@ arm "config file absent / skills-fresh" m_config_deleted 3 \
   "configuration '.dlint.json' is missing" -- skills-fresh
 arm "config file absent / toolchain-smoke" m_config_deleted 3 \
   "configuration '.dlint.json' is missing" -- toolchain-smoke
+arm "config file absent / workflow-policy" m_config_deleted 3 \
+  "configuration '.dlint.json' is missing" -- workflow-policy
 arm "config section absent / action-pins" m_section_removed_action_pins 3 \
   "An absent section is never a pass" -- action-pins trusted
 arm "config section absent / exec-bits" m_section_removed_exec_bits 3 \
@@ -615,6 +747,8 @@ arm "config section absent / skills-fresh" m_section_removed_skills_fresh 3 \
   "An absent section is never a pass" -- skills-fresh
 arm "config section absent / toolchain-smoke" m_section_removed_toolchain_smoke 3 \
   "An absent section is never a pass" -- toolchain-smoke
+arm "config section absent / workflow-policy" m_section_removed_workflow_policy 3 \
+  "An absent section is never a pass" -- workflow-policy
 arm "explicit opt-out is honoured" m_section_disabled_exec_bits 0 \
   "⏭️ dlint exec-bits is disabled" -- exec-bits
 arm "section true configures nothing" m_section_true_exec_bits 4 \
@@ -641,10 +775,16 @@ arm "exec-bits rejects arguments" m_none 2 \
   "exec-bits takes no arguments" -- exec-bits --fix
 
 printf '\nmultiple checks in one invocation\n'
-arm "--all-configured baseline (6 specs from 5 sections)" m_none 0 \
-  "✅ every requested check passed (6)" -- --all-configured
+arm "--all-configured baseline (7 specs from 6 sections)" m_none 0 \
+  "✅ every requested check passed (7)" -- --all-configured
 arm "--all-configured counts what it ran" m_none 0 \
-  "checks run: 6 (did not pass: 0)" -- --all-configured
+  "checks run: 7 (did not pass: 0)" -- --all-configured
+# --all-configured reads dlint's OWN check list, so a check added to dlint is
+# enforced by it without anything else being edited. This arm is what makes that
+# claim checkable rather than asserted: it plants a workflow-policy fault and
+# requires the aggregate run to catch it.
+arm "--all-configured enforces workflow-policy too" m_release_concurrency_group_dropped 1 \
+  "release concurrency group must be release" -- --all-configured
 
 # The expansion arm that matters: only the NON-TRUSTED pin is broken. An
 # --all-configured that ran just 'action-pins trusted' would report GREEN here,
@@ -711,6 +851,7 @@ arm "exec-bits rebaseline" m_none 0 "✅ Tracked shell scripts are executable" -
 arm "ci-wiring rebaseline" m_none 0 "✅ Workflow jobs resolve to existing CI scripts" -- ci-wiring
 arm "skills-fresh rebaseline" m_none 0 "✅ Vendored tree is fresh" -- skills-fresh
 arm "toolchain-smoke rebaseline" m_none 0 "✅ Declared shell 'fixture' resolves every required binary" -- toolchain-smoke
+arm "workflow-policy rebaseline" m_none 0 "✅ Workflow policy conforms" -- workflow-policy
 
 printf '\narms: %s/%s passed\n' "${ARMS_PASSED}" "${ARMS_RUN}"
 if [ "${FAILURES}" -ne 0 ]; then

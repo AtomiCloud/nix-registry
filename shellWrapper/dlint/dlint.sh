@@ -43,7 +43,7 @@ WORK_DIR=""
 # The checks dlint ships, in the order --all-configured runs them. The
 # dispatcher, the --all-configured enumerator and the usage text all read this
 # one list, so they cannot drift into disagreeing about what dlint has.
-readonly DLINT_CHECKS="action-pins exec-bits ci-wiring skills-fresh toolchain-smoke"
+readonly DLINT_CHECKS="action-pins exec-bits ci-wiring skills-fresh toolchain-smoke workflow-policy"
 
 # --------------------------------------------------------------------------- #
 # reporting
@@ -108,7 +108,7 @@ Running several checks in ONE invocation:
   could not be trusted (3, 4, 5) outranks a known violation (1). An invocation
   that would inspect nothing refuses; it is never a pass.
 
-Checks (there is no 'all' check — the flag is --all-configured):
+Checks (there are exactly six; there is no 'all' CHECK — the flag is --all-configured):
   action-pins <trusted|non-trusted>
       Every GitHub Action reference carries the pin its authored trust
       classification demands: a major tag for trusted actions, an exact 40-hex
@@ -124,9 +124,12 @@ Checks (there is no 'all' check — the flag is --all-configured):
   toolchain-smoke
       Verify that every binary a repository declares for one named shell resolves
       in the environment where dlint is invoked.
+  workflow-policy
+      Assert declared values at declared paths in declared workflow files. One
+      assertion is one caught fault, and each carries the reason it refuses with.
 
 Configuration:
-  All five checks read ONE file: \$DLINT_CONFIG, or ./${DLINT_CONFIG_DEFAULT}.
+  All six checks read ONE file: \$DLINT_CONFIG, or ./${DLINT_CONFIG_DEFAULT}.
   dlint is run from the repository root and reads every path relative to it.
 
     {
@@ -146,6 +149,16 @@ Configuration:
         "toolchain-smoke": {
           "shell": "default",
           "binaries": ["bash", "git"]
+        },
+        "workflow-policy": {
+          "assertions": [
+            {
+              "file": ".github/workflows/release.yaml",
+              "path": ".concurrency.group",
+              "equals": "release",
+              "reason": "release concurrency group must be release"
+            }
+          ]
         }
       }
     }
@@ -660,6 +673,7 @@ dispatch_check() {
   ci-wiring) check_ci_wiring "$@" ;;
   skills-fresh) check_skills_fresh "$@" ;;
   toolchain-smoke) check_toolchain_smoke "$@" ;;
+  workflow-policy) check_workflow_policy "$@" ;;
   *)
     usage_error "unknown check '${check}'; dlint has these: ${DLINT_CHECKS}"
     ;;
@@ -792,6 +806,95 @@ run_all_configured() {
 
   log_info "running every check dlint ships (${#specs[@]}) against '${CFG_FILE}'"
   run_specs "${specs[@]}"
+}
+
+# --------------------------------------------------------------------------- #
+# workflow-policy
+# --------------------------------------------------------------------------- #
+
+# Asserts declared VALUES at declared PATHS in declared workflow files. The
+# policy itself is repository-specific, so every assertion — the file, the path,
+# the expected value and the reason to print — comes from the configuration; this
+# function owns only "read the path, compare, and say which assertion failed".
+#
+# One assertion is one caught fault. That is deliberate: a single combined
+# predicate over four fields refuses without saying which field moved.
+#
+# The read is deliberately NOT a pipeline. `yq … | jq -e …` takes its exit status
+# from jq, so a yq that fails and writes to stderr leaves jq reading empty input
+# and the whole thing can exit 0 — a real defect in the validator this check
+# replaces, where renaming the orchestrator made the old mode pass VACUOUSLY.
+# Here yq writes to a file, its own status is checked, and only then is the file
+# read.
+check_workflow_policy() {
+  [ "$#" -eq 0 ] || usage_error "workflow-policy takes no arguments, got '$1'"
+
+  load_check_config workflow-policy
+
+  local count=""
+  count="$(jq -r '.checks["workflow-policy"].assertions | if type == "array" then length else "not-an-array" end' "${CFG_FILE}")" ||
+    config_invalid "workflow-policy: could not read '.checks[\"workflow-policy\"].assertions'"
+  [ "${count}" != "not-an-array" ] ||
+    config_invalid "workflow-policy: '.checks[\"workflow-policy\"].assertions' must be an array of assertions"
+  [ "${count}" -gt 0 ] ||
+    config_invalid "workflow-policy: '.checks[\"workflow-policy\"].assertions' must declare at least one assertion; an empty list would let this check pass without asserting any policy"
+
+  local index=0 file="" path="" reason="" want="" actual="" json="" yq_status=0
+  while [ "${index}" -lt "${count}" ]; do
+    # Every field is required. A missing 'reason' is refused rather than
+    # defaulted: a refusal that cannot name the policy it enforces is the kind of
+    # gate that gets deleted for being unexplainable.
+    file="$(jq -r --argjson i "${index}" '.checks["workflow-policy"].assertions[$i].file // empty' "${CFG_FILE}")" ||
+      config_invalid "workflow-policy: could not read assertion ${index}"
+    path="$(jq -r --argjson i "${index}" '.checks["workflow-policy"].assertions[$i].path // empty' "${CFG_FILE}")" ||
+      config_invalid "workflow-policy: could not read assertion ${index}"
+    reason="$(jq -r --argjson i "${index}" '.checks["workflow-policy"].assertions[$i].reason // empty' "${CFG_FILE}")" ||
+      config_invalid "workflow-policy: could not read assertion ${index}"
+
+    [ -n "${file}" ] ||
+      config_invalid "workflow-policy: assertion ${index} needs a non-empty 'file'"
+    [ -n "${path}" ] ||
+      config_invalid "workflow-policy: assertion ${index} needs a non-empty 'path'"
+    [ -n "${reason}" ] ||
+      config_invalid "workflow-policy: assertion ${index} needs a non-empty 'reason', so a refusal can name the policy it enforces"
+    case "${path}" in
+    .*) ;;
+    *) config_invalid "workflow-policy: assertion ${index} 'path' must start with '.', got '${path}'" ;;
+    esac
+
+    # `null` is how this check reports an ABSENT path, so it cannot also be a
+    # legitimate expectation: allowing it would make "the field is missing" and
+    # "the field is correctly null" the same answer.
+    jq -e --argjson i "${index}" \
+      '.checks["workflow-policy"].assertions[$i] | has("equals") and (.equals != null)' \
+      "${CFG_FILE}" >/dev/null 2>&1 ||
+      config_invalid "workflow-policy: assertion ${index} needs an 'equals' value that is not null; null is reserved for reporting an absent path"
+
+    want="$(jq -S -c --argjson i "${index}" '.checks["workflow-policy"].assertions[$i].equals' "${CFG_FILE}")" ||
+      config_invalid "workflow-policy: could not read the expected value of assertion ${index}"
+
+    [ -f "${file}" ] ||
+      config_absent "workflow-policy: '${file}', declared by assertion ${index} in '${CFG_FILE}', does not exist, so the policy '${reason}' has no subject"
+
+    json="${WORK_DIR}/workflow-${index}.json"
+    yq_status=0
+    yq -o=json '.' "${file}" >"${json}" || yq_status=$?
+    [ "${yq_status}" -eq 0 ] ||
+      tool_failure "workflow-policy: could not read '${file}' as YAML (yq exit ${yq_status}); the policy '${reason}' is UNKNOWN, which is not a pass"
+
+    actual="$(jq -S -c "${path}" "${json}")" ||
+      tool_failure "workflow-policy: could not read '${path}' from '${file}' (assertion ${index}); the policy '${reason}' is UNKNOWN, which is not a pass"
+
+    [ "${actual}" != "null" ] ||
+      refuse "${file}: ${reason} — '${path}' is absent"
+    [ "${actual}" = "${want}" ] ||
+      refuse "${file}: ${reason} — '${path}' is ${actual}, expected ${want}"
+
+    index=$((index + 1))
+  done
+
+  log_info "workflow policy assertions inspected: ${count}"
+  ok "Workflow policy conforms"
 }
 
 # --------------------------------------------------------------------------- #
