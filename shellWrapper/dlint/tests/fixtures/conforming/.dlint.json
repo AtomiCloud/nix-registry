@@ -22,6 +22,46 @@
         "full": ["bash", "git", "fixture-tool"],
         "lean": ["bash", "git"]
       }
+    },
+    "workflow-policy": {
+      "assertions": [
+        {
+          "file": "ci/workflows/release.yaml",
+          "path": ".on.workflow_run.workflows",
+          "equals": ["Main"],
+          "reason": "release must trigger from the Main workflow"
+        },
+        {
+          "file": "ci/workflows/release.yaml",
+          "path": ".on.workflow_run.branches",
+          "equals": ["trunk"],
+          "reason": "release must be limited to trunk"
+        },
+        {
+          "file": "ci/workflows/release.yaml",
+          "path": ".on.workflow_run.types",
+          "equals": ["completed"],
+          "reason": "release workflow_run type must be completed"
+        },
+        {
+          "file": "ci/workflows/release.yaml",
+          "path": ".jobs.release.if",
+          "equals": "github.event.workflow_run.conclusion == 'success'",
+          "reason": "release job must require upstream success"
+        },
+        {
+          "file": "ci/workflows/release.yaml",
+          "path": ".concurrency.group",
+          "equals": "release",
+          "reason": "release concurrency group must be release"
+        },
+        {
+          "file": "ci/workflows/main.yaml",
+          "path": ".name",
+          "equals": "Main",
+          "reason": "the orchestrator workflow name must be exactly Main"
+        }
+      ]
     }
   }
 }
