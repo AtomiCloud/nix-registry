@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "actions": {
+    "acme/setup-toolchain": "trusted",
+    "third-party/gatekeeper": "non-trusted"
+  }
+}
