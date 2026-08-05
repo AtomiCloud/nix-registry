@@ -1,3 +1,11 @@
+## [3.12.0](https://github.com/AtomiCloud/nix-registry/compare/v3.11.0...v3.12.0) (2026-08-05)
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **infralint:** add kubeconform and kyverno ([1465e42](https://github.com/AtomiCloud/nix-registry/commit/1465e42667f006618eec8a4829559d4764c60dd3))
+* **atomiutils:** add ripgrep ([40adba7](https://github.com/AtomiCloud/nix-registry/commit/40adba72e878fa7dcd929df25de9b7cba483e266))
+
 ## [3.11.0](https://github.com/AtomiCloud/nix-registry/compare/v3.10.0...v3.11.0) (2026-07-26)
 
 
