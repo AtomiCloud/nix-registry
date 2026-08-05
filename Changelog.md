@@ -1,3 +1,23 @@
+## [3.13.0](https://github.com/AtomiCloud/nix-registry/compare/v3.12.0...v3.13.0) (2026-08-05)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **drv:** drop the phantom skopeo declaration from infrautils ([2020713](https://github.com/AtomiCloud/nix-registry/commit/2020713791cae567e1fefae86bfa19ee1df45f0d))
+* **drv:** make dlint refuse a vacuous pass on every check ([0dc4b65](https://github.com/AtomiCloud/nix-registry/commit/0dc4b659d76cec0d34f4a7ba86a7ae27b1eef556)), closes [#63](https://github.com/AtomiCloud/nix-registry/issues/63)
+* **drv:** resolve the harness dlint path without masking a failed cd ([8b90402](https://github.com/AtomiCloud/nix-registry/commit/8b9040246788c5a676d7d5e73225f01f8795b1f1)), closes [#63](https://github.com/AtomiCloud/nix-registry/issues/63)
+* **drv:** stop CDPATH from redirecting the harness path resolution ([134a8b3](https://github.com/AtomiCloud/nix-registry/commit/134a8b3b5cb468eada8f02c10f38e45a99e0a9ec)), closes [#63](https://github.com/AtomiCloud/nix-registry/issues/63)
+
+
+### ✨ New Packages ✨
+
+* **dlint:** add four repo-agnostic repository linters ([f0d6901](https://github.com/AtomiCloud/nix-registry/commit/f0d69018d2059c2a2d81ef14ad6d95fc337a0e4e))
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **infralint:** add skopeo ([e19042e](https://github.com/AtomiCloud/nix-registry/commit/e19042e5256c3de34ed88ec43c18057e5c67a21b))
+
 ## [3.12.0](https://github.com/AtomiCloud/nix-registry/compare/v3.11.0...v3.12.0) (2026-08-05)
 
 
