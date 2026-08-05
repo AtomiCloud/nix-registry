@@ -27,7 +27,10 @@
 set -euo pipefail
 
 DLINT_VERSION="${DLINT_VERSION:-0.0.0-dev}"
-DLINT_CONFIG_DEFAULT=".dlint.json"
+# The canonical name (D6 ONE-CONFIG-NAME: dlint.yaml and release.yaml are the only
+# names). The JSON name is still read so a repository can migrate on its own clock.
+DLINT_CONFIG_YAML="dlint.yaml"
+DLINT_CONFIG_JSON=".dlint.json"
 
 # 0 conforms, or the check is explicitly disabled
 readonly EXIT_VIOLATION=1     # the repository breaks the rule
@@ -37,7 +40,12 @@ readonly EXIT_CONFIG_INVALID=4
 readonly EXIT_TOOL=5 # dlint could not complete the inspection
 
 CHECK=""
+# CFG_FILE is what the AUTHOR wrote and is what every message names. CFG_JSON is
+# what jq reads: for a YAML configuration it is a converted copy. Keeping them
+# separate is what stops a refusal from pointing at a temporary file the author
+# has never seen.
 CFG_FILE=""
+CFG_JSON=""
 WORK_DIR=""
 
 # --------------------------------------------------------------------------- #
@@ -101,8 +109,25 @@ Checks (there are exactly five; there is no 'all'):
       in the environment where dlint is invoked.
 
 Configuration:
-  All five checks read ONE file: \$DLINT_CONFIG, or ./${DLINT_CONFIG_DEFAULT}.
+  All five checks read ONE file. dlint looks for, in order:
+    \$DLINT_CONFIG          (any path; YAML if it ends .yaml/.yml, else JSON)
+    ./${DLINT_CONFIG_YAML}            the canonical name
+    ./${DLINT_CONFIG_JSON}          still read, so a repository can migrate on its own clock
+  Finding BOTH ./${DLINT_CONFIG_YAML} and ./${DLINT_CONFIG_JSON} is an ERROR: whichever
+  dlint did not read would look enforced while configuring nothing.
   dlint is run from the repository root and reads every path relative to it.
+
+  The YAML form is the same shape, so this:
+
+    schemaVersion: 1
+    checks:
+      exec-bits:
+        globs: ["*.sh"]
+      toolchain-smoke:
+        shell: default
+        binaries: [bash, git]
+
+  and the JSON below are the same configuration.
 
     {
       "schemaVersion": 1,
@@ -149,33 +174,81 @@ require_git_repo() {
     tool_failure "dlint ${CHECK} needs a git work tree; '${PWD}' is not inside one"
 }
 
+# Picks the configuration file and, for YAML, converts it once into JSON that the
+# jq readers below can use. Sets CFG_FILE (for messages) and CFG_JSON (for jq).
+resolve_config_file() {
+  if [ -n "${DLINT_CONFIG:-}" ]; then
+    CFG_FILE="${DLINT_CONFIG}"
+    [ -f "${CFG_FILE}" ] ||
+      config_absent "dlint configuration '${CFG_FILE}', named by DLINT_CONFIG, does not exist. dlint never guesses, and never passes a check it could not configure."
+  else
+    local have_yaml=0 have_json=0
+    [ ! -f "${DLINT_CONFIG_YAML}" ] || have_yaml=1
+    [ ! -f "${DLINT_CONFIG_JSON}" ] || have_json=1
+
+    # Two configurations mean the reader cannot know which one is authoritative,
+    # and the losing file would sit there looking enforced while nothing read it.
+    # That is the same silent-staleness this tool refuses everywhere else, so it
+    # is an error rather than a precedence rule.
+    [ "$((have_yaml + have_json))" -ne 2 ] ||
+      config_invalid "dlint found BOTH '${DLINT_CONFIG_YAML}' and '${DLINT_CONFIG_JSON}'. Keep one: whichever dlint did not read would look enforced while configuring nothing. '${DLINT_CONFIG_YAML}' is the canonical name."
+
+    if [ "${have_yaml}" -eq 1 ]; then
+      CFG_FILE="${DLINT_CONFIG_YAML}"
+    elif [ "${have_json}" -eq 1 ]; then
+      CFG_FILE="${DLINT_CONFIG_JSON}"
+    else
+      config_absent "dlint configuration is missing, so dlint cannot know this repository's layout. Create '${DLINT_CONFIG_YAML}' (see 'dlint --help') or point DLINT_CONFIG at it. dlint never guesses, and never passes a check it could not configure."
+    fi
+  fi
+
+  case "${CFG_FILE}" in
+  *.yaml | *.yml)
+    CFG_JSON="${WORK_DIR}/config-from-yaml.json"
+    # yq writes to a file and its own status is checked, rather than being piped
+    # into jq: a pipeline takes its status from the LAST command, so a yq that
+    # failed here would leave jq reading an empty file and could read as success.
+    local yq_status=0
+    yq -o=json '.' "${CFG_FILE}" >"${CFG_JSON}" 2>"${WORK_DIR}/yq.err" || yq_status=$?
+    if [ "${yq_status}" -ne 0 ]; then
+      printf '❌ %s\n' "dlint configuration '${CFG_FILE}' is not valid YAML (yq exit ${yq_status})" >&2
+      [ ! -s "${WORK_DIR}/yq.err" ] || sed 's/^/       | /' "${WORK_DIR}/yq.err" >&2
+      exit "${EXIT_CONFIG_INVALID}"
+    fi
+    # An empty YAML document converts to the four bytes `null`, which every reader
+    # below would then walk into as if it were a configuration.
+    [ "$(jq -r 'type' "${CFG_JSON}")" = "object" ] ||
+      config_invalid "dlint configuration '${CFG_FILE}' must be a YAML mapping at the top level"
+    ;;
+  *)
+    CFG_JSON="${CFG_FILE}"
+    jq empty "${CFG_JSON}" >/dev/null 2>&1 ||
+      config_invalid "dlint configuration '${CFG_FILE}' is not valid JSON"
+    ;;
+  esac
+}
+
 # Loads the configuration and selects this check's section. Exits 3 when the
 # file or the section is absent, 4 when either is malformed, and 0 when the
 # section is an explicit `false`.
 load_check_config() {
   CHECK="$1"
-  CFG_FILE="${DLINT_CONFIG:-${DLINT_CONFIG_DEFAULT}}"
-
-  [ -f "${CFG_FILE}" ] ||
-    config_absent "dlint configuration '${CFG_FILE}' is missing, so dlint cannot know this repository's layout. Create it (see 'dlint --help') or point DLINT_CONFIG at it. dlint never guesses, and never passes a check it could not configure."
-
-  jq empty "${CFG_FILE}" >/dev/null 2>&1 ||
-    config_invalid "dlint configuration '${CFG_FILE}' is not valid JSON"
+  resolve_config_file
 
   local version=""
-  version="$(jq -r '.schemaVersion // empty' "${CFG_FILE}")" ||
+  version="$(jq -r '.schemaVersion // empty' "${CFG_JSON}")" ||
     config_invalid "dlint configuration '${CFG_FILE}': could not read '.schemaVersion'"
   [ "${version}" = "1" ] ||
     config_invalid "dlint configuration '${CFG_FILE}': '.schemaVersion' must be 1, found '${version:-<absent>}'"
 
   local checks_type=""
-  checks_type="$(jq -r '.checks | type' "${CFG_FILE}")" ||
+  checks_type="$(jq -r '.checks | type' "${CFG_JSON}")" ||
     config_invalid "dlint configuration '${CFG_FILE}': could not read '.checks'"
   [ "${checks_type}" = "object" ] ||
     config_invalid "dlint configuration '${CFG_FILE}': '.checks' must be an object, found ${checks_type}"
 
   local section_type=""
-  section_type="$(jq -r --arg c "${CHECK}" '.checks[$c] | type' "${CFG_FILE}")" ||
+  section_type="$(jq -r --arg c "${CHECK}" '.checks[$c] | type' "${CFG_JSON}")" ||
     config_invalid "dlint configuration '${CFG_FILE}': could not read '.checks[\"${CHECK}\"]'"
 
   case "${section_type}" in
@@ -185,7 +258,7 @@ load_check_config() {
     ;;
   boolean)
     local enabled=""
-    enabled="$(jq -r --arg c "${CHECK}" '.checks[$c]' "${CFG_FILE}")" ||
+    enabled="$(jq -r --arg c "${CHECK}" '.checks[$c]' "${CFG_JSON}")" ||
       config_invalid "dlint configuration '${CFG_FILE}': could not read '.checks[\"${CHECK}\"]'"
     [ "${enabled}" = "false" ] ||
       config_invalid "dlint configuration '${CFG_FILE}': '.checks[\"${CHECK}\"]' is true, which configures nothing. Use an object, or false to disable the check."
@@ -204,7 +277,7 @@ load_check_config() {
 # value.
 cfg_string() {
   local key="$1" type="" value=""
-  type="$(jq -r --arg c "${CHECK}" --arg k "${key}" '.checks[$c][$k] | type' "${CFG_FILE}")" ||
+  type="$(jq -r --arg c "${CHECK}" --arg k "${key}" '.checks[$c][$k] | type' "${CFG_JSON}")" ||
     config_invalid "dlint configuration '${CFG_FILE}': could not read '.checks[\"${CHECK}\"].${key}'"
 
   if [ "${type}" = "null" ]; then
@@ -217,7 +290,7 @@ cfg_string() {
 
   [ "${type}" = "string" ] ||
     config_invalid "dlint configuration '${CFG_FILE}': '.checks[\"${CHECK}\"].${key}' must be a string, found ${type}"
-  value="$(jq -r --arg c "${CHECK}" --arg k "${key}" '.checks[$c][$k]' "${CFG_FILE}")" ||
+  value="$(jq -r --arg c "${CHECK}" --arg k "${key}" '.checks[$c][$k]' "${CFG_JSON}")" ||
     config_invalid "dlint configuration '${CFG_FILE}': could not read '.checks[\"${CHECK}\"].${key}'"
   [ -n "${value}" ] ||
     config_invalid "dlint configuration '${CFG_FILE}': '.checks[\"${CHECK}\"].${key}' must not be empty"
@@ -230,7 +303,7 @@ cfg_string() {
 # leave a caller holding an empty list.
 cfg_array() {
   local key="$1" type=""
-  type="$(jq -r --arg c "${CHECK}" --arg k "${key}" '.checks[$c][$k] | type' "${CFG_FILE}")" ||
+  type="$(jq -r --arg c "${CHECK}" --arg k "${key}" '.checks[$c][$k] | type' "${CFG_JSON}")" ||
     config_invalid "dlint configuration '${CFG_FILE}': could not read '.checks[\"${CHECK}\"].${key}'"
 
   if [ "${type}" = "null" ]; then
@@ -243,16 +316,16 @@ cfg_array() {
     config_invalid "dlint configuration '${CFG_FILE}': '.checks[\"${CHECK}\"].${key}' must be an array of strings, found ${type}"
   jq -e --arg c "${CHECK}" --arg k "${key}" \
     '([.checks[$c][$k][] | select((type != "string") or (length == 0))] | length) == 0' \
-    "${CFG_FILE}" >/dev/null 2>&1 ||
+    "${CFG_JSON}" >/dev/null 2>&1 ||
     config_invalid "dlint configuration '${CFG_FILE}': every entry of '.checks[\"${CHECK}\"].${key}' must be a non-empty string"
-  jq -r --arg c "${CHECK}" --arg k "${key}" '.checks[$c][$k][]' "${CFG_FILE}" ||
+  jq -r --arg c "${CHECK}" --arg k "${key}" '.checks[$c][$k][]' "${CFG_JSON}" ||
     config_invalid "dlint configuration '${CFG_FILE}': could not read '.checks[\"${CHECK}\"].${key}'"
 }
 
 # cfg_bool <key> <default> -> "true" or "false" on stdout.
 cfg_bool() {
   local key="$1" fallback="$2" type=""
-  type="$(jq -r --arg c "${CHECK}" --arg k "${key}" '.checks[$c][$k] | type' "${CFG_FILE}")" ||
+  type="$(jq -r --arg c "${CHECK}" --arg k "${key}" '.checks[$c][$k] | type' "${CFG_JSON}")" ||
     config_invalid "dlint configuration '${CFG_FILE}': could not read '.checks[\"${CHECK}\"].${key}'"
 
   if [ "${type}" = "null" ]; then
@@ -262,7 +335,7 @@ cfg_bool() {
 
   [ "${type}" = "boolean" ] ||
     config_invalid "dlint configuration '${CFG_FILE}': '.checks[\"${CHECK}\"].${key}' must be true or false, found ${type}"
-  jq -r --arg c "${CHECK}" --arg k "${key}" '.checks[$c][$k]' "${CFG_FILE}" ||
+  jq -r --arg c "${CHECK}" --arg k "${key}" '.checks[$c][$k]' "${CFG_JSON}" ||
     config_invalid "dlint configuration '${CFG_FILE}': could not read '.checks[\"${CHECK}\"].${key}'"
 }
 

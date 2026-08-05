@@ -111,6 +111,7 @@ trap 'rm -rf "${TMPROOT}"' EXIT
 ARMS_RUN=0
 ARMS_PASSED=0
 FAILURES=0
+ARM_DLINT_CONFIG=""
 
 # --------------------------------------------------------------------------- #
 # fixture helpers (mutators run with the fresh repository as their CWD)
@@ -203,7 +204,15 @@ arm() {
   materialize "${repo}"
   (cd "${repo}" && "${mutator}") || die "arm '${name}': mutator '${mutator}' failed"
 
-  (cd "${repo}" && "${DLINT}" "$@") >"${out}" 2>"${err}" || rc=$?
+  # A single arm may need DLINT_CONFIG set. It is consumed and cleared here rather
+  # than exported globally, so it cannot leak into the arms that follow and quietly
+  # redirect them at a configuration they were not written for.
+  if [ -n "${ARM_DLINT_CONFIG:-}" ]; then
+    (cd "${repo}" && DLINT_CONFIG="${ARM_DLINT_CONFIG}" "${DLINT}" "$@") >"${out}" 2>"${err}" || rc=$?
+    ARM_DLINT_CONFIG=""
+  else
+    (cd "${repo}" && "${DLINT}" "$@") >"${out}" 2>"${err}" || rc=$?
+  fi
 
   if [ "${want_rc}" -eq 0 ]; then
     stream="${out}"
@@ -458,6 +467,86 @@ m_regeneration_fails() {
   chmod +x tools/regen.sh
 }
 
+# -- YAML configuration ----------------------------------------------------- #
+#
+# The migration arms. Converting the fixture's own .dlint.json to dlint.yaml and
+# then re-running the SAME assertions is what shows the two forms are one
+# configuration rather than two code paths that happen to agree today.
+
+# Converts .dlint.json to dlint.yaml and REMOVES the JSON, which is the migration
+# a template performs. `yq -P` reads JSON and writes YAML.
+m_config_as_yaml() {
+  require_file .dlint.json
+  yq -P . .dlint.json >dlint.yaml || die "could not convert .dlint.json to dlint.yaml"
+  rm -f .dlint.json
+  git add -A
+}
+
+m_yaml_exec_bit_broken() {
+  m_config_as_yaml
+  chmod -x automation/build.sh
+}
+
+m_yaml_section_removed() {
+  m_config_as_yaml
+  local tmp=""
+  tmp="$(mktemp)"
+  yq -P 'del(.checks["exec-bits"])' dlint.yaml >"${tmp}" || die "could not edit dlint.yaml"
+  cat "${tmp}" >dlint.yaml
+  rm -f "${tmp}"
+}
+
+m_yaml_disabled_section() {
+  m_config_as_yaml
+  local tmp=""
+  tmp="$(mktemp)"
+  yq -P '.checks["exec-bits"] = false' dlint.yaml >"${tmp}" || die "could not edit dlint.yaml"
+  cat "${tmp}" >dlint.yaml
+  rm -f "${tmp}"
+}
+
+# Both names present: dlint must refuse rather than silently pick one, because the
+# loser would sit in the tree looking enforced.
+m_both_config_names() {
+  require_file .dlint.json
+  yq -P . .dlint.json >dlint.yaml || die "could not convert"
+  git add -A
+}
+
+m_yaml_not_parseable() {
+  m_config_as_yaml
+  printf 'schemaVersion: 1\nchecks:\n  exec-bits:\n   globs: [\n' >dlint.yaml
+}
+
+# An empty YAML document converts to the four bytes `null`, which a reader could
+# walk into as if it were a configuration.
+m_yaml_empty_document() {
+  m_config_as_yaml
+  : >dlint.yaml
+}
+
+m_yaml_top_level_list() {
+  m_config_as_yaml
+  printf -- '- schemaVersion: 1\n' >dlint.yaml
+}
+
+m_yaml_wrong_schema_version() {
+  m_config_as_yaml
+  local tmp=""
+  tmp="$(mktemp)"
+  yq -P '.schemaVersion = 2' dlint.yaml >"${tmp}" || die "could not edit dlint.yaml"
+  cat "${tmp}" >dlint.yaml
+  rm -f "${tmp}"
+}
+
+# DLINT_CONFIG must still win, and its format must follow its extension.
+m_config_at_custom_yaml_path() {
+  m_config_as_yaml
+  mkdir -p config
+  mv dlint.yaml config/linters.yaml
+  git add -A
+}
+
 # -- repo-agnosticism ------------------------------------------------------- #
 
 # Move the whole GitHub-shaped layout to the documented DEFAULT workflow
@@ -572,15 +661,15 @@ arm "shell name invalid" m_toolchain_shell_invalid 4 \
 
 printf '\nconfiguration arms (an absent subject is never a pass)\n'
 arm "config file absent / action-pins" m_config_deleted 3 \
-  "configuration '.dlint.json' is missing" -- action-pins trusted
+  "dlint configuration is missing" -- action-pins trusted
 arm "config file absent / exec-bits" m_config_deleted 3 \
-  "configuration '.dlint.json' is missing" -- exec-bits
+  "dlint configuration is missing" -- exec-bits
 arm "config file absent / ci-wiring" m_config_deleted 3 \
-  "configuration '.dlint.json' is missing" -- ci-wiring
+  "dlint configuration is missing" -- ci-wiring
 arm "config file absent / skills-fresh" m_config_deleted 3 \
-  "configuration '.dlint.json' is missing" -- skills-fresh
+  "dlint configuration is missing" -- skills-fresh
 arm "config file absent / toolchain-smoke" m_config_deleted 3 \
-  "configuration '.dlint.json' is missing" -- toolchain-smoke
+  "dlint configuration is missing" -- toolchain-smoke
 arm "config section absent / action-pins" m_section_removed_action_pins 3 \
   "An absent section is never a pass" -- action-pins trusted
 arm "config section absent / exec-bits" m_section_removed_exec_bits 3 \
@@ -615,6 +704,52 @@ arm "no check at all" m_none 2 \
   "dlint needs a check to run" --
 arm "exec-bits rejects arguments" m_none 2 \
   "exec-bits takes no arguments" -- exec-bits --fix
+
+printf '\nYAML configuration (dlint.yaml is the canonical name)\n'
+# The same five checks, same fixture, config converted to YAML and the JSON
+# removed. These are the arms that show the two forms are ONE configuration.
+arm "yaml config / action-pins trusted" m_config_as_yaml 0 \
+  "✅ trusted action pins conform" -- action-pins trusted
+arm "yaml config / action-pins non-trusted" m_config_as_yaml 0 \
+  "✅ non-trusted action pins conform" -- action-pins non-trusted
+arm "yaml config / exec-bits" m_config_as_yaml 0 \
+  "✅ Tracked shell scripts are executable" -- exec-bits
+arm "yaml config / ci-wiring" m_config_as_yaml 0 \
+  "✅ Workflow jobs resolve to existing CI scripts" -- ci-wiring
+arm "yaml config / skills-fresh" m_config_as_yaml 0 \
+  "✅ Vendored tree is fresh" -- skills-fresh
+arm "yaml config / toolchain-smoke" m_config_as_yaml 0 \
+  "✅ Declared shell 'fixture' resolves every required binary" -- toolchain-smoke
+
+# A green under YAML proves nothing on its own — the check has to still be able to
+# FAIL when read from YAML.
+arm "yaml config still refuses a real violation" m_yaml_exec_bit_broken 1 \
+  "is tracked but not executable" -- exec-bits
+arm "yaml config: an absent section is still not a pass" m_yaml_section_removed 3 \
+  "An absent section is never a pass" -- exec-bits
+arm "yaml config: an explicit opt-out is still honoured" m_yaml_disabled_section 0 \
+  "⏭️ dlint exec-bits is disabled" -- exec-bits
+# The message must name the file the AUTHOR wrote, never the converted temporary.
+arm "yaml refusal names dlint.yaml, not a temp file" m_yaml_section_removed 3 \
+  "'dlint.yaml'" -- exec-bits
+arm "yaml config: schemaVersion is still enforced" m_yaml_wrong_schema_version 4 \
+  "'.schemaVersion' must be 1" -- exec-bits
+
+arm "both config names present is an error" m_both_config_names 4 \
+  "Keep one" -- exec-bits
+arm "unparseable yaml is invalid, not empty" m_yaml_not_parseable 4 \
+  "is not valid YAML" -- exec-bits
+arm "an empty yaml document configures nothing" m_yaml_empty_document 4 \
+  "must be a YAML mapping at the top level" -- exec-bits
+arm "a top-level yaml list is not a mapping" m_yaml_top_level_list 4 \
+  "must be a YAML mapping at the top level" -- exec-bits
+
+ARM_DLINT_CONFIG="config/linters.yaml"
+arm "DLINT_CONFIG wins and follows its extension" m_config_at_custom_yaml_path 0 \
+  "✅ Tracked shell scripts are executable" -- exec-bits
+ARM_DLINT_CONFIG="config/nowhere.yaml"
+arm "DLINT_CONFIG naming a missing file is absent" m_none 3 \
+  "named by DLINT_CONFIG, does not exist" -- exec-bits
 
 printf '\nrepo-agnosticism\n'
 arm "default workflow dir / action-pins" m_default_workflows_dir 0 \
