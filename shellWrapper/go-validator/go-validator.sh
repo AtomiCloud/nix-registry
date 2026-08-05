@@ -36,5 +36,8 @@ shift
 
 cache="${TMPDIR:-/tmp}/go-validator-mod-cache"
 mkdir -p "${cache}" || refuse "could not create module cache '${cache}'"
-export CGO_ENABLED=0 GOPROXY="file://${proxy}" GOSUMDB=off GOMODCACHE="${cache}"
+# GOPRIVATE implicitly defaults GONOPROXY to its own pattern. Set this
+# explicitly so an ambient GOPRIVATE cannot route any module around the
+# declared offline proxy and out to direct VCS.
+export CGO_ENABLED=0 GOPROXY="file://${proxy}" GONOPROXY=none GOSUMDB=off GOMODCACHE="${cache}"
 exec "$@"
