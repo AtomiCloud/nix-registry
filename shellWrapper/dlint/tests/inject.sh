@@ -70,9 +70,16 @@ fi
 [ -x "${DLINT}" ] || die "'${DLINT}' is not an executable"
 
 # Every arm runs after `cd` into a fixture repository, so a relative --dlint would
-# pass the check above and then fail all 60 arms with exit 127 and no explanation.
-DLINT="$(cd "$(dirname "${DLINT}")" && pwd)/$(basename "${DLINT}")" ||
-  die "could not resolve '${DLINT}' to an absolute path"
+# pass the check above and then fail every arm with exit 127 and no explanation.
+# Resolved in steps: in `x="$(cd … && pwd)/$(basename …)"` the assignment carries
+# the status of the LAST substitution, so a failed cd would be masked by a
+# successful basename and produce a plausible-looking '/dlint'.
+dlint_dir=""
+dlint_dir="$(dirname "${DLINT}")" ||
+  die "could not take the directory of '${DLINT}'"
+dlint_dir="$(cd "${dlint_dir}" && pwd)" ||
+  die "could not resolve '${dlint_dir}' to an absolute path"
+DLINT="${dlint_dir}/$(basename "${DLINT}")"
 [ -x "${DLINT}" ] || die "'${DLINT}' is not an executable"
 
 printf 'dlint under test: %s\n' "${DLINT}"
