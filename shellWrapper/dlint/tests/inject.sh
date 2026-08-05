@@ -29,6 +29,14 @@
 
 set -euo pipefail
 
+# `cd` consults CDPATH for any operand that is not absolute and does not start
+# with `.` or `..`, and prints the directory it landed in — which would end up
+# inside the command substitutions below. Every relative `cd` in this file is
+# affected, not just one, so the variable is cleared once here rather than
+# guarded at each site. (`cd --` does not help: `--` ends option parsing, it does
+# not disable the CDPATH search.)
+unset CDPATH
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FIXTURE_DIR="${SCRIPT_DIR}/fixtures/conforming"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
@@ -77,7 +85,9 @@ fi
 dlint_dir=""
 dlint_dir="$(dirname "${DLINT}")" ||
   die "could not take the directory of '${DLINT}'"
-dlint_dir="$(cd "${dlint_dir}" && pwd)" ||
+# CDPATH is unset at the top of this file, which is what makes this `cd` land in
+# the directory it was given rather than in a CDPATH match of the same name.
+dlint_dir="$(cd -- "${dlint_dir}" && pwd)" ||
   die "could not resolve '${dlint_dir}' to an absolute path"
 DLINT="${dlint_dir}/$(basename "${DLINT}")"
 [ -x "${DLINT}" ] || die "'${DLINT}' is not an executable"
