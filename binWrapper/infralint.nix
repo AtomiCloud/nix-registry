@@ -12,6 +12,9 @@ pkgs.runCommand "infralint"
     pkgs.tfsec
     pkgs.tflint
     hl
+
+    pkgs.kubeconform
+    pkgs.kyverno
   ];
 } ''
   mkdir -p $out/bin
@@ -22,4 +25,7 @@ pkgs.runCommand "infralint"
   cp ${pkgs.tfsec}/bin/* $out/bin/
   cp ${pkgs.tflint}/bin/* $out/bin/
   cp ${hl}/bin/* $out/bin/
+
+  cp ${pkgs.kubeconform}/bin/* $out/bin/
+  cp ${pkgs.kyverno}/bin/* $out/bin/
 ''
