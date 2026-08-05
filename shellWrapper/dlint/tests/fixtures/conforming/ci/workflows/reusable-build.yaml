@@ -1,0 +1,11 @@
+name: Reusable Build
+on:
+  workflow_call:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: acme/setup-toolchain@v3
+      - uses: third-party/gatekeeper@1111111111111111111111111111111111111111 # v2.1.0
+      - name: Build
+        run: ./automation/build.sh

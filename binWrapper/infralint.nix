@@ -15,6 +15,7 @@ pkgs.runCommand "infralint"
 
     pkgs.kubeconform
     pkgs.kyverno
+    pkgs.skopeo
   ];
 } ''
   mkdir -p $out/bin
@@ -28,4 +29,5 @@ pkgs.runCommand "infralint"
 
   cp ${pkgs.kubeconform}/bin/* $out/bin/
   cp ${pkgs.kyverno}/bin/* $out/bin/
+  cp ${pkgs.skopeo}/bin/* $out/bin/
 ''

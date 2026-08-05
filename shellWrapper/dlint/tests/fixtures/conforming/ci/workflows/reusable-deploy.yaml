@@ -1,0 +1,10 @@
+name: Reusable Deploy
+on:
+  workflow_call:
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: acme/setup-toolchain@v3
+      - name: Deploy
+        run: ./automation/deploy.sh

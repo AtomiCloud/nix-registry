@@ -8,6 +8,7 @@ let
         inherit
           sg
           pls
+          dlint
           md-mermaid-lint;
       }
     );

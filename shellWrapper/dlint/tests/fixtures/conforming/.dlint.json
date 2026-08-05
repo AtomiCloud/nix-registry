@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "checks": {
+    "action-pins": {
+      "trustMap": "trust/actions.json",
+      "workflowsDir": "ci/workflows"
+    },
+    "exec-bits": {},
+    "ci-wiring": {
+      "workflowsDir": "ci/workflows",
+      "entrypointPattern": "automation/[A-Za-z0-9._-]+[.]sh",
+      "orchestrators": ["ci/workflows/main.yaml"]
+    },
+    "skills-fresh": {
+      "regenerate": "bash tools/regen.sh",
+      "paths": ["third_party/skills"],
+      "ignore": ["third_party/skills/.gitkeep"]
+    }
+  }
+}

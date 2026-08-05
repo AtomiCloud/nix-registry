@@ -1,0 +1,8 @@
+name: Main
+on:
+  push:
+jobs:
+  build:
+    uses: ./ci/workflows/reusable-build.yaml
+  deploy:
+    uses: ./ci/workflows/reusable-deploy.yaml
