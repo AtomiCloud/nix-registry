@@ -4,7 +4,7 @@ Four repo-agnostic repository linters behind one entrypoint. `dlint` runs in **a
 consuming repository: every repository-specific fact comes from that repository's own
 configuration file, never from a constant baked into the tool.
 
-```
+```text
 dlint <check> [args]
 dlint --help
 dlint --version
@@ -56,7 +56,9 @@ One mechanism, applied uniformly: a section per check, keyed by the check's own 
 | ----------------------------- | -------- | ------------------- |
 | `action-pins.trustMap`        | yes      | —                   |
 | `action-pins.workflowsDir`    | no       | `.github/workflows` |
+| `action-pins.requireSubjects` | no       | `true`              |
 | `exec-bits.globs`             | no       | `["*.sh"]`          |
+| `exec-bits.requireSubjects`   | no       | `true`              |
 | `ci-wiring.entrypointPattern` | yes      | —                   |
 | `ci-wiring.orchestrators`     | yes      | —                   |
 | `ci-wiring.workflowsDir`      | no       | `.github/workflows` |
@@ -91,7 +93,7 @@ check off you have to say so, and the run says so back:
 { "checks": { "exec-bits": false } }
 ```
 
-```
+```text
 ⏭️ dlint exec-bits is disabled by '"exec-bits": false' in '.dlint.json'
 ```
 
@@ -126,17 +128,28 @@ regeneration; `dlint` owns "regenerate, then refuse if the tree moved".
 
 ## Non-vacuity
 
-Three of the four checks cannot pass without having inspected something:
+**No check passes without having inspected something.** A `✅` after zero subjects is the
+failure mode this repository's history keeps producing, so every check refuses instead:
 
-- `skills-fresh` refuses outright when zero tracked subjects survive the `ignore` filter.
+- `skills-fresh` refuses when zero tracked subjects survive the `ignore` filter.
 - `ci-wiring` requires at least one declared orchestrator, requires each to exist and to
   declare at least one job, and requires every job's reusable workflow to name a CI
   entrypoint — so a green `ci-wiring` has necessarily resolved at least one entrypoint.
-- `action-pins` refuses any reference it cannot classify.
+  Its non-vacuity is structural: there is no knob, because there is no legitimate
+  zero-job orchestrator.
+- `action-pins` refuses any reference it cannot classify, and refuses when the workflow
+  directory holds no action reference at all.
+- `exec-bits` refuses when no tracked file matches its globs.
 
-`exec-bits` prints its subject count and passes on zero, because a repository with no
-shell scripts is a legitimate state rather than a defect. Every check prints its counts,
-so a run that inspected nothing says so on stdout.
+The last two are the only checks with a legitimate zero-subject state — a repository may
+genuinely have no shell scripts, or no third-party actions — so that state is a
+**declaration**, not a default:
+
+```json
+{ "checks": { "exec-bits": { "requireSubjects": false } } }
+```
+
+Every check also prints its counts, so a run that inspected little says so on stdout.
 
 ## Tests
 

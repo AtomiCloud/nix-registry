@@ -69,6 +69,12 @@ fi
 
 [ -x "${DLINT}" ] || die "'${DLINT}' is not an executable"
 
+# Every arm runs after `cd` into a fixture repository, so a relative --dlint would
+# pass the check above and then fail all 60 arms with exit 127 and no explanation.
+DLINT="$(cd "$(dirname "${DLINT}")" && pwd)/$(basename "${DLINT}")" ||
+  die "could not resolve '${DLINT}' to an absolute path"
+[ -x "${DLINT}" ] || die "'${DLINT}' is not an executable"
+
 printf 'dlint under test: %s\n' "${DLINT}"
 "${DLINT}" --version || die "'${DLINT} --version' failed"
 printf 'fixture layout:   %s (workflows in ci/workflows, entrypoints in automation/)\n\n' "${FIXTURE_DIR}"
@@ -314,6 +320,33 @@ m_tracked_script_deleted_from_worktree() {
   rm -f automation/deploy.sh
 }
 
+m_no_tracked_shell_script() {
+  edit_config '.checks["exec-bits"].globs = ["*.no-such-extension"]'
+}
+
+m_no_tracked_shell_script_declared() {
+  edit_config '.checks["exec-bits"].globs = ["*.no-such-extension"]
+    | .checks["exec-bits"].requireSubjects = false'
+}
+
+m_no_action_reference() {
+  # A workflow directory whose only reference is a local one, which action-pins
+  # skips by design: zero classifiable subjects.
+  printf 'name: Local Only\non:\n  push:\njobs:\n  build:\n    uses: ./ci/workflows/reusable-build.yaml\n' \
+    >ci/workflows/only.yaml
+  rm -f ci/workflows/reusable-build.yaml ci/workflows/reusable-deploy.yaml ci/workflows/main.yaml
+  git add -A
+}
+
+m_no_action_reference_declared() {
+  m_no_action_reference
+  edit_config '.checks["action-pins"].requireSubjects = false'
+}
+
+m_require_subjects_wrong_type() {
+  edit_config '.checks["exec-bits"].requireSubjects = "yes"'
+}
+
 m_bash_glob_not_executable() {
   printf '#!/usr/bin/env bash\necho hi\n' >automation/extra.bash
   chmod -x automation/extra.bash
@@ -441,6 +474,10 @@ arm "trust map bad classification value" m_trust_map_bad_classification 4 \
   "invalid schema or classification" -- action-pins trusted
 arm "declared workflow dir absent" m_workflows_dir_missing 3 \
   "does not exist" -- action-pins trusted
+arm "no action reference refuses (not a pass)" m_no_action_reference 1 \
+  "would pass vacuously" -- action-pins trusted
+arm "declared action-free repo passes" m_no_action_reference_declared 0 \
+  "✅ trusted action pins conform" -- action-pins trusted
 arm "action-pins with no mode" m_none 2 \
   "needs a mode" -- action-pins
 arm "action-pins with a bogus mode" m_none 2 \
@@ -453,6 +490,12 @@ arm "tracked script gone from worktree" m_tracked_script_deleted_from_worktree 1
   "is tracked but missing from the worktree" -- exec-bits
 arm "configured glob (*.bash) not executable" m_bash_glob_not_executable 1 \
   "automation/extra.bash' is tracked but not executable" -- exec-bits
+arm "no tracked subject refuses (not a pass)" m_no_tracked_shell_script 1 \
+  "would pass vacuously" -- exec-bits
+arm "declared zero-subject repo passes" m_no_tracked_shell_script_declared 0 \
+  "✅ Tracked shell scripts are executable" -- exec-bits
+arm "requireSubjects wrong type" m_require_subjects_wrong_type 4 \
+  "must be true or false, found string" -- exec-bits
 
 printf '\nci-wiring mutations\n'
 arm "referenced entrypoint missing" m_entrypoint_missing 1 \

@@ -5,7 +5,9 @@
 # This file is INLINED into the packaged entrypoint (see ./default.nix), which
 # supplies the shebang, the runtime PATH and DLINT_VERSION, and which shellchecks
 # the result at build time. It therefore carries a `shellcheck shell=` directive
-# instead of a shebang, and must stay self-contained.
+# instead of a shebang, and must stay self-contained. That directive exists for
+# linting this file on its own — in the packaged script it is inert, because the
+# generated shebang has already settled the dialect by the time it appears.
 #
 # Every repository-specific fact comes from the consuming repository's own
 # configuration file, never from a constant baked into this script.
@@ -18,7 +20,9 @@
 #     readers print their reason inside the subshell before exiting.
 #   * A negative assertion must never be wrapped in an existence check. An
 #     absent subject, an absent configuration section and an empty subject list
-#     each get their own loud outcome; none of them is a pass.
+#     each get their own loud outcome; none of them is a pass. Where a repository
+#     can legitimately have zero subjects, saying so is a declaration
+#     (`requireSubjects: false`), never a silent default.
 
 set -euo pipefail
 
@@ -115,7 +119,9 @@ Configuration:
     }
 
   A check with no section in '.checks' is an ERROR, not a pass. To turn a check
-  off, say so: "exec-bits": false.
+  off, say so: "exec-bits": false. Likewise, a check that finds NO subject at all
+  refuses; if a repository legitimately has none, say that too:
+  "exec-bits": { "requireSubjects": false }.
 
 Exit codes:
   0  conforms, or the check is explicitly disabled
@@ -236,6 +242,23 @@ cfg_array() {
     config_invalid "dlint configuration '${CFG_FILE}': could not read '.checks[\"${CHECK}\"].${key}'"
 }
 
+# cfg_bool <key> <default> -> "true" or "false" on stdout.
+cfg_bool() {
+  local key="$1" fallback="$2" type=""
+  type="$(jq -r --arg c "${CHECK}" --arg k "${key}" '.checks[$c][$k] | type' "${CFG_FILE}")" ||
+    config_invalid "dlint configuration '${CFG_FILE}': could not read '.checks[\"${CHECK}\"].${key}'"
+
+  if [ "${type}" = "null" ]; then
+    printf '%s' "${fallback}"
+    return 0
+  fi
+
+  [ "${type}" = "boolean" ] ||
+    config_invalid "dlint configuration '${CFG_FILE}': '.checks[\"${CHECK}\"].${key}' must be true or false, found ${type}"
+  jq -r --arg c "${CHECK}" --arg k "${key}" '.checks[$c][$k]' "${CFG_FILE}" ||
+    config_invalid "dlint configuration '${CFG_FILE}': could not read '.checks[\"${CHECK}\"].${key}'"
+}
+
 count_lines() {
   local count=""
   count="$(wc -l <"$1" | tr -d '[:space:]')" ||
@@ -259,9 +282,10 @@ check_action_pins() {
 
   load_check_config action-pins
 
-  local map_file="" workflows_dir=""
+  local map_file="" workflows_dir="" require_subjects=""
   map_file="$(cfg_string trustMap)"
   workflows_dir="$(cfg_string workflowsDir '.github/workflows')"
+  require_subjects="$(cfg_bool requireSubjects true)"
 
   [ -f "${map_file}" ] ||
     config_absent "action-pins: the trust map '${map_file}' declared in '${CFG_FILE}' does not exist. Every action reference needs an authored trust classification, so dlint refuses rather than pass an unclassified tree."
@@ -323,6 +347,9 @@ check_action_pins() {
   done <"${matches}"
 
   log_info "action references inspected: ${inspected} (${mode}: ${in_mode})"
+  if [ "${inspected}" -eq 0 ] && [ "${require_subjects}" = "true" ]; then
+    refuse "no action reference under ${workflows_dir}; the ${mode} pin check would pass vacuously. If this repository legitimately has none, declare it: '.checks[\"action-pins\"].requireSubjects': false"
+  fi
   ok "${mode} action pins conform"
 }
 
@@ -335,6 +362,9 @@ check_exec_bits() {
 
   load_check_config exec-bits
   require_git_repo
+
+  local require_subjects=""
+  require_subjects="$(cfg_bool requireSubjects true)"
 
   local globs_file="${WORK_DIR}/exec-globs.txt"
   cfg_array globs optional >"${globs_file}"
@@ -358,6 +388,9 @@ check_exec_bits() {
   done <"${listing}"
 
   log_info "tracked shell scripts inspected: ${count} (globs: ${globs[*]})"
+  if [ "${count}" -eq 0 ] && [ "${require_subjects}" = "true" ]; then
+    refuse "no tracked file matches ${globs[*]}; the executable-shell check would pass vacuously. If this repository legitimately has none, declare it: '.checks[\"exec-bits\"].requireSubjects': false"
+  fi
   ok "Tracked shell scripts are executable"
 }
 
