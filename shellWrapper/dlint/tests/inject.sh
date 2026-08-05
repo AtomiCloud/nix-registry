@@ -317,6 +317,7 @@ m_section_removed_exec_bits() { edit_config 'del(.checks["exec-bits"])'; }
 m_section_removed_ci_wiring() { edit_config 'del(.checks["ci-wiring"])'; }
 m_section_removed_skills_fresh() { edit_config 'del(.checks["skills-fresh"])'; }
 m_section_removed_toolchain_smoke() { edit_config 'del(.checks["toolchain-smoke"])'; }
+m_section_removed_no_custom_derivations() { edit_config 'del(.checks["no-custom-derivations"])'; }
 
 m_section_disabled_exec_bits() { edit_config '.checks["exec-bits"] = false'; }
 m_section_true_exec_bits() { edit_config '.checks["exec-bits"] = true'; }
@@ -458,6 +459,68 @@ m_regeneration_fails() {
   chmod +x tools/regen.sh
 }
 
+# -- no-custom-derivations -------------------------------------------------- #
+#
+# ONE ARM PER VOCABULARY MEMBER. The point of this check is an ABSENCE claim, and
+# an absence claim is only as wide as its word list — so no member is merely
+# asserted to be covered, each is planted and caught. Redundancy across spellings
+# of one word would prove nothing about whether the list spans the concept.
+
+# Plants a custom build written with the named builder.
+plant_builder() {
+  insert_before nix/packages.nix '  packages = with pkgs; [' \
+    "  custom = pkgs.$1 { name = \"thing\"; };"
+}
+
+m_nocustom_override_attrs() { plant_builder 'overrideAttrs'; }
+m_nocustom_override_derivation() { plant_builder 'overrideDerivation'; }
+m_nocustom_mk_derivation() { plant_builder 'mkDerivation'; }
+m_nocustom_run_command() { plant_builder 'runCommand'; }
+m_nocustom_build_env() { plant_builder 'buildEnv'; }
+m_nocustom_symlink_join() { plant_builder 'symlinkJoin'; }
+m_nocustom_write_shell_application() { plant_builder 'writeShellApplication'; }
+m_nocustom_write_shell_script_bin() { plant_builder 'writeShellScriptBin'; }
+m_nocustom_write_script_bin() { plant_builder 'writeScriptBin'; }
+m_nocustom_write_text_file() { plant_builder 'writeTextFile'; }
+m_nocustom_bare_derivation() { plant_builder 'derivation'; }
+
+# A substring form: 'stdenv.mkDerivation' is deliberately NOT its own vocabulary
+# member because 'mkDerivation' already catches it. This arm proves that.
+m_nocustom_stdenv_mk_derivation() {
+  insert_before nix/packages.nix '  packages = with pkgs; [' \
+    '  custom = pkgs.stdenv.mkDerivation { name = "thing"; };'
+}
+
+# Planted in the SECOND declared path, so the check is shown to inspect every
+# path it declares rather than only the first.
+m_nocustom_in_second_path() {
+  insert_before nix/env.nix '  env = with pkgs; [' \
+    '  custom = pkgs.runCommand "thing" { } "true";'
+}
+
+m_nocustom_paths_empty() { edit_config '.checks["no-custom-derivations"].paths = []'; }
+m_nocustom_forbid_empty() { edit_config '.checks["no-custom-derivations"].forbid = []'; }
+
+# A narrowed vocabulary must still catch what it names, and must PRINT what it
+# enumerated so its green states how wide it was.
+m_nocustom_narrowed_vocabulary() {
+  edit_config '.checks["no-custom-derivations"].forbid = ["symlinkJoin"]'
+  plant_builder 'symlinkJoin'
+}
+
+# The hazard a narrowed vocabulary carries: it goes green on a builder it does
+# not name. That is not a defect in dlint, it is the reason the vocabulary is
+# printed, and this arm records the behaviour explicitly.
+m_nocustom_narrow_vocabulary_misses() {
+  edit_config '.checks["no-custom-derivations"].forbid = ["symlinkJoin"]'
+  plant_builder 'overrideAttrs'
+}
+
+m_nocustom_declared_path_missing() {
+  require_file nix/env.nix
+  rm -f nix/env.nix
+}
+
 # -- repo-agnosticism ------------------------------------------------------- #
 
 # Move the whole GitHub-shaped layout to the documented DEFAULT workflow
@@ -570,6 +633,60 @@ arm "binary list empty" m_toolchain_binaries_empty 4 \
 arm "shell name invalid" m_toolchain_shell_invalid 4 \
   "must name one shell" -- toolchain-smoke
 
+printf '\nno-custom-derivations mutations (one arm per vocabulary member)\n'
+arm "no-custom-derivations baseline" m_none 0 \
+  "✅ Template nix stays plain declarative lists" -- no-custom-derivations
+# The clause that survives if everything else is dropped: a green states how wide
+# it was, so it cannot retire doubt it never earned.
+arm "the green PRINTS the vocabulary it enumerated" m_none 0 \
+  "vocabulary enumerated (11):" -- no-custom-derivations
+arm "overrideAttrs" m_nocustom_override_attrs 1 \
+  "uses 'overrideAttrs'" -- no-custom-derivations
+arm "overrideDerivation" m_nocustom_override_derivation 1 \
+  "uses 'overrideDerivation'" -- no-custom-derivations
+arm "mkDerivation" m_nocustom_mk_derivation 1 \
+  "uses 'mkDerivation'" -- no-custom-derivations
+arm "runCommand" m_nocustom_run_command 1 \
+  "uses 'runCommand'" -- no-custom-derivations
+arm "buildEnv" m_nocustom_build_env 1 \
+  "uses 'buildEnv'" -- no-custom-derivations
+arm "symlinkJoin" m_nocustom_symlink_join 1 \
+  "uses 'symlinkJoin'" -- no-custom-derivations
+arm "writeShellApplication" m_nocustom_write_shell_application 1 \
+  "uses 'writeShellApplication'" -- no-custom-derivations
+arm "writeShellScriptBin" m_nocustom_write_shell_script_bin 1 \
+  "uses 'writeShellScriptBin'" -- no-custom-derivations
+arm "writeScriptBin" m_nocustom_write_script_bin 1 \
+  "uses 'writeScriptBin'" -- no-custom-derivations
+arm "writeTextFile" m_nocustom_write_text_file 1 \
+  "uses 'writeTextFile'" -- no-custom-derivations
+arm "bare derivation" m_nocustom_bare_derivation 1 \
+  "uses 'derivation'" -- no-custom-derivations
+# 'stdenv.mkDerivation' is not a separate vocabulary member because 'mkDerivation'
+# already contains it. This arm is the evidence for that claim rather than an
+# assertion of it.
+arm "stdenv.mkDerivation is caught by mkDerivation" m_nocustom_stdenv_mk_derivation 1 \
+  "uses 'mkDerivation'" -- no-custom-derivations
+arm "the refusal names the resolver reason" m_nocustom_override_attrs 1 \
+  "not resolver-mergeable" -- no-custom-derivations
+arm "the refusal quotes the offending line" m_nocustom_override_attrs 1 \
+  "custom = pkgs.overrideAttrs" -- no-custom-derivations
+# Proves every declared path is inspected, not just the first.
+arm "a violation in the SECOND declared path" m_nocustom_in_second_path 1 \
+  "'nix/env.nix' uses 'runCommand'" -- no-custom-derivations
+arm "a narrowed vocabulary still catches what it names" m_nocustom_narrowed_vocabulary 1 \
+  "uses 'symlinkJoin'" -- no-custom-derivations
+arm "a narrowed vocabulary states its width" m_nocustom_narrow_vocabulary_misses 0 \
+  "vocabulary enumerated (1): symlinkJoin" -- no-custom-derivations
+arm "paths list empty" m_nocustom_paths_empty 4 \
+  "must name at least one path" -- no-custom-derivations
+arm "forbid list explicitly empty forbids nothing" m_nocustom_forbid_empty 4 \
+  "would forbid nothing and pass unconditionally" -- no-custom-derivations
+arm "a declared path that is gone is absent, not clean" m_nocustom_declared_path_missing 3 \
+  "does not exist, so the resolver-shape rule has no subject" -- no-custom-derivations
+arm "no-custom-derivations rejects arguments" m_none 2 \
+  "no-custom-derivations takes no arguments" -- no-custom-derivations --fix
+
 printf '\nconfiguration arms (an absent subject is never a pass)\n'
 arm "config file absent / action-pins" m_config_deleted 3 \
   "configuration '.dlint.json' is missing" -- action-pins trusted
@@ -581,6 +698,8 @@ arm "config file absent / skills-fresh" m_config_deleted 3 \
   "configuration '.dlint.json' is missing" -- skills-fresh
 arm "config file absent / toolchain-smoke" m_config_deleted 3 \
   "configuration '.dlint.json' is missing" -- toolchain-smoke
+arm "config file absent / no-custom-derivations" m_config_deleted 3 \
+  "configuration '.dlint.json' is missing" -- no-custom-derivations
 arm "config section absent / action-pins" m_section_removed_action_pins 3 \
   "An absent section is never a pass" -- action-pins trusted
 arm "config section absent / exec-bits" m_section_removed_exec_bits 3 \
@@ -591,6 +710,8 @@ arm "config section absent / skills-fresh" m_section_removed_skills_fresh 3 \
   "An absent section is never a pass" -- skills-fresh
 arm "config section absent / toolchain-smoke" m_section_removed_toolchain_smoke 3 \
   "An absent section is never a pass" -- toolchain-smoke
+arm "config section absent / no-custom-derivations" m_section_removed_no_custom_derivations 3 \
+  "An absent section is never a pass" -- no-custom-derivations
 arm "explicit opt-out is honoured" m_section_disabled_exec_bits 0 \
   "⏭️ dlint exec-bits is disabled" -- exec-bits
 arm "section true configures nothing" m_section_true_exec_bits 4 \
@@ -608,9 +729,9 @@ arm "required key wrong type" m_trust_map_key_wrong_type 4 \
 
 printf '\nentrypoint arms\n'
 arm "unknown check" m_none 2 \
-  "dlint has exactly five" -- not-a-check
+  "dlint has exactly six" -- not-a-check
 arm "there is no 'all'" m_none 2 \
-  "dlint has exactly five" -- all
+  "dlint has exactly six" -- all
 arm "no check at all" m_none 2 \
   "dlint needs a check to run" --
 arm "exec-bits rejects arguments" m_none 2 \
@@ -629,6 +750,7 @@ arm "exec-bits rebaseline" m_none 0 "✅ Tracked shell scripts are executable" -
 arm "ci-wiring rebaseline" m_none 0 "✅ Workflow jobs resolve to existing CI scripts" -- ci-wiring
 arm "skills-fresh rebaseline" m_none 0 "✅ Vendored tree is fresh" -- skills-fresh
 arm "toolchain-smoke rebaseline" m_none 0 "✅ Declared shell 'fixture' resolves every required binary" -- toolchain-smoke
+arm "no-custom-derivations rebaseline" m_none 0 "✅ Template nix stays plain declarative lists" -- no-custom-derivations
 
 printf '\narms: %s/%s passed\n' "${ARMS_PASSED}" "${ARMS_RUN}"
 if [ "${FAILURES}" -ne 0 ]; then

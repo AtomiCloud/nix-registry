@@ -55,7 +55,7 @@ refuse() {
 
 usage_error() {
   printf '❌ %s\n' "$1" >&2
-  printf "Run 'dlint --help' for the five checks dlint supports.\n" >&2
+  printf "Run 'dlint --help' for the checks dlint supports.\n" >&2
   exit "${EXIT_USAGE}"
 }
 
@@ -83,7 +83,7 @@ Usage:
   dlint --help
   dlint --version
 
-Checks (there are exactly five; there is no 'all'):
+Checks (there are exactly six; there is no 'all'):
   action-pins <trusted|non-trusted>
       Every GitHub Action reference carries the pin its authored trust
       classification demands: a major tag for trusted actions, an exact 40-hex
@@ -99,9 +99,12 @@ Checks (there are exactly five; there is no 'all'):
   toolchain-smoke
       Verify that every binary a repository declares for one named shell resolves
       in the environment where dlint is invoked.
+  no-custom-derivations
+      Every declared nix file stays a plain declarative list: no custom derivation
+      builder appears in it. The vocabulary of builders is printed with the result.
 
 Configuration:
-  All five checks read ONE file: \$DLINT_CONFIG, or ./${DLINT_CONFIG_DEFAULT}.
+  All six checks read ONE file: \$DLINT_CONFIG, or ./${DLINT_CONFIG_DEFAULT}.
   dlint is run from the repository root and reads every path relative to it.
 
     {
@@ -611,6 +614,86 @@ check_toolchain_smoke() {
 }
 
 # --------------------------------------------------------------------------- #
+# no-custom-derivations
+# --------------------------------------------------------------------------- #
+
+# The builders that make a Nix file a custom BUILD rather than a declarative
+# list. This is a convention of the Nix language, not of any repository, which is
+# why it has a default at all — the same reason '*.sh' is exec-bits' one default.
+# A repository may widen or narrow it with 'forbid'.
+#
+# The list is deliberately several DIFFERENT WORDS for one concept rather than
+# several spellings of one word. Redundancy across spellings is not coverage
+# across vocabulary: a template that avoided 'overrideAttrs' could still carry a
+# custom build through 'runCommand' or 'symlinkJoin', and a sweep for the first
+# would report a clean tree with a straight face.
+# Ordered most specific first, so a refusal names the builder actually written
+# rather than a shorter token inside it. Members that are already substrings of
+# another member are left out ('stdenv.mkDerivation' is caught by 'mkDerivation',
+# 'runCommandLocal' by 'runCommand'); every member here is a distinct way to
+# write a build, not a variant spelling of one.
+readonly DLINT_DERIVATION_BUILDERS="overrideAttrs overrideDerivation mkDerivation runCommand buildEnv symlinkJoin writeShellApplication writeShellScriptBin writeScriptBin writeTextFile derivation"
+
+check_no_custom_derivations() {
+  [ "$#" -eq 0 ] || usage_error "no-custom-derivations takes no arguments, got '$1'"
+
+  load_check_config no-custom-derivations
+
+  local require_subjects=""
+  require_subjects="$(cfg_bool requireSubjects true)"
+
+  local paths_file="${WORK_DIR}/nocustom-paths.txt"
+  cfg_array paths >"${paths_file}"
+  local -a paths=()
+  mapfile -t paths <"${paths_file}"
+  [ "${#paths[@]}" -gt 0 ] ||
+    config_invalid "no-custom-derivations: '.checks[\"no-custom-derivations\"].paths' must name at least one path; an empty list would let this check pass without inspecting anything"
+
+  # An explicitly EMPTY vocabulary is refused rather than defaulted: a check that
+  # forbids nothing is the inert check this whole tool is shaped to avoid.
+  local forbid_file="${WORK_DIR}/nocustom-forbid.txt"
+  cfg_array forbid optional >"${forbid_file}"
+  local -a forbid=()
+  mapfile -t forbid <"${forbid_file}"
+  if [ "$(jq -r '.checks["no-custom-derivations"].forbid | type' "${CFG_FILE}")" = "array" ]; then
+    [ "${#forbid[@]}" -gt 0 ] ||
+      config_invalid "no-custom-derivations: '.checks[\"no-custom-derivations\"].forbid' is empty, so this check would forbid nothing and pass unconditionally. Remove the key to use dlint's own vocabulary, or name the builders to forbid."
+  fi
+  [ "${#forbid[@]}" -gt 0 ] || read -r -a forbid <<<"${DLINT_DERIVATION_BUILDERS}"
+
+  local path="" builder="" inspected=0 rg_status=0
+  local hits="${WORK_DIR}/nocustom-hits.txt"
+  for path in "${paths[@]}"; do
+    # A declared path that is gone is absent, not clean. Deleting the file a rule
+    # is about must never be the way to satisfy the rule.
+    [ -e "${path}" ] ||
+      config_absent "no-custom-derivations: '${path}', declared in '${CFG_FILE}', does not exist, so the resolver-shape rule has no subject there"
+
+    for builder in "${forbid[@]}"; do
+      rg_status=0
+      rg -n --no-heading --fixed-strings -- "${builder}" "${path}" >"${hits}" || rg_status=$?
+      [ "${rg_status}" -le 1 ] ||
+        tool_failure "no-custom-derivations: could not scan '${path}' for '${builder}' (rg exit ${rg_status})"
+      if [ "${rg_status}" -eq 0 ]; then
+        printf '❌ %s\n' "no-custom-derivations: '${path}' uses '${builder}', so it is a custom build rather than a plain declarative list. Templates compose through the cyanprint nix resolver, which merges simple attribute lists; a custom derivation is not resolver-mergeable. Hoist it to the registry." >&2
+        sed 's/^/       | /' "${hits}" >&2
+        exit "${EXIT_VIOLATION}"
+      fi
+    done
+    inspected=$((inspected + 1))
+  done
+
+  # The vocabulary is PRINTED, not merely applied: an absence claim is only as
+  # wide as its word list, so the green states what it was wide enough to see.
+  log_info "files inspected: ${inspected} (${paths[*]})"
+  log_info "vocabulary enumerated (${#forbid[@]}): ${forbid[*]}"
+  if [ "${inspected}" -eq 0 ] && [ "${require_subjects}" = "true" ]; then
+    refuse "no declared path was inspected; the resolver-shape check would pass vacuously. If this repository legitimately has none, declare it: '.checks[\"no-custom-derivations\"].requireSubjects': false"
+  fi
+  ok "Template nix stays plain declarative lists"
+}
+
+# --------------------------------------------------------------------------- #
 # entrypoint
 # --------------------------------------------------------------------------- #
 
@@ -642,8 +725,9 @@ main() {
   ci-wiring) check_ci_wiring "$@" ;;
   skills-fresh) check_skills_fresh "$@" ;;
   toolchain-smoke) check_toolchain_smoke "$@" ;;
+  no-custom-derivations) check_no_custom_derivations "$@" ;;
   *)
-    usage_error "unknown check '${command}'; dlint has exactly five: action-pins, exec-bits, ci-wiring, skills-fresh, toolchain-smoke"
+    usage_error "unknown check '${command}'; dlint has exactly six: action-pins, exec-bits, ci-wiring, skills-fresh, toolchain-smoke, no-custom-derivations"
     ;;
   esac
 }

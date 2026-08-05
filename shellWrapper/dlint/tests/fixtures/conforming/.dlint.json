@@ -19,6 +19,9 @@
     "toolchain-smoke": {
       "shell": "fixture",
       "binaries": ["bash", "git"]
+    },
+    "no-custom-derivations": {
+      "paths": ["nix/packages.nix", "nix/env.nix"]
     }
   }
 }
