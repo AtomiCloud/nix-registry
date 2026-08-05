@@ -55,7 +55,7 @@ refuse() {
 
 usage_error() {
   printf '❌ %s\n' "$1" >&2
-  printf "Run 'dlint --help' for the four checks dlint supports.\n" >&2
+  printf "Run 'dlint --help' for the five checks dlint supports.\n" >&2
   exit "${EXIT_USAGE}"
 }
 
@@ -83,7 +83,7 @@ Usage:
   dlint --help
   dlint --version
 
-Checks (there are exactly four; there is no 'all'):
+Checks (there are exactly five; there is no 'all'):
   action-pins <trusted|non-trusted>
       Every GitHub Action reference carries the pin its authored trust
       classification demands: a major tag for trusted actions, an exact 40-hex
@@ -96,9 +96,12 @@ Checks (there are exactly four; there is no 'all'):
       executable.
   skills-fresh
       Regenerate the vendored tree, then refuse if the worktree moved.
+  toolchain-smoke
+      Verify that every binary a repository declares for one named shell resolves
+      in the environment where dlint is invoked.
 
 Configuration:
-  All four checks read ONE file: \$DLINT_CONFIG, or ./${DLINT_CONFIG_DEFAULT}.
+  All five checks read ONE file: \$DLINT_CONFIG, or ./${DLINT_CONFIG_DEFAULT}.
   dlint is run from the repository root and reads every path relative to it.
 
     {
@@ -114,6 +117,10 @@ Configuration:
           "regenerate": "bash scripts/local/skills-sync.sh",
           "paths": [".claude/skills/vendor"],
           "ignore": [".claude/skills/vendor/.gitkeep"]
+        },
+        "toolchain-smoke": {
+          "shell": "default",
+          "binaries": ["bash", "git"]
         }
       }
     }
@@ -569,6 +576,41 @@ check_skills_fresh() {
 }
 
 # --------------------------------------------------------------------------- #
+# toolchain-smoke
+# --------------------------------------------------------------------------- #
+
+check_toolchain_smoke() {
+  [ "$#" -eq 0 ] || usage_error "toolchain-smoke takes no arguments, got '$1'"
+
+  load_check_config toolchain-smoke
+
+  local shell=""
+  shell="$(cfg_string shell)"
+  [[ ${shell} =~ ^[A-Za-z0-9._-]+$ ]] ||
+    config_invalid "toolchain-smoke: '.checks[\"toolchain-smoke\"].shell' must name one shell with letters, digits, '.', '_' or '-', got '${shell}'"
+
+  local binaries_file="${WORK_DIR}/toolchain-binaries.txt"
+  cfg_array binaries >"${binaries_file}"
+  local -a binaries=()
+  mapfile -t binaries <"${binaries_file}"
+  [ "${#binaries[@]}" -gt 0 ] ||
+    config_invalid "toolchain-smoke: '.checks[\"toolchain-smoke\"].binaries' must name at least one binary; an empty list would inspect no toolchain"
+
+  local binary="" resolved="" count=0
+  for binary in "${binaries[@]}"; do
+    [[ ${binary} =~ ^[A-Za-z0-9._+-]+$ ]] ||
+      config_invalid "toolchain-smoke: binary '${binary}' is not a command name"
+    resolved="$(command -v -- "${binary}" 2>/dev/null || true)"
+    [ -n "${resolved}" ] ||
+      refuse "declared shell '${shell}' is missing binary '${binary}'"
+    count=$((count + 1))
+  done
+
+  log_info "toolchain binaries inspected: ${count} (declared shell: ${shell})"
+  ok "Declared shell '${shell}' resolves every required binary"
+}
+
+# --------------------------------------------------------------------------- #
 # entrypoint
 # --------------------------------------------------------------------------- #
 
@@ -599,8 +641,9 @@ main() {
   exec-bits) check_exec_bits "$@" ;;
   ci-wiring) check_ci_wiring "$@" ;;
   skills-fresh) check_skills_fresh "$@" ;;
+  toolchain-smoke) check_toolchain_smoke "$@" ;;
   *)
-    usage_error "unknown check '${command}'; dlint has exactly four: action-pins, exec-bits, ci-wiring, skills-fresh"
+    usage_error "unknown check '${command}'; dlint has exactly five: action-pins, exec-bits, ci-wiring, skills-fresh, toolchain-smoke"
     ;;
   esac
 }

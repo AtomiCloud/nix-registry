@@ -1,6 +1,6 @@
 # dlint
 
-Four repo-agnostic repository linters behind one entrypoint. `dlint` runs in **any**
+Five repo-agnostic repository linters behind one entrypoint. `dlint` runs in **any**
 consuming repository: every repository-specific fact comes from that repository's own
 configuration file, never from a constant baked into the tool.
 
@@ -10,7 +10,7 @@ dlint --help
 dlint --version
 ```
 
-There are **exactly four** checks. There are no aliases, no hidden checks and no `all`.
+There are **exactly five** checks. There are no aliases, no hidden checks and no `all`.
 An unknown check exits `2` and lists the valid ones.
 
 | Check                                | Refuses when                                                                                                                                                                                                         |
@@ -19,10 +19,11 @@ An unknown check exits `2` and lists the valid ones.
 | `exec-bits`                          | A tracked shell script is not executable, or is missing from the worktree.                                                                                                                                           |
 | `ci-wiring`                          | A CI entrypoint a workflow names is missing or not executable; an orchestrator job does not call a repository-local reusable workflow; a reusable workflow calls no CI entrypoint; an orchestrator declares no jobs. |
 | `skills-fresh`                       | The vendored tree moved in the worktree after its own regeneration command ran, or there is no tracked subject to judge at all.                                                                                      |
+| `toolchain-smoke`                    | A required binary does not resolve in the named shell where the check is run.                                                                                                                                        |
 
 ## Configuration
 
-All four checks read **one** file: `$DLINT_CONFIG`, or `./.dlint.json`. `dlint` is run
+All five checks read **one** file: `$DLINT_CONFIG`, or `./.dlint.json`. `dlint` is run
 from the repository root and reads every path relative to it.
 
 ```json
@@ -45,6 +46,10 @@ from the repository root and reads every path relative to it.
       "regenerate": "bash scripts/local/skills-sync.sh",
       "paths": [".claude/skills/vendor"],
       "ignore": [".claude/skills/vendor/.gitkeep"]
+    },
+    "toolchain-smoke": {
+      "shell": "default",
+      "binaries": ["bash", "git"]
     }
   }
 }
@@ -65,6 +70,8 @@ One mechanism, applied uniformly: a section per check, keyed by the check's own 
 | `skills-fresh.regenerate`     | yes      | —                   |
 | `skills-fresh.paths`          | yes      | —                   |
 | `skills-fresh.ignore`         | no       | `[]`                |
+| `toolchain-smoke.shell`       | yes      | —                   |
+| `toolchain-smoke.binaries`    | yes      | —                   |
 
 Only facts that are conventions of a **tool** rather than of a repository have defaults:
 `.github/workflows` is GitHub's, `*.sh` is the shell's. Everything that describes how a
@@ -115,6 +122,14 @@ Collapsing them is how a loud refusal turns into a green check.
 tell "you have not configured me" from "you are broken" from "I could not look" will
 retry the wrong thing.
 
+## Toolchain smoke
+
+`toolchain-smoke` is called from the shell named in its configuration; the
+configuration makes that shell and its required commands reviewable, while the
+check verifies every command resolves in that real invocation environment. It
+does not inspect package declarations: a developer-installed binary must not
+make a declaration-only check pass.
+
 ## Runtime
 
 Every binary the checks call — `bash`, `coreutils`, `findutils`, `git`, `grep`, `sed`,
@@ -153,7 +168,7 @@ Every check also prints its counts, so a run that inspected little says so on st
 
 ## Tests
 
-`tests/inject.sh` is the failure-injection harness: **60 arms**, each asserting the
+`tests/inject.sh` is the failure-injection harness: **72 arms**, each asserting the
 refusal **text** and not merely a non-zero status.
 
 ```bash
