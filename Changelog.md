@@ -1,3 +1,11 @@
+## [3.16.0](https://github.com/AtomiCloud/nix-registry/compare/v3.15.0...v3.16.0) (2026-08-06)
+
+
+### ✨ New Packages ✨
+
+* **dlint:** run several checks in one invocation ([349f910](https://github.com/AtomiCloud/nix-registry/commit/349f910011bcb7e58d20318a15a89a3476051847))
+* **go:** ship go 1.26.5 from the registry ([1d941c4](https://github.com/AtomiCloud/nix-registry/commit/1d941c499e2b9678c1619fee15f94a995a1ba4b6))
+
 ## [3.15.0](https://github.com/AtomiCloud/nix-registry/compare/v3.14.0...v3.15.0) (2026-08-06)
 
 

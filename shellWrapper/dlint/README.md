@@ -6,12 +6,15 @@ configuration file, never from a constant baked into the tool.
 
 ```text
 dlint <check> [args]
+dlint --check <check> [--check <check>]...
+dlint --all-configured
 dlint --help
 dlint --version
 ```
 
-There are **exactly six** checks. There are no aliases, no hidden checks and no `all`.
-An unknown check exits `2` and lists the valid ones.
+There are **exactly six** checks. There are no aliases and no hidden checks. There is no
+`all` **check** either — running everything is the `--all-configured` flag. An unknown
+check exits `2` and lists the valid ones.
 
 | Check                                | Refuses when                                                                                                                                                                                                         |
 | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -21,6 +24,36 @@ An unknown check exits `2` and lists the valid ones.
 | `skills-fresh`                       | The vendored tree moved in the worktree after its own regeneration command ran, or there is no tracked subject to judge at all.                                                                                      |
 | `toolchain-smoke`                    | A binary declared for a shell does not resolve INSIDE that shell, or the shell could not be entered at all.                                                                                                          |
 | `workflow-policy`                    | A declared path in a declared workflow file does not hold its declared value, or is absent. One assertion is one caught fault.                                                                                       |
+
+## Several checks in one invocation
+
+`--check` may be repeated, and each value is one check with its arguments. `--all-configured`
+runs the lot. Both exist so a consuming repository can call `dlint` **once**, as a plain
+binary, instead of wrapping it in a shell that chains invocations with `&&`.
+
+```text
+dlint --check 'action-pins trusted' --check 'action-pins non-trusted'
+dlint --all-configured
+```
+
+Three properties hold, and each is asserted by its own arm in `tests/inject.sh`:
+
+- **Every requested check runs**, even after one refuses, so a single invocation reports
+  every fault instead of only the first. A `&&` chain stops at the first failure.
+- **The exit code is the highest of theirs.** The codes are ordered by severity, so a check
+  that could not be trusted (`3`, `4`, `5`) outranks a known violation (`1`). Reporting the
+  violation and hiding the unrunnable check would be the quieter, worse answer.
+- **`--all-configured` iterates the checks `dlint` ships, not the keys the file carries.**
+  This is the important one. Deriving the work list from the configuration means deleting a
+  section silently stops enforcing that check while the run still reports green — the
+  vacuous pass every other refusal here exists to prevent. Because the population is
+  `dlint`'s own list, an absent section reaches its normal `3`, and `"<check>": false`
+  remains the one way to opt out. A configured key `dlint` does not know exits `4`, so a
+  misspelled check cannot sit in the file looking enforced.
+
+A configured `action-pins` expands to **both** trust classes: the check enforces one class
+per invocation, so running only `trusted` would leave every non-trusted pin unasserted while
+the invocation reported green.
 
 ## Configuration
 
@@ -51,7 +84,7 @@ checks:
 
 and the JSON below describe the same thing. YAML is converted to JSON once per invocation and
 every reader is unchanged, so there is one code path rather than two that happen to agree
-today — and there are arms running all six checks from a YAML config to hold that.
+today — and there are arms running all six checks AND `--all-configured` from a YAML config to hold that.
 
 Two properties are deliberate:
 
@@ -336,7 +369,7 @@ Every check also prints its counts, so a run that inspected little says so on st
 
 ## Tests
 
-`tests/inject.sh` is the failure-injection harness: **124 arms**, each asserting the
+`tests/inject.sh` is the failure-injection harness: **148 arms**, each asserting the
 refusal **text** and not merely a non-zero status.
 
 ```bash

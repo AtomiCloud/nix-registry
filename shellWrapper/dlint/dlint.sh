@@ -48,6 +48,11 @@ CFG_FILE=""
 CFG_JSON=""
 WORK_DIR=""
 
+# The checks dlint ships, in the order --all-configured runs them. The
+# dispatcher, the --all-configured enumerator and the usage text all read this
+# one list, so they cannot drift into disagreeing about what dlint has.
+readonly DLINT_CHECKS="action-pins exec-bits ci-wiring skills-fresh toolchain-smoke workflow-policy"
+
 # --------------------------------------------------------------------------- #
 # reporting
 # --------------------------------------------------------------------------- #
@@ -63,7 +68,7 @@ refuse() {
 
 usage_error() {
   printf '❌ %s\n' "$1" >&2
-  printf "Run 'dlint --help' for the five checks dlint supports.\n" >&2
+  printf "Run 'dlint --help' for the checks dlint supports.\n" >&2
   exit "${EXIT_USAGE}"
 }
 
@@ -88,10 +93,30 @@ dlint ${DLINT_VERSION} — repo-agnostic repository linters
 
 Usage:
   dlint <check> [args]
+  dlint --check <check> [--check <check>]...
+  dlint --all-configured
   dlint --help
   dlint --version
 
-Checks (there are exactly six; there is no 'all'):
+Running several checks in ONE invocation:
+
+  --check <check>     May be repeated. Each value is one check and its arguments,
+                      e.g. --check 'action-pins trusted' --check exec-bits.
+  --all-configured    Runs every check DLINT SHIPS, in the order listed below,
+                      reading each one's subject from '.checks'. The population is
+                      dlint's own list and not the keys the file happens to carry,
+                      so deleting a section refuses (exit 3) instead of quietly
+                      going unenforced; '"<check>": false' stays the one way to opt
+                      out. 'action-pins' runs BOTH trust classes, because enforcing
+                      one and reporting green leaves the other unasserted.
+
+  Every requested check RUNS, even after one refuses, so one invocation reports
+  every fault rather than only the first. The invocation's exit code is the
+  HIGHEST of theirs — the codes below are ordered by severity, so a check that
+  could not be trusted (3, 4, 5) outranks a known violation (1). An invocation
+  that would inspect nothing refuses; it is never a pass.
+
+Checks (there are exactly six; there is no 'all' CHECK — the flag is --all-configured):
   action-pins <trusted|non-trusted>
       Every GitHub Action reference carries the pin its authored trust
       classification demands: a major tag for trusted actions, an exact 40-hex
@@ -247,11 +272,12 @@ resolve_config_file() {
   esac
 }
 
-# Loads the configuration and selects this check's section. Exits 3 when the
-# file or the section is absent, 4 when either is malformed, and 0 when the
-# section is an explicit `false`.
-load_check_config() {
-  CHECK="$1"
+# Loads the configuration FILE and validates everything that is not specific to
+# one check, so that selecting a section and enumerating every section apply the
+# same rules to the same file. File selection and any YAML conversion are
+# delegated to resolve_config_file, so there is one place that decides WHICH file
+# is authoritative and one place that validates it.
+load_config_file() {
   resolve_config_file
 
   local version=""
@@ -265,6 +291,14 @@ load_check_config() {
     config_invalid "dlint configuration '${CFG_FILE}': could not read '.checks'"
   [ "${checks_type}" = "object" ] ||
     config_invalid "dlint configuration '${CFG_FILE}': '.checks' must be an object, found ${checks_type}"
+}
+
+# Loads the configuration and selects this check's section. Exits 3 when the
+# file or the section is absent, 4 when either is malformed, and 0 when the
+# section is an explicit `false`.
+load_check_config() {
+  CHECK="$1"
+  load_config_file
 
   local section_type=""
   section_type="$(jq -r --arg c "${CHECK}" '.checks[$c] | type' "${CFG_JSON}")" ||
@@ -677,9 +711,9 @@ check_toolchain_smoke() {
   load_check_config toolchain-smoke
 
   local shells_type="" legacy_type=""
-  shells_type="$(jq -r '.checks["toolchain-smoke"].shells | type' "${CFG_FILE}")" ||
+  shells_type="$(jq -r '.checks["toolchain-smoke"].shells | type' "${CFG_JSON}")" ||
     config_invalid "toolchain-smoke: could not read '.checks[\"toolchain-smoke\"].shells'"
-  legacy_type="$(jq -r '.checks["toolchain-smoke"].shell | type' "${CFG_FILE}")" ||
+  legacy_type="$(jq -r '.checks["toolchain-smoke"].shell | type' "${CFG_JSON}")" ||
     config_invalid "toolchain-smoke: could not read '.checks[\"toolchain-smoke\"].shell'"
 
   [ "${shells_type}" = "null" ] || [ "${legacy_type}" = "null" ] ||
@@ -717,7 +751,7 @@ check_toolchain_smoke_scoped() {
   esac
 
   local names_file="${WORK_DIR}/toolchain-shells.txt"
-  jq -r '.checks["toolchain-smoke"].shells | keys_unsorted[]' "${CFG_FILE}" >"${names_file}" ||
+  jq -r '.checks["toolchain-smoke"].shells | keys_unsorted[]' "${CFG_JSON}" >"${names_file}" ||
     config_invalid "toolchain-smoke: could not list the shells of '.checks[\"toolchain-smoke\"].shells'"
   local -a names=()
   mapfile -t names <"${names_file}"
@@ -731,13 +765,13 @@ check_toolchain_smoke_scoped() {
     [[ ${shell} =~ ^[A-Za-z0-9._#-]+$ ]] ||
       config_invalid "toolchain-smoke: shell name '${shell}' must be letters, digits, '.', '_', '#' or '-'"
 
-    binaries_type="$(jq -r --arg s "${shell}" '.checks["toolchain-smoke"].shells[$s] | type' "${CFG_FILE}")" ||
+    binaries_type="$(jq -r --arg s "${shell}" '.checks["toolchain-smoke"].shells[$s] | type' "${CFG_JSON}")" ||
       config_invalid "toolchain-smoke: could not read the binaries of shell '${shell}'"
     [ "${binaries_type}" = "array" ] ||
       config_invalid "toolchain-smoke: '.checks[\"toolchain-smoke\"].shells[\"${shell}\"]' must be an array of binaries, found ${binaries_type}"
 
     binaries_file="${WORK_DIR}/toolchain-binaries-${shell_count}.txt"
-    jq -r --arg s "${shell}" '.checks["toolchain-smoke"].shells[$s][]' "${CFG_FILE}" >"${binaries_file}" ||
+    jq -r --arg s "${shell}" '.checks["toolchain-smoke"].shells[$s][]' "${CFG_JSON}" >"${binaries_file}" ||
       config_invalid "toolchain-smoke: could not read the binaries of shell '${shell}'"
     binaries=()
     mapfile -t binaries <"${binaries_file}"
@@ -820,6 +854,158 @@ check_toolchain_smoke_ambient() {
 }
 
 # --------------------------------------------------------------------------- #
+# dispatch
+# --------------------------------------------------------------------------- #
+
+# Runs exactly one check. Called directly for a single-check invocation, and in a
+# SUBSHELL for each check of a multi-check one: every check reports by exiting, so
+# without that subshell the first one to finish would end the whole invocation and
+# the checks after it would never run at all.
+dispatch_check() {
+  local check="$1"
+  shift
+  case "${check}" in
+  action-pins) check_action_pins "$@" ;;
+  exec-bits) check_exec_bits "$@" ;;
+  ci-wiring) check_ci_wiring "$@" ;;
+  skills-fresh) check_skills_fresh "$@" ;;
+  toolchain-smoke) check_toolchain_smoke "$@" ;;
+  workflow-policy) check_workflow_policy "$@" ;;
+  *)
+    usage_error "unknown check '${check}'; dlint has these: ${DLINT_CHECKS}"
+    ;;
+  esac
+}
+
+# The specs one configured check expands into. A configured `action-pins` section
+# means BOTH trust classes: the check enforces one class per invocation, so
+# running only `trusted` would leave every non-trusted pin unasserted while the
+# invocation reported green.
+specs_for_check() {
+  case "$1" in
+  action-pins)
+    printf 'action-pins trusted\n'
+    printf 'action-pins non-trusted\n'
+    ;;
+  *) printf '%s\n' "$1" ;;
+  esac
+}
+
+# Runs every spec it is given and exits with the HIGHEST code any of them
+# produced. The exit codes are ordered by severity, so this reports a check that
+# could not be trusted (3, 4, 5) ahead of a known violation (1) — the opposite
+# would hide an unrunnable check behind a lesser, more reassuring answer.
+run_specs() {
+  # An invocation that inspects nothing is the vacuous pass this tool exists to
+  # refuse, so it is a tool failure rather than a silent 0.
+  [ "$#" -gt 0 ] ||
+    tool_failure "dlint was asked to run no check at all, so it would report success without inspecting anything"
+
+  local spec="" rc=0 worst=0 ran=0 failed=0
+  local -a argv=()
+  for spec in "$@"; do
+    # Splitting on whitespace is what turns 'action-pins trusted' into a check
+    # and its argument; an empty spec would split to nothing and silently run no
+    # check, so it is refused rather than skipped.
+    read -r -a argv <<<"${spec}"
+    [ "${#argv[@]}" -gt 0 ] ||
+      usage_error "a requested check is empty; every '--check' needs a check name"
+
+    printf '\n── dlint %s\n' "${spec}"
+    rc=0
+    (dispatch_check "${argv[@]}") || rc=$?
+    # A code dlint does not define (a signal, a missing interpreter) is a tool
+    # failure, not a violation: clamping keeps an unknown fault from reading as
+    # the milder answer.
+    [ "${rc}" -le 5 ] || rc=5
+    ran=$((ran + 1))
+    [ "${rc}" -eq 0 ] || failed=$((failed + 1))
+    [ "${rc}" -le "${worst}" ] || worst="${rc}"
+  done
+
+  printf '\nℹ️ checks run: %s (did not pass: %s)\n' "${ran}" "${failed}"
+  if [ "${worst}" -ne 0 ]; then
+    printf '❌ %s\n' "dlint: ${failed} of ${ran} check(s) did not pass; exiting with the highest code, ${worst}" >&2
+    exit "${worst}"
+  fi
+  ok "every requested check passed (${ran})"
+}
+
+# dlint --check <check> [--check <check>]...
+run_selected() {
+  local -a specs=()
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+    --check)
+      [ "$#" -ge 2 ] || usage_error "'--check' needs a check to run"
+      [ -n "$2" ] || usage_error "'--check' needs a check to run, got an empty value"
+      specs+=("$2")
+      shift 2
+      ;;
+    *)
+      usage_error "unexpected argument '$1'; combine checks with a repeated '--check <check>'"
+      ;;
+    esac
+  done
+  run_specs "${specs[@]}"
+}
+
+# dlint --all-configured
+run_all_configured() {
+  [ "$#" -eq 0 ] || usage_error "--all-configured takes no arguments, got '$1'"
+
+  load_config_file
+
+  # Every key is validated against the checks dlint actually has. A key dlint
+  # does not know is a configuration error, never something to pass over: a
+  # misspelled check would otherwise be silently unenforced while
+  # --all-configured reported green.
+  local enabled=""
+  enabled="$(jq -r '[.checks | to_entries[] | select(.value != false)] | length' "${CFG_JSON}")" ||
+    config_invalid "dlint configuration '${CFG_FILE}': could not read '.checks'"
+  [ "${enabled}" -gt 0 ] ||
+    config_absent "dlint configuration '${CFG_FILE}' has no check left enabled under '.checks', so --all-configured would assert nothing at all. That is never a pass; enable a check, or do not run dlint."
+
+  # A configured key dlint does not know is a configuration error, never
+  # something to pass over: a misspelled check would otherwise sit in the file
+  # looking enforced while nothing ran it.
+  local keys_file="${WORK_DIR}/configured-checks.txt"
+  jq -r '.checks | keys_unsorted[]' "${CFG_JSON}" >"${keys_file}" ||
+    config_invalid "dlint configuration '${CFG_FILE}': could not list the keys of '.checks'"
+
+  local key="" known="" candidate=""
+  while IFS= read -r key; do
+    [ -n "${key}" ] || continue
+    known=0
+    for candidate in ${DLINT_CHECKS}; do
+      [ "${key}" != "${candidate}" ] || known=1
+    done
+    [ "${known}" -eq 1 ] ||
+      config_invalid "dlint configuration '${CFG_FILE}': '.checks[\"${key}\"]' is not a dlint check. dlint has these: ${DLINT_CHECKS}"
+  done <"${keys_file}"
+
+  # The population is the checks DLINT SHIPS, never the keys the configuration
+  # happens to carry. Deriving it from the file would mean a deleted section
+  # quietly stopped being enforced while this invocation still reported green —
+  # the vacuous pass every other refusal in this tool exists to prevent. Read
+  # from dlint's own list, an absent section reaches its normal exit-3 refusal
+  # and `false` stays the one way to opt a check out.
+  local specs_file="${WORK_DIR}/requested-specs.txt"
+  : >"${specs_file}"
+  for candidate in ${DLINT_CHECKS}; do
+    specs_for_check "${candidate}" >>"${specs_file}"
+  done
+
+  local -a specs=()
+  mapfile -t specs <"${specs_file}"
+  [ "${#specs[@]}" -gt 0 ] ||
+    tool_failure "dlint lists no check to run, so --all-configured would inspect nothing"
+
+  log_info "running every check dlint ships (${#specs[@]}) against '${CFG_FILE}'"
+  run_specs "${specs[@]}"
+}
+
+# --------------------------------------------------------------------------- #
 # workflow-policy
 # --------------------------------------------------------------------------- #
 
@@ -843,7 +1029,7 @@ check_workflow_policy() {
   load_check_config workflow-policy
 
   local count=""
-  count="$(jq -r '.checks["workflow-policy"].assertions | if type == "array" then length else "not-an-array" end' "${CFG_FILE}")" ||
+  count="$(jq -r '.checks["workflow-policy"].assertions | if type == "array" then length else "not-an-array" end' "${CFG_JSON}")" ||
     config_invalid "workflow-policy: could not read '.checks[\"workflow-policy\"].assertions'"
   [ "${count}" != "not-an-array" ] ||
     config_invalid "workflow-policy: '.checks[\"workflow-policy\"].assertions' must be an array of assertions"
@@ -855,11 +1041,11 @@ check_workflow_policy() {
     # Every field is required. A missing 'reason' is refused rather than
     # defaulted: a refusal that cannot name the policy it enforces is the kind of
     # gate that gets deleted for being unexplainable.
-    file="$(jq -r --argjson i "${index}" '.checks["workflow-policy"].assertions[$i].file // empty' "${CFG_FILE}")" ||
+    file="$(jq -r --argjson i "${index}" '.checks["workflow-policy"].assertions[$i].file // empty' "${CFG_JSON}")" ||
       config_invalid "workflow-policy: could not read assertion ${index}"
-    path="$(jq -r --argjson i "${index}" '.checks["workflow-policy"].assertions[$i].path // empty' "${CFG_FILE}")" ||
+    path="$(jq -r --argjson i "${index}" '.checks["workflow-policy"].assertions[$i].path // empty' "${CFG_JSON}")" ||
       config_invalid "workflow-policy: could not read assertion ${index}"
-    reason="$(jq -r --argjson i "${index}" '.checks["workflow-policy"].assertions[$i].reason // empty' "${CFG_FILE}")" ||
+    reason="$(jq -r --argjson i "${index}" '.checks["workflow-policy"].assertions[$i].reason // empty' "${CFG_JSON}")" ||
       config_invalid "workflow-policy: could not read assertion ${index}"
 
     [ -n "${file}" ] ||
@@ -878,10 +1064,10 @@ check_workflow_policy() {
     # "the field is correctly null" the same answer.
     jq -e --argjson i "${index}" \
       '.checks["workflow-policy"].assertions[$i] | has("equals") and (.equals != null)' \
-      "${CFG_FILE}" >/dev/null 2>&1 ||
+      "${CFG_JSON}" >/dev/null 2>&1 ||
       config_invalid "workflow-policy: assertion ${index} needs an 'equals' value that is not null; null is reserved for reporting an absent path"
 
-    want="$(jq -S -c --argjson i "${index}" '.checks["workflow-policy"].assertions[$i].equals' "${CFG_FILE}")" ||
+    want="$(jq -S -c --argjson i "${index}" '.checks["workflow-policy"].assertions[$i].equals' "${CFG_JSON}")" ||
       config_invalid "workflow-policy: could not read the expected value of assertion ${index}"
 
     [ -f "${file}" ] ||
@@ -935,15 +1121,9 @@ main() {
   trap "rm -rf '${WORK_DIR}'" EXIT
 
   case "${command}" in
-  action-pins) check_action_pins "$@" ;;
-  exec-bits) check_exec_bits "$@" ;;
-  ci-wiring) check_ci_wiring "$@" ;;
-  skills-fresh) check_skills_fresh "$@" ;;
-  toolchain-smoke) check_toolchain_smoke "$@" ;;
-  workflow-policy) check_workflow_policy "$@" ;;
-  *)
-    usage_error "unknown check '${command}'; dlint has exactly six: action-pins, exec-bits, ci-wiring, skills-fresh, toolchain-smoke, workflow-policy"
-    ;;
+  --all-configured) run_all_configured "$@" ;;
+  --check) run_selected --check "$@" ;;
+  *) dispatch_check "${command}" "$@" ;;
   esac
 }
 

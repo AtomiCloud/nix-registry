@@ -608,6 +608,30 @@ m_config_at_custom_yaml_path() {
   git add -A
 }
 
+# -- multiple checks in one invocation -------------------------------------- #
+
+m_all_checks_disabled() {
+  edit_config '.checks |= with_entries(.value = false)'
+}
+
+m_unknown_check_configured() {
+  edit_config '.checks["not-a-check"] = {}'
+}
+
+# Two faults in two DIFFERENT checks, both of which refuse with exit 1. Used to
+# prove that a multi-check run does not stop at the first refusal.
+m_two_violations() {
+  m_entrypoint_not_executable
+  m_nontrusted_pinned_to_tag
+}
+
+# A violation (1) in one check and an absent section (3) in another. The
+# aggregate must report 3: an unrunnable check outranks a known violation.
+m_violation_and_absent_section() {
+  m_entrypoint_not_executable
+  edit_config 'del(.checks["ci-wiring"])'
+}
+
 # -- workflow-policy -------------------------------------------------------- #
 #
 # The first five mirror, one for one, the sabotages the validator this check
@@ -922,9 +946,9 @@ arm "required key wrong type" m_trust_map_key_wrong_type 4 \
 
 printf '\nentrypoint arms\n'
 arm "unknown check" m_none 2 \
-  "dlint has exactly six" -- not-a-check
-arm "there is no 'all'" m_none 2 \
-  "dlint has exactly six" -- all
+  "unknown check 'not-a-check'" -- not-a-check
+arm "there is still no 'all' CHECK" m_none 2 \
+  "unknown check 'all'" -- all
 arm "no check at all" m_none 2 \
   "dlint needs a check to run" --
 arm "exec-bits rejects arguments" m_none 2 \
@@ -945,6 +969,15 @@ arm "yaml config / skills-fresh" m_config_as_yaml 0 \
   "✅ Vendored tree is fresh" -- skills-fresh
 arm "yaml config / toolchain-smoke" m_config_as_yaml 0 \
   "✅ Every declared shell resolves its required binaries (full lean)" -- toolchain-smoke
+# These two are the controls for THIS REBASE. Landing on a main that already carries
+# workflow-policy and --all-configured brought in jq readers the CFG_JSON refactor had
+# never seen, so every one of them was moved to the converted copy. Without these arms
+# that conversion is asserted rather than checked: under YAML they would hand a YAML
+# file to jq, and no other arm exercises those two readers from a YAML config.
+arm "yaml config / workflow-policy" m_config_as_yaml 0 \
+  "✅ Workflow policy conforms" -- workflow-policy
+arm "yaml config / --all-configured (every reader)" m_config_as_yaml 0 \
+  "✅ every requested check passed (7)" -- --all-configured
 
 # A green under YAML proves nothing on its own — the check has to still be able to
 # FAIL when read from YAML.
@@ -975,6 +1008,70 @@ arm "DLINT_CONFIG wins and follows its extension" m_config_at_custom_yaml_path 0
 ARM_DLINT_CONFIG="config/nowhere.yaml"
 arm "DLINT_CONFIG naming a missing file is absent" m_none 3 \
   "named by DLINT_CONFIG, does not exist" -- exec-bits
+
+printf '\nmultiple checks in one invocation\n'
+arm "--all-configured baseline (7 specs from 6 sections)" m_none 0 \
+  "✅ every requested check passed (7)" -- --all-configured
+arm "--all-configured counts what it ran" m_none 0 \
+  "checks run: 7 (did not pass: 0)" -- --all-configured
+# --all-configured reads dlint's OWN check list, so a check added to dlint is
+# enforced by it without anything else being edited. This arm is what makes that
+# claim checkable rather than asserted: it plants a workflow-policy fault and
+# requires the aggregate run to catch it.
+arm "--all-configured enforces workflow-policy too" m_release_concurrency_group_dropped 1 \
+  "release concurrency group must be release" -- --all-configured
+
+# The expansion arm that matters: only the NON-TRUSTED pin is broken. An
+# --all-configured that ran just 'action-pins trusted' would report GREEN here,
+# so this is the control that separates "both classes ran" from "one did".
+arm "--all-configured runs BOTH action-pins classes" m_nontrusted_pinned_to_tag 1 \
+  "must use an exact SHA" -- --all-configured
+arm "--all-configured reports the trusted class too" m_trusted_pinned_to_sha 1 \
+  "must use a major pin" -- --all-configured
+
+# Two arms, one mutator: each asserts a DIFFERENT check's reason, so both
+# together prove the run continued past the first refusal instead of stopping.
+arm "two faults: the exec-bits reason is reported" m_two_violations 1 \
+  "is tracked but not executable" -- --all-configured
+arm "two faults: the action-pins reason is reported too" m_two_violations 1 \
+  "must use an exact SHA" -- --all-configured
+arm "two faults are counted, not just the first" m_two_violations 1 \
+  "did not pass" -- --all-configured
+
+# The regression guard for a hole this harness found during development: when
+# --all-configured derived its work list from the CONFIG's keys, deleting a
+# section made that check silently stop being enforced and the run still reported
+# green. The population is dlint's own check list, so a deleted section refuses.
+arm "a deleted section refuses, it is not skipped" m_section_removed_ci_wiring 3 \
+  "An absent section is never a pass" -- --all-configured
+arm "a deleted section still names the check" m_section_removed_ci_wiring 3 \
+  '.checks["ci-wiring"]' -- --all-configured
+arm "an unrunnable check outranks a violation" m_violation_and_absent_section 3 \
+  "An absent section is never a pass" -- --all-configured
+arm "config file absent / --all-configured" m_config_deleted 3 \
+  "dlint configuration is missing" -- --all-configured
+arm "every check disabled asserts nothing" m_all_checks_disabled 3 \
+  "no check left enabled" -- --all-configured
+arm "a configured key that is not a check" m_unknown_check_configured 4 \
+  "is not a dlint check" -- --all-configured
+arm "--all-configured takes no arguments" m_none 2 \
+  "--all-configured takes no arguments" -- --all-configured exec-bits
+
+arm "--check runs one check" m_none 0 \
+  "✅ every requested check passed (1)" -- --check exec-bits
+# This is the exact invocation that replaces the `dlints` bash-wrapper hook.
+arm "--check replaces the two-class wrapper hook" m_none 0 \
+  "✅ every requested check passed (2)" -- --check "action-pins trusted" --check "action-pins non-trusted"
+arm "--check reports a refusal" m_entrypoint_not_executable 1 \
+  "is tracked but not executable" -- --check exec-bits
+arm "--check with no value" m_none 2 \
+  "'--check' needs a check to run" -- --check
+arm "--check with an empty value" m_none 2 \
+  "needs a check to run, got an empty value" -- --check ""
+arm "--check with an unknown check" m_none 2 \
+  "unknown check 'not-a-check'" -- --check not-a-check
+arm "a bare argument is not a check list" m_none 2 \
+  "combine checks with a repeated" -- --check exec-bits ci-wiring
 
 printf '\nrepo-agnosticism\n'
 arm "default workflow dir / action-pins" m_default_workflows_dir 0 \
