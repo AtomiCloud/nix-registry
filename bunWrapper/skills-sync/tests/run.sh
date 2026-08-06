@@ -86,7 +86,7 @@ make_node_repo() {
 
   cat >"${dir}/skills-sync.yaml" <<'YAML'
 schemaVersion: 1
-runtime: bun
+runtimes: [bun]
 YAML
   cat >"${dir}/package.json" <<'JSON'
 {
@@ -191,9 +191,9 @@ expect 'B1 no config: the writer is inert' 0 'names no runtime'
 run_in "${OFF_REPO}" "${SKILLS_SYNC_CMD[@]}" sync --frozen
 expect 'B2 no config: frozen mode is inert too' 0 'names no runtime'
 
-printf 'schemaVersion: 1\nruntime: none\n' >"${OFF_REPO}/skills-sync.yaml"
+printf 'schemaVersion: 1\nruntimes: []\n' >"${OFF_REPO}/skills-sync.yaml"
 run_in "${OFF_REPO}" "${SKILLS_SYNC_CMD[@]}" sync --frozen
-expect 'B3 runtime: none is inert' 0 'names no runtime'
+expect 'B3 runtimes: [] is inert' 0 'names no runtime'
 
 rm -f "${OFF_REPO}/skills-sync.yaml"
 mkdir -p "${OFF_REPO}/.claude/skills/vendor/leftover"
@@ -317,7 +317,7 @@ expect 'E1 frozen refuses when requireSubjects has no subject' 1 'no vendored sk
 run_in "${V}" "${SKILLS_SYNC_CMD[@]}" sync
 expect 'E2 writer refuses when requireSubjects has no subject' 1 'no vendored skill resolved'
 
-printf 'schemaVersion: 1\nruntime: bun\nrequireSubjects: false\n' >"${V}/skills-sync.yaml"
+printf 'schemaVersion: 1\nruntimes: [bun]\nrequireSubjects: false\n' >"${V}/skills-sync.yaml"
 run_in "${V}" "${SKILLS_SYNC_CMD[@]}" sync
 expect 'E3 writer accepts the explicitly empty case' 0 'vendored skills synchronised'
 git_q "${V}" add -A
@@ -415,21 +415,29 @@ expect 'G5 the places changed to add that language = 1 (skills-sync itself is un
 group 'H. CONFIGURATION — an unusable config is loud, never an "off"'
 
 H="$(mutate config)"
-printf 'schemaVersion: 1\nruntime: kotlin\n' >"${H}/skills-sync.yaml"
+printf 'schemaVersion: 1\nruntimes: [kotlin]\n' >"${H}/skills-sync.yaml"
 run_in "${H}" "${SKILLS_SYNC_CMD[@]}" sync --frozen
 expect 'H1 an unknown runtime is INVALID, not silently off' 4 'is not a built-in preset'
 
-printf 'schemaVersion: 7\nruntime: bun\n' >"${H}/skills-sync.yaml"
+printf 'schemaVersion: 7\nruntimes: [bun]\n' >"${H}/skills-sync.yaml"
 run_in "${H}" "${SKILLS_SYNC_CMD[@]}" sync --frozen
 expect 'H2 an unknown schema version is invalid' 4 "'schemaVersion' must be 1"
 
-printf 'schemaVersion: 1\nruntime: bun\nvendorDir: /etc\n' >"${H}/skills-sync.yaml"
+printf 'schemaVersion: 1\nruntimes: [bun]\nvendorDir: /etc\n' >"${H}/skills-sync.yaml"
 run_in "${H}" "${SKILLS_SYNC_CMD[@]}" sync --frozen
 expect 'H3 a vendorDir outside the repository is invalid' 4 'must be a path inside the repository'
 
-printf 'schemaVersion: 1\nruntime: bun\n' >"${H}/skills-sync.yaml"
+printf 'schemaVersion: 1\nruntimes: [bun]\n' >"${H}/skills-sync.yaml"
 run_in "${H}" SKILLS_SYNC_CONFIG=nowhere.yaml "${SKILLS_SYNC_CMD[@]}" sync --frozen
 expect 'H4 a config pointer aimed at nothing is invalid, not off' 4 'does not exist'
+
+printf 'schemaVersion: 1\nruntime: bun\n' >"${H}/skills-sync.yaml"
+run_in "${H}" "${SKILLS_SYNC_CMD[@]}" sync --frozen
+expect 'H5 the retired singular runtime key is refused with the migration named' 4 "'runtime' is retired"
+
+printf 'schemaVersion: 1\nruntimes: [bun, bun]\n' >"${H}/skills-sync.yaml"
+run_in "${H}" "${SKILLS_SYNC_CMD[@]}" sync --frozen
+expect 'H6 a runtime listed twice is refused' 4 "lists 'bun' twice"
 
 printf 'schemaVersion: 1\nresolver:\n  name: broken\n  declare: []\n' >"${H}/skills-sync.yaml"
 run_in "${H}" "${SKILLS_SYNC_CMD[@]}" sync --frozen
@@ -446,7 +454,7 @@ mkdir -p "${DART}/.claude/skills/vendor" "${DART}/.dart_tool" \
   "${DART}/packages/app" "${DART}/pubcache/diene_core/skills/core"
 git init -q "${DART}"
 git -C "${DART}" config core.hooksPath "${TMPROOT}/no-hooks"
-printf 'schemaVersion: 1\nruntime: dart\n' >"${DART}/skills-sync.yaml"
+printf 'schemaVersion: 1\nruntimes: [dart]\n' >"${DART}/skills-sync.yaml"
 printf 'name: root\nworkspace:\n  - packages/app\n' >"${DART}/pubspec.yaml"
 printf 'name: app\ndependencies:\n  diene_core: ^1.0.0\n  http: ^1.0.0\n' >"${DART}/packages/app/pubspec.yaml"
 printf 'core skill\n' >"${DART}/pubcache/diene_core/skills/core/SKILL.md"
@@ -485,7 +493,7 @@ NUGET="${TMPROOT}/nuget"
 mkdir -p "${NUGET}/.claude/skills/vendor" "${HOME}/.nuget/packages/atomicloud.diene.core/1.2.3/skills/core"
 git init -q "${NUGET}"
 git -C "${NUGET}" config core.hooksPath "${TMPROOT}/no-hooks"
-printf 'schemaVersion: 1\nruntime: dotnet\n' >"${NUGET}/skills-sync.yaml"
+printf 'schemaVersion: 1\nruntimes: [dotnet]\n' >"${NUGET}/skills-sync.yaml"
 cat >"${NUGET}/Directory.Packages.props" <<'XML'
 <Project>
   <ItemGroup>
@@ -514,7 +522,7 @@ if command -v go >/dev/null 2>&1; then
   mkdir -p "${GO}/.claude/skills/vendor" "${GO}/vendored/diene.go/skills/gopher"
   git init -q "${GO}"
   git -C "${GO}" config core.hooksPath "${TMPROOT}/no-hooks"
-  printf 'schemaVersion: 1\nruntime: go\n' >"${GO}/skills-sync.yaml"
+  printf 'schemaVersion: 1\nruntimes: [go]\n' >"${GO}/skills-sync.yaml"
   printf 'go skill\n' >"${GO}/vendored/diene.go/skills/gopher/SKILL.md"
   printf 'module example.com/fixture\n\ngo 1.21\n\nrequire example.com/diene.go v0.0.0\n\nreplace example.com/diene.go => ./vendored/diene.go\n' >"${GO}/go.mod"
   printf 'module example.com/diene.go\n\ngo 1.21\n' >"${GO}/vendored/diene.go/go.mod"
@@ -563,9 +571,9 @@ printf 'schemaVersion: 1\n' >"${DECL}/skills-sync.yaml"
 run_in "${DECL}" "${SKILLS_SYNC_CMD[@]}" sync --frozen
 expect 'J2 a config naming no runtime is an absence, not a declaration' 1 'declares diene package'
 
-printf 'schemaVersion: 1\nruntime: none\n' >"${DECL}/skills-sync.yaml"
+printf 'schemaVersion: 1\nruntimes: []\n' >"${DECL}/skills-sync.yaml"
 run_in "${DECL}" "${SKILLS_SYNC_CMD[@]}" sync --frozen
-expect 'J3 MUST-DIFFER: runtime: none is an explicit opt-out and PASSES' 0 ''
+expect 'J3 MUST-DIFFER: runtimes: [] is an explicit opt-out and PASSES' 0 ''
 run_in "${DECL}" "${SKILLS_SYNC_CMD[@]}" sync --frozen
 expect 'J3b and the opt-out still names what it is ignoring' 0 '@atomicloud/diene.alpha'
 
@@ -702,7 +710,7 @@ SELF="${TMPROOT}/selfref"
 mkdir -p "${SELF}/.claude/skills/vendor" "${SELF}/.dart_tool" "${SELF}/pubcache/diene_core/skills/core"
 git init -q "${SELF}"
 git -C "${SELF}" config core.hooksPath "${TMPROOT}/no-hooks"
-printf 'schemaVersion: 1\nruntime: dart\n' >"${SELF}/skills-sync.yaml"
+printf 'schemaVersion: 1\nruntimes: [dart]\n' >"${SELF}/skills-sync.yaml"
 printf 'name: root\ndependencies:\n  diene_core: ^1.0.0\n' >"${SELF}/pubspec.yaml"
 printf 'core skill\n' >"${SELF}/pubcache/diene_core/skills/core/SKILL.md"
 cat >"${SELF}/.dart_tool/package_config.json" <<JSON
@@ -734,7 +742,7 @@ make_precommit_repo() {
   mkdir -p "${dir}/.claude/skills/vendor" "${dir}/node_modules/@atomicloud/diene.alpha/skills/alpha"
   git init -q "${dir}"
   git -C "${dir}" config core.hooksPath "${dir}/.git/hooks"
-  printf 'schemaVersion: 1\nruntime: bun\n' >"${dir}/skills-sync.yaml"
+  printf 'schemaVersion: 1\nruntimes: [bun]\n' >"${dir}/skills-sync.yaml"
   printf '{"name":"f","dependencies":{"@atomicloud/diene.alpha":"1.0.0"}}\n' >"${dir}/package.json"
   printf 'v1\n' >"${dir}/node_modules/@atomicloud/diene.alpha/skills/alpha/SKILL.md"
   printf 'node_modules/\n' >"${dir}/.gitignore"

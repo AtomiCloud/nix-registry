@@ -35,7 +35,7 @@ function writeVendorTree(vendorAbs: string, config: Config, plan: ReturnType<typ
       mutated.push(path);
     }
 
-    const manifestText = renderManifest(buildManifest(config.runtimeName as string, plan.declared, plan.expected));
+    const manifestText = renderManifest(buildManifest(config.runtimes.join('+'), plan.declared, plan.expected));
     const manifestPath = join(vendorAbs, MANIFEST_NAME);
     if (!existsSync(manifestPath) || readFileSync(manifestPath, 'utf8') !== manifestText) {
       writeFileSync(manifestPath, manifestText);
@@ -82,7 +82,7 @@ export function runSync(repoRoot: string, config: Config, frozen: boolean): numb
       warn('Frozen enforcement did not run; restore dependencies before relying on vendored-state enforcement.');
       return EXIT_OK;
     }
-    refusal(`skills-sync sync: dependencies for '${config.runtimeName}' are not restored in '${repoRoot}'.`);
+    refusal(`skills-sync sync: dependencies for '${config.runtimes.join(', ')}' are not restored in '${repoRoot}'.`);
     for (const reason of plan.preconditionReasons) console.error(`   - ${reason}`);
     console.error('   The writer never publishes a partial vendored tree. Restore dependencies, then run it again.');
     return EXIT_PRECONDITION;
@@ -90,7 +90,7 @@ export function runSync(repoRoot: string, config: Config, frozen: boolean): numb
 
   if (plan.expected.length === 0 && config.requireSubjects) {
     refusal(
-      `skills-sync sync${frozen ? ' --frozen' : ''}: no vendored skill resolved for runtime '${config.runtimeName}' in '${repoRoot}'. ` +
+      `skills-sync sync${frozen ? ' --frozen' : ''}: no vendored skill resolved for runtimes '${config.runtimes.join(', ')}' in '${repoRoot}'. ` +
         `Writing an empty tree here would silently remove whatever is committed. ` +
         `If this repository legitimately vendors no skills, declare it: 'requireSubjects: false' in '${config.source}'.`,
     );
@@ -121,6 +121,6 @@ export function runSync(repoRoot: string, config: Config, frozen: boolean): numb
     return EXIT_OK;
   }
 
-  ok(`vendored skills synchronised into '${vendorAbs}' (runtime '${config.runtimeName}'). Commit the result.`);
+  ok(`vendored skills synchronised into '${vendorAbs}' (runtimes '${config.runtimes.join(', ')}'). Commit the result.`);
   return EXIT_OK;
 }

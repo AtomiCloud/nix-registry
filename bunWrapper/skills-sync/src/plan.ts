@@ -55,7 +55,7 @@ export function outcomeWhenOff(config: Config, vendorAbs: string, repoRoot: stri
     const named = declared.packages.map(p => `${p.name} (from ${p.declaredIn})`);
     if (config.explicitOptOut) {
       warn(
-        `'${where}' declares 'runtime: none', so skills-sync is deliberately off here — but this repository ` +
+        `'${where}' declares 'runtimes: []', so skills-sync is deliberately off here — but this repository ` +
           `declares ${declared.packages.length} diene package(s): ${named.join(', ')}. ` +
           `Their skills are NOT vendored. That is accepted because the opt-out is explicit.`,
       );
@@ -67,8 +67,8 @@ export function outcomeWhenOff(config: Config, vendorAbs: string, repoRoot: stri
     throw violation(
       `'${where}' names no runtime, but this repository declares ${declared.packages.length} diene package(s): ` +
         `${named.join(', ')}. A repository that declares diene packages has a vendored-skills subject, so being ` +
-        `off here would ship no skills and say nothing. Name the runtime, or declare the opt-out explicitly with ` +
-        `'runtime: none'. An absent configuration is an absence of declaration, not a declaration of absence.`,
+        `off here would ship no skills and say nothing. Declare the runtimes, or opt out explicitly with ` +
+        `'runtimes: []'. An absent configuration is an absence of declaration, not a declaration of absence.`,
     );
   }
 
@@ -97,31 +97,56 @@ function probeForUnclaimedSubject(repoRoot: string): {
 
 export function buildPlan(repoRoot: string, config: Config): Plan {
   const vendorAbs = join(repoRoot, config.vendorDir);
-  const spec = config.resolver!;
 
-  info(`configuration: '${config.source}' (runtime: ${config.runtimeName})`);
+  info(`configuration: '${config.source}' (runtimes: ${config.runtimes.join(', ')})`);
   info(`repository root: '${repoRoot}'`);
   info(`vendor directory: '${vendorAbs}'`);
 
-  const declared = declaredPackages(repoRoot, spec);
+  const declared: DeclaredPackage[] = [];
+  const preconditionReasons: string[] = [];
+  const installed: Resolution['installed'] = [];
+  const unresolved: DeclaredPackage[] = [];
+
+  for (const spec of config.resolvers) {
+    const specDeclared = declaredPackages(repoRoot, spec).filter(d => !declared.some(p => p.name === d.name));
+    declared.push(...specDeclared);
+    const reasons = [...dependencyVerdict(repoRoot, spec, specDeclared).reasons];
+    if (reasons.length > 0) {
+      preconditionReasons.push(...reasons);
+      unresolved.push(...specDeclared);
+      continue;
+    }
+    const resolution = resolveInstalled(repoRoot, spec, specDeclared);
+    preconditionReasons.push(...unresolvedReasons(resolution.unresolved));
+    unresolved.push(...resolution.unresolved);
+    installed.push(...resolution.installed);
+  }
   info(
     `declared diene packages: ${declared.length}${declared.length ? ` — ${declared.map(d => d.name).join(', ')}` : ''}`,
   );
 
-  const preconditionReasons = [...dependencyVerdict(repoRoot, spec, declared).reasons];
-
-  let resolution: Resolution = { installed: [], unresolved: declared };
+  let expected = preconditionReasons.length === 0 ? expectedTree(installed) : [];
   if (preconditionReasons.length === 0) {
-    resolution = resolveInstalled(repoRoot, spec, declared);
-    preconditionReasons.push(...unresolvedReasons(resolution.unresolved));
+    // Two runtimes shipping the same vendored path with different content is a
+    // real conflict a human must resolve, never a silent last-writer-wins.
+    const byPath = new Map<string, string>();
+    for (const entry of expected) {
+      const prior = byPath.get(entry.path);
+      if (prior !== undefined && prior !== entry.sha256) {
+        preconditionReasons.push(
+          `vendored path '${entry.path}' is shipped with different content by two declared runtimes; resolve the collision in the packages`,
+        );
+      }
+      byPath.set(entry.path, entry.sha256);
+    }
+    if (preconditionReasons.length > 0) expected = [];
   }
-
-  const expected = preconditionReasons.length === 0 ? expectedTree(resolution.installed) : [];
   if (preconditionReasons.length === 0) {
-    const shipping = resolution.installed.filter(p => p.skillsDir !== null);
-    info(`installed packages resolved: ${resolution.installed.length}, of which ${shipping.length} ship skills`);
+    const shipping = installed.filter(p => p.skillsDir !== null);
+    info(`installed packages resolved: ${installed.length}, of which ${shipping.length} ship skills`);
     info(`expected vendored files: ${expected.length}`);
   }
 
+  const resolution: Resolution = { installed, unresolved };
   return { repoRoot, config, vendorAbs, declared, resolution, expected, preconditionReasons };
 }
