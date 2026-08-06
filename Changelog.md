@@ -1,3 +1,11 @@
+## [4.4.1](https://github.com/AtomiCloud/nix-registry/compare/v4.4.0...v4.4.1) (2026-08-06)
+
+
+### Documentation Updates
+
+* **pkg:** release the corrected skills-sync wiring documentation ([6c6d340](https://github.com/AtomiCloud/nix-registry/commit/6c6d34027474532e516f9057e78a577f41c9b5ff)), closes [#77](https://github.com/AtomiCloud/nix-registry/issues/77) [#77](https://github.com/AtomiCloud/nix-registry/issues/77)
+* **skills-sync:** the shipped docs still describe the revoked never-in-hooks rule ([a0421c2](https://github.com/AtomiCloud/nix-registry/commit/a0421c2a569db6f79b71c09ba54c74f7db946591))
+
 ## [4.4.0](https://github.com/AtomiCloud/nix-registry/compare/v4.3.0...v4.4.0) (2026-08-06)
 
 
