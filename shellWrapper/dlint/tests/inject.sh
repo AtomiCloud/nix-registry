@@ -1046,7 +1046,7 @@ arm "yaml config / toolchain-smoke" m_config_as_yaml 0 \
 arm "yaml config / workflow-policy" m_config_as_yaml 0 \
   "✅ Workflow policy conforms" -- workflow-policy
 arm "yaml config / --all-configured (every reader)" m_config_as_yaml 0 \
-  "✅ every requested check passed (7)" -- --all-configured
+  "✅ every requested check passed (8)" -- --all-configured
 # Added by the #68 rebase, and predicted by the stale-scope law before it was found:
 # no-custom-derivations reads its own `forbid` type directly, a reader this refactor
 # never saw. Under YAML that read would have been handed the YAML file. This arm is
@@ -1086,10 +1086,10 @@ arm "DLINT_CONFIG naming a missing file is absent" m_none 3 \
   "named by DLINT_CONFIG, does not exist" -- exec-bits
 
 printf '\nmultiple checks in one invocation\n'
-arm "--all-configured baseline (7 specs from 6 sections)" m_none 0 \
-  "✅ every requested check passed (7)" -- --all-configured
+arm "--all-configured baseline (8 specs from 7 sections)" m_none 0 \
+  "✅ every requested check passed (8)" -- --all-configured
 arm "--all-configured counts what it ran" m_none 0 \
-  "checks run: 7 (did not pass: 0)" -- --all-configured
+  "checks run: 8 (did not pass: 0)" -- --all-configured
 # --all-configured reads dlint's OWN check list, so a check added to dlint is
 # enforced by it without anything else being edited. This arm is what makes that
 # claim checkable rather than asserted: it plants a workflow-policy fault and
