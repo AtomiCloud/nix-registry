@@ -16,6 +16,11 @@ import { info, ok, refusal } from './report.ts';
 // at all, so that branch is gone: an unrestored tree is a refusal, and the only
 // thing that runs at commit time is the read-only check.
 export function runSync(repoRoot: string, config: Config): number {
+  // Deliberately duplicated: the CLI evaluates this BEFORE resolving the work
+  // tree, so that D1 is reachable in any directory and can be tested there. This
+  // second call guards the function itself, whose arguments a caller has already
+  // had to resolve — removing it would make D1 depend on going through the CLI.
+  // Both are idempotent; neither is redundant with the other.
   refuseInHookContext('sync');
 
   const vendorAbs = join(repoRoot, config.vendorDir);

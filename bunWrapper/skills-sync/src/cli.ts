@@ -1,6 +1,6 @@
 import { CONFIG_DEFAULT, VENDOR_DEFAULT, loadConfig } from './config.ts';
 import { EXIT_OK, EXIT_TOOL, EXIT_USAGE, SkillsSyncError, usageError } from './exit.ts';
-import { repoRoot } from './git.ts';
+import { refuseInHookContext, repoRoot } from './git.ts';
 import { runCheck } from './check.ts';
 import { runSync } from './sync.ts';
 import { PRESETS, PRESET_NAMES } from './spec.ts';
@@ -151,6 +151,18 @@ Options:
       syncCommand.usage();
       return EXIT_OK;
     }
+    // D1 is evaluated BEFORE any precondition, and this ordering is load-bearing.
+    //
+    // It used to sit after `repoRoot`, which meant that in a directory that is
+    // not a work tree BOTH the hook case and the ordinary case answered exit 5,
+    // "not inside a git work tree" — and D1 was never evaluated. Nothing shipped
+    // broken, because a hook always runs inside a work tree. What did ship was a
+    // rule that DEFEATS ATTEMPTS TO CONFIRM IT: two arms agreeing reads exactly
+    // like a controlled result, so a verifier who does not print a positive
+    // control first reports a pass for a rule their test never reached. That
+    // already cost one real control. A law that another precondition can
+    // pre-empt is not independently verifiable, so it goes first.
+    refuseInHookContext('sync');
     const root = repoRoot(process.cwd());
     return runSync(root, loadConfig(root));
   },

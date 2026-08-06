@@ -397,6 +397,37 @@ git_q "${WNEW}" commit -m resync --no-verify
 run_in "${WNEW}" "${SKILLS_SYNC_CMD[@]}" check --tier ci
 expect 'E8 and the check goes green again' 0 'are fresh'
 
+# D1 must be REACHABLE, not merely correct once reached.
+#
+# This pair exists because of a real defect, found by a control that could not
+# reach its subject. The writer used to resolve the work-tree root BEFORE
+# evaluating the hook guard, so in a NON-git directory both the hook arm and the
+# no-hook arm returned exit 5, "not inside a git work tree", and D1 was never
+# evaluated at all. Two arms agreeing reads exactly like a controlled result,
+# which is how a rule gets certified by a test that never executed it.
+#
+# E9 is the arm that catches that ordering: it FAILS (exit 5) against the old
+# ordering and passes (exit 2) once the guard is hoisted above every
+# precondition. E10 is not a second D1 arm — it is what makes E9 mean something,
+# by proving the same directory still answers 5 when no marker is set. Without
+# E10, a build that simply refused everything with exit 2 would pass E9.
+NONGIT="${TMPROOT}/nongit-hook"
+mkdir -p "${NONGIT}"
+
+# Both arms below are worthless if this directory is secretly inside a work
+# tree, so that is asserted rather than assumed.
+run_in "${NONGIT}" git rev-parse --show-toplevel
+expect 'E9a POSITIVE CONTROL: the fixture directory is NOT a git work tree' 128 'not a git repository'
+
+run_in "${NONGIT}" PRE_COMMIT=1 "${SKILLS_SYNC_CMD[@]}" sync
+expect 'E9 D1 is REACHED where the git precondition would otherwise pre-empt it' 2 'must never run from a hook (D1)'
+run_in "${NONGIT}" PRE_COMMIT=1 "${SKILLS_SYNC_CMD[@]}" sync
+expect 'E9b and it still names the marker that fired' 2 'The environment variable PRE_COMMIT'
+
+run_in "${NONGIT}" env -u SKILLS_SYNC_HOOK_CONTEXT -u PRE_COMMIT -u PRE_COMMIT_HOME \
+  -u GIT_INDEX_FILE -u HUSKY_GIT_PARAMS -u LEFTHOOK "${SKILLS_SYNC_CMD[@]}" sync
+expect 'E10 MUST-DIFFER: same directory, no marker, still the git precondition' 5 'is not inside a git work tree'
+
 # --------------------------------------------------------------------------- #
 group 'F. VACUOUS PASSES — a check with no subject is not a passing check'
 # --------------------------------------------------------------------------- #
