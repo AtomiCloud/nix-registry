@@ -99,7 +99,7 @@ function sourceFiles(repoRoot: string, src: DeclareSource): string[] {
 // DEAD. A sweep that reports only a total lets a source that can never match
 // (a filename that moved, a pattern that no longer applies) go on inflating the
 // apparent width of the scan.
-export function declaredPackages(repoRoot: string, spec: ResolverSpec): DeclaredPackage[] {
+export function declaredPackages(repoRoot: string, spec: ResolverSpec, quiet = false): DeclaredPackage[] {
   const packages = new Map<string, DeclaredPackage>();
   const liveness: { term: string; hits: number }[] = [];
   let witnessedWithoutNames = false;
@@ -150,12 +150,16 @@ export function declaredPackages(repoRoot: string, spec: ResolverSpec): Declared
     liveness.push({ term: `${term} (${files.length} file(s))`, hits });
   }
 
-  reportTermLiveness('declare', liveness);
+  // Quiet is for the off-path probe, which sweeps EVERY mechanism and would
+  // otherwise bury a one-line answer under four vocabularies. The probe prints
+  // its own accounting instead — silence there would make it indistinguishable
+  // from a probe that never ran.
+  if (!quiet) reportTermLiveness('declare', liveness);
 
   // A witness proves DECLARED without yielding a name. Left alone it would make
   // "declared, resolved nothing" indistinguishable from "declared nothing",
   // which is the shape of a silent pass. It is reported instead.
-  if (witnessedWithoutNames && packages.size === 0) {
+  if (witnessedWithoutNames && packages.size === 0 && !quiet) {
     info('declare: a lockfile witness matched but named no package; the naming manifest is the subject');
   }
 

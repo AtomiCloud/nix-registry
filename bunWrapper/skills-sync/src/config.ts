@@ -20,6 +20,11 @@ export interface Config {
   // `off` is a legitimate, owner-ruled state: the central wiring is generic and
   // INERT wherever no runtime is named.
   enabled: boolean;
+  // True ONLY for `runtime: none`. An absent file, and a file that names no
+  // runtime at all, are an ABSENCE OF DECLARATION rather than a declaration of
+  // absence — and the difference decides whether a repository that declares
+  // diene packages is allowed to be silently off. See plan.ts.
+  explicitOptOut: boolean;
   runtimeName: string | null;
   resolver: ResolverSpec | null;
   vendorDir: string;
@@ -79,6 +84,7 @@ export function loadConfig(repoRoot: string): Config {
     return {
       source: null,
       enabled: false,
+      explicitOptOut: false,
       runtimeName: null,
       resolver: null,
       vendorDir: VENDOR_DEFAULT,
@@ -134,7 +140,18 @@ export function loadConfig(repoRoot: string): Config {
   const namesNothing =
     (runtimeName === null || runtimeName.length === 0 || runtimeName === 'none') && inline === undefined;
   if (namesNothing) {
-    return { source, enabled: false, runtimeName: null, resolver: null, vendorDir, requireSubjects };
+    // 'none' is a DECLARATION of absence and is accepted as an opt-out. A file
+    // that simply carries no `runtime` key is an ABSENCE of declaration, and is
+    // treated the same as no file at all — absence declares nothing.
+    return {
+      source,
+      enabled: false,
+      explicitOptOut: runtimeName === 'none',
+      runtimeName: null,
+      resolver: null,
+      vendorDir,
+      requireSubjects,
+    };
   }
 
   if (inline !== undefined) {
@@ -145,7 +162,15 @@ export function loadConfig(repoRoot: string): Config {
         `names runtime '${runtimeName}' and also carries an inline resolver called '${resolver.name}'; declare one or give them the same name`,
       );
     }
-    return { source, enabled: true, runtimeName: resolver.name, resolver, vendorDir, requireSubjects };
+    return {
+      source,
+      enabled: true,
+      explicitOptOut: false,
+      runtimeName: resolver.name,
+      resolver,
+      vendorDir,
+      requireSubjects,
+    };
   }
 
   const preset = PRESETS[runtimeName as string];
@@ -155,7 +180,15 @@ export function loadConfig(repoRoot: string): Config {
       `'runtime' is '${runtimeName}', which is not a built-in preset. Built-in presets: ${PRESET_NAMES.join(', ')}. A runtime skills-sync does not know is added with an inline 'resolver:' in this same file — never by editing skills-sync.`,
     );
   }
-  return { source, enabled: true, runtimeName: preset.name, resolver: preset, vendorDir, requireSubjects };
+  return {
+    source,
+    enabled: true,
+    explicitOptOut: false,
+    runtimeName: preset.name,
+    resolver: preset,
+    vendorDir,
+    requireSubjects,
+  };
 }
 
 // The inline resolver is validated as strictly as the presets are written: an

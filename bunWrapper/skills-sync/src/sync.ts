@@ -48,8 +48,23 @@ export function runSync(repoRoot: string, config: Config): number {
 
   // Staged beside the destination and moved into place, so an interrupted run
   // leaves the committed tree intact rather than half-replaced.
-  mkdirSync(dirname(vendorAbs), { recursive: true });
-  const staging = mkdtempSync(`${vendorAbs}.staging.`);
+  //
+  // Creating that staging directory is the writer's most likely real failure —
+  // an unwritable vendor tree — so it gets its own stated refusal. It used to
+  // sit outside the try below and escaped as a raw EACCES with a stack trace. A
+  // tool whose refusals ARE its product must not answer with an exception dump.
+  let staging = '';
+  try {
+    mkdirSync(dirname(vendorAbs), { recursive: true });
+    staging = mkdtempSync(`${vendorAbs}.staging.`);
+  } catch (e) {
+    throw toolFailure(
+      `could not create a staging directory beside '${vendorAbs}': ${(e as Error).message}. ` +
+        `The writer builds the new tree next to the old one and moves it into place, so it needs to create ` +
+        `directories in '${dirname(vendorAbs)}'.`,
+    );
+  }
+
   try {
     writeFileSync(join(staging, KEEP_NAME), '');
     for (const entry of plan.expected) {

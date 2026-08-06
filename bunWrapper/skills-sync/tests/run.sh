@@ -55,6 +55,30 @@ run_in() {
   RUN_RC=$?
 }
 
+# The negative companion to `expect`. Some claims are about what the output must
+# NOT say — "this refusal does not leak a stack trace" cannot be asserted by
+# looking for something.
+expect_absent() {
+  local name="$1" want_rc="$2" forbidden="$3"
+  local ok=1 why=""
+  if [ "${RUN_RC}" -ne "${want_rc}" ]; then
+    ok=0
+    why="exit ${RUN_RC}, wanted ${want_rc}"
+  elif printf '%s' "${RUN_OUT}" | grep -qF -- "${forbidden}"; then
+    ok=0
+    why="output contained '${forbidden}', which it must not"
+  fi
+  if [ "${ok}" -eq 1 ]; then
+    PASS=$((PASS + 1))
+    printf '  ✅ %s\n' "${name}"
+  else
+    FAIL=$((FAIL + 1))
+    FAILED_NAMES+=("${name}")
+    printf '  ❌ %s — %s\n' "${name}" "${why}"
+    printf '%s\n' "${RUN_OUT}" | sed 's/^/       | /'
+  fi
+}
+
 expect() {
   local name="$1" want_rc="$2" want_text="$3"
   local ok=1 why=""
@@ -655,6 +679,157 @@ if command -v go >/dev/null 2>&1; then
 else
   printf '  ⏭️ I8-I10 go arm NOT RUN: no go toolchain on PATH. The go preset is UNEXERCISED by this run.\n'
 fi
+
+# --------------------------------------------------------------------------- #
+group 'J. OFF IS NOT A HIDING PLACE — the other operand'
+# --------------------------------------------------------------------------- #
+
+# A contradiction guard written in one direction leaves its mirror open.
+#
+# The existing guard refuses when nothing names a runtime WHILE THE VENDOR TREE
+# HOLDS FILES — the subject witnessed by the OUTPUT. It said nothing about the
+# subject witnessed by the INPUT: a repository whose manifests DECLARE diene
+# packages that ship real skills, whose vendor tree happens to be empty, and
+# which carries no configuration. That node exited 0 in silence, where the
+# mechanism this tool replaced (dlint skills-fresh) exited 3 — a regression
+# against the very thing being retired.
+#
+# The rulings authorise absent-equals-off BECAUSE a node naming no runtime has no
+# subject (ledger :98, and the stamp at :149-153). A node declaring diene
+# packages HAS one, so the authorisation does not reach it. Ratification does not
+# confer scope.
+
+# A repository that declares a package shipping real skills, with an EMPTY vendor
+# tree and NO configuration at all.
+make_declaring_repo() {
+  local dir="$1"
+  rm -rf "${dir}"
+  mkdir -p "${dir}/.claude/skills/vendor" "${dir}/node_modules/@atomicloud/diene.alpha/skills/alpha"
+  git init -q "${dir}"
+  git -C "${dir}" config core.hooksPath "${TMPROOT}/no-hooks"
+  printf '{"name":"f","dependencies":{"@atomicloud/diene.alpha":"1.0.0"}}\n' >"${dir}/package.json"
+  printf 'real skill\n' >"${dir}/node_modules/@atomicloud/diene.alpha/skills/alpha/SKILL.md"
+  printf 'node_modules/\n' >"${dir}/.gitignore"
+  touch "${dir}/.claude/skills/vendor/.gitkeep"
+  git_q "${dir}" add -A
+  git_q "${dir}" commit -m declaring --no-verify
+}
+
+DECL="${TMPROOT}/declaring"
+make_declaring_repo "${DECL}"
+run_in "${DECL}" "${SKILLS_SYNC_CMD[@]}" check --tier ci
+expect 'J1 declares diene packages + empty tree + NO config REFUSES' 1 '@atomicloud/diene.alpha'
+run_in "${DECL}" "${SKILLS_SYNC_CMD[@]}" check --tier ci
+expect 'J1b and it says why rather than only that' 1 'declares diene package'
+
+# A config that EXISTS but names no runtime is still an absence of declaration.
+printf 'schemaVersion: 1\n' >"${DECL}/skills-sync.yaml"
+run_in "${DECL}" "${SKILLS_SYNC_CMD[@]}" check --tier ci
+expect 'J2 a config naming no runtime is an absence, not a declaration' 1 'declares diene package'
+
+# `runtime: none` IS a declaration, and is the accepted opt-out. It must still be
+# audible: the packages being deliberately ignored are named.
+printf 'schemaVersion: 1\nruntime: none\n' >"${DECL}/skills-sync.yaml"
+run_in "${DECL}" "${SKILLS_SYNC_CMD[@]}" check --tier ci
+expect 'J3 MUST-DIFFER: runtime: none is an explicit opt-out and PASSES' 0 ''
+run_in "${DECL}" "${SKILLS_SYNC_CMD[@]}" check --tier ci
+expect 'J3b and the opt-out still names what it is ignoring' 0 '@atomicloud/diene.alpha'
+
+# The workspace/shared shape: no manifest of any kind, empty tree, no config.
+# Measured at the landed refs b0bbadbd and cd25b877 — no package.json, no
+# Directory.Packages.props, no go.mod, no pubspec.yaml. The guard must be INERT
+# here or it breaks the two nodes that already landed.
+rm -f "${DECL}/skills-sync.yaml"
+WSSHAPE="${TMPROOT}/workspace-shape"
+mkdir -p "${WSSHAPE}/.claude/skills/vendor"
+git init -q "${WSSHAPE}"
+git -C "${WSSHAPE}" config core.hooksPath "${TMPROOT}/no-hooks"
+touch "${WSSHAPE}/.claude/skills/vendor/.gitkeep"
+printf '[]\n' >"${WSSHAPE}/.claude/skills/vendor/manifest.json"
+git_q "${WSSHAPE}" add -A
+git_q "${WSSHAPE}" commit -m wsshape --no-verify
+for tier in setup pre-commit ci; do
+  run_in "${WSSHAPE}" "${SKILLS_SYNC_CMD[@]}" check --tier "${tier}"
+  expect "J4 the workspace/shared shape stays inert at --tier ${tier}" 0 'names no runtime'
+done
+
+# An off-path probe that prints nothing is indistinguishable from a probe that
+# never ran. It has to account for itself even when it finds nothing.
+run_in "${WSSHAPE}" "${SKILLS_SYNC_CMD[@]}" check --tier ci
+expect 'J5 the probe reports that it ran even when it finds nothing' 0 'mechanism(s) probed'
+
+# PER-MECHANISM LIVENESS ON THE PROBE ITSELF.
+#
+# The probe sweeps four mechanisms and reports one number. "0 declared" is
+# exactly the shape a DEAD mechanism produces, so each one is shown able to fire
+# on its own manifest. A mechanism that can never match would silently narrow the
+# guard to the mechanisms that still work, and the summary line would look
+# identical.
+probe_fires() {
+  local id="$1" file="$2" body="$3"
+  local dir="${TMPROOT}/probe-${id}"
+  rm -rf "${dir}"
+  mkdir -p "${dir}/.claude/skills/vendor" "$(dirname "${dir}/${file}")"
+  git init -q "${dir}"
+  git -C "${dir}" config core.hooksPath "${TMPROOT}/no-hooks"
+  printf '%s' "${body}" >"${dir}/${file}"
+  touch "${dir}/.claude/skills/vendor/.gitkeep"
+  git_q "${dir}" add -A
+  git_q "${dir}" commit -m probe --no-verify
+  run_in "${dir}" "${SKILLS_SYNC_CMD[@]}" check --tier ci
+}
+
+probe_fires node package.json '{"name":"n","dependencies":{"@atomicloud/diene.alpha":"1.0.0"}}'
+expect 'J6a probe mechanism node FIRES on package.json' 1 '@atomicloud/diene.alpha'
+
+probe_fires nuget Directory.Packages.props \
+  '<Project><ItemGroup><PackageVersion Include="AtomiCloud.Diene.Core" Version="1.2.3" /></ItemGroup></Project>'
+expect 'J6b probe mechanism nuget FIRES on Directory.Packages.props' 1 'AtomiCloud.Diene.Core'
+
+probe_fires go go.mod \
+  'module example.com/app
+
+go 1.21
+
+require example.com/diene.go v1.0.0
+'
+expect 'J6c probe mechanism go FIRES on a go.mod require' 1 'diene.go'
+
+probe_fires pub pubspec.yaml 'name: app
+dependencies:
+  diene_core: ^1.0.0
+'
+expect 'J6d probe mechanism pub FIRES on a pubspec dependency' 1 'diene_core'
+
+# MUST-DIFFER for the go mechanism, and it is not academic: go-base's own module
+# line is `module github.com/AtomiCloud/diene.go-base`. A pattern that matched a
+# module NAME rather than a dependency would refuse on every go node in the
+# corpus. A main module whose name contains diene is not a dependency obligation.
+probe_fires go-selfname go.mod 'module github.com/AtomiCloud/diene.go-base
+
+go 1.26.0
+
+require github.com/redis/go-redis/v9 v9.21.0
+'
+expect 'J6e MUST-DIFFER: a main module NAMED diene.* is not a declaration' 0 '0 diene package(s) declared'
+
+# --------------------------------------------------------------------------- #
+group 'K. THE WRITER REFUSES CLEANLY — a tool whose refusals are its product must not leak a stack'
+# --------------------------------------------------------------------------- #
+
+UNW="$(mutate unwritable)"
+chmod -R a-w "${UNW}/.claude"
+run_in "${UNW}" "${SKILLS_SYNC_CMD[@]}" sync
+expect 'K1 an unwritable vendor tree is a stated refusal' 5 'could not create a staging directory'
+run_in "${UNW}" "${SKILLS_SYNC_CMD[@]}" sync
+expect_absent 'K2 and it does NOT leak an unhandled exception' 5 'failed unexpectedly'
+run_in "${UNW}" "${SKILLS_SYNC_CMD[@]}" sync
+expect_absent 'K3 and it does NOT leak a stack trace' 5 'at <anonymous>'
+# The read-only half is unaffected by an unwritable tree, which is what makes the
+# A9 drop a drop rather than a crash.
+run_in "${UNW}" "${SKILLS_SYNC_CMD[@]}" check --tier ci
+expect 'K4 MUST-DIFFER: check is unaffected by an unwritable tree' 0 'are fresh'
+chmod -R u+w "${UNW}/.claude" 2>/dev/null
 
 # --------------------------------------------------------------------------- #
 printf '\n=== artifact under test: %s\n' "${SKILLS_SYNC}"

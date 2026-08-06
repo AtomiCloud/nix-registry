@@ -12,9 +12,10 @@ import {
   unresolvedReasons,
   walkFiles,
 } from './engine.ts';
+import { PRESETS, type ResolverSpec } from './spec.ts';
 import { EXIT_OK, violation } from './exit.ts';
 import { trackedUnder } from './git.ts';
-import { info, skipped } from './report.ts';
+import { info, skipped, warn } from './report.ts';
 
 export interface Plan {
   repoRoot: string;
@@ -52,6 +53,7 @@ export function outcomeWhenOff(config: Config, vendorAbs: string, repoRoot: stri
   const content = vendorContent(vendorAbs);
   const where = config.source ?? `${join(repoRoot, 'skills-sync.yaml')} (absent)`;
 
+  // Operand one: the subject witnessed by the OUTPUT.
   if (content.length > 0) {
     throw violation(
       `skills-sync names no runtime in '${where}', but '${vendorAbs}' holds ${content.length} vendored file(s): ` +
@@ -61,9 +63,66 @@ export function outcomeWhenOff(config: Config, vendorAbs: string, repoRoot: stri
     );
   }
 
+  // Operand two: the subject witnessed by the INPUT.
+  //
+  // The rulings authorise absent-equals-off BECAUSE a node naming no runtime has
+  // no subject. A node whose manifests DECLARE diene packages has one, so the
+  // authorisation does not reach it — and the mechanism this tool replaced
+  // (dlint skills-fresh) refused that case outright. An empty vendor tree is not
+  // evidence of no subject; it is equally the shape of a tree nothing is
+  // maintaining.
+  const declared = probeForUnclaimedSubject(repoRoot);
+
+  if (declared.packages.length > 0) {
+    const named = declared.packages.map(p => `${p.name} (from ${p.declaredIn})`);
+    // `runtime: none` is a DECLARATION of absence and is the accepted opt-out.
+    // It still has to be audible: what is being deliberately ignored is named,
+    // so an opt-out cannot quietly grow a subject it no longer covers.
+    if (config.explicitOptOut) {
+      warn(
+        `'${where}' declares 'runtime: none', so skills-sync is deliberately off here — but this repository ` +
+          `declares ${declared.packages.length} diene package(s): ${named.join(', ')}. ` +
+          `Their skills are NOT vendored. That is accepted because the opt-out is explicit.`,
+      );
+      info(
+        `off-probe: ${declared.mechanisms} mechanism(s) probed (${declared.names}), ${declared.packages.length} diene package(s) declared`,
+      );
+      return EXIT_OK;
+    }
+    throw violation(
+      `'${where}' names no runtime, but this repository declares ${declared.packages.length} diene package(s): ` +
+        `${named.join(', ')}. A repository that declares diene packages has a vendored-skills subject, so being ` +
+        `off here would ship no skills and say nothing. Name the runtime, or declare the opt-out explicitly with ` +
+        `'runtime: none'. An absent configuration is an absence of declaration, not a declaration of absence.`,
+    );
+  }
+
   skipped(`skills-sync names no runtime in '${where}', so there is nothing to synchronise here.`);
   info(`vendor directory inspected: '${vendorAbs}' — 0 vendored file(s)`);
+  // Printed even on the empty result: a probe that says nothing when it finds
+  // nothing is indistinguishable from a probe that never ran.
+  info(`off-probe: ${declared.mechanisms} mechanism(s) probed (${declared.names}), 0 diene package(s) declared`);
   return EXIT_OK;
+}
+
+// Sweeps every built-in mechanism's DECLARE step. Declaration is pure manifest
+// reading — no toolchain, no installed dependencies — so this is cheap and works
+// on a cold checkout, which is exactly where the silent-off case bites.
+function probeForUnclaimedSubject(repoRoot: string): {
+  packages: DeclaredPackage[];
+  mechanisms: number;
+  names: string;
+} {
+  const seen = new Map<string, ResolverSpec>();
+  for (const preset of Object.values(PRESETS)) seen.set(preset.name, preset);
+
+  const packages: DeclaredPackage[] = [];
+  for (const spec of seen.values()) {
+    for (const pkg of declaredPackages(repoRoot, spec, true)) {
+      if (!packages.some(p => p.name === pkg.name)) packages.push(pkg);
+    }
+  }
+  return { packages, mechanisms: seen.size, names: [...seen.keys()].sort().join(', ') };
 }
 
 export function buildPlan(repoRoot: string, config: Config): Plan {
