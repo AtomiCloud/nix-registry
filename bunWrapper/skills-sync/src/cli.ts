@@ -61,7 +61,7 @@ Configuration:
 Exit codes:
   0  fresh, synchronised, or off
   1  the vendored tree is stale, or a guarantee-tier precondition failed
-  2  usage error (including the writer being invoked from a hook)
+  2  usage error (including a declared tier that contradicts the environment)
   3  a precondition is unsatisfied: dependencies are not restored
   4  the configuration is invalid
   5  skills-sync could not complete the inspection`);

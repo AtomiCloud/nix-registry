@@ -18,15 +18,20 @@ exist can never answer `--help` and read as real.
 
 ## The two halves
 
-| Command            | Writes?                                                    | Runs at                       |
-| ------------------ | ---------------------------------------------------------- | ----------------------------- |
-| `sync`             | **yes** — it is the only thing that writes the vendor tree | setup and manual use **only** |
-| `check --tier <t>` | **no** — read-only by construction                         | setup, pre-commit and CI      |
+| Command            | Writes?                                                    | Runs at                  |
+| ------------------ | ---------------------------------------------------------- | ------------------------ |
+| `sync`             | **yes** — it is the only thing that writes the vendor tree | setup, pre-commit and CI |
+| `check --tier <t>` | **no** — read-only by construction                         | setup, pre-commit and CI |
 
-`sync` refuses when it detects a hook context and names the environment variable that gave it
-away. The rule that no hook writes the vendor tree is enforced by the tool, not only by where
-the tool is wired: a repository that adds `skills-sync sync` to a hook gets a refusal at the
-first commit rather than a violation that survives until someone reads the hook file.
+`sync` runs at all three tiers, and at pre-commit and in CI it **never stages anything**: if it had
+to change the tree, **or if the index does not already carry what the packages ship**, it refuses and
+leaves the regenerated files in your working tree for you to stage. A hook that silently amends the
+commit is not acceptable, and CI must not repair-and-pass — a defect repaired every cycle presents as
+no defect at all.
+
+It still **detects** the hook context — six markers — but that detection is now a consistency check
+on the **declared tier** rather than a refusal: `--tier setup` inside a hook is a wiring mistake and
+is refused, while `--tier pre-commit` and `--tier ci` are exactly what belongs there.
 
 ## The three tiers
 
@@ -113,14 +118,14 @@ resolver:
 
 ## Exit codes
 
-| Code | Meaning                                                             |
-| ---- | ------------------------------------------------------------------- |
-| `0`  | fresh, synchronised, or off                                         |
-| `1`  | the vendored tree is stale, or a guarantee-tier precondition failed |
-| `2`  | usage error, including the writer being invoked from a hook         |
-| `3`  | a precondition is unsatisfied: dependencies are not restored        |
-| `4`  | the configuration is invalid                                        |
-| `5`  | skills-sync could not complete the inspection                       |
+| Code | Meaning                                                                 |
+| ---- | ----------------------------------------------------------------------- |
+| `0`  | fresh, synchronised, or off                                             |
+| `1`  | the vendored tree is stale, or a guarantee-tier precondition failed     |
+| `2`  | usage error, including a declared tier that contradicts the environment |
+| `3`  | a precondition is unsatisfied: dependencies are not restored            |
+| `4`  | the configuration is invalid                                            |
+| `5`  | skills-sync could not complete the inspection                           |
 
 ## Wiring a template
 
@@ -129,14 +134,26 @@ do nothing wherever no runtime is named.
 
 ```bash
 # setup script, after dependencies are restored
-skills-sync check --tier setup && skills-sync sync
+skills-sync sync --tier setup
 
-# pre-commit hook — the READ-ONLY half only
-skills-sync check --tier pre-commit
+# pre-commit hook — `sync` SUBSUMES `check` here; do not wire both
+skills-sync sync --tier pre-commit
 
 # CI — the guarantee
-skills-sync check --tier ci
+skills-sync sync --tier ci
 ```
+
+**`skills-sync.yaml` ships in the same commit as the wiring.** A node that is wired but unconfigured
+does nothing today and starts **blocking every commit** the moment it gains vendored content — on
+somebody else's unrelated change. Wiring without the config arms a blocker nobody wired.
+
+Two things are true at pre-commit at the same time, and they are about different conditions:
+
+- **lenient about unrestored dependencies** — it skips (exit 0), because a commit must not require a
+  restored dependency tree;
+- **strict about drift when dependencies are present** — it refuses (exit 1).
+
+The tier never governed the mutation/index rule; `sync` applies that at pre-commit and CI alike.
 
 ## Tests
 
