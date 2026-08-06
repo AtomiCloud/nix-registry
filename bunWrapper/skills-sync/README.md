@@ -4,6 +4,11 @@ Vendored-skill synchronisation and freshness, behind one entrypoint. `skills-syn
 **any** consuming repository: every repository-specific fact comes from that repository's own
 `skills-sync.yaml`, never from a constant baked into the tool.
 
+**There is no `skills-sync` repository.** It ships as a package inside `nix-registry` and is consumed
+as `atomipkgs.skills-sync`, so a consuming flake takes it through the registry input it already has
+rather than adding one. Looking for a repository by that name returns "not found", which reads like a
+missing permission rather than a wrong assumption.
+
 ```text
 skills-sync sync
 skills-sync check --tier <setup|pre-commit|ci>
