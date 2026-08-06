@@ -832,6 +832,124 @@ expect 'K4 MUST-DIFFER: check is unaffected by an unwritable tree' 0 'are fresh'
 chmod -R u+w "${UNW}/.claude" 2>/dev/null
 
 # --------------------------------------------------------------------------- #
+group 'L. SELECTION CONTROLS — drawn from the EXCLUDED and NON-MATCHING sets'
+# --------------------------------------------------------------------------- #
+
+# Every other group in this file controls the ASSERTION: does the check fire when
+# it should? These control the SELECTION — which files the sweep could ever see,
+# and which names the pattern could ever match. A control that only exercises the
+# matching set can never detect that the set is WRONG, and that fault reports as
+# a smaller number or a clean zero, both indistinguishable from a true negative.
+#
+# Two selections live in this tool and neither is reachable from group J:
+#
+#   GLOB_PRUNE          fails toward SILENTLY OFF — a declaration under a pruned
+#                       path leaves the repository looking like it declares
+#                       nothing.
+#   the declare regexes  yield "0 declared" for a BROKEN pattern and for a
+#                       genuinely absent one identically. That is the shape that
+#                       nearly produced a false finding against this tool: a
+#                       fixture named `@atomicloud/diene-skills-demo` (HYPHEN)
+#                       could not match `diene\.`, and its null read as "the
+#                       guard is inert".
+#
+# Each row below is a PAIR: one case from the included/matching set, one from the
+# excluded/non-matching set.
+
+# Builds a repo with NO config and an EMPTY vendor tree, then drops one manifest
+# at a caller-chosen path. Exit 1 means the off-probe SAW the declaration.
+selection_probe() {
+  local id="$1" path="$2" body="$3"
+  local dir="${TMPROOT}/sel-${id}"
+  rm -rf "${dir}"
+  mkdir -p "${dir}/.claude/skills/vendor" "$(dirname "${dir}/${path}")"
+  git init -q "${dir}"
+  git -C "${dir}" config core.hooksPath "${TMPROOT}/no-hooks"
+  printf '%s' "${body}" >"${dir}/${path}"
+  touch "${dir}/.claude/skills/vendor/.gitkeep"
+  git_q "${dir}" add -A
+  git_q "${dir}" commit -m sel --no-verify
+  run_in "${dir}" "${SKILLS_SYNC_CMD[@]}" check --tier ci
+}
+
+PUBSPEC_DIENE='name: app
+dependencies:
+  diene_core: ^1.0.0
+'
+
+selection_probe inc-root pubspec.yaml "${PUBSPEC_DIENE}"
+expect 'L1 INCLUDED  pubspec.yaml at the repo root is seen' 1 'diene_core'
+selection_probe inc-nested packages/app/pubspec.yaml "${PUBSPEC_DIENE}"
+expect 'L2 INCLUDED  packages/app/pubspec.yaml is seen' 1 'diene_core'
+
+for pruned in build/gen .dart_tool/x .direnv/x node_modules/x; do
+  selection_probe "exc-$(printf '%s' "${pruned}" | tr '/.' '--')" "${pruned}/pubspec.yaml" "${PUBSPEC_DIENE}"
+  expect "L3 EXCLUDED  ${pruned}/pubspec.yaml is NOT counted" 0 '0 diene package(s) declared'
+done
+
+# Excluded BY THE PRUNE, not by depth or by nesting. `buildx/` differs from
+# `build/` only in the prune list, so if this were also unseen the rows above
+# would be measuring something else entirely — a two-level path, say — and would
+# still have read as a clean pass.
+selection_probe boundary buildx/gen/pubspec.yaml "${PUBSPEC_DIENE}"
+expect 'L3b MUST-DIFFER: buildx/gen/pubspec.yaml IS counted — the prune name is the cause' 1 'diene_core'
+
+# Non-matching names. The hyphen row is the exact shape that nearly produced a
+# false finding: it is UNSEEN because it is not a diene package under the
+# `diene.` convention, NOT because the pattern is dead — L4 is what proves that.
+selection_probe pat-dot package.json '{"name":"n","dependencies":{"@atomicloud/diene.alpha":"1.0.0"}}'
+expect 'L4 MATCHING     @atomicloud/diene.alpha (dot) is seen' 1 '@atomicloud/diene.alpha'
+selection_probe pat-hyphen package.json '{"name":"n","dependencies":{"@atomicloud/diene-skills-demo":"1.0.0"}}'
+expect 'L5 NON-MATCHING @atomicloud/diene-skills-demo (HYPHEN) is not' 0 '0 diene package(s) declared'
+selection_probe pat-other package.json '{"name":"n","dependencies":{"@atomicloud/other.alpha":"1.0.0"}}'
+expect 'L6 NON-MATCHING @atomicloud/other.alpha is not' 0 '0 diene package(s) declared'
+selection_probe nuget-n Directory.Packages.props \
+  '<Project><ItemGroup><PackageVersion Include="AtomiCloud.Other.Core" Version="1.0.0" /></ItemGroup></Project>'
+expect 'L7 NON-MATCHING AtomiCloud.Other.Core is not' 0 '0 diene package(s) declared'
+selection_probe pub-n pubspec.yaml 'name: app
+dependencies:
+  notdiene_core: ^1.0.0
+'
+expect 'L8 NON-MATCHING notdiene_core is not' 0 '0 diene package(s) declared'
+
+# THE SELF-REFERENCE HAZARD — the tool must not read its OWN OUTPUT as input.
+#
+# This is the one prune that cannot be reached the way the others are: any file
+# placed under the vendor tree of a repo that names NO runtime trips the
+# contradiction guard first, so the prune is never observable. Reaching it needs
+# a repo that legitimately HAS a populated vendor tree, i.e. one that names a
+# runtime — and the witness is the DECLARE FILE COUNT, not the exit code, because
+# the content check refuses the planted file for its own separate and correct
+# reason.
+SELF="${TMPROOT}/selfref"
+mkdir -p "${SELF}/.claude/skills/vendor" "${SELF}/.dart_tool" "${SELF}/pubcache/diene_core/skills/core"
+git init -q "${SELF}"
+git -C "${SELF}" config core.hooksPath "${TMPROOT}/no-hooks"
+printf 'schemaVersion: 1\nruntime: dart\n' >"${SELF}/skills-sync.yaml"
+printf 'name: root\ndependencies:\n  diene_core: ^1.0.0\n' >"${SELF}/pubspec.yaml"
+printf 'core skill\n' >"${SELF}/pubcache/diene_core/skills/core/SKILL.md"
+cat >"${SELF}/.dart_tool/package_config.json" <<JSON
+{ "configVersion": 2, "packages": [ { "name": "diene_core", "rootUri": "file://${SELF}/pubcache/diene_core" } ] }
+JSON
+printf 'pubcache/\n' >"${SELF}/.gitignore"
+touch "${SELF}/.claude/skills/vendor/.gitkeep"
+git_q "${SELF}" add -A
+git_q "${SELF}" commit -m selfref --no-verify
+sync_and_commit "${SELF}" || printf '  ‼️ the L9 pair is unusable\n'
+
+run_in "${SELF}" "${SKILLS_SYNC_CMD[@]}" check --tier ci
+expect 'L9a POSITIVE CONTROL: one pubspec swept, one package declared' 0 "declare: '**/pubspec.yaml (1 file(s))'"
+
+printf 'name: shipped\ndependencies:\n  diene_ghost: ^9.9.9\n' \
+  >"${SELF}/.claude/skills/vendor/diene_core/core/pubspec.yaml"
+git_q "${SELF}" add -A
+git_q "${SELF}" commit -m ghost --no-verify
+run_in "${SELF}" "${SKILLS_SYNC_CMD[@]}" check --tier ci
+expect 'L9b a manifest INSIDE the vendor tree is not swept (still 1 file)' 1 "declare: '**/pubspec.yaml (1 file(s))'"
+run_in "${SELF}" "${SKILLS_SYNC_CMD[@]}" check --tier ci
+expect_absent 'L9c and its package is NOT declared — no self-reference' 1 'diene_ghost'
+
+# --------------------------------------------------------------------------- #
 printf '\n=== artifact under test: %s\n' "${SKILLS_SYNC}"
 printf '=== %s passed, %s failed\n' "${PASS}" "${FAIL}"
 if [ "${FAIL}" -ne 0 ]; then

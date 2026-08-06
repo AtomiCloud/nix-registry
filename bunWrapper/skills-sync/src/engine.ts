@@ -73,6 +73,42 @@ function parseStructured(path: string, format: 'json' | 'yaml'): unknown {
   }
 }
 
+// Directories a glob declare source never descends into.
+//
+// Every entry here is OUTPUT rather than DECLARATION — a manifest found inside
+// one of them is something else's, not this repository's statement about what it
+// depends on. The distinction matters because the failure direction of getting
+// it wrong is SILENT: a declaration that is pruned away leaves the repository
+// looking like it declares nothing.
+//
+//   .git/                   VCS internals; never a declaration.
+//   node_modules/           the DEPENDENCIES' OWN manifests. Counting these
+//                           would make every installed package a declaration of
+//                           this repository.
+//   .dart_tool/             pub's generated output.
+//   .direnv/                direnv/nix cache.
+//   .claude/skills/vendor/  the tree THIS TOOL WRITES. Counting it would make
+//                           the tool's own output its own input — a vendored
+//                           skill may legitimately ship a manifest of its own.
+//
+//   build/                  ⚠ THE ONE ENTRY THAT RESTS ON CONVENTION, NOT ON
+//                           MEANING. The five above are self-justifying: a
+//                           reader can see from the name that the contents are
+//                           generated or vendored. `build/` is only generated
+//                           BY CONVENTION, and a repository with a SOURCE
+//                           directory literally named `build/` would have its
+//                           declarations there pruned away silently. Accepted
+//                           deliberately: that layout is rare enough that
+//                           guarding it would cost more than it protects. This
+//                           note exists so the next reader does not have to
+//                           re-derive which entries are safe by construction and
+//                           which are a judgement call — this one is the
+//                           judgement call.
+//
+// Verified from the EXCLUDED side, not just the included side: tests/run.sh
+// group L plants a declaring manifest inside each of these and asserts it is not
+// counted, paired with the same manifest at an included path to prove the sweep
+// was alive.
 const GLOB_PRUNE = ['.git/', 'node_modules/', '.dart_tool/', '.direnv/', 'build/', '.claude/skills/vendor/'];
 
 function sourceFiles(repoRoot: string, src: DeclareSource): string[] {
