@@ -1,6 +1,6 @@
 # dlint
 
-Six repo-agnostic repository linters behind one entrypoint. `dlint` runs in **any**
+Seven repo-agnostic repository linters behind one entrypoint. `dlint` runs in **any**
 consuming repository: every repository-specific fact comes from that repository's own
 configuration file, never from a constant baked into the tool.
 
@@ -12,7 +12,7 @@ dlint --help
 dlint --version
 ```
 
-There are **exactly six** checks. There are no aliases and no hidden checks. There is no
+There are **exactly seven** checks. There are no aliases and no hidden checks. There is no
 `all` **check** either — running everything is the `--all-configured` flag. An unknown
 check exits `2` and lists the valid ones.
 
@@ -23,6 +23,7 @@ check exits `2` and lists the valid ones.
 | `ci-wiring`                          | A CI entrypoint a workflow names is missing or not executable; an orchestrator job does not call a repository-local reusable workflow; a reusable workflow calls no CI entrypoint; an orchestrator declares no jobs. |
 | `skills-fresh`                       | The vendored tree moved in the worktree after its own regeneration command ran, or there is no tracked subject to judge at all.                                                                                      |
 | `toolchain-smoke`                    | A binary declared for a shell does not resolve INSIDE that shell, or the shell could not be entered at all.                                                                                                          |
+| `no-custom-derivations`              | A declared nix file uses a custom derivation builder instead of staying a plain declarative list.                                                                                                                    |
 | `workflow-policy`                    | A declared path in a declared workflow file does not hold its declared value, or is absent. One assertion is one caught fault.                                                                                       |
 
 ## Several checks in one invocation
@@ -57,7 +58,7 @@ the invocation reported green.
 
 ## Configuration
 
-All six checks read **one** file, and `dlint.yaml` is its canonical name (**D6
+All seven checks read **one** file, and `dlint.yaml` is its canonical name (**D6
 ONE-CONFIG-NAME**). `dlint` looks for, in order:
 
 | Looked for      | Format                                                          |
@@ -142,28 +143,29 @@ Two properties are deliberate:
 
 One mechanism, applied uniformly: a section per check, keyed by the check's own name.
 
-| Key                           | Required | Default             |
-| ----------------------------- | -------- | ------------------- |
-| `action-pins.trustMap`        | yes      | —                   |
-| `action-pins.workflowsDir`    | no       | `.github/workflows` |
-| `action-pins.requireSubjects` | no       | `true`              |
-| `exec-bits.globs`             | no       | `["*.sh"]`          |
-| `exec-bits.requireSubjects`   | no       | `true`              |
-| `ci-wiring.entrypointPattern` | yes      | —                   |
-| `ci-wiring.orchestrators`     | yes      | —                   |
-| `ci-wiring.workflowsDir`      | no       | `.github/workflows` |
-| `skills-fresh.regenerate`     | yes      | —                   |
-| `skills-fresh.paths`          | yes      | —                   |
-| `skills-fresh.ignore`         | no       | `[]`                |
-| `toolchain-smoke.shells`      | yes\*    | —                   |
-| `toolchain-smoke.enter`       | yes\*    | — (needs `{shell}`) |
-| `toolchain-smoke.shell`       | legacy   | —                   |
-| `toolchain-smoke.binaries`    | legacy   | —                   |
-| `workflow-policy.assertions`  | yes      | —                   |
-| ` ↳ .file`                    | yes      | —                   |
-| ` ↳ .path`                    | yes      | —                   |
-| ` ↳ .equals`                  | yes      | — (may not be null) |
-| ` ↳ .reason`                  | yes      | —                   |
+| Key                                     | Required | Default             |
+| --------------------------------------- | -------- | ------------------- |
+| `action-pins.trustMap`                  | yes      | —                   |
+| `action-pins.workflowsDir`              | no       | `.github/workflows` |
+| `action-pins.requireSubjects`           | no       | `true`              |
+| `exec-bits.globs`                       | no       | `["*.sh"]`          |
+| `exec-bits.requireSubjects`             | no       | `true`              |
+| `ci-wiring.entrypointPattern`           | yes      | —                   |
+| `ci-wiring.orchestrators`               | yes      | —                   |
+| `ci-wiring.workflowsDir`                | no       | `.github/workflows` |
+| `skills-fresh.regenerate`               | yes      | —                   |
+| `skills-fresh.paths`                    | yes      | —                   |
+| `skills-fresh.ignore`                   | no       | `[]`                |
+| `toolchain-smoke.shells`                | yes\*    | —                   |
+| `toolchain-smoke.enter`                 | yes\*    | — (needs `{shell}`) |
+| `toolchain-smoke.shell`                 | legacy   | —                   |
+| `toolchain-smoke.binaries`              | legacy   | —                   |
+| `no-custom-derivations.paths`           | yes      | —                   |
+| `no-custom-derivations.forbid`          | no       | dlint's vocabulary  |
+| `no-custom-derivations.requireSubjects` | no       | `true`              |
+| `workflow-policy.assertions`            | yes      | —                   |
+| ` ↳ .file`                              | yes      | —                   |
+| ` ↳ .path`                              | yes      | —                   |
 
 `yes*` means required **in the scoped form**. `shells` + `enter` is that form; `shell` +
 `binaries` is the legacy single-shell one. Declare one form or the other, never both.
@@ -275,6 +277,11 @@ actually inspected:
 
 It no longer claims the named shell resolved anything, because it never entered it.
 
+## No custom derivations
+
+`no-custom-derivations` enforces **D7 RESOLVER-SHAPE**: template nix stays plain declarative
+lists, and custom builds live in the registry.
+
 ## Workflow policy
 
 `workflow-policy` replaces hand-written `yq | jq` validators. The policy is
@@ -284,6 +291,8 @@ and the reason to print when it does not hold.
 ```json
 {
   "checks": {
+    "no-custom-derivations": {
+      "paths": ["nix/packages.nix", "nix/pre-commit.nix", "nix/env.nix"]
     "workflow-policy": {
       "assertions": [
         {
@@ -310,6 +319,52 @@ and the reason to print when it does not hold.
 }
 ```
 
+The reason it refuses, which the refusal itself states: templates compose through the
+**cyanprint nix resolver**, which merges simple attribute lists. A custom derivation is not
+resolver-mergeable, so complexity is hoisted to the registry rather than carried by a child.
+
+### The vocabulary, and why it is printed
+
+This is an **absence** check, and _an absence claim is only as wide as its word list_.
+Redundancy across spellings of one word is not coverage across a concept: a template that
+avoided `overrideAttrs` could still carry a custom build through `runCommand` or
+`symlinkJoin`, and a sweep for the first would report a clean tree with a straight face.
+
+So the default vocabulary is several **different words** for one concept, ordered most
+specific first so a refusal names the builder actually written:
+
+```text
+overrideAttrs  overrideDerivation  mkDerivation  runCommand  buildEnv  symlinkJoin
+writeShellApplication  writeShellScriptBin  writeScriptBin  writeTextFile  derivation
+```
+
+Members that are already substrings of another member are deliberately left out —
+`stdenv.mkDerivation` is caught by `mkDerivation`, `runCommandLocal` by `runCommand` — and
+there is an arm proving that rather than an assertion claiming it.
+
+This vocabulary is a convention of the **Nix language**, not of any repository, which is why
+it has a default at all: the same reason `*.sh` is `exec-bits`' one default. A repository may
+widen or narrow it with `forbid`. An explicitly **empty** `forbid` is refused (`4`), because a
+check that forbids nothing passes unconditionally.
+
+**Every run prints the vocabulary it enumerated:**
+
+```text
+ℹ️ files inspected: 3 (nix/packages.nix nix/pre-commit.nix nix/env.nix)
+ℹ️ vocabulary enumerated (11): overrideAttrs overrideDerivation mkDerivation …
+✅ Template nix stays plain declarative lists
+```
+
+A green that does not state its scope is the shape that retires doubt it never earned. If you
+narrow `forbid` to one builder, the green says `vocabulary enumerated (1)` and the reader can
+see for themselves how much the pass is worth.
+
+Mentions inside comments count. That is deliberate: the check reads the file as written, and a
+template that needs to discuss these builders in prose belongs in `docs/`, not in the nix
+file the rule is about.
+
+A declared path that does not exist is `3`, not clean — deleting the file a rule is about must
+never be how the rule gets satisfied.
 **One assertion is one caught fault.** A single combined predicate over four fields refuses
 without saying which field moved, so each is declared and reported separately. A refusal
 names the reason, the path, the value it **found** and the value it expected.
@@ -369,7 +424,7 @@ Every check also prints its counts, so a run that inspected little says so on st
 
 ## Tests
 
-`tests/inject.sh` is the failure-injection harness: **148 arms**, each asserting the
+`tests/inject.sh` is the failure-injection harness: **176 arms**, each asserting the
 refusal **text** and not merely a non-zero status.
 
 ```bash

@@ -1,3 +1,10 @@
+## [3.17.0](https://github.com/AtomiCloud/nix-registry/compare/v3.16.0...v3.17.0) (2026-08-06)
+
+
+### ✨ New Packages ✨
+
+* **dlint:** add the no-custom-derivations check ([82ab995](https://github.com/AtomiCloud/nix-registry/commit/82ab9950cbeab55837f3d303857985fc22be21e9))
+
 ## [3.16.0](https://github.com/AtomiCloud/nix-registry/compare/v3.15.0...v3.16.0) (2026-08-06)
 
 
