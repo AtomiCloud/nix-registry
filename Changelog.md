@@ -1,3 +1,10 @@
+## [4.3.0](https://github.com/AtomiCloud/nix-registry/compare/v4.2.0...v4.3.0) (2026-08-06)
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **minor:** bump the releaser pin to v2.0.0 ([5e59bd9](https://github.com/AtomiCloud/nix-registry/commit/5e59bd93ef1e875d8984916360ef315216667be6)), closes [#9](https://github.com/AtomiCloud/nix-registry/issues/9) [#11](https://github.com/AtomiCloud/nix-registry/issues/11)
+
 ## [4.2.0](https://github.com/AtomiCloud/nix-registry/compare/v4.1.0...v4.2.0) (2026-08-06)
 
 
