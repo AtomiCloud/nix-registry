@@ -1,3 +1,10 @@
+## [3.18.0](https://github.com/AtomiCloud/nix-registry/compare/v3.17.0...v3.18.0) (2026-08-06)
+
+
+### ✨ New Packages ✨
+
+* **dlint:** read the configuration from dlint.yaml ([5b89b4d](https://github.com/AtomiCloud/nix-registry/commit/5b89b4d4526e8d1f8b5daeee1e422187ade8bf86))
+
 ## [3.17.0](https://github.com/AtomiCloud/nix-registry/compare/v3.16.0...v3.17.0) (2026-08-06)
 
 
