@@ -1,3 +1,21 @@
+## [4.1.0](https://github.com/AtomiCloud/nix-registry/compare/v4.0.0...v4.1.0) (2026-08-06)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **releaser:** compare the whole --version output, not a grep ([a10190c](https://github.com/AtomiCloud/nix-registry/commit/a10190c3c3db6598d9296582f95149c3f936cc7b)), closes [#59](https://github.com/AtomiCloud/nix-registry/issues/59)
+
+
+### ✨ New Packages ✨
+
+* **releaser:** package AtomiCloud offline release CLI ([a930915](https://github.com/AtomiCloud/nix-registry/commit/a930915f43d8cb8242725fa9ade6e5089d674219))
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **releaser:** bump the pin to v1.2.0 and assert the built bytes ([570d84a](https://github.com/AtomiCloud/nix-registry/commit/570d84a5eb89216a801b6d636ff6d065cd9c8c51))
+* **releaser:** move the pin to v1.3.0 ([749c78f](https://github.com/AtomiCloud/nix-registry/commit/749c78f030974a0ae0a8dd84e853ec75a2b829a9))
+
 ## [4.0.0](https://github.com/AtomiCloud/nix-registry/compare/v3.18.0...v4.0.0) (2026-08-06)
 
 
