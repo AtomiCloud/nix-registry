@@ -1,3 +1,86 @@
+## [3.18.0](https://github.com/AtomiCloud/nix-registry/compare/v3.17.0...v3.18.0) (2026-08-06)
+
+
+### ✨ New Packages ✨
+
+* **dlint:** read the configuration from dlint.yaml ([5b89b4d](https://github.com/AtomiCloud/nix-registry/commit/5b89b4d4526e8d1f8b5daeee1e422187ade8bf86))
+
+## [3.17.0](https://github.com/AtomiCloud/nix-registry/compare/v3.16.0...v3.17.0) (2026-08-06)
+
+
+### ✨ New Packages ✨
+
+* **dlint:** add the no-custom-derivations check ([82ab995](https://github.com/AtomiCloud/nix-registry/commit/82ab9950cbeab55837f3d303857985fc22be21e9))
+
+## [3.16.0](https://github.com/AtomiCloud/nix-registry/compare/v3.15.0...v3.16.0) (2026-08-06)
+
+
+### ✨ New Packages ✨
+
+* **dlint:** run several checks in one invocation ([349f910](https://github.com/AtomiCloud/nix-registry/commit/349f910011bcb7e58d20318a15a89a3476051847))
+* **go:** ship go 1.26.5 from the registry ([1d941c4](https://github.com/AtomiCloud/nix-registry/commit/1d941c499e2b9678c1619fee15f94a995a1ba4b6))
+
+## [3.15.0](https://github.com/AtomiCloud/nix-registry/compare/v3.14.0...v3.15.0) (2026-08-06)
+
+
+### ✨ New Packages ✨
+
+* **dlint:** add the workflow-policy check ([c58484a](https://github.com/AtomiCloud/nix-registry/commit/c58484ac29189c9e9288a570e9ed3a87b7dcf000))
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **dlint:** scope toolchain-smoke per shell ([eac6ea0](https://github.com/AtomiCloud/nix-registry/commit/eac6ea0bf25b5352dd4b98d25073e5c9111841bc))
+
+## [3.14.0](https://github.com/AtomiCloud/nix-registry/compare/v3.13.0...v3.14.0) (2026-08-05)
+
+## [3.13.0](https://github.com/AtomiCloud/nix-registry/compare/v3.12.0...v3.13.0) (2026-08-05)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **drv:** drop the phantom skopeo declaration from infrautils ([2020713](https://github.com/AtomiCloud/nix-registry/commit/2020713791cae567e1fefae86bfa19ee1df45f0d))
+* **drv:** make dlint refuse a vacuous pass on every check ([0dc4b65](https://github.com/AtomiCloud/nix-registry/commit/0dc4b659d76cec0d34f4a7ba86a7ae27b1eef556)), closes [#63](https://github.com/AtomiCloud/nix-registry/issues/63)
+* **drv:** resolve the harness dlint path without masking a failed cd ([8b90402](https://github.com/AtomiCloud/nix-registry/commit/8b9040246788c5a676d7d5e73225f01f8795b1f1)), closes [#63](https://github.com/AtomiCloud/nix-registry/issues/63)
+* **drv:** stop CDPATH from redirecting the harness path resolution ([134a8b3](https://github.com/AtomiCloud/nix-registry/commit/134a8b3b5cb468eada8f02c10f38e45a99e0a9ec)), closes [#63](https://github.com/AtomiCloud/nix-registry/issues/63)
+
+
+### ✨ New Packages ✨
+
+* **dlint:** add four repo-agnostic repository linters ([f0d6901](https://github.com/AtomiCloud/nix-registry/commit/f0d69018d2059c2a2d81ef14ad6d95fc337a0e4e))
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **infralint:** add skopeo ([e19042e](https://github.com/AtomiCloud/nix-registry/commit/e19042e5256c3de34ed88ec43c18057e5c67a21b))
+
+## [3.12.0](https://github.com/AtomiCloud/nix-registry/compare/v3.11.0...v3.12.0) (2026-08-05)
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **infralint:** add kubeconform and kyverno ([1465e42](https://github.com/AtomiCloud/nix-registry/commit/1465e42667f006618eec8a4829559d4764c60dd3))
+* **atomiutils:** add ripgrep ([40adba7](https://github.com/AtomiCloud/nix-registry/commit/40adba72e878fa7dcd929df25de9b7cba483e266))
+
+## [3.11.0](https://github.com/AtomiCloud/nix-registry/compare/v3.10.0...v3.11.0) (2026-07-26)
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **cyanprint:** upgrade to sulfone.lite v4.9.2 ([98b4c57](https://github.com/AtomiCloud/nix-registry/commit/98b4c57f251ab5434b160ce885bb47bd201fcd25)), closes [AtomiCloud/sulfone.lite#26](https://github.com/AtomiCloud/sulfone.lite/issues/26)
+
+## [3.10.0](https://github.com/AtomiCloud/nix-registry/compare/v3.9.0...v3.10.0) (2026-07-25)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **cyanprint:** keep the Bun payload by disabling strip ([5d3b53e](https://github.com/AtomiCloud/nix-registry/commit/5d3b53e5416cd0aaa5907d8b6c9a569353c454e5))
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **cyanprint:** upgrade to sulfone.lite v4.9.1 ([d995a5d](https://github.com/AtomiCloud/nix-registry/commit/d995a5db021fe62757f19cc226a888aefa0935b3)), closes [AtomiCloud/sulfone.lite#24](https://github.com/AtomiCloud/sulfone.lite/issues/24)
+
 ## [3.9.0](https://github.com/AtomiCloud/nix-registry/compare/v3.8.0...v3.9.0) (2026-07-24)
 
 

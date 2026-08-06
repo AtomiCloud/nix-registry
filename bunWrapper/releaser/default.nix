@@ -1,14 +1,16 @@
 { nixpkgs, bun }:
 with nixpkgs;
 let
-  version = "1.0.0";
+  version = "1.2.0";
 
-  # Immutable source pin: tag v1.0.0 of the standalone repository.
+  # Immutable source pin. The rev is authoritative and the tag is a comment, so the
+  # rev was ASSERTED to resolve to that tag rather than taken on the comment:
+  #   git ls-remote --tags .../releaser -> refs/tags/v1.2.0 = d41b68a0bff6...
   src = fetchFromGitHub {
     owner = "AtomiCloud";
     repo = "releaser";
-    rev = "3200bdd95a0fdd8f43f9905faa8c85afe4595d1f"; # v1.0.0
-    hash = "sha256-L8kPuS1uc0RPOk9eqrvYGjtKqq780Tdcy7o42df6eyo=";
+    rev = "d41b68a0bff69e622ba334e187f2a55f37cd1efb"; # v1.2.0
+    hash = "sha256-51de0dCCkPTG4Tc1IEsaeCBAnIOy74YByUG4NmNOjmE=";
   };
 
   # Production deps only: the compiled binary bundles runtime imports (all pure
@@ -54,6 +56,25 @@ stdenv.mkDerivation {
   # Bun --compile emits a self-contained executable; normal fixup strip would
   # corrupt the embedded bytecode blob.
   dontFixup = true;
+
+  # The BYTES must report the version the derivation claims. This is not
+  # belt-and-braces: `src` is a fixed-output derivation, so THE HASH IS THE
+  # IDENTITY AND THE `rev` IS ONLY A HINT. If a bump changes `rev` but leaves a
+  # previous `hash` in place, and that content is already in the store, nix
+  # reuses the OLD SOURCE, never fetches the rev at all, and produces a
+  # derivation NAMED for the new version out of the old bytes -- silently, and
+  # with exit 0.
+  #
+  # That is not hypothetical. It was demonstrated on this package while writing
+  # this: v1.0.0's hash paired with v1.2.0's rev built a `releaser-1.2.0` whose
+  # binary reported 1.0.0 and lacked `conventions --check`. This phase is what
+  # makes that mismatch fail instead of ship.
+  doInstallCheck = true;
+  installCheckPhase = ''
+    runHook preInstallCheck
+    "$out/bin/releaser" --version | grep -Fx "${version}"
+    runHook postInstallCheck
+  '';
 
   meta = with lib; {
     description = "AtomiCloud offline-first release and commit-lint CLI";

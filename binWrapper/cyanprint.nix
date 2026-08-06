@@ -12,13 +12,13 @@ let
   }.${system} or throwSystem;
 
   sha256 = {
-    x86_64-linux = "sha256-G4MKSJtsEgeKdcMP/sa7V22iNf7dhcaCCIQKqC8QAo8=";
-    aarch64-linux = "sha256-cENa8v8S5+iy3m32gTuwxpqo38OasU/SlSkZnYqllGo=";
+    x86_64-linux = "sha256-PeFuwTrym0IPxFtW5UUFsB4FnrhRZhRzYbOjHd4y2GA=";
+    aarch64-linux = "sha256-l8ZbXBi6x+fSJFFTP2e7S8v7/uqN5WcX5v/pidrvIC8=";
 
-    aarch64-darwin = "sha256-YDMl0rZQwCfg4aBRgRd/cGwQHfkWcsp/aGs9ZjwAmgo=";
+    aarch64-darwin = "sha256-nqvipKksCM0HkmG8u1z5VktW86kIt+3c0o1Y8DOdBC0=";
   }.${system} or throwSystem;
 in
-let version = "4.7.0"; in
+let version = "4.9.2"; in
 
 stdenv.mkDerivation (finalAttrs: {
   pname = "cyanprint";
@@ -37,6 +37,18 @@ stdenv.mkDerivation (finalAttrs: {
   # Mach-O binary needs no patching), so guard them behind isLinux.
   nativeBuildInputs = lib.optionals stdenv.hostPlatform.isLinux [ autoPatchelfHook ];
   buildInputs = lib.optionals stdenv.hostPlatform.isLinux [ stdenv.cc.cc.lib glibc ];
+
+  # cyanprint ships as a Bun single-file executable: the whole application is
+  # APPENDED to the Bun runtime, past the end of the ELF's sections, and located at
+  # startup from a trailer. stdenv's default fixup runs `strip`, which rewrites the
+  # file and drops that trailing payload — the binary stays executable and keeps its
+  # size to within a few KiB, so nothing fails loudly; it simply degrades into a bare
+  # Bun runtime. `cyanprint --version` then prints Bun's version and `cyanprint probe`
+  # dies with `error: Script not found "probe"`.
+  # This bit every release packaged since autoPatchelfHook was introduced, 4.7.0
+  # included. Keep the binary unstripped; there are no symbols worth reclaiming in a
+  # prebuilt artifact anyway.
+  dontStrip = true;
 
   installPhase = ''
     mkdir -p $out/bin

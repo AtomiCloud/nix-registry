@@ -37,6 +37,7 @@ The following packages are verified in CI with their respective commands:
 | dn-inspect             | `dn-inspect --version`             | .NET inspection tool                        |
 | deadcode               | `deadcode --version`               | Dead code detector                          |
 | helmlint               | `helmlint --version`               | Helm linting wrapper                        |
+| dlint                  | `dlint --version`                  | Repo-agnostic repository linters            |
 | attic                  | `attic --version`                  | Attic binary cache client                   |
 | cliproxyapi            | `cli-proxy-api --help`             | Only has --help, no --version               |
 | aws-export-credentials | `aws-export-credentials --version` | AWS credential exporter                     |

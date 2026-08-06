@@ -14,6 +14,7 @@ pkgs.runCommand "atomiutils"
 
     pkgs.gnused
     pkgs.gnugrep
+    pkgs.ripgrep
     pkgs.gnutar
     pkgs.gawk
     pkgs.wget
@@ -37,6 +38,7 @@ pkgs.runCommand "atomiutils"
 
   cp -f ${pkgs.gnused}/bin/* $out/bin/
   cp -f ${pkgs.gnugrep}/bin/* $out/bin/
+  cp -f ${pkgs.ripgrep}/bin/* $out/bin/
   cp -f ${pkgs.gnutar}/bin/* $out/bin/
   cp -f ${pkgs.gawk}/bin/* $out/bin/
 

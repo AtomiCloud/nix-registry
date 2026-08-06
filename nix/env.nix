@@ -30,6 +30,7 @@ with packages;
     gitlint
     shellcheck
     sg
+    dlint
   ];
 
   releaser = [

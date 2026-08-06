@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "checks": {
+    "action-pins": {
+      "trustMap": "trust/actions.json",
+      "workflowsDir": "ci/workflows"
+    },
+    "exec-bits": {},
+    "ci-wiring": {
+      "workflowsDir": "ci/workflows",
+      "entrypointPattern": "automation/[A-Za-z0-9._-]+[.]sh",
+      "orchestrators": ["ci/workflows/main.yaml"]
+    },
+    "skills-fresh": {
+      "regenerate": "bash tools/regen.sh",
+      "paths": ["third_party/skills"],
+      "ignore": ["third_party/skills/.gitkeep"]
+    },
+    "toolchain-smoke": {
+      "enter": "bash tools/enter-shell.sh {shell}",
+      "shells": {
+        "full": ["bash", "git", "fixture-tool"],
+        "lean": ["bash", "git"]
+      }
+    },
+    "no-custom-derivations": {
+      "paths": ["nix/packages.nix", "nix/env.nix"]
+    },
+    "workflow-policy": {
+      "assertions": [
+        {
+          "file": "ci/workflows/release.yaml",
+          "path": ".on.workflow_run.workflows",
+          "equals": ["Main"],
+          "reason": "release must trigger from the Main workflow"
+        },
+        {
+          "file": "ci/workflows/release.yaml",
+          "path": ".on.workflow_run.branches",
+          "equals": ["trunk"],
+          "reason": "release must be limited to trunk"
+        },
+        {
+          "file": "ci/workflows/release.yaml",
+          "path": ".on.workflow_run.types",
+          "equals": ["completed"],
+          "reason": "release workflow_run type must be completed"
+        },
+        {
+          "file": "ci/workflows/release.yaml",
+          "path": ".jobs.release.if",
+          "equals": "github.event.workflow_run.conclusion == 'success'",
+          "reason": "release job must require upstream success"
+        },
+        {
+          "file": "ci/workflows/release.yaml",
+          "path": ".concurrency.group",
+          "equals": "release",
+          "reason": "release concurrency group must be release"
+        },
+        {
+          "file": "ci/workflows/main.yaml",
+          "path": ".name",
+          "equals": "Main",
+          "reason": "the orchestrator workflow name must be exactly Main"
+        }
+      ]
+    }
+  }
+}

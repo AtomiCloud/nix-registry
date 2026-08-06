@@ -93,6 +93,7 @@ jobs:
           .#attic
           .#cliproxyapi
           .#deadcode
+          .#dlint
           .#coderabbit
           .#ccc
           .#md-mermaid-lint
@@ -122,6 +123,7 @@ jobs:
           dotnetlint --version &&
           dn-inspect --version &&
           deadcode --version &&
+          dlint --version &&
           coderabbit --version &&
           ccc --version &&
           md-mermaid-lint --version &&
