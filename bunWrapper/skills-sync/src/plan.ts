@@ -14,7 +14,6 @@ import {
 } from './engine.ts';
 import { PRESETS, type ResolverSpec } from './spec.ts';
 import { EXIT_OK, violation } from './exit.ts';
-import { trackedUnder } from './git.ts';
 import { info, skipped, warn } from './report.ts';
 
 export interface Plan {
@@ -24,14 +23,9 @@ export interface Plan {
   declared: DeclaredPackage[];
   resolution: Resolution;
   expected: TreeEntry[];
-  // Empty when every precondition holds. Populated means: the ENVIRONMENT is
-  // not ready, which is the one condition the three check tiers handle
-  // differently. It never means the repository is wrong.
   preconditionReasons: string[];
 }
 
-// Files that are actually inside the vendor tree right now, excluding the two
-// files the tool owns there.
 export function vendorContent(vendorAbs: string): string[] {
   if (!existsSync(vendorAbs)) return [];
   try {
@@ -42,18 +36,10 @@ export function vendorContent(vendorAbs: string): string[] {
   return walkFiles(vendorAbs).filter(p => !VENDOR_OWN_FILES.includes(p));
 }
 
-// The state where skills-sync is OFF.
-//
-// Off is owner-ruled and legitimate: the central wiring is generic and INERT
-// wherever no runtime is named. But "off" and "there are vendored skills here"
-// cannot both be true. Left unchecked, deleting the configuration would be a
-// way to switch the guarantee off while leaving the vendored tree in the
-// repository — so that combination refuses instead of skipping.
 export function outcomeWhenOff(config: Config, vendorAbs: string, repoRoot: string): number {
   const content = vendorContent(vendorAbs);
   const where = config.source ?? `${join(repoRoot, 'skills-sync.yaml')} (absent)`;
 
-  // Operand one: the subject witnessed by the OUTPUT.
   if (content.length > 0) {
     throw violation(
       `skills-sync names no runtime in '${where}', but '${vendorAbs}' holds ${content.length} vendored file(s): ` +
@@ -63,21 +49,10 @@ export function outcomeWhenOff(config: Config, vendorAbs: string, repoRoot: stri
     );
   }
 
-  // Operand two: the subject witnessed by the INPUT.
-  //
-  // The rulings authorise absent-equals-off BECAUSE a node naming no runtime has
-  // no subject. A node whose manifests DECLARE diene packages has one, so the
-  // authorisation does not reach it — and the mechanism this tool replaced
-  // (dlint skills-fresh) refused that case outright. An empty vendor tree is not
-  // evidence of no subject; it is equally the shape of a tree nothing is
-  // maintaining.
   const declared = probeForUnclaimedSubject(repoRoot);
 
   if (declared.packages.length > 0) {
     const named = declared.packages.map(p => `${p.name} (from ${p.declaredIn})`);
-    // `runtime: none` is a DECLARATION of absence and is the accepted opt-out.
-    // It still has to be audible: what is being deliberately ignored is named,
-    // so an opt-out cannot quietly grow a subject it no longer covers.
     if (config.explicitOptOut) {
       warn(
         `'${where}' declares 'runtime: none', so skills-sync is deliberately off here — but this repository ` +
@@ -99,15 +74,10 @@ export function outcomeWhenOff(config: Config, vendorAbs: string, repoRoot: stri
 
   skipped(`skills-sync names no runtime in '${where}', so there is nothing to synchronise here.`);
   info(`vendor directory inspected: '${vendorAbs}' — 0 vendored file(s)`);
-  // Printed even on the empty result: a probe that says nothing when it finds
-  // nothing is indistinguishable from a probe that never ran.
   info(`off-probe: ${declared.mechanisms} mechanism(s) probed (${declared.names}), 0 diene package(s) declared`);
   return EXIT_OK;
 }
 
-// Sweeps every built-in mechanism's DECLARE step. Declaration is pure manifest
-// reading — no toolchain, no installed dependencies — so this is cheap and works
-// on a cold checkout, which is exactly where the silent-off case bites.
 function probeForUnclaimedSubject(repoRoot: string): {
   packages: DeclaredPackage[];
   mechanisms: number;
@@ -140,9 +110,6 @@ export function buildPlan(repoRoot: string, config: Config): Plan {
 
   const preconditionReasons = [...dependencyVerdict(repoRoot, spec, declared).reasons];
 
-  // The resolution is only attempted when the cheap environment checks pass;
-  // running `go list` with no go on PATH would turn a precondition into a tool
-  // failure and lose the tier distinction entirely.
   let resolution: Resolution = { installed: [], unresolved: declared };
   if (preconditionReasons.length === 0) {
     resolution = resolveInstalled(repoRoot, spec, declared);
@@ -157,19 +124,4 @@ export function buildPlan(repoRoot: string, config: Config): Plan {
   }
 
   return { repoRoot, config, vendorAbs, declared, resolution, expected, preconditionReasons };
-}
-
-// The tracked-subject guard.
-//
-// Comparing the expected tree against the WORKTREE alone would pass a
-// repository whose vendor tree is correct on disk and absent from git — the
-// files would be regenerated locally and shipped to nobody. So the committed
-// state is a subject in its own right.
-export function untrackedVendorFiles(repoRoot: string, vendorDir: string, vendorAbs: string): string[] {
-  const tracked = new Set(
-    trackedUnder(repoRoot, vendorDir)
-      .map(p => p.slice(`${vendorDir}/`.length))
-      .filter(p => p.length > 0),
-  );
-  return vendorContent(vendorAbs).filter(p => !tracked.has(p));
 }
