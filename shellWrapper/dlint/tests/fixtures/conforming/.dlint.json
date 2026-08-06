@@ -17,8 +17,11 @@
       "ignore": ["third_party/skills/.gitkeep"]
     },
     "toolchain-smoke": {
-      "shell": "fixture",
-      "binaries": ["bash", "git"]
+      "enter": "bash tools/enter-shell.sh {shell}",
+      "shells": {
+        "full": ["bash", "git", "fixture-tool"],
+        "lean": ["bash", "git"]
+      }
     },
     "no-custom-derivations": {
       "paths": ["nix/packages.nix", "nix/env.nix"]

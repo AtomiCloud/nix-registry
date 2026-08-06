@@ -121,6 +121,10 @@ materialize() {
   mkdir -p "${repo}"
   cp -R "${FIXTURE_DIR}/." "${repo}/"
   chmod +x "${repo}/automation/"*.sh "${repo}/tools/"*.sh
+  # The per-shell binaries carry no `.sh`, so they need their own chmod: a
+  # fixture tool that silently lost its exec bit would make the toolchain-smoke
+  # baseline fail for a reason that has nothing to do with dlint.
+  chmod +x "${repo}/tools/bin-full/fixture-tool"
   git -C "${repo}" init -q -b main
   git -C "${repo}" add -A
   git -C "${repo}" commit -q -m "fixture"
@@ -331,14 +335,70 @@ m_paths_empty() { edit_config '.checks["skills-fresh"].paths = []'; }
 # -- toolchain-smoke ------------------------------------------------------- #
 
 m_toolchain_binary_missing() {
-  edit_config '.checks["toolchain-smoke"].binaries = ["definitely-not-a-real-binary"]'
+  edit_config '.checks["toolchain-smoke"].shells.full = ["definitely-not-a-real-binary"]'
 }
 
 m_toolchain_binaries_empty() {
-  edit_config '.checks["toolchain-smoke"].binaries = []'
+  edit_config '.checks["toolchain-smoke"].shells.full = []'
 }
 
-m_toolchain_shell_invalid() {
+# The ARM THAT PROVES SCOPING. `fixture-tool` exists in the `full` shell and not
+# in `lean`. Asking `lean` for it must refuse and must name `lean` — under an
+# implementation that resolved binaries in the invocation environment instead of
+# entering each shell, the two shells would be indistinguishable.
+m_toolchain_binary_missing_in_one_shell_only() {
+  edit_config '.checks["toolchain-smoke"].shells.lean += ["fixture-tool"]'
+}
+
+m_toolchain_shells_not_object() {
+  edit_config '.checks["toolchain-smoke"].shells = ["full", "lean"]'
+}
+
+m_toolchain_shells_empty() {
+  edit_config '.checks["toolchain-smoke"].shells = {}'
+}
+
+m_toolchain_shell_binaries_not_array() {
+  edit_config '.checks["toolchain-smoke"].shells.full = "bash"'
+}
+
+m_toolchain_enter_without_placeholder() {
+  edit_config '.checks["toolchain-smoke"].enter = "bash -c"'
+}
+
+m_toolchain_enter_absent() {
+  edit_config 'del(.checks["toolchain-smoke"].enter)'
+}
+
+# An unenterable shell must be UNKNOWN (5), never a missing binary (1): the
+# fixture's enter script exits 9 for a shell it does not know.
+m_toolchain_unenterable_shell() {
+  edit_config '.checks["toolchain-smoke"].shells = {"nosuch": ["bash"]}'
+}
+
+# Both forms declared at once leaves it ambiguous which shell a green is about.
+m_toolchain_both_forms() {
+  edit_config '.checks["toolchain-smoke"].shell = "fixture"
+    | .checks["toolchain-smoke"].binaries = ["bash"]'
+}
+
+# The legacy single-shell form, kept working so a repository configured for it
+# does not break the moment this lands. Its message must claim the INVOCATION
+# ENVIRONMENT and not the shell it names.
+m_toolchain_legacy_form() {
+  edit_config 'del(.checks["toolchain-smoke"].shells)
+    | del(.checks["toolchain-smoke"].enter)
+    | .checks["toolchain-smoke"].shell = "fixture"
+    | .checks["toolchain-smoke"].binaries = ["bash", "git"]'
+}
+
+m_toolchain_legacy_binary_missing() {
+  m_toolchain_legacy_form
+  edit_config '.checks["toolchain-smoke"].binaries = ["definitely-not-a-real-binary"]'
+}
+
+m_toolchain_legacy_shell_invalid() {
+  m_toolchain_legacy_form
   edit_config '.checks["toolchain-smoke"].shell = "not a shell"'
 }
 
@@ -635,7 +695,7 @@ arm "action-pins/non-trusted baseline" m_none 0 "✅ non-trusted action pins con
 arm "exec-bits baseline" m_none 0 "✅ Tracked shell scripts are executable" -- exec-bits
 arm "ci-wiring baseline" m_none 0 "✅ Workflow jobs resolve to existing CI scripts" -- ci-wiring
 arm "skills-fresh baseline" m_none 0 "✅ Vendored tree is fresh" -- skills-fresh
-arm "toolchain-smoke baseline" m_none 0 "✅ Declared shell 'fixture' resolves every required binary" -- toolchain-smoke
+arm "toolchain-smoke baseline (2 shells entered)" m_none 0 "✅ Every declared shell resolves its required binaries (full lean)" -- toolchain-smoke
 
 printf '\naction-pins mutations\n'
 arm "trusted action pinned to a SHA" m_trusted_pinned_to_sha 1 \
@@ -713,12 +773,43 @@ arm "regeneration command fails" m_regeneration_fails 1 \
 arm "paths list empty" m_paths_empty 4 \
   "must name at least one tracked path" -- skills-fresh
 
-printf '\ntoolchain-smoke mutations\n'
-arm "declared binary missing" m_toolchain_binary_missing 1 \
-  "declared shell 'fixture' is missing binary" -- toolchain-smoke
+printf '\ntoolchain-smoke mutations (per-shell scoping)\n'
+arm "declared binary missing in a named shell" m_toolchain_binary_missing 1 \
+  "shell 'full' is missing binary" -- toolchain-smoke
+# THE SCOPING ARM. Same binary, two shells, two verdicts. This is green under an
+# implementation that ignores the shell and only inspects where it was invoked.
+arm "a binary present in one shell is missing in another" m_toolchain_binary_missing_in_one_shell_only 1 \
+  "shell 'lean' is missing binary 'fixture-tool'" -- toolchain-smoke
+arm "the refusal names the shell, not the environment" m_toolchain_binary_missing_in_one_shell_only 1 \
+  "'lean'" -- toolchain-smoke
+arm "an unenterable shell is UNKNOWN, not a missing binary" m_toolchain_unenterable_shell 5 \
+  "could not enter shell 'nosuch'" -- toolchain-smoke
+arm "an unenterable shell says which command it ran" m_toolchain_unenterable_shell 5 \
+  "The entry command was" -- toolchain-smoke
 arm "binary list empty" m_toolchain_binaries_empty 4 \
-  "must name at least one binary" -- toolchain-smoke
-arm "shell name invalid" m_toolchain_shell_invalid 4 \
+  "declares no binary" -- toolchain-smoke
+arm "shells is not an object" m_toolchain_shells_not_object 4 \
+  "must be an object mapping each shell name" -- toolchain-smoke
+arm "shells is empty" m_toolchain_shells_empty 4 \
+  "must name at least one shell" -- toolchain-smoke
+arm "a shell's binaries are not an array" m_toolchain_shell_binaries_not_array 4 \
+  "must be an array of binaries" -- toolchain-smoke
+arm "enter without the {shell} placeholder" m_toolchain_enter_without_placeholder 4 \
+  "must contain the '{shell}' placeholder" -- toolchain-smoke
+arm "scoped form without an enter command" m_toolchain_enter_absent 4 \
+  "is required" -- toolchain-smoke
+arm "both shell and shells declared" m_toolchain_both_forms 4 \
+  "never both" -- toolchain-smoke
+
+printf '\ntoolchain-smoke: the legacy single-shell form still works\n'
+# It keeps working, but its green may not be attributed to the shell it names.
+arm "legacy form passes" m_toolchain_legacy_form 0 \
+  "✅ The invocation environment resolves every binary declared for 'fixture'" -- toolchain-smoke
+arm "legacy form says it did NOT enter the shell" m_toolchain_legacy_form 0 \
+  "not entered" -- toolchain-smoke
+arm "legacy form refusal blames the environment" m_toolchain_legacy_binary_missing 1 \
+  "the invocation environment is missing binary" -- toolchain-smoke
+arm "legacy shell name invalid" m_toolchain_legacy_shell_invalid 4 \
   "must name one shell" -- toolchain-smoke
 
 printf '\nno-custom-derivations mutations (one arm per vocabulary member)\n'
@@ -882,7 +973,7 @@ arm "action-pins/non-trusted rebaseline" m_none 0 "✅ non-trusted action pins c
 arm "exec-bits rebaseline" m_none 0 "✅ Tracked shell scripts are executable" -- exec-bits
 arm "ci-wiring rebaseline" m_none 0 "✅ Workflow jobs resolve to existing CI scripts" -- ci-wiring
 arm "skills-fresh rebaseline" m_none 0 "✅ Vendored tree is fresh" -- skills-fresh
-arm "toolchain-smoke rebaseline" m_none 0 "✅ Declared shell 'fixture' resolves every required binary" -- toolchain-smoke
+arm "toolchain-smoke rebaseline" m_none 0 "✅ Every declared shell resolves its required binaries (full lean)" -- toolchain-smoke
 arm "no-custom-derivations rebaseline" m_none 0 "✅ Template nix stays plain declarative lists" -- no-custom-derivations
 arm "workflow-policy rebaseline" m_none 0 "✅ Workflow policy conforms" -- workflow-policy
 
