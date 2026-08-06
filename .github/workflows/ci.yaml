@@ -103,6 +103,7 @@ jobs:
           .#dashboard-linter
           .#nsc
           .#obsidian_headless
+          .#releaser
           -c bash -c '
           sg --version &&
           upstash --version &&
@@ -137,6 +138,7 @@ jobs:
           app-store-connect --version &&
           mmoney --version &&
           ob --version &&
+          releaser --version &&
           echo "🎉 Done"'
 
   release:
