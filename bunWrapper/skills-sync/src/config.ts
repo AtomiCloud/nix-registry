@@ -14,8 +14,8 @@ export interface Config {
   source: string | null;
   enabled: boolean;
   explicitOptOut: boolean;
-  runtimeName: string | null;
-  resolver: ResolverSpec | null;
+  runtimes: string[];
+  resolvers: ResolverSpec[];
   vendorDir: string;
   requireSubjects: boolean;
 }
@@ -68,8 +68,8 @@ export function loadConfig(repoRoot: string): Config {
       source: null,
       enabled: false,
       explicitOptOut: false,
-      runtimeName: null,
-      resolver: null,
+      runtimes: [],
+      resolvers: [],
       vendorDir: VENDOR_DEFAULT,
       requireSubjects: true,
     };
@@ -105,63 +105,67 @@ export function loadConfig(repoRoot: string): Config {
   }
   const requireSubjects = raw.requireSubjects === undefined ? true : (raw.requireSubjects as boolean);
 
-  const runtimeRaw = raw.runtime;
-  if (runtimeRaw !== undefined && typeof runtimeRaw !== 'string') {
-    fail(source, `'runtime' must be a string, found ${typeof runtimeRaw}`);
+  if (raw.runtime !== undefined) {
+    fail(source, `'runtime' is retired; declare 'runtimes: [name, ...]' (or 'runtimes: []' to opt out)`);
   }
-  const runtimeName = typeof runtimeRaw === 'string' ? runtimeRaw.trim() : null;
+  const runtimesRaw = raw.runtimes;
+  if (runtimesRaw !== undefined && !Array.isArray(runtimesRaw)) {
+    fail(source, `'runtimes' must be a list of runtime names, found ${typeof runtimesRaw}`);
+  }
+  const runtimes: string[] = [];
+  if (Array.isArray(runtimesRaw)) {
+    runtimesRaw.forEach((entry, i) => {
+      if (typeof entry !== 'string' || entry.trim().length === 0) {
+        fail(source, `'runtimes[${i}]' must be a non-empty runtime name`);
+      }
+      const name = entry.trim();
+      if (runtimes.includes(name)) fail(source, `'runtimes' lists '${name}' twice`);
+      runtimes.push(name);
+    });
+  }
 
   const inline = raw.resolver;
   if (inline !== undefined && (inline === null || typeof inline !== 'object' || Array.isArray(inline))) {
     fail(source, `'resolver' must be a mapping, found ${Array.isArray(inline) ? 'array' : typeof inline}`);
   }
 
-  const namesNothing =
-    (runtimeName === null || runtimeName.length === 0 || runtimeName === 'none') && inline === undefined;
-  if (namesNothing) {
+  if (runtimes.length === 0 && inline === undefined) {
     return {
       source,
       enabled: false,
-      explicitOptOut: runtimeName === 'none',
-      runtimeName: null,
-      resolver: null,
+      explicitOptOut: runtimesRaw !== undefined,
+      runtimes: [],
+      resolvers: [],
       vendorDir,
       requireSubjects,
     };
   }
 
-  if (inline !== undefined) {
-    const resolver = validateResolver(source, inline as Record<string, unknown>);
-    if (runtimeName && runtimeName !== 'none' && runtimeName !== resolver.name) {
+  const resolvers: ResolverSpec[] = [];
+  for (const name of runtimes) {
+    const preset = PRESETS[name];
+    if (!preset) {
       fail(
         source,
-        `names runtime '${runtimeName}' and also carries an inline resolver called '${resolver.name}'; declare one or give them the same name`,
+        `'runtimes' names '${name}', which is not a built-in preset. Built-in presets: ${PRESET_NAMES.join(', ')}. A runtime skills-sync does not know is added with an inline 'resolver:' in this same file — never by editing skills-sync.`,
       );
     }
-    return {
-      source,
-      enabled: true,
-      explicitOptOut: false,
-      runtimeName: resolver.name,
-      resolver,
-      vendorDir,
-      requireSubjects,
-    };
+    resolvers.push(preset);
+  }
+  if (inline !== undefined) {
+    const resolver = validateResolver(source, inline as Record<string, unknown>);
+    if (resolvers.some(r => r.name === resolver.name)) {
+      fail(source, `inline resolver '${resolver.name}' duplicates a name already in 'runtimes'`);
+    }
+    resolvers.push(resolver);
   }
 
-  const preset = PRESETS[runtimeName as string];
-  if (!preset) {
-    fail(
-      source,
-      `'runtime' is '${runtimeName}', which is not a built-in preset. Built-in presets: ${PRESET_NAMES.join(', ')}. A runtime skills-sync does not know is added with an inline 'resolver:' in this same file — never by editing skills-sync.`,
-    );
-  }
   return {
     source,
     enabled: true,
     explicitOptOut: false,
-    runtimeName: preset.name,
-    resolver: preset,
+    runtimes: resolvers.map(r => r.name),
+    resolvers,
     vendorDir,
     requireSubjects,
   };
