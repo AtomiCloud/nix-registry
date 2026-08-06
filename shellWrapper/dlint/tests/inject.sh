@@ -19,8 +19,8 @@
 #     other, and the four baselines are re-asserted after all mutations.
 #   * The fixture repository is deliberately laid out like NEITHER of the two
 #     repositories in play: its workflows live in `ci/workflows`, its CI
-#     entrypoints in `automation/`, its trust map in `trust/actions.json` and its
-#     vendored tree in `third_party/skills`. If dlint had a diene-shaped or
+#     entrypoints in `automation/`, and its per-shell tools in `tools/`. Its
+#     trust map in `trust/actions.json`. If dlint had a diene-shaped or
 #     registry-shaped constant baked into it, these arms would fail.
 #
 # Usage:
@@ -328,7 +328,6 @@ m_config_checks_not_object() { edit_config '.checks = []'; }
 m_section_removed_action_pins() { edit_config 'del(.checks["action-pins"])'; }
 m_section_removed_exec_bits() { edit_config 'del(.checks["exec-bits"])'; }
 m_section_removed_ci_wiring() { edit_config 'del(.checks["ci-wiring"])'; }
-m_section_removed_skills_fresh() { edit_config 'del(.checks["skills-fresh"])'; }
 m_section_removed_toolchain_smoke() { edit_config 'del(.checks["toolchain-smoke"])'; }
 m_section_removed_no_custom_derivations() { edit_config 'del(.checks["no-custom-derivations"])'; }
 m_section_removed_workflow_policy() { edit_config 'del(.checks["workflow-policy"])'; }
@@ -339,7 +338,6 @@ m_section_true_exec_bits() { edit_config '.checks["exec-bits"] = true'; }
 m_trust_map_key_missing() { edit_config 'del(.checks["action-pins"].trustMap)'; }
 m_trust_map_key_wrong_type() { edit_config '.checks["action-pins"].trustMap = 7'; }
 m_orchestrators_empty() { edit_config '.checks["ci-wiring"].orchestrators = []'; }
-m_paths_empty() { edit_config '.checks["skills-fresh"].paths = []'; }
 
 # -- toolchain-smoke ------------------------------------------------------- #
 
@@ -497,36 +495,6 @@ m_orchestrator_deleted() {
   require_file ci/workflows/main.yaml
   git rm -q --cached ci/workflows/main.yaml
   rm -f ci/workflows/main.yaml
-}
-
-# -- skills-fresh ----------------------------------------------------------- #
-
-m_vendored_source_changed() {
-  replace_in source/skills/alpha/SKILL.md \
-    'Vendored fixture skill.' \
-    'Vendored fixture skill, revised upstream.'
-}
-
-# The index is the proposed tree, so a STAGED regeneration is the canonical
-# commit-in-progress and must pass. This arm is positive on purpose: it proves
-# the check refuses worktree drift rather than "any git status output".
-m_vendored_regeneration_staged() {
-  replace_in source/skills/alpha/SKILL.md \
-    'Vendored fixture skill.' \
-    'Vendored fixture skill, revised upstream.'
-  bash tools/regen.sh
-  git add -A third_party/skills
-}
-
-m_vendored_subjects_untracked() {
-  require_file third_party/skills/alpha/SKILL.md
-  git rm -q --cached third_party/skills/alpha/SKILL.md
-}
-
-m_regeneration_fails() {
-  require_file tools/regen.sh
-  printf '#!/usr/bin/env bash\nexit 3\n' >tools/regen.sh
-  chmod +x tools/regen.sh
 }
 
 # -- YAML configuration ----------------------------------------------------- #
@@ -807,7 +775,6 @@ arm "action-pins/trusted baseline" m_none 0 "✅ trusted action pins conform" --
 arm "action-pins/non-trusted baseline" m_none 0 "✅ non-trusted action pins conform" -- action-pins non-trusted
 arm "exec-bits baseline" m_none 0 "✅ Tracked shell scripts are executable" -- exec-bits
 arm "ci-wiring baseline" m_none 0 "✅ Workflow jobs resolve to existing CI scripts" -- ci-wiring
-arm "skills-fresh baseline" m_none 0 "✅ Vendored tree is fresh" -- skills-fresh
 arm "toolchain-smoke baseline (2 shells entered)" m_none 0 "✅ Every declared shell resolves its required binaries (full lean)" -- toolchain-smoke
 
 printf '\naction-pins mutations\n'
@@ -873,18 +840,6 @@ arm "declared orchestrator deleted" m_orchestrator_deleted 1 \
   "does not exist" -- ci-wiring
 arm "orchestrators list empty" m_orchestrators_empty 4 \
   "must name at least one workflow" -- ci-wiring
-
-printf '\nskills-fresh mutations\n'
-arm "vendored tree stale after regeneration" m_vendored_source_changed 1 \
-  "is stale; re-run" -- skills-fresh
-arm "staged regeneration passes (index-only)" m_vendored_regeneration_staged 0 \
-  "✅ Vendored tree is fresh" -- skills-fresh
-arm "no tracked subject left" m_vendored_subjects_untracked 1 \
-  "would pass vacuously" -- skills-fresh
-arm "regeneration command fails" m_regeneration_fails 1 \
-  "failed (exit 3)" -- skills-fresh
-arm "paths list empty" m_paths_empty 4 \
-  "must name at least one tracked path" -- skills-fresh
 
 printf '\ntoolchain-smoke mutations (per-shell scoping)\n'
 arm "declared binary missing in a named shell" m_toolchain_binary_missing 1 \
@@ -1027,8 +982,6 @@ arm "config file absent / exec-bits" m_config_deleted 3 \
   "dlint configuration is missing" -- exec-bits
 arm "config file absent / ci-wiring" m_config_deleted 3 \
   "dlint configuration is missing" -- ci-wiring
-arm "config file absent / skills-fresh" m_config_deleted 3 \
-  "dlint configuration is missing" -- skills-fresh
 arm "config file absent / toolchain-smoke" m_config_deleted 3 \
   "dlint configuration is missing" -- toolchain-smoke
 arm "config file absent / no-custom-derivations" m_config_deleted 3 \
@@ -1041,8 +994,6 @@ arm "config section absent / exec-bits" m_section_removed_exec_bits 3 \
   "An absent section is never a pass" -- exec-bits
 arm "config section absent / ci-wiring" m_section_removed_ci_wiring 3 \
   "An absent section is never a pass" -- ci-wiring
-arm "config section absent / skills-fresh" m_section_removed_skills_fresh 3 \
-  "An absent section is never a pass" -- skills-fresh
 arm "config section absent / toolchain-smoke" m_section_removed_toolchain_smoke 3 \
   "An absent section is never a pass" -- toolchain-smoke
 arm "config section absent / no-custom-derivations" m_section_removed_no_custom_derivations 3 \
@@ -1085,8 +1036,6 @@ arm "yaml config / exec-bits" m_config_as_yaml 0 \
   "✅ Tracked shell scripts are executable" -- exec-bits
 arm "yaml config / ci-wiring" m_config_as_yaml 0 \
   "✅ Workflow jobs resolve to existing CI scripts" -- ci-wiring
-arm "yaml config / skills-fresh" m_config_as_yaml 0 \
-  "✅ Vendored tree is fresh" -- skills-fresh
 arm "yaml config / toolchain-smoke" m_config_as_yaml 0 \
   "✅ Every declared shell resolves its required binaries (full lean)" -- toolchain-smoke
 # These two are the controls for THIS REBASE. Landing on a main that already carries
@@ -1097,7 +1046,7 @@ arm "yaml config / toolchain-smoke" m_config_as_yaml 0 \
 arm "yaml config / workflow-policy" m_config_as_yaml 0 \
   "✅ Workflow policy conforms" -- workflow-policy
 arm "yaml config / --all-configured (every reader)" m_config_as_yaml 0 \
-  "✅ every requested check passed (8)" -- --all-configured
+  "✅ every requested check passed (7)" -- --all-configured
 # Added by the #68 rebase, and predicted by the stale-scope law before it was found:
 # no-custom-derivations reads its own `forbid` type directly, a reader this refactor
 # never saw. Under YAML that read would have been handed the YAML file. This arm is
@@ -1137,10 +1086,10 @@ arm "DLINT_CONFIG naming a missing file is absent" m_none 3 \
   "named by DLINT_CONFIG, does not exist" -- exec-bits
 
 printf '\nmultiple checks in one invocation\n'
-arm "--all-configured baseline (8 specs from 7 sections)" m_none 0 \
-  "✅ every requested check passed (8)" -- --all-configured
+arm "--all-configured baseline (7 specs from 6 sections)" m_none 0 \
+  "✅ every requested check passed (7)" -- --all-configured
 arm "--all-configured counts what it ran" m_none 0 \
-  "checks run: 8 (did not pass: 0)" -- --all-configured
+  "checks run: 7 (did not pass: 0)" -- --all-configured
 # --all-configured reads dlint's OWN check list, so a check added to dlint is
 # enforced by it without anything else being edited. This arm is what makes that
 # claim checkable rather than asserted: it plants a workflow-policy fault and
@@ -1217,7 +1166,6 @@ arm "action-pins/trusted rebaseline" m_none 0 "✅ trusted action pins conform" 
 arm "action-pins/non-trusted rebaseline" m_none 0 "✅ non-trusted action pins conform" -- action-pins non-trusted
 arm "exec-bits rebaseline" m_none 0 "✅ Tracked shell scripts are executable" -- exec-bits
 arm "ci-wiring rebaseline" m_none 0 "✅ Workflow jobs resolve to existing CI scripts" -- ci-wiring
-arm "skills-fresh rebaseline" m_none 0 "✅ Vendored tree is fresh" -- skills-fresh
 arm "toolchain-smoke rebaseline" m_none 0 "✅ Every declared shell resolves its required binaries (full lean)" -- toolchain-smoke
 arm "no-custom-derivations rebaseline" m_none 0 "✅ Template nix stays plain declarative lists" -- no-custom-derivations
 arm "workflow-policy rebaseline" m_none 0 "✅ Workflow policy conforms" -- workflow-policy

@@ -51,7 +51,7 @@ WORK_DIR=""
 # The checks dlint ships, in the order --all-configured runs them. The
 # dispatcher, the --all-configured enumerator and the usage text all read this
 # one list, so they cannot drift into disagreeing about what dlint has.
-readonly DLINT_CHECKS="action-pins exec-bits ci-wiring skills-fresh toolchain-smoke workflow-policy no-custom-derivations"
+readonly DLINT_CHECKS="action-pins exec-bits ci-wiring toolchain-smoke workflow-policy no-custom-derivations"
 
 # --------------------------------------------------------------------------- #
 # reporting
@@ -116,7 +116,7 @@ Running several checks in ONE invocation:
   could not be trusted (3, 4, 5) outranks a known violation (1). An invocation
   that would inspect nothing refuses; it is never a pass.
 
-Checks (there are exactly seven; there is no 'all' CHECK — the flag is --all-configured):
+Checks (there are exactly six; there is no 'all' CHECK — the flag is --all-configured):
   action-pins <trusted|non-trusted>
       Every GitHub Action reference carries the pin its authored trust
       classification demands: a major tag for trusted actions, an exact 40-hex
@@ -127,8 +127,6 @@ Checks (there are exactly seven; there is no 'all' CHECK — the flag is --all-c
       Every orchestrator job calls a repository-local reusable workflow, and
       every reusable workflow calls a CI entrypoint that exists and is
       executable.
-  skills-fresh
-      Regenerate the vendored tree, then refuse if the worktree moved.
   toolchain-smoke
       Enter each declared shell and verify that every binary declared FOR THAT
       SHELL resolves inside it, so a green result is attributable to the shell it
@@ -143,7 +141,7 @@ Checks (there are exactly seven; there is no 'all' CHECK — the flag is --all-c
       assertion is one caught fault, and each carries the reason it refuses with.
 
 Configuration:
-  All seven checks read ONE file. dlint looks for, in order:
+  All six checks read ONE file. dlint looks for, in order:
     \$DLINT_CONFIG          (any path; YAML if it ends .yaml/.yml, else JSON)
     ./${DLINT_CONFIG_YAML}            the canonical name
     ./${DLINT_CONFIG_JSON}          still read, so a repository can migrate on its own clock
@@ -171,11 +169,6 @@ Configuration:
         "ci-wiring":    {
           "entrypointPattern": "scripts/ci/[A-Za-z0-9._-]+[.]sh",
           "orchestrators": [".github/workflows/ci.yaml"]
-        },
-        "skills-fresh": {
-          "regenerate": "bash scripts/local/skills-sync.sh",
-          "paths": [".claude/skills/vendor"],
-          "ignore": [".claude/skills/vendor/.gitkeep"]
         },
         "toolchain-smoke": {
           "enter": "nix develop .#{shell} --command bash -c",
@@ -622,89 +615,6 @@ check_ci_wiring() {
 }
 
 # --------------------------------------------------------------------------- #
-# skills-fresh
-# --------------------------------------------------------------------------- #
-
-check_skills_fresh() {
-  [ "$#" -eq 0 ] || usage_error "skills-fresh takes no arguments, got '$1'"
-
-  load_check_config skills-fresh
-  require_git_repo
-
-  local regenerate=""
-  regenerate="$(cfg_string regenerate)"
-
-  local paths_file="${WORK_DIR}/subject-paths.txt"
-  cfg_array paths >"${paths_file}"
-  local -a paths=()
-  mapfile -t paths <"${paths_file}"
-  [ "${#paths[@]}" -gt 0 ] ||
-    config_invalid "skills-fresh: '.checks[\"skills-fresh\"].paths' must name at least one tracked path; an empty list would let this check pass without a subject"
-
-  local ignore_file="${WORK_DIR}/ignore.txt"
-  cfg_array ignore optional >"${ignore_file}"
-
-  # The consuming repository owns the regeneration; dlint owns "regenerate,
-  # then refuse if the tree moved".
-  local regen_status=0
-  bash -c "${regenerate}" || regen_status=$?
-  [ "${regen_status}" -eq 0 ] ||
-    refuse "the regeneration command '${regenerate}' failed (exit ${regen_status}); freshness cannot be judged from a failed regeneration"
-
-  local tracked="${WORK_DIR}/tracked.txt"
-  git ls-files -- "${paths[@]}" >"${tracked}" ||
-    tool_failure "skills-fresh: could not list tracked subjects (git ls-files)"
-
-  # Ignored entries (a .gitkeep keeps a directory alive) can never witness
-  # stale content, so they are not subjects. grep answers 1 for "no line
-  # survived" and 2 or more for a real failure; a broken filter must never read
-  # as "nothing to check".
-  local subjects="${WORK_DIR}/subjects.txt" filter_status=0
-  if [ -s "${ignore_file}" ]; then
-    grep -F -x -v -f "${ignore_file}" "${tracked}" >"${subjects}" || filter_status=$?
-    [ "${filter_status}" -le 1 ] ||
-      tool_failure "skills-fresh: could not filter the tracked subjects (grep exit ${filter_status})"
-  else
-    cp "${tracked}" "${subjects}" ||
-      tool_failure "skills-fresh: could not copy the tracked subject list"
-  fi
-
-  local subject_count=""
-  subject_count="$(count_lines "${subjects}")"
-  log_info "tracked subjects: ${subject_count} (paths: ${paths[*]})"
-  if [ "${subject_count}" -eq 0 ]; then
-    refuse "no tracked subject under ${paths[*]}; the freshness check would pass vacuously"
-  fi
-
-  local porcelain="${WORK_DIR}/porcelain.txt"
-  git status --porcelain=v1 --untracked-files=all -- "${paths[@]}" >"${porcelain}" ||
-    tool_failure "skills-fresh: could not inspect the subject status (git status)"
-
-  # The index is the proposed tree, so an index-only entry (`A `, `M `, `R `) is
-  # the canonical regeneration a commit is about to record. Real drift is
-  # anything the worktree disagrees on after regeneration: a nonblank worktree
-  # column, which also covers every `??` untracked regeneration.
-  local drift="${WORK_DIR}/drift.txt" drift_status=0
-  grep -E '^.[^ ] ' "${porcelain}" >"${drift}" || drift_status=$?
-  [ "${drift_status}" -le 1 ] ||
-    tool_failure "skills-fresh: could not filter the subject status (grep exit ${drift_status})"
-
-  local status_count="" drift_count=""
-  status_count="$(count_lines "${porcelain}")"
-  drift_count="$(count_lines "${drift}")"
-  log_info "subject status entries: ${status_count}"
-  log_info "subject drift entries: ${drift_count}"
-
-  if [ "${drift_count}" -ne 0 ]; then
-    printf '❌ %s\n' "vendored tree is stale; re-run '${regenerate}' and stage the result:" >&2
-    cat "${drift}" >&2
-    exit "${EXIT_VIOLATION}"
-  fi
-
-  ok "Vendored tree is fresh"
-}
-
-# --------------------------------------------------------------------------- #
 # toolchain-smoke
 # --------------------------------------------------------------------------- #
 
@@ -951,7 +861,6 @@ dispatch_check() {
   action-pins) check_action_pins "$@" ;;
   exec-bits) check_exec_bits "$@" ;;
   ci-wiring) check_ci_wiring "$@" ;;
-  skills-fresh) check_skills_fresh "$@" ;;
   toolchain-smoke) check_toolchain_smoke "$@" ;;
   workflow-policy) check_workflow_policy "$@" ;;
   no-custom-derivations) check_no_custom_derivations "$@" ;;

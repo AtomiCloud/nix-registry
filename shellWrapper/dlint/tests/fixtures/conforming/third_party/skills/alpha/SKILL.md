@@ -1,3 +1,0 @@
-# Alpha
-
-Vendored fixture skill.
