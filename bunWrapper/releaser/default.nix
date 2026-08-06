@@ -1,16 +1,16 @@
 { nixpkgs, bun }:
 with nixpkgs;
 let
-  version = "1.3.1";
+  version = "1.3.2";
 
   # Immutable source pin. The rev is authoritative and the tag is a comment, so the
   # rev was ASSERTED to resolve to that tag rather than taken on the comment:
-  #   git ls-remote --tags .../releaser -> refs/tags/v1.3.1 = d44264a6b470...
+  #   git ls-remote --tags .../releaser -> refs/tags/v1.3.2 = 72b9109d8776...
   src = fetchFromGitHub {
     owner = "AtomiCloud";
     repo = "releaser";
-    rev = "d44264a6b4708d1c6bab55e3b2249c9de51dec97"; # v1.3.1
-    hash = "sha256-/TKHoHPycfgLmUGqyeHLHeqf8m2MVToELwKIJ/1tBds=";
+    rev = "72b9109d87764062bb4ffb7546422cffca807530"; # v1.3.2
+    hash = "sha256-GkiKyBZUfW5R8eBV4OQ48bvrqYxfaBcHgY6xdiN3gjU=";
   };
 
   # Production deps only: the compiled binary bundles runtime imports (all pure
@@ -104,8 +104,10 @@ stdenv.mkDerivation {
       releases) and commit-message linting from one atomi_release.yaml
       configuration, replacing sg (semantic-generator) and python gitlint.
       Built from a pinned source tag with Bun's single-file compiler. The tag is
-      deliberately not named here: a version in prose goes stale on every bump
-      and this one already had, still claiming v1.0.0 at the v1.3.1 pin.
+      deliberately not named here: a version written into prose goes stale on
+      every bump, and this sentence had already been wrong for several of them.
+      The authoritative version is the `version` binding above, which the
+      installCheck asserts against the built bytes.
     '';
     mainProgram = "releaser";
     homepage = "https://github.com/AtomiCloud/releaser";
