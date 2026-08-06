@@ -213,7 +213,7 @@ run_in "${TMPROOT}" "${SKILLS_SYNC_CMD[@]}" check --tier bogus
 expect 'A11 unknown tier refuses' 2 "unknown tier 'bogus'"
 run_in "${TMPROOT}" "${SKILLS_SYNC_CMD[@]}" check --tier ci --bogus
 expect 'A12 unknown option on check refuses' 2 "has no option '--bogus'"
-run_in "${TMPROOT}" "${SKILLS_SYNC_CMD[@]}" sync --tier ci
+run_in "${TMPROOT}" "${SKILLS_SYNC_CMD[@]}" runtimes --tier ci
 expect 'A13 an option that belongs to another subcommand refuses' 2 "has no option '--tier'"
 
 run_in "${TMPROOT}" "${SKILLS_SYNC_CMD[@]}" runtimes
@@ -380,19 +380,32 @@ fi
 expect "D9 the three tiers produced THREE DISTINCT exit codes on one condition (${RUN_OUT})" 0 ''
 
 # --------------------------------------------------------------------------- #
-group 'E. THE WRITER — D1 (never in a hook) and D11 (nobody else writes the tree)'
+group 'E. THE WRITER — D1 MIGRATED (detection kept, refusal retired) and D11'
 # --------------------------------------------------------------------------- #
 
+# The owner revoked D1's never-in-hooks clause and mandated the writer run at
+# setup, pre-commit AND CI. The REFUSAL is gone; the DETECTION is not. The six
+# markers now check that the DECLARED tier is consistent with the environment,
+# which preserves the one mis-wiring the old rule caught that is still worth
+# catching: a setup script wired into a hook.
 W="$(mutate writer)"
 for marker in PRE_COMMIT=1 GIT_INDEX_FILE=/tmp/index HUSKY_GIT_PARAMS=x LEFTHOOK=1 SKILLS_SYNC_HOOK_CONTEXT=1; do
-  run_in "${W}" "${marker}" "${SKILLS_SYNC_CMD[@]}" sync
-  expect "E1 sync refuses in a hook context (${marker%%=*})" 2 'must never run from a hook (D1)'
+  run_in "${W}" "${marker}" "${SKILLS_SYNC_CMD[@]}" sync --tier setup
+  expect "E1 --tier setup in a hook context (${marker%%=*}) is a wiring mistake" 2 'a hook is not setup'
 done
 
 # The refusal has to name WHICH marker fired; "this looks like a hook" is not
 # something an operator can act on.
+run_in "${W}" PRE_COMMIT=1 "${SKILLS_SYNC_CMD[@]}" sync --tier setup
+expect 'E2 the refusal names the marker that fired' 2 'PRE_COMMIT says so'
+
+# The tier decides what the writer does on drift, so it is never inferred.
 run_in "${W}" PRE_COMMIT=1 "${SKILLS_SYNC_CMD[@]}" sync
-expect 'E2 the refusal names the marker that fired' 2 'The environment variable PRE_COMMIT'
+expect 'E2b a hook context with no --tier refuses and asks for one' 2 'no --tier was declared'
+
+# MUST-DIFFER: the same markers must NOT refuse the tiers the owner mandated.
+run_in "${W}" PRE_COMMIT=1 "${SKILLS_SYNC_CMD[@]}" sync --tier pre-commit
+expect 'E2c MUST-DIFFER: --tier pre-commit is ALLOWED in the same hook context' 0 'may proceed'
 
 # The read-only half is exactly what a hook is allowed to run, so it must NOT be
 # refused under the same markers.
@@ -430,11 +443,14 @@ expect 'E8 and the check goes green again' 0 'are fresh'
 # evaluated at all. Two arms agreeing reads exactly like a controlled result,
 # which is how a rule gets certified by a test that never executed it.
 #
-# E9 is the arm that catches that ordering: it FAILS (exit 5) against the old
-# ordering and passes (exit 2) once the guard is hoisted above every
-# precondition. E10 is not a second D1 arm — it is what makes E9 mean something,
-# by proving the same directory still answers 5 when no marker is set. Without
-# E10, a build that simply refused everything with exit 2 would pass E9.
+# E9 is the arm that catches that ordering. Its SUBJECT changed when the owner
+# revoked the never-in-hooks clause — the marker check is now a tier-consistency
+# check — but the REACHABILITY property it protects is unchanged and still worth
+# asserting: the marker logic must be evaluated before the git precondition can
+# pre-empt it, or no control aimed at it can ever reach it. E10 is not a second
+# arm; it is what makes E9 mean something, by proving the same directory still
+# answers 5 when no marker is set. Without E10, a build that refused everything
+# with exit 2 would pass E9.
 NONGIT="${TMPROOT}/nongit-hook"
 mkdir -p "${NONGIT}"
 
@@ -443,13 +459,13 @@ mkdir -p "${NONGIT}"
 run_in "${NONGIT}" git rev-parse --show-toplevel
 expect 'E9a POSITIVE CONTROL: the fixture directory is NOT a git work tree' 128 'not a git repository'
 
-run_in "${NONGIT}" PRE_COMMIT=1 "${SKILLS_SYNC_CMD[@]}" sync
-expect 'E9 D1 is REACHED where the git precondition would otherwise pre-empt it' 2 'must never run from a hook (D1)'
-run_in "${NONGIT}" PRE_COMMIT=1 "${SKILLS_SYNC_CMD[@]}" sync
-expect 'E9b and it still names the marker that fired' 2 'The environment variable PRE_COMMIT'
+run_in "${NONGIT}" PRE_COMMIT=1 "${SKILLS_SYNC_CMD[@]}" sync --tier setup
+expect 'E9 the marker check is REACHED where the git precondition would pre-empt it' 2 'a hook is not setup'
+run_in "${NONGIT}" PRE_COMMIT=1 "${SKILLS_SYNC_CMD[@]}" sync --tier setup
+expect 'E9b and it still names the marker that fired' 2 'PRE_COMMIT says so'
 
 run_in "${NONGIT}" env -u SKILLS_SYNC_HOOK_CONTEXT -u PRE_COMMIT -u PRE_COMMIT_HOME \
-  -u GIT_INDEX_FILE -u HUSKY_GIT_PARAMS -u LEFTHOOK "${SKILLS_SYNC_CMD[@]}" sync
+  -u GIT_INDEX_FILE -u HUSKY_GIT_PARAMS -u LEFTHOOK "${SKILLS_SYNC_CMD[@]}" sync --tier setup
 expect 'E10 MUST-DIFFER: same directory, no marker, still the git precondition' 5 'is not inside a git work tree'
 
 # --------------------------------------------------------------------------- #
@@ -817,19 +833,30 @@ expect 'J6e MUST-DIFFER: a main module NAMED diene.* is not a declaration' 0 '0 
 group 'K. THE WRITER REFUSES CLEANLY — a tool whose refusals are its product must not leak a stack'
 # --------------------------------------------------------------------------- #
 
+# The upstream package must MOVE first, or there is nothing for the writer to
+# write and an unwritable tree never gets touched. That is not a flaw in the
+# fixture — it is the content-idempotent writer behaving correctly, and K0 asserts
+# it, because "the writer succeeded on a read-only tree" is only acceptable when
+# the writer genuinely had nothing to do.
 UNW="$(mutate unwritable)"
 chmod -R a-w "${UNW}/.claude"
 run_in "${UNW}" "${SKILLS_SYNC_CMD[@]}" sync
-expect 'K1 an unwritable vendor tree is a stated refusal' 5 'could not create a staging directory'
-run_in "${UNW}" "${SKILLS_SYNC_CMD[@]}" sync
-expect_absent 'K2 and it does NOT leak an unhandled exception' 5 'failed unexpectedly'
-run_in "${UNW}" "${SKILLS_SYNC_CMD[@]}" sync
-expect_absent 'K3 and it does NOT leak a stack trace' 5 'at <anonymous>'
-# The read-only half is unaffected by an unwritable tree, which is what makes the
-# A9 drop a drop rather than a crash.
-run_in "${UNW}" "${SKILLS_SYNC_CMD[@]}" check --tier ci
-expect 'K4 MUST-DIFFER: check is unaffected by an unwritable tree' 0 'are fresh'
+expect 'K0 an idempotent writer needs no write permission when nothing changed' 0 'writer mutated 0 file(s)'
 chmod -R u+w "${UNW}/.claude" 2>/dev/null
+
+UNW2="$(mutate unwritable-drift)"
+printf 'moved upstream\n' >"${UNW2}/node_modules/@atomicloud/diene.alpha/skills/alpha/SKILL.md"
+chmod -R a-w "${UNW2}/.claude"
+run_in "${UNW2}" "${SKILLS_SYNC_CMD[@]}" sync
+expect 'K1 a write it CANNOT perform is a stated refusal' 5 'could not write the vendored tree at'
+run_in "${UNW2}" "${SKILLS_SYNC_CMD[@]}" sync
+expect_absent 'K2 and it does NOT leak an unhandled exception' 5 'failed unexpectedly'
+run_in "${UNW2}" "${SKILLS_SYNC_CMD[@]}" sync
+expect_absent 'K3 and it does NOT leak a stack trace' 5 'at <anonymous>'
+# The read-only half is unaffected by an unwritable tree.
+run_in "${UNW2}" "${SKILLS_SYNC_CMD[@]}" check --tier ci
+expect 'K4 MUST-DIFFER: check still reports the drift, unaffected by permissions' 1 'content differs'
+chmod -R u+w "${UNW2}/.claude" 2>/dev/null
 
 # --------------------------------------------------------------------------- #
 group 'L. SELECTION CONTROLS — drawn from the EXCLUDED and NON-MATCHING sets'
@@ -948,6 +975,160 @@ run_in "${SELF}" "${SKILLS_SYNC_CMD[@]}" check --tier ci
 expect 'L9b a manifest INSIDE the vendor tree is not swept (still 1 file)' 1 "declare: '**/pubspec.yaml (1 file(s))'"
 run_in "${SELF}" "${SKILLS_SYNC_CMD[@]}" check --tier ci
 expect_absent 'L9c and its package is NOT declared — no self-reference' 1 'diene_ghost'
+
+# --------------------------------------------------------------------------- #
+group 'M. THE PRE-COMMIT WRITER — treefmt shape, plus the INDEX condition'
+# --------------------------------------------------------------------------- #
+
+# The owner mandated the writer run at pre-commit. norah ruled the shape: any
+# tree mutation FAILS the commit loudly, regenerated files left for the user to
+# stage, and the tool NEVER stages anything.
+#
+# That shape is necessary but not sufficient, and M3 is why: git commits the
+# INDEX. A user who regenerates by hand and does not stage leaves NOTHING to
+# mutate, so a mutation-only rule passes and the commit still ships the stale
+# tree. So the rule is: refuse if MUTATED **or** INDEX != EXPECTED.
+
+# A repo wired the way the owner mandated: a real pre-commit hook running the
+# WRITER. `exec` so the hook's exit status IS the writer's — a trailing `echo`
+# would return its own status and the commit would survive a refusal, which is
+# how this harness lied to me once already.
+make_precommit_repo() {
+  local dir="$1"
+  rm -rf "${dir}"
+  mkdir -p "${dir}/.claude/skills/vendor" "${dir}/node_modules/@atomicloud/diene.alpha/skills/alpha"
+  git init -q "${dir}"
+  git -C "${dir}" config core.hooksPath "${dir}/.git/hooks"
+  printf 'schemaVersion: 1\nruntime: bun\n' >"${dir}/skills-sync.yaml"
+  printf '{"name":"f","dependencies":{"@atomicloud/diene.alpha":"1.0.0"}}\n' >"${dir}/package.json"
+  printf 'v1\n' >"${dir}/node_modules/@atomicloud/diene.alpha/skills/alpha/SKILL.md"
+  printf 'node_modules/\n' >"${dir}/.gitignore"
+  printf 'orig\n' >"${dir}/other.txt"
+  touch "${dir}/.claude/skills/vendor/.gitkeep"
+  git_q "${dir}" add -A
+  git_q "${dir}" commit -m init --no-verify
+  (cd "${dir}" && "${SKILLS_SYNC_CMD[@]}" sync) >/dev/null 2>&1
+  git_q "${dir}" add -A
+  git_q "${dir}" commit -m sync --no-verify
+  # shellcheck disable=SC2016  # the hook body must expand at COMMIT time, not now
+  printf '#!/bin/sh\ncd "$(git rev-parse --show-toplevel)"\nexec %s sync --tier pre-commit\n' \
+    "${SKILLS_SYNC_CMD[*]}" >"${dir}/.git/hooks/pre-commit"
+  chmod +x "${dir}/.git/hooks/pre-commit"
+}
+
+commit_in() {
+  RUN_OUT="$(cd "$1" && git -c user.email=tests@example.invalid -c user.name=tests \
+    -c commit.gpgsign=false commit -m "$2" 2>&1)"
+  RUN_RC=$?
+}
+
+VENDORED=.claude/skills/vendor/diene.alpha/alpha/SKILL.md
+
+# POSITIVE CONTROL: the harness can see a hook abort a commit at all. Without it
+# every "LOUD" row below could be a harness that swallows exit codes.
+PC="${TMPROOT}/precommit-control"
+make_precommit_repo "${PC}"
+printf '#!/bin/sh\nexit 7\n' >"${PC}/.git/hooks/pre-commit"
+chmod +x "${PC}/.git/hooks/pre-commit"
+printf 'z\n' >"${PC}/z.txt"
+git_q "${PC}" add z.txt
+commit_in "${PC}" 'control'
+expect 'M0 POSITIVE CONTROL: a hook exiting non-zero DOES abort the commit' 1 ''
+
+# ---- CONDITION 2: content-idempotence, demonstrated not assumed -------------
+IDEM="${TMPROOT}/idempotent"
+make_precommit_repo "${IDEM}"
+run_in "${IDEM}" "${SKILLS_SYNC_CMD[@]}" sync
+expect 'M1 a no-change sync mutates ZERO files (content-idempotent)' 0 'writer mutated 0 file(s)'
+
+# The justification, in the battery rather than only in a report: a
+# content-identical sync CHURNS inode and mtime while git stays silent. So an
+# mtime-keyed or directory-replacement-keyed detector would report a mutation
+# here and reject A2; only a CONTENT-keyed detector reports zero.
+BEFORE_MTIME="$(stat -c %Y "${IDEM}/${VENDORED}")"
+BEFORE_INODE="$(stat -c %i "${IDEM}/${VENDORED}")"
+sleep 1.1
+run_in "${IDEM}" "${SKILLS_SYNC_CMD[@]}" sync
+AFTER_MTIME="$(stat -c %Y "${IDEM}/${VENDORED}")"
+AFTER_INODE="$(stat -c %i "${IDEM}/${VENDORED}")"
+RUN_OUT="mtime ${BEFORE_MTIME}->${AFTER_MTIME} inode ${BEFORE_INODE}->${AFTER_INODE}"
+RUN_RC=$([ "${BEFORE_MTIME}" = "${AFTER_MTIME}" ] && [ "${BEFORE_INODE}" = "${AFTER_INODE}" ] && echo 0 || echo 1)
+expect "M1b an idempotent write does not even touch mtime/inode (${RUN_OUT})" 0 ''
+
+# ---- CONDITION 3: cpSync silently not overwriting is a false green ----------
+# MUST-DIFFER on the CONTENT, not on the call returning: a writer that silently
+# does not write is exactly the failure this asserts against.
+OVER="${TMPROOT}/overwrite"
+make_precommit_repo "${OVER}"
+printf 'HAND-EDITED\n' >"${OVER}/${VENDORED}"
+run_in "${OVER}" "${SKILLS_SYNC_CMD[@]}" sync
+RUN_OUT="content now: $(cat "${OVER}/${VENDORED}")"
+RUN_RC=$([ "$(cat "${OVER}/${VENDORED}")" = "v1" ] && echo 0 || echo 1)
+expect "M2 the writer OVERWROTE an existing file — content changed, not just a return code (${RUN_OUT})" 0 ''
+
+# ---- A2: the row that must not be rejected ---------------------------------
+A2="${TMPROOT}/a2"
+make_precommit_repo "${A2}"
+printf 'v2\n' >"${A2}/node_modules/@atomicloud/diene.alpha/skills/alpha/SKILL.md"
+(cd "${A2}" && "${SKILLS_SYNC_CMD[@]}" sync) >/dev/null 2>&1
+git_q "${A2}" add -A
+commit_in "${A2}" 'A2 staged regeneration'
+expect 'M3 A2: an already-staged regeneration PASSES — the commit that fixes the tree' 0 ''
+RUN_OUT="$(git -C "${A2}" show "HEAD:${VENDORED}" 2>&1)"
+RUN_RC=$([ "${RUN_OUT}" = "v2" ] && echo 0 || echo 1)
+expect "M3b and the commit records the CORRECT tree (${RUN_OUT})" 0 ''
+
+# ---- CONDITION 1: THE GAP ROW, permanent -----------------------------------
+# mutated = 0, index != expected, exit 1. Without this arm the index condition
+# could be inert and nothing would say so.
+GAP="${TMPROOT}/gap"
+make_precommit_repo "${GAP}"
+printf 'v2\n' >"${GAP}/node_modules/@atomicloud/diene.alpha/skills/alpha/SKILL.md"
+(cd "${GAP}" && "${SKILLS_SYNC_CMD[@]}" sync) >/dev/null 2>&1 # worktree correct, NOT staged
+printf 'changed\n' >"${GAP}/other.txt"
+git_q "${GAP}" add other.txt
+commit_in "${GAP}" 'gap'
+expect 'M4 THE GAP ROW: correct on disk but unstaged is REFUSED' 1 'not staged as the packages ship them'
+expect 'M4b and it is refused with mutated=0 — a mutation-only rule would PASS this' 1 'writer mutated 0 file(s)'
+RUN_OUT="$(git -C "${GAP}" log --oneline -1)"
+RUN_RC=$(git -C "${GAP}" log --oneline -1 | grep -q 'gap' && echo 1 || echo 0)
+expect 'M4c and the commit was NOT created' 0 ''
+
+# ---- drift: loud, files left, nothing staged -------------------------------
+DRIFT="${TMPROOT}/drift"
+make_precommit_repo "${DRIFT}"
+printf 'v2\n' >"${DRIFT}/node_modules/@atomicloud/diene.alpha/skills/alpha/SKILL.md"
+printf 'changed\n' >"${DRIFT}/other.txt"
+git_q "${DRIFT}" add other.txt
+commit_in "${DRIFT}" 'drift'
+expect 'M5 drift REFUSES the commit loudly' 1 'regenerated'
+expect 'M5b and states that nothing was added to the commit' 1 'NOTHING was added to your commit'
+RUN_OUT="$(cat "${DRIFT}/${VENDORED}")"
+RUN_RC=$([ "${RUN_OUT}" = "v2" ] && echo 0 || echo 1)
+expect "M5c and the regenerated file is LEFT IN THE WORKING TREE to stage (${RUN_OUT})" 0 ''
+# The tool never stages: the vendor tree must still be unstaged after the refusal.
+RUN_OUT="$(git -C "${DRIFT}" diff --cached --name-only -- .claude/skills/vendor | tr '\n' ' ')"
+RUN_RC=$([ -z "${RUN_OUT}" ] && echo 0 || echo 1)
+expect "M5d and the tool staged NOTHING itself (staged vendor paths: [${RUN_OUT}])" 0 ''
+
+# ---- deps absent per tier --------------------------------------------------
+COLDW="$(mutate writer-precommit-cold)"
+rm -rf "${COLDW}/node_modules"
+run_in "${COLDW}" "${SKILLS_SYNC_CMD[@]}" sync --tier pre-commit
+expect 'M6 deps absent at pre-commit SKIPS (0) — a commit must not need a restored tree' 0 'this tier skips'
+run_in "${COLDW}" "${SKILLS_SYNC_CMD[@]}" sync --tier ci
+expect 'M6b deps absent in CI REFUSES (1)' 1 'not restored'
+run_in "${COLDW}" "${SKILLS_SYNC_CMD[@]}" sync --tier setup
+expect 'M6c deps absent at setup REFUSES (3)' 3 'not restored'
+
+# ---- CI writes then refuses, never repair-and-pass --------------------------
+CIR="${TMPROOT}/ci-drift"
+make_precommit_repo "${CIR}"
+printf 'v2\n' >"${CIR}/node_modules/@atomicloud/diene.alpha/skills/alpha/SKILL.md"
+run_in "${CIR}" "${SKILLS_SYNC_CMD[@]}" sync --tier ci
+expect 'M7 CI on drift REFUSES rather than repair-and-pass' 1 'is not what the packages ship'
+run_in "${CIR}" "${SKILLS_SYNC_CMD[@]}" sync --tier ci
+expect 'M7b MUST-DIFFER: a second CI run still refuses (no self-healing loop)' 1 'not staged as the packages ship them'
 
 # --------------------------------------------------------------------------- #
 printf '\n=== artifact under test: %s\n' "${SKILLS_SYNC}"
