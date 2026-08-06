@@ -51,7 +51,7 @@ WORK_DIR=""
 # The checks dlint ships, in the order --all-configured runs them. The
 # dispatcher, the --all-configured enumerator and the usage text all read this
 # one list, so they cannot drift into disagreeing about what dlint has.
-readonly DLINT_CHECKS="action-pins exec-bits ci-wiring toolchain-smoke workflow-policy no-custom-derivations"
+readonly DLINT_CHECKS="action-pins exec-bits ci-wiring toolchain-smoke workflow-policy no-custom-derivations nixpkgs-pin"
 
 # --------------------------------------------------------------------------- #
 # reporting
@@ -94,7 +94,7 @@ dlint ${DLINT_VERSION} — repo-agnostic repository linters
 Usage:
   dlint <check> [args]
   dlint --check <check> [--check <check>]...
-  dlint --all-configured
+  dlint lint          (alias: --all-configured)
   dlint --help
   dlint --version
 
@@ -864,6 +864,7 @@ dispatch_check() {
   toolchain-smoke) check_toolchain_smoke "$@" ;;
   workflow-policy) check_workflow_policy "$@" ;;
   no-custom-derivations) check_no_custom_derivations "$@" ;;
+  nixpkgs-pin) check_nixpkgs_pin "$@" ;;
   *)
     usage_error "unknown check '${check}'; dlint has these: ${DLINT_CHECKS}"
     ;;
@@ -1088,6 +1089,81 @@ check_workflow_policy() {
 }
 
 # --------------------------------------------------------------------------- #
+# nixpkgs-pin
+# --------------------------------------------------------------------------- #
+
+# Root flake inputs matching the configured pattern must pin exact commits.
+# Resolution goes through .nodes.root.inputs, never .nodes by declared name:
+# transitive dependencies carry the bare names, and reading them checks someone
+# else's pin as ours.
+check_nixpkgs_pin() {
+  [ "$#" -eq 0 ] || usage_error "nixpkgs-pin takes no arguments, got '$1'"
+
+  load_check_config nixpkgs-pin
+
+  local flake="" lock="" pattern=""
+  flake="$(jq -r '.checks["nixpkgs-pin"].flake // "flake.nix"' "${CFG_JSON}")"
+  lock="$(jq -r '.checks["nixpkgs-pin"].lock // "flake.lock"' "${CFG_JSON}")"
+  pattern="$(jq -r '.checks["nixpkgs-pin"].inputPattern // "nixpkgs"' "${CFG_JSON}")"
+
+  [ -f "${lock}" ] || refuse "nixpkgs-pin: '${lock}' is absent, so no pin can be checked"
+  [ -f "${flake}" ] || refuse "nixpkgs-pin: '${flake}' is absent, so no pin can be checked"
+
+  local nodes_file="${WORK_DIR}/nixpkgs-pin-nodes"
+  jq -r --arg p "${pattern}" \
+    '.nodes.root.inputs | to_entries[] | select(.key | test($p)) | .value' \
+    "${lock}" >"${nodes_file}" ||
+    tool_failure "nixpkgs-pin: could not read '.nodes.root.inputs' from '${lock}'"
+
+  local -a nodes=()
+  mapfile -t nodes <"${nodes_file}"
+  [ "${#nodes[@]}" -gt 0 ] ||
+    refuse "nixpkgs-pin: the root declares no input matching '${pattern}', so this check inspected nothing"
+
+  local failed=0 node="" ref="" original_rev="" locked_rev=""
+  for node in "${nodes[@]}"; do
+    ref="$(jq -r --arg n "${node}" '.nodes[$n].original.ref // ""' "${lock}")"
+    original_rev="$(jq -r --arg n "${node}" '.nodes[$n].original.rev // ""' "${lock}")"
+    locked_rev="$(jq -r --arg n "${node}" '.nodes[$n].locked.rev // ""' "${lock}")"
+
+    if [ -n "${ref}" ]; then
+      printf '❌ nixpkgs-pin: root input '\''%s'\'' follows the channel '\''%s'\'' instead of an exact commit\n' "${node}" "${ref}" >&2
+      failed=1
+      continue
+    fi
+    if ! printf '%s' "${original_rev}" | grep -Eq '^[0-9a-f]{40}$'; then
+      printf '❌ nixpkgs-pin: root input '\''%s'\'' declares '\''%s'\'', which is not an exact 40-character commit\n' "${node}" "${original_rev}" >&2
+      failed=1
+      continue
+    fi
+    # original vs locked can disagree: an exact request whose resolution moved.
+    if [ "${locked_rev}" != "${original_rev}" ]; then
+      printf '❌ nixpkgs-pin: root input '\''%s'\'' asks for %s but is locked to %s\n' "${node}" "${original_rev}" "${locked_rev}" >&2
+      failed=1
+    fi
+  done
+
+  # Catch a declaration edited without re-locking: every rev the flake names for
+  # a matching input must actually be in force.
+  local declared=""
+  while read -r declared; do
+    [ -n "${declared}" ] || continue
+    if ! jq -e --arg r "${declared}" --arg p "${pattern}" \
+      '[.nodes.root.inputs | to_entries[] | select(.key | test($p)) | .value] as $roots
+        | [.nodes | to_entries[] | select(.key as $k | $roots | index($k)) | .value.locked.rev]
+        | index($r)' "${lock}" >/dev/null; then
+      printf '❌ nixpkgs-pin: %s declares %s but no matching root input is locked to it\n' "${flake}" "${declared}" >&2
+      failed=1
+    fi
+  done < <(grep -E "${pattern}[A-Za-z0-9_-]*\.url" "${flake}" | grep -oE '[0-9a-f]{40}')
+
+  [ "${failed}" -eq 0 ] || exit "${EXIT_VIOLATION}"
+
+  log_info "root inputs matching '${pattern}' inspected: ${#nodes[@]}"
+  ok "Every matching root input is pinned to an exact commit"
+}
+
+# --------------------------------------------------------------------------- #
 # entrypoint
 # --------------------------------------------------------------------------- #
 
@@ -1114,7 +1190,7 @@ main() {
   trap "rm -rf '${WORK_DIR}'" EXIT
 
   case "${command}" in
-  --all-configured) run_all_configured "$@" ;;
+  lint | --all-configured) run_all_configured "$@" ;;
   --check) run_selected --check "$@" ;;
   *) dispatch_check "${command}" "$@" ;;
   esac
