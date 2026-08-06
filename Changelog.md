@@ -1,3 +1,15 @@
+## [3.15.0](https://github.com/AtomiCloud/nix-registry/compare/v3.14.0...v3.15.0) (2026-08-06)
+
+
+### ✨ New Packages ✨
+
+* **dlint:** add the workflow-policy check ([c58484a](https://github.com/AtomiCloud/nix-registry/commit/c58484ac29189c9e9288a570e9ed3a87b7dcf000))
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **dlint:** scope toolchain-smoke per shell ([eac6ea0](https://github.com/AtomiCloud/nix-registry/commit/eac6ea0bf25b5352dd4b98d25073e5c9111841bc))
+
 ## [3.14.0](https://github.com/AtomiCloud/nix-registry/compare/v3.13.0...v3.14.0) (2026-08-05)
 
 ## [3.13.0](https://github.com/AtomiCloud/nix-registry/compare/v3.12.0...v3.13.0) (2026-08-05)
