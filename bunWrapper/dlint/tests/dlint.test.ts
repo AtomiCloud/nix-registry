@@ -83,6 +83,11 @@ test('nixpkgs-pin configuration and lock refusals report exact exit codes', () =
     2,
     'nixpkgs-pin.inputPattern supports literal names with optional ^ and $ anchors',
   );
+  expectDlintError(
+    () => checkNixpkgsPin(root, { lock: 'absent.lock' }),
+    2,
+    `could not parse '${join(root, 'absent.lock')}': ENOENT: no such file or directory, open '${join(root, 'absent.lock')}'`,
+  );
   writeFileSync(join(root, 'flake.lock'), '{');
   expectDlintError(
     () => checkNixpkgsPin(root, {}),
