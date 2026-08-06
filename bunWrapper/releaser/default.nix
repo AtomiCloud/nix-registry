@@ -1,16 +1,16 @@
 { nixpkgs, bun }:
 with nixpkgs;
 let
-  version = "1.2.0";
+  version = "1.3.0";
 
   # Immutable source pin. The rev is authoritative and the tag is a comment, so the
   # rev was ASSERTED to resolve to that tag rather than taken on the comment:
-  #   git ls-remote --tags .../releaser -> refs/tags/v1.2.0 = d41b68a0bff6...
+  #   git ls-remote --tags .../releaser -> refs/tags/v1.3.0 = 9f6bd01103f3...
   src = fetchFromGitHub {
     owner = "AtomiCloud";
     repo = "releaser";
-    rev = "d41b68a0bff69e622ba334e187f2a55f37cd1efb"; # v1.2.0
-    hash = "sha256-51de0dCCkPTG4Tc1IEsaeCBAnIOy74YByUG4NmNOjmE=";
+    rev = "9f6bd01103f3312a5df9bfe6b6588ff9632a49ab"; # v1.3.0
+    hash = "sha256-hwNK6egs1devKAjBAgiid4eLtc7t9VXlEjBIln7PIDw=";
   };
 
   # Production deps only: the compiled binary bundles runtime imports (all pure
