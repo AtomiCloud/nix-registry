@@ -122,8 +122,11 @@ Checks (there are exactly six; there is no 'all' CHECK — the flag is --all-con
   skills-fresh
       Regenerate the vendored tree, then refuse if the worktree moved.
   toolchain-smoke
-      Verify that every binary a repository declares for one named shell resolves
-      in the environment where dlint is invoked.
+      Enter each declared shell and verify that every binary declared FOR THAT
+      SHELL resolves inside it, so a green result is attributable to the shell it
+      names. The legacy single-'shell' form still works, but it inspects the
+      invocation environment and says so rather than naming a shell it never
+      entered.
   workflow-policy
       Assert declared values at declared paths in declared workflow files. One
       assertion is one caught fault, and each carries the reason it refuses with.
@@ -147,8 +150,11 @@ Configuration:
           "ignore": [".claude/skills/vendor/.gitkeep"]
         },
         "toolchain-smoke": {
-          "shell": "default",
-          "binaries": ["bash", "git"]
+          "enter": "nix develop .#{shell} --command bash -c",
+          "shells": {
+            "default": ["bash", "git"],
+            "cd": ["skopeo", "helm"]
+          }
         },
         "workflow-policy": {
           "assertions": [
@@ -630,6 +636,122 @@ check_toolchain_smoke() {
 
   load_check_config toolchain-smoke
 
+  local shells_type="" legacy_type=""
+  shells_type="$(jq -r '.checks["toolchain-smoke"].shells | type' "${CFG_FILE}")" ||
+    config_invalid "toolchain-smoke: could not read '.checks[\"toolchain-smoke\"].shells'"
+  legacy_type="$(jq -r '.checks["toolchain-smoke"].shell | type' "${CFG_FILE}")" ||
+    config_invalid "toolchain-smoke: could not read '.checks[\"toolchain-smoke\"].shell'"
+
+  [ "${shells_type}" = "null" ] || [ "${legacy_type}" = "null" ] ||
+    config_invalid "toolchain-smoke: declare EITHER 'shells' (scoped, one entry per shell) OR the single 'shell', never both; two declarations would leave it ambiguous which shell a green result is about"
+
+  if [ "${shells_type}" != "null" ]; then
+    check_toolchain_smoke_scoped "${shells_type}"
+    return
+  fi
+  check_toolchain_smoke_ambient
+}
+
+# The SCOPED form. Each declared shell is ENTERED and its binaries are resolved
+# inside it, so a green result is attributable to that shell and no other.
+#
+# This exists because of a real defect: toolchain-smoke was configured
+# "shell": "default" and then resolved binaries in whatever environment dlint
+# happened to be invoked from. It reported that `skopeo` resolves — and it was
+# RIGHT, about a shell the failing probe never used. A control that answers a
+# neighbouring question is worse than none, because it retires the doubt without
+# answering it. Attribution, not just resolution, is what this form adds.
+check_toolchain_smoke_scoped() {
+  local shells_type="$1"
+  [ "${shells_type}" = "object" ] ||
+    config_invalid "toolchain-smoke: '.checks[\"toolchain-smoke\"].shells' must be an object mapping each shell name to its binaries, found ${shells_type}"
+
+  local enter=""
+  enter="$(cfg_string enter)"
+  # Without a way to enter the shell, every result would come from the invocation
+  # environment while the message named a shell — exactly the false attribution
+  # this form exists to remove.
+  case "${enter}" in
+  *'{shell}'*) ;;
+  *) config_invalid "toolchain-smoke: '.checks[\"toolchain-smoke\"].enter' must contain the '{shell}' placeholder, so each shell is entered by name; got '${enter}'" ;;
+  esac
+
+  local names_file="${WORK_DIR}/toolchain-shells.txt"
+  jq -r '.checks["toolchain-smoke"].shells | keys_unsorted[]' "${CFG_FILE}" >"${names_file}" ||
+    config_invalid "toolchain-smoke: could not list the shells of '.checks[\"toolchain-smoke\"].shells'"
+  local -a names=()
+  mapfile -t names <"${names_file}"
+  [ "${#names[@]}" -gt 0 ] ||
+    config_invalid "toolchain-smoke: '.checks[\"toolchain-smoke\"].shells' must name at least one shell; an empty object would inspect no toolchain"
+
+  local shell="" binaries_type="" binary="" verdict="" rc=0 shell_count=0 total=0
+  local -a binaries=() argv=()
+  local binaries_file="" errs=""
+  for shell in "${names[@]}"; do
+    [[ ${shell} =~ ^[A-Za-z0-9._#-]+$ ]] ||
+      config_invalid "toolchain-smoke: shell name '${shell}' must be letters, digits, '.', '_', '#' or '-'"
+
+    binaries_type="$(jq -r --arg s "${shell}" '.checks["toolchain-smoke"].shells[$s] | type' "${CFG_FILE}")" ||
+      config_invalid "toolchain-smoke: could not read the binaries of shell '${shell}'"
+    [ "${binaries_type}" = "array" ] ||
+      config_invalid "toolchain-smoke: '.checks[\"toolchain-smoke\"].shells[\"${shell}\"]' must be an array of binaries, found ${binaries_type}"
+
+    binaries_file="${WORK_DIR}/toolchain-binaries-${shell_count}.txt"
+    jq -r --arg s "${shell}" '.checks["toolchain-smoke"].shells[$s][]' "${CFG_FILE}" >"${binaries_file}" ||
+      config_invalid "toolchain-smoke: could not read the binaries of shell '${shell}'"
+    binaries=()
+    mapfile -t binaries <"${binaries_file}"
+    [ "${#binaries[@]}" -gt 0 ] ||
+      config_invalid "toolchain-smoke: shell '${shell}' declares no binary; an empty list would inspect no toolchain"
+
+    # The enter command is split into argv here, with {shell} substituted, and the
+    # probe is appended as ONE final argument — so it must end in something that
+    # takes a script string, e.g. 'nix develop .#{shell} --command bash -c'.
+    argv=()
+    read -r -a argv <<<"${enter//\{shell\}/${shell}}"
+    [ "${#argv[@]}" -gt 0 ] ||
+      config_invalid "toolchain-smoke: 'enter' expanded to nothing for shell '${shell}'"
+
+    for binary in "${binaries[@]}"; do
+      [[ ${binary} =~ ^[A-Za-z0-9._+-]+$ ]] ||
+        config_invalid "toolchain-smoke: binary '${binary}' is not a command name"
+
+      # The probe reports through a MARKER rather than through its exit status.
+      # 'not found' and 'could not enter the shell at all' both exit non-zero, and
+      # collapsing them would let a broken entry mechanism read as a missing
+      # binary — a wrong reason, loudly stated. A missing marker is UNKNOWN.
+      errs="${WORK_DIR}/enter-${shell_count}.err"
+      verdict=""
+      rc=0
+      verdict="$("${argv[@]}" "command -v -- '${binary}' >/dev/null 2>&1 && printf DLINT_RESOLVED || printf DLINT_MISSING" 2>"${errs}")" || rc=$?
+
+      case "${verdict}" in
+      DLINT_RESOLVED) ;;
+      DLINT_MISSING)
+        refuse "shell '${shell}' is missing binary '${binary}'"
+        ;;
+      *)
+        printf '❌ %s\n' "toolchain-smoke: could not enter shell '${shell}' to look for '${binary}' (exit ${rc}); the toolchain of that shell is UNKNOWN, which is not a pass. The entry command was: ${argv[*]}" >&2
+        [ ! -s "${errs}" ] || sed 's/^/       | /' "${errs}" >&2
+        exit "${EXIT_TOOL}"
+        ;;
+      esac
+      total=$((total + 1))
+    done
+
+    log_info "shell '${shell}': ${#binaries[@]} binary/binaries resolved INSIDE it"
+    shell_count=$((shell_count + 1))
+  done
+
+  log_info "toolchain binaries inspected: ${total} across ${shell_count} shell(s): ${names[*]}"
+  ok "Every declared shell resolves its required binaries (${names[*]})"
+}
+
+# The AMBIENT form, kept so a repository configured for the single 'shell' key
+# keeps working. It resolves binaries in the environment dlint was INVOKED from,
+# which is not necessarily the shell it names, so it says exactly that and claims
+# nothing about the named shell.
+check_toolchain_smoke_ambient() {
   local shell=""
   shell="$(cfg_string shell)"
   [[ ${shell} =~ ^[A-Za-z0-9._-]+$ ]] ||
@@ -648,12 +770,13 @@ check_toolchain_smoke() {
       config_invalid "toolchain-smoke: binary '${binary}' is not a command name"
     resolved="$(command -v -- "${binary}" 2>/dev/null || true)"
     [ -n "${resolved}" ] ||
-      refuse "declared shell '${shell}' is missing binary '${binary}'"
+      refuse "the invocation environment is missing binary '${binary}' (declared for shell '${shell}')"
     count=$((count + 1))
   done
 
-  log_info "toolchain binaries inspected: ${count} (declared shell: ${shell})"
-  ok "Declared shell '${shell}' resolves every required binary"
+  log_info "toolchain binaries inspected: ${count} in the INVOCATION ENVIRONMENT (declared shell: ${shell}, not entered)"
+  log_info "to attribute this result to a shell, declare 'shells' with an 'enter' command instead of 'shell'"
+  ok "The invocation environment resolves every binary declared for '${shell}'"
 }
 
 # --------------------------------------------------------------------------- #
