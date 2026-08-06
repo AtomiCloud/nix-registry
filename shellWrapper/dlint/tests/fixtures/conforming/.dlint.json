@@ -32,7 +32,6 @@
         "nix/packages.nix",
         "nix/env.nix"
       ]
-    },
-    "nixpkgs-pin": false
+    }
   }
 }
