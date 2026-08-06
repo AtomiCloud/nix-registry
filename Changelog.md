@@ -1,3 +1,15 @@
+## [4.2.0](https://github.com/AtomiCloud/nix-registry/compare/v4.1.0...v4.2.0) (2026-08-06)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **drv:** make the releaser version guard name its reason ([8c0c390](https://github.com/AtomiCloud/nix-registry/commit/8c0c390349ff0b1db289f377c12b7f3eb8438985))
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **patch:** retarget the releaser pin to v1.3.2 ([35c62a7](https://github.com/AtomiCloud/nix-registry/commit/35c62a7e7de64e0fa41e51dfd1a53ef9399cee13))
+
 ## [4.1.0](https://github.com/AtomiCloud/nix-registry/compare/v4.0.0...v4.1.0) (2026-08-06)
 
 
