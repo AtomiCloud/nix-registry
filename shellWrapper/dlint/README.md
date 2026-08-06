@@ -58,8 +58,47 @@ the invocation reported green.
 
 ## Configuration
 
-All seven checks read **one** file: `$DLINT_CONFIG`, or `./.dlint.json`. `dlint` is run
-from the repository root and reads every path relative to it.
+All seven checks read **one** file, and `dlint.yaml` is its canonical name (**D6
+ONE-CONFIG-NAME**). `dlint` looks for, in order:
+
+| Looked for      | Format                                                          |
+| --------------- | --------------------------------------------------------------- |
+| `$DLINT_CONFIG` | YAML if the path ends `.yaml`/`.yml`, else JSON                 |
+| `./dlint.yaml`  | YAML — the canonical name                                       |
+| `./.dlint.json` | JSON — still read, so a repository can migrate on its own clock |
+
+Finding **both** `./dlint.yaml` and `./.dlint.json` is an error (`4`), not a precedence rule:
+whichever one `dlint` did not read would sit in the tree looking enforced while configuring
+nothing, which is the same silent staleness this tool refuses everywhere else.
+
+The two forms are the **same configuration**, so this:
+
+```yaml
+schemaVersion: 1
+checks:
+  exec-bits:
+    globs: ['*.sh']
+  toolchain-smoke:
+    shell: default
+    binaries: [bash, git]
+```
+
+and the JSON below describe the same thing. YAML is converted to JSON once per invocation and
+every reader is unchanged, so there is one code path rather than two that happen to agree
+today — and there are arms running all six checks AND `--all-configured` from a YAML config to hold that.
+
+Two properties are deliberate:
+
+- **Every message names the file you wrote**, never the converted temporary. A refusal that
+  pointed at a path in `/tmp` would be unactionable, so there is an arm asserting the refusal
+  says `dlint.yaml`.
+- **A YAML read failure is `4`, and an empty YAML document is `4`.** The conversion is not
+  piped into `jq`: a pipeline takes its status from the last command, so a failed `yq` would
+  otherwise leave `jq` reading an empty file and could read as success. An empty document also
+  converts to the four bytes `null`, which a reader would walk into as if it were a
+  configuration, so the top level is asserted to be a mapping.
+
+`dlint` is run from the repository root and reads every path relative to it.
 
 ```json
 {
@@ -127,9 +166,6 @@ One mechanism, applied uniformly: a section per check, keyed by the check's own 
 | `workflow-policy.assertions`            | yes      | —                   |
 | ` ↳ .file`                              | yes      | —                   |
 | ` ↳ .path`                              | yes      | —                   |
-| ` ↳ .equals`                            | yes      | — (may not be null) |
-| ` ↳ .reason`                            | yes      | —                   |
-| `toolchain-smoke.binaries`              | legacy   | —                   |
 
 `yes*` means required **in the scoped form**. `shells` + `enter` is that form; `shell` +
 `binaries` is the legacy single-shell one. Declare one form or the other, never both.
@@ -388,7 +424,7 @@ Every check also prints its counts, so a run that inspected little says so on st
 
 ## Tests
 
-`tests/inject.sh` is the failure-injection harness: **156 arms**, each asserting the
+`tests/inject.sh` is the failure-injection harness: **176 arms**, each asserting the
 refusal **text** and not merely a non-zero status.
 
 ```bash
