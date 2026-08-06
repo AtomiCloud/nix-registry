@@ -69,10 +69,15 @@ stdenv.mkDerivation {
   # this: v1.0.0's hash paired with v1.2.0's rev built a `releaser-1.2.0` whose
   # binary reported 1.0.0 and lacked `conventions --check`. This phase is what
   # makes that mismatch fail instead of ship.
+  # The whole output is captured and compared exactly, rather than grepped. A
+  # `grep -Fx` here would pass on any output that CONTAINS a matching line, so a
+  # binary printing the right version plus a warning line would satisfy it. For a
+  # guard whose only job is to catch a mismatch, "contains" is the wrong relation.
   doInstallCheck = true;
   installCheckPhase = ''
     runHook preInstallCheck
-    "$out/bin/releaser" --version | grep -Fx "${version}"
+    actualVersion="$("$out/bin/releaser" --version)"
+    test "$actualVersion" = "${version}"
     runHook postInstallCheck
   '';
 
