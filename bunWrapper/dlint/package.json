@@ -1,0 +1,11 @@
+{
+  "name": "dlint",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "module": "index.ts",
+  "scripts": {
+    "test": "bun test"
+  },
+  "dependencies": {}
+}
