@@ -3,6 +3,8 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { main, runLint } from '../src/cli.ts';
+import { loadConfig } from '../src/config.ts';
+import { DlintError } from '../src/exit.ts';
 import { checkNixpkgsPin } from '../src/nixpkgs-pin.ts';
 
 const rev = '0123456789abcdef0123456789abcdef01234567';
@@ -20,6 +22,17 @@ function fixture(change: (lock: any, flake: { text: string }) => void = () => {}
   writeFileSync(join(root, 'flake.lock'), JSON.stringify(lock));
   writeFileSync(join(root, 'flake.nix'), flake.text);
   return root;
+}
+
+function expectDlintError(run: () => unknown, code: number, message: string): void {
+  try {
+    run();
+    throw new Error('expected DlintError');
+  } catch (error) {
+    expect(error).toBeInstanceOf(DlintError);
+    expect((error as DlintError).code).toBe(code);
+    expect((error as DlintError).message).toBe(message);
+  }
 }
 
 test('lint runs every configured check and returns the highest code', () => {
@@ -47,6 +60,52 @@ test('lint loads configured checks from dlint.yaml', () => {
   const root = fixture();
   writeFileSync(join(root, 'dlint.yaml'), 'schemaVersion: 1\nchecks:\n  nixpkgs-pin: {}\n');
   expect(main(['lint'], root)).toBe(0);
+});
+
+test('nixpkgs-pin direct command uses defaults without a configured section', () => {
+  const root = fixture();
+  writeFileSync(join(root, 'dlint.yaml'), 'schemaVersion: 1\nchecks: {}\n');
+  expect(main(['nixpkgs-pin'], root)).toBe(0);
+});
+
+test('configuration refusals report exact exit codes', () => {
+  const root = mkdtempSync(join(tmpdir(), 'dlint-config-'));
+  expectDlintError(() => loadConfig(root), 2, `configuration '${join(root, 'dlint.yaml')}' is absent`);
+  writeFileSync(join(root, 'dlint.yaml'), 'schemaVersion: 2\nchecks: {}\n');
+  expectDlintError(() => loadConfig(root), 2, `'${join(root, 'dlint.yaml')}' must set schemaVersion: 1`);
+});
+
+test('nixpkgs-pin configuration and lock refusals report exact exit codes', () => {
+  const root = fixture();
+  expectDlintError(() => checkNixpkgsPin(root, { flake: 1 }), 2, 'nixpkgs-pin.flake must be a non-empty string');
+  expectDlintError(
+    () => checkNixpkgsPin(root, { inputPattern: '(nixpkgs+)+$' }),
+    2,
+    'nixpkgs-pin.inputPattern supports literal names with optional ^ and $ anchors',
+  );
+  writeFileSync(join(root, 'flake.lock'), '{');
+  expectDlintError(
+    () => checkNixpkgsPin(root, {}),
+    2,
+    `could not parse '${join(root, 'flake.lock')}': JSON Parse error: Expected '}'`,
+  );
+  writeFileSync(join(root, 'flake.lock'), JSON.stringify({ nodes: { root: {} } }));
+  expectDlintError(
+    () => checkNixpkgsPin(root, {}),
+    2,
+    `'${join(root, 'flake.lock')}' has no nodes.root.inputs mapping`,
+  );
+});
+
+test('nixpkgs-pin rejects unsafe input patterns before inspecting long input names', () => {
+  const root = fixture(lock => {
+    lock.nodes.root.inputs = { [`${'a'.repeat(20_000)}!`]: 'nixpkgs-main_2' };
+  });
+  expectDlintError(
+    () => checkNixpkgsPin(root, { inputPattern: '(a+)+$' }),
+    2,
+    'nixpkgs-pin.inputPattern supports literal names with optional ^ and $ anchors',
+  );
 });
 
 test.each([

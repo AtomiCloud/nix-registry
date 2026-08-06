@@ -43,7 +43,7 @@ export function main(args: string[], root = process.cwd()): number {
       args.length === 1 && args[0] === 'lint'
         ? runLint(root, config.checks)
         : args.length === 1 && args[0] === 'nixpkgs-pin'
-          ? checks['nixpkgs-pin'](root, config.checks['nixpkgs-pin'])
+          ? checks['nixpkgs-pin'](root, config.checks['nixpkgs-pin'] ?? {})
           : usage('expected lint or nixpkgs-pin');
     for (const line of result.output) console.log(line);
     return result.code;

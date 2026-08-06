@@ -40,7 +40,28 @@ function readLock(path: string): LockFile {
   }
 }
 
-function declaredRevisions(flake: string, pattern: RegExp): string[] {
+interface InputPattern {
+  matches(name: string): boolean;
+}
+
+function compileInputPattern(source: string): InputPattern {
+  const starts = source.startsWith('^');
+  const ends = source.endsWith('$');
+  const literal = source.slice(starts ? 1 : 0, ends ? -1 : undefined);
+  if (literal.length === 0 || /[\\[\]{}()|*+?\\]/.test(literal)) {
+    usage('nixpkgs-pin.inputPattern supports literal names with optional ^ and $ anchors');
+  }
+  return {
+    matches(name) {
+      if (starts && ends) return name === literal;
+      if (starts) return name.startsWith(literal);
+      if (ends) return name.endsWith(literal);
+      return name.includes(literal);
+    },
+  };
+}
+
+function declaredRevisions(flake: string, pattern: InputPattern): string[] {
   let text = '';
   try {
     text = readFileSync(flake, 'utf8');
@@ -50,8 +71,7 @@ function declaredRevisions(flake: string, pattern: RegExp): string[] {
   const result: string[] = [];
   for (const line of text.split('\n')) {
     const name = line.match(/([A-Za-z0-9_-]+)\.url\s*=/)?.[1];
-    if (!name || !pattern.test(name)) continue;
-    pattern.lastIndex = 0;
+    if (!name || !pattern.matches(name)) continue;
     result.push(...(line.match(/[0-9a-f]{40}/g) ?? []));
   }
   return result;
@@ -61,19 +81,13 @@ export function checkNixpkgsPin(root: string, config: unknown): CheckResult {
   const flake = pathFrom(root, option(config, 'flake', 'flake.nix'));
   const lockPath = pathFrom(root, option(config, 'lock', 'flake.lock'));
   const inputPattern = option(config, 'inputPattern', 'nixpkgs');
-  let pattern: RegExp;
-  try {
-    pattern = new RegExp(inputPattern);
-  } catch (error) {
-    usage(`nixpkgs-pin.inputPattern is not a regular expression: ${(error as Error).message}`);
-  }
+  const pattern = compileInputPattern(inputPattern);
   const lock = readLock(lockPath);
   const rootInputs = (lock.nodes?.root as { inputs?: unknown } | undefined)?.inputs;
   if (rootInputs === null || typeof rootInputs !== 'object' || Array.isArray(rootInputs)) {
     usage(`'${lockPath}' has no nodes.root.inputs mapping`);
   }
-  const selected = Object.entries(rootInputs as Record<string, unknown>).filter(([name]) => pattern.test(name));
-  pattern.lastIndex = 0;
+  const selected = Object.entries(rootInputs as Record<string, unknown>).filter(([name]) => pattern.matches(name));
   if (selected.length === 0) return { code: 1, output: [`no root input matches '${inputPattern}'`] };
 
   const failures: string[] = [];
