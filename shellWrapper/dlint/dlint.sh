@@ -1143,6 +1143,19 @@ check_nixpkgs_pin() {
     fi
   done
 
+  # A flake URL naming a channel instead of a rev never reaches the lock loops
+  # above, so the flake text itself is asserted: every matching input URL must
+  # end in a 40-hex rev.
+  local urlline="" urlref=""
+  while read -r urlline; do
+    urlref="${urlline##*\/}"
+    urlref="${urlref%%\"*}"
+    if ! printf '%s' "${urlref}" | grep -Eq '^[0-9a-f]{40}$'; then
+      printf '\xe2\x9d\x8c nixpkgs-pin: %s pins '\''%s'\'' to '\''%s'\'', which is not an exact 40-character commit\n' "${flake}" "$(printf '%s' "${urlline}" | grep -oE '[A-Za-z0-9_-]+\.url')" "${urlref}" >&2
+      failed=1
+    fi
+  done < <(grep -E "${pattern}[A-Za-z0-9_-]*\.url" "${flake}")
+
   # Catch a declaration edited without re-locking: every rev the flake names for
   # a matching input must actually be in force.
   local declared=""

@@ -9,36 +9,54 @@
     "ci-wiring": {
       "workflowsDir": "ci/workflows",
       "entrypointPattern": "automation/[A-Za-z0-9._-]+[.]sh",
-      "orchestrators": ["ci/workflows/main.yaml"]
+      "orchestrators": [
+        "ci/workflows/main.yaml"
+      ]
     },
     "toolchain-smoke": {
       "enter": "bash tools/enter-shell.sh {shell}",
       "shells": {
-        "full": ["bash", "git", "fixture-tool"],
-        "lean": ["bash", "git"]
+        "full": [
+          "bash",
+          "git",
+          "fixture-tool"
+        ],
+        "lean": [
+          "bash",
+          "git"
+        ]
       }
     },
     "no-custom-derivations": {
-      "paths": ["nix/packages.nix", "nix/env.nix"]
+      "paths": [
+        "nix/packages.nix",
+        "nix/env.nix"
+      ]
     },
     "workflow-policy": {
       "assertions": [
         {
           "file": "ci/workflows/release.yaml",
           "path": ".on.workflow_run.workflows",
-          "equals": ["Main"],
+          "equals": [
+            "Main"
+          ],
           "reason": "release must trigger from the Main workflow"
         },
         {
           "file": "ci/workflows/release.yaml",
           "path": ".on.workflow_run.branches",
-          "equals": ["trunk"],
+          "equals": [
+            "trunk"
+          ],
           "reason": "release must be limited to trunk"
         },
         {
           "file": "ci/workflows/release.yaml",
           "path": ".on.workflow_run.types",
-          "equals": ["completed"],
+          "equals": [
+            "completed"
+          ],
           "reason": "release workflow_run type must be completed"
         },
         {
@@ -60,6 +78,7 @@
           "reason": "the orchestrator workflow name must be exactly Main"
         }
       ]
-    }
+    },
+    "nixpkgs-pin": false
   }
 }
