@@ -1,3 +1,22 @@
+## [4.4.0](https://github.com/AtomiCloud/nix-registry/compare/v4.3.0...v4.4.0) (2026-08-06)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **skills-sync:** evaluate D1 before the git precondition can pre-empt it ([3b1490d](https://github.com/AtomiCloud/nix-registry/commit/3b1490d8e6aeeb181269eba0f867b0eb8ce8505f))
+* **skills-sync:** refuse when a repository declares diene packages but names no runtime ([e2f7ea6](https://github.com/AtomiCloud/nix-registry/commit/e2f7ea68aedfefb7371495b5ed21a9e949a1e234))
+
+
+### ✨ New Packages ✨
+
+* **skills-sync:** package the vendored-skill writer and freshness check ([0cc63c5](https://github.com/AtomiCloud/nix-registry/commit/0cc63c577aee8b32baba2ca640729a4e2a0089b5))
+* **skills-sync:** the writer runs at pre-commit and CI, and refuses on the INDEX ([17089d0](https://github.com/AtomiCloud/nix-registry/commit/17089d0da07fba5a1f06c202ab73fadef80bedd8))
+
+
+### Documentation Updates
+
+* **skills-sync:** write the prune reasons, and control the selection from outside ([eaac7d8](https://github.com/AtomiCloud/nix-registry/commit/eaac7d8d53a1db85ccfdc2d9193f2dccb16d8794))
+
 ## [4.3.0](https://github.com/AtomiCloud/nix-registry/compare/v4.2.0...v4.3.0) (2026-08-06)
 
 
