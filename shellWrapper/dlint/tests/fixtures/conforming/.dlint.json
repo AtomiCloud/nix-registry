@@ -23,6 +23,9 @@
         "lean": ["bash", "git"]
       }
     },
+    "no-custom-derivations": {
+      "paths": ["nix/packages.nix", "nix/env.nix"]
+    },
     "workflow-policy": {
       "assertions": [
         {
