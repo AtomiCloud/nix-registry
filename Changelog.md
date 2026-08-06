@@ -1,3 +1,10 @@
+## [4.0.0](https://github.com/AtomiCloud/nix-registry/compare/v3.18.0...v4.0.0) (2026-08-06)
+
+
+### ❌ Removed Packages ❌
+
+* **dlint:** retire skills-fresh to its owning tool ([5975c54](https://github.com/AtomiCloud/nix-registry/commit/5975c5410130508343b8b5413e05fc942d24df6f))
+
 ## [3.18.0](https://github.com/AtomiCloud/nix-registry/compare/v3.17.0...v3.18.0) (2026-08-06)
 
 
