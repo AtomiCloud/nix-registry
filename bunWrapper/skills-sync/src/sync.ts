@@ -3,59 +3,28 @@ import { dirname, join } from 'node:path';
 import { type Config, KEEP_NAME, MANIFEST_NAME } from './config.ts';
 import { sha256 } from './engine.ts';
 import { EXIT_OK, EXIT_PRECONDITION, EXIT_VIOLATION, toolFailure } from './exit.ts';
-import { stagedSha256 } from './git.ts';
+import { stagedSha256, trackedUnder } from './git.ts';
 import { buildManifest, renderManifest } from './manifest.ts';
 import { buildPlan, outcomeWhenOff, vendorContent } from './plan.ts';
 import { info, ok, refusal, skipped, warn } from './report.ts';
-import type { Tier } from './tiers.ts';
 
-// `skills-sync sync` is the WRITER, and under the owner's amendment it runs at
-// setup, pre-commit AND CI. The never-in-hooks clause is revoked; everything
-// else in the D-group stands, and D11 now does MORE work because two more places
-// write the tree.
-//
-// The shape at commit time is treefmt's, ruled by norah: ANY tree mutation FAILS
-// the commit loudly, with the regenerated files left in the working tree for the
-// user to stage. THE TOOL NEVER STAGES ANYTHING — a hook that silently amends
-// the commit is not acceptable, because a defect repaired every cycle presents
-// as no defect at all.
-
-export interface WriteOutcome {
-  mutated: string[];
-  indexStale: string[];
-}
-
-// CONTENT-IDEMPOTENT WRITE.
-//
-// Only files whose CONTENT differs are touched. That is load-bearing rather than
-// tidy: the commit-time rule is "any mutation is loud", so the writer has to be
-// able to answer "did I change anything" truthfully. The previous writer always
-// replaced the whole directory, so it could not distinguish "I changed something"
-// from "I rewrote identical bytes" — under this rule it would report a mutation
-// on EVERY commit and reject A2, the commit that fixes the tree.
-//
-// And the detector is keyed on CONTENT, not on mtime and not on "did I replace
-// the directory". Measured: a content-identical sync churns inode and mtime
-// while `git status` stays empty. An mtime-keyed or replacement-keyed detector
-// therefore FAILS A2; a content-keyed one passes it.
 function writeVendorTree(vendorAbs: string, config: Config, plan: ReturnType<typeof buildPlan>): string[] {
   const mutated: string[] = [];
   try {
     mkdirSync(vendorAbs, { recursive: true });
-    if (!existsSync(join(vendorAbs, KEEP_NAME))) writeFileSync(join(vendorAbs, KEEP_NAME), '');
+    if (!existsSync(join(vendorAbs, KEEP_NAME))) {
+      writeFileSync(join(vendorAbs, KEEP_NAME), '');
+      mutated.push(KEEP_NAME);
+    }
 
     const expectedPaths = new Set(plan.expected.map(e => e.path));
     for (const entry of plan.expected) {
       const target = join(vendorAbs, entry.path);
+      // Mutation detection is content-keyed so idempotent runs stay mutation-free.
       if (existsSync(target) && sha256(target) === entry.sha256) continue;
       mkdirSync(dirname(target), { recursive: true });
-      // copyFileSync, NOT cpSync: `cpSync(src, dst, { dereference: true })`
-      // SILENTLY DOES NOT OVERWRITE an existing destination on this runtime — no
-      // throw, the old bytes remain. A writer that silently does not write is a
-      // false green by construction, and the staging-directory writer never met
-      // it only because its targets never existed.
+      // copyFileSync is required because cpSync may silently leave an existing destination unchanged.
       copyFileSync(entry.source, target);
-      // Package caches ship read-only files; the vendored copy is ours to rewrite.
       chmodSync(target, 0o644);
       mutated.push(entry.path);
     }
@@ -78,48 +47,50 @@ function writeVendorTree(vendorAbs: string, config: Config, plan: ReturnType<typ
   return mutated.sort();
 }
 
-// Which expected files the INDEX does not already carry.
-//
-// This is the condition a mutation-only rule cannot reach: a user who
-// regenerates by hand and does not stage leaves nothing to mutate, so the tree
-// is correct on disk, the writer is silent, and the commit still records the
-// stale tree — because git commits the index.
-function indexDisagreements(repoRoot: string, config: Config, plan: ReturnType<typeof buildPlan>): string[] {
-  const stale: string[] = [];
-  for (const entry of plan.expected) {
-    const tracked = `${config.vendorDir}/${entry.path}`;
-    if (stagedSha256(repoRoot, tracked) !== entry.sha256) stale.push(tracked);
-  }
-  return stale;
+function indexDisagreements(
+  repoRoot: string,
+  config: Config,
+  plan: ReturnType<typeof buildPlan>,
+  vendorAbs: string,
+): string[] {
+  const expected = new Set([KEEP_NAME, MANIFEST_NAME, ...plan.expected.map(entry => entry.path)]);
+  const indexed = trackedUnder(repoRoot, config.vendorDir)
+    .map(path => path.slice(`${config.vendorDir}/`.length))
+    .filter(path => path.length > 0);
+  const candidates = [...new Set([...expected, ...indexed])].sort();
+
+  return candidates
+    .filter(path => {
+      if (!expected.has(path)) return true;
+      const tracked = `${config.vendorDir}/${path}`;
+      return stagedSha256(repoRoot, tracked) !== sha256(join(vendorAbs, path));
+    })
+    .map(path => `${config.vendorDir}/${path}`);
 }
 
-export function runSync(repoRoot: string, config: Config, tier: Tier | null): number {
+export function runSync(repoRoot: string, config: Config, frozen: boolean): number {
   const vendorAbs = join(repoRoot, config.vendorDir);
   if (!config.enabled) return outcomeWhenOff(config, vendorAbs, repoRoot);
 
   const plan = buildPlan(repoRoot, config);
-  info(`tier: ${tier ?? 'manual'}`);
+  info(`mode: ${frozen ? 'frozen' : 'writer'}`);
 
   if (plan.preconditionReasons.length > 0) {
-    // The deps-absent skip-guard STANDS. At pre-commit it must SKIP: a commit
-    // must never require a restored dependency tree.
-    if (tier === 'pre-commit') {
-      skipped(`skills-sync sync --tier pre-commit: dependencies are not restored, so this tier skips.`);
+    if (frozen) {
+      skipped(`skills-sync sync --frozen: dependencies are not restored, so enforcement is skipped.`);
       for (const reason of plan.preconditionReasons) console.log(`   - ${reason}`);
-      warn(
-        'This is the WARNING TIER, not the guarantee. The guarantee is CI, which refuses under this same condition.',
-      );
+      warn('Frozen enforcement did not run; restore dependencies before relying on vendored-state enforcement.');
       return EXIT_OK;
     }
     refusal(`skills-sync sync: dependencies for '${config.runtimeName}' are not restored in '${repoRoot}'.`);
     for (const reason of plan.preconditionReasons) console.error(`   - ${reason}`);
     console.error('   The writer never publishes a partial vendored tree. Restore dependencies, then run it again.');
-    return tier === 'ci' ? EXIT_VIOLATION : EXIT_PRECONDITION;
+    return EXIT_PRECONDITION;
   }
 
   if (plan.expected.length === 0 && config.requireSubjects) {
     refusal(
-      `skills-sync sync: no vendored skill resolved for runtime '${config.runtimeName}' in '${repoRoot}'. ` +
+      `skills-sync sync${frozen ? ' --frozen' : ''}: no vendored skill resolved for runtime '${config.runtimeName}' in '${repoRoot}'. ` +
         `Writing an empty tree here would silently remove whatever is committed. ` +
         `If this repository legitimately vendors no skills, declare it: 'requireSubjects: false' in '${config.source}'.`,
     );
@@ -129,27 +100,24 @@ export function runSync(repoRoot: string, config: Config, tier: Tier | null): nu
   const mutated = writeVendorTree(vendorAbs, config, plan);
   info(`writer mutated ${mutated.length} file(s)${mutated.length ? `: ${mutated.slice(0, 5).join(', ')}` : ''}`);
 
-  if (tier === 'pre-commit' || tier === 'ci') {
-    const indexStale = indexDisagreements(repoRoot, config, plan);
+  if (frozen) {
+    const indexStale = indexDisagreements(repoRoot, config, plan, vendorAbs);
     info(`index entries disagreeing with the expected tree: ${indexStale.length}`);
 
     if (mutated.length > 0 || indexStale.length > 0) {
-      refusal(`skills-sync sync --tier ${tier}: the vendored tree is not what the packages ship.`);
+      refusal(`skills-sync sync --frozen: the vendored tree changed or its git index disagrees.`);
       if (mutated.length > 0) {
         console.error(`   regenerated ${mutated.length} file(s) in your working tree:`);
         for (const path of mutated.slice(0, 10)) console.error(`     - ${config.vendorDir}/${path}`);
       }
       if (indexStale.length > 0) {
-        console.error(`   ${indexStale.length} file(s) are not staged as the packages ship them:`);
+        console.error(`   ${indexStale.length} path(s) in the vendor index disagree:`);
         for (const path of indexStale.slice(0, 10)) console.error(`     - ${path}`);
       }
-      // The two halves of the rule that must never be softened: nothing was
-      // staged, and CI does not repair-and-pass. A self-repairing guarantee is a
-      // repair loop nobody sees.
       console.error(`   NOTHING was added to your commit. Stage the vendored tree and commit again.`);
       return EXIT_VIOLATION;
     }
-    ok(`vendored tree already matches what the packages ship, and is staged; the commit may proceed.`);
+    ok(`vendored tree and git index match what the packages ship.`);
     return EXIT_OK;
   }
 

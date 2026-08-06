@@ -8,22 +8,11 @@ export const VENDOR_DEFAULT = '.claude/skills/vendor';
 export const MANIFEST_NAME = 'manifest.json';
 export const KEEP_NAME = '.gitkeep';
 
-// Files the tool itself owns inside the vendor tree. They are never skill
-// content, so they are never subjects of the freshness comparison.
 export const VENDOR_OWN_FILES = [KEEP_NAME, MANIFEST_NAME];
 
 export interface Config {
-  // The absolute path of the file this was read from, or null when no file
-  // exists. Reported in the same sentence as every result: a verdict about a
-  // configuration is worthless without naming which configuration.
   source: string | null;
-  // `off` is a legitimate, owner-ruled state: the central wiring is generic and
-  // INERT wherever no runtime is named.
   enabled: boolean;
-  // True ONLY for `runtime: none`. An absent file, and a file that names no
-  // runtime at all, are an ABSENCE OF DECLARATION rather than a declaration of
-  // absence — and the difference decides whether a repository that declares
-  // diene packages is allowed to be silently off. See plan.ts.
   explicitOptOut: boolean;
   runtimeName: string | null;
   resolver: ResolverSpec | null;
@@ -43,8 +32,6 @@ function parseDocument(source: string, text: string): unknown {
       fail(source, `is not valid JSON (${(e as Error).message})`);
     }
   }
-  // Bun parses YAML natively. Guard rather than assume: an older runtime would
-  // otherwise throw a TypeError that reads like a bug in this tool.
   const yaml = (Bun as unknown as { YAML?: { parse(t: string): unknown } }).YAML;
   if (!yaml || typeof yaml.parse !== 'function') {
     throw toolFailure(
@@ -58,15 +45,11 @@ function parseDocument(source: string, text: string): unknown {
   }
 }
 
-// Locates the configuration. $SKILLS_SYNC_CONFIG wins; otherwise
-// ./skills-sync.yaml, then ./skills-sync.yml, then ./skills-sync.json.
 export function locateConfig(repoRoot: string): string | null {
   const override = process.env.SKILLS_SYNC_CONFIG;
   if (override && override.length > 0) {
     const path = override.startsWith('/') ? override : join(repoRoot, override);
     if (!existsSync(path)) {
-      // An override that points at nothing is a mistake, never an "off". Only
-      // the ABSENCE of any declaration is off; a broken pointer is loud.
       fail(path, 'is named by $SKILLS_SYNC_CONFIG but does not exist');
     }
     return path;
@@ -133,16 +116,9 @@ export function loadConfig(repoRoot: string): Config {
     fail(source, `'resolver' must be a mapping, found ${Array.isArray(inline) ? 'array' : typeof inline}`);
   }
 
-  // OFF is declared by naming nothing, or by naming 'none'. It is not a
-  // fallback for a value the tool failed to understand: an unknown runtime name
-  // is invalid configuration, because silently treating it as off is exactly how
-  // a guarantee disappears from a repository that believes it has one.
   const namesNothing =
     (runtimeName === null || runtimeName.length === 0 || runtimeName === 'none') && inline === undefined;
   if (namesNothing) {
-    // 'none' is a DECLARATION of absence and is accepted as an opt-out. A file
-    // that simply carries no `runtime` key is an ABSENCE of declaration, and is
-    // treated the same as no file at all — absence declares nothing.
     return {
       source,
       enabled: false,
@@ -191,9 +167,6 @@ export function loadConfig(repoRoot: string): Config {
   };
 }
 
-// The inline resolver is validated as strictly as the presets are written: an
-// unusable spec must refuse here, not resolve to zero packages later and read as
-// "this repository vendors nothing".
 function validateResolver(source: string, raw: Record<string, unknown>): ResolverSpec {
   const name = raw.name;
   if (typeof name !== 'string' || name.length === 0) {

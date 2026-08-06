@@ -1,24 +1,12 @@
 import { CONFIG_DEFAULT, VENDOR_DEFAULT, loadConfig } from './config.ts';
 import { EXIT_OK, EXIT_TOOL, EXIT_USAGE, SkillsSyncError, usageError } from './exit.ts';
-import { assertTierMatchesEnvironment, repoRoot } from './git.ts';
-import { runCheck } from './check.ts';
+import { repoRoot } from './git.ts';
 import { runSync } from './sync.ts';
 import { PRESETS, PRESET_NAMES } from './spec.ts';
-import { TIERS, TIER_BEHAVIOUR, parseTier } from './tiers.ts';
-
-// package.json is the single place the version is written; the nix derivation
-// reads the same file, so the packaged name and `--version` cannot disagree.
 import manifest from '../package.json' with { type: 'json' };
 
 export const VERSION: string = (manifest as { version: string }).version;
 
-// The subcommand table is the ONLY place a subcommand exists.
-//
-// It is written as a table, and dispatch is a lookup in it, because the usual
-// alternative — a framework that serves root help before its unknown-command
-// handler — lets a subcommand that was never implemented answer `--help` with
-// the root usage and read as real. Here an unknown name cannot reach help at
-// all: it is refused by name, and every subcommand prints ITS OWN usage.
 interface Subcommand {
   name: string;
   synopsis: string;
@@ -32,7 +20,7 @@ function commandList(): string {
 }
 
 function rootUsage(): void {
-  console.log(`skills-sync ${VERSION} — vendored-skill synchronisation and freshness
+  console.log(`skills-sync ${VERSION} — vendored-skill synchronisation
 
 Usage:
   skills-sync <command> [options]
@@ -42,148 +30,74 @@ Usage:
 Commands:
 ${commandList()}
 
-Run 'skills-sync <command> --help' for that command's own options.
+Run 'skills-sync <command> --help' for command options.
 
 Configuration:
-  ./${CONFIG_DEFAULT} (override with $SKILLS_SYNC_CONFIG), read from the git work
-  tree root. Naming no runtime is OFF: skills-sync is inert in a repository that
-  vendors no skills, which is why one generic wiring can sit in every template.
+  <git-root>/${CONFIG_DEFAULT} (override with $SKILLS_SYNC_CONFIG)
 
     schemaVersion: 1
     runtime: bun            # ${PRESET_NAMES.join(' | ')}
     vendorDir: ${VENDOR_DEFAULT}
     requireSubjects: true
 
-  A language skills-sync has never met is added with an inline 'resolver:' in
-  this same file — one place, and no change to skills-sync, to workspace or to
-  shared.
-
 Exit codes:
-  0  fresh, synchronised, or off
-  1  the vendored tree is stale, or a guarantee-tier precondition failed
-  2  usage error (including a declared tier that contradicts the environment)
-  3  a precondition is unsatisfied: dependencies are not restored
-  4  the configuration is invalid
-  5  skills-sync could not complete the inspection`);
-}
-
-function optionValue(args: string[], flag: string): string | null {
-  const exact = args.indexOf(flag);
-  if (exact >= 0) {
-    const value = args[exact + 1];
-    if (value === undefined || value.startsWith('-')) throw usageError(`${flag} needs a value`);
-    return value;
-  }
-  const inline = args.find(a => a.startsWith(`${flag}=`));
-  return inline === undefined ? null : inline.slice(flag.length + 1);
+  0  synchronised, frozen-clean, skipped, or off
+  1  the configured vendored-state contract is violated
+  2  usage error
+  3  bare sync cannot run because dependencies are not restored
+  4  invalid configuration
+  5  inspection or writing failed`);
 }
 
 function rejectUnknownOptions(command: string, args: string[], allowed: string[]): void {
-  for (let i = 0; i < args.length; i += 1) {
-    const arg = args[i] as string;
-    if (!arg.startsWith('-')) throw usageError(`'skills-sync ${command}' takes no positional arguments, got '${arg}'`);
-    const name = arg.includes('=') ? arg.slice(0, arg.indexOf('=')) : arg;
-    if (!allowed.includes(name)) {
-      throw usageError(`'skills-sync ${command}' has no option '${name}'; it accepts: ${allowed.join(', ')}`);
+  for (const arg of args) {
+    if (!arg.startsWith('-')) {
+      throw usageError(`'skills-sync ${command}' takes no positional arguments, got '${arg}'`);
     }
-    if (!arg.includes('=') && name !== '--help' && name !== '-h') i += 1;
+    if (!allowed.includes(arg)) {
+      throw usageError(`'skills-sync ${command}' has no option '${arg}'; it accepts: ${allowed.join(', ')}`);
+    }
   }
 }
 
-const checkCommand: Subcommand = {
-  name: 'check',
-  synopsis: 'skills-sync check --tier <setup|pre-commit|ci>',
-  blurb: 'READ-ONLY. Refuse if the vendored tree is not what the packages ship.',
-  usage: () => {
-    console.log(`Usage: ${checkCommand.synopsis}
-
-Compares the committed vendored tree against the skills the resolved packages
-actually ship. Writes nothing, so it is the only half of skills-sync that a hook
-may run.
-
-Options:
-  --tier <tier>   REQUIRED. One of: ${TIERS.join(', ')}.
-  --help, -h      Print this message.
-
-The tiers differ on exactly one thing — what an unrestored dependency tree
-means. Nothing else is tiered:
-${TIERS.map(t => `  ${TIER_BEHAVIOUR[t].summary}`).join('\n')}`);
-  },
-  run: args => {
-    rejectUnknownOptions('check', args, ['--tier', '--help', '-h']);
-    if (args.includes('--help') || args.includes('-h')) {
-      checkCommand.usage();
-      return EXIT_OK;
-    }
-    const raw = optionValue(args, '--tier');
-    if (raw === null) {
-      // Defaulting the tier would let a caller get the warning tier's silence
-      // while believing it had the guarantee. The tier is always stated.
-      throw usageError(
-        `'skills-sync check' requires --tier; it is never defaulted. One of: ${TIERS.join(', ')}. See 'skills-sync check --help'.`,
-      );
-    }
-    const tier = parseTier(raw);
-    const root = repoRoot(process.cwd());
-    return runCheck(root, loadConfig(root), tier);
-  },
-};
-
 const syncCommand: Subcommand = {
   name: 'sync',
-  synopsis: 'skills-sync sync [--tier <setup|pre-commit|ci>]',
-  blurb: 'WRITER. Regenerate the vendored tree. Runs at setup, pre-commit and CI.',
+  synopsis: 'skills-sync sync [--frozen]',
+  blurb: 'Write the vendor tree; optionally enforce worktree and index freshness.',
   usage: () => {
     console.log(`Usage: ${syncCommand.synopsis}
 
-Rewrites the vendored skills tree from the packages this repository declares and
-has installed. This is the only thing that writes that tree (D11).
+Without --frozen, writes the complete vendor tree and refuses with exit 3 when
+dependencies are not restored.
 
-At pre-commit and in CI it NEVER STAGES ANYTHING. If it had to change the tree,
-or if the INDEX does not already carry what the packages ship, it REFUSES and
-leaves the regenerated files in your working tree for you to stage. A hook that
-silently amends the commit is not acceptable, and CI must not repair-and-pass —
-a defect repaired every cycle presents as no defect at all.
-
-git commits the INDEX, which is why a mutation-only rule is not enough: a tree
-regenerated by hand and left unstaged has nothing left to mutate, and the commit
-would still record the stale tree.
+With --frozen, unrestored dependencies are reported and skipped with exit 0.
+Otherwise it writes, then refuses with exit 1 if anything changed or the git
+index disagrees with the complete vendor tree. It never stages files.
 
 Options:
-  --tier <tier>   ${TIERS.join(' | ')}. Omit for a manual run.
+  --frozen        Enforce mutation-free and index-matching vendored state.
   --help, -h      Print this message.`);
   },
   run: args => {
-    rejectUnknownOptions('sync', args, ['--tier', '--help', '-h']);
+    rejectUnknownOptions('sync', args, ['--frozen', '--help', '-h']);
     if (args.includes('--help') || args.includes('-h')) {
       syncCommand.usage();
       return EXIT_OK;
     }
-    const raw = optionValue(args, '--tier');
-    const tier = raw === null ? null : parseTier(raw);
-    // The migrated D1, and the ordering is still load-bearing: it is evaluated
-    // BEFORE any precondition, so it is reachable — and testable — in any
-    // directory. It used to sit after `repoRoot`, which meant that outside a work
-    // tree both the hook case and the ordinary case answered exit 5 and the rule
-    // was never evaluated at all. Two arms agreeing reads exactly like a
-    // controlled result, so a law another precondition can pre-empt is not
-    // independently verifiable.
-    assertTierMatchesEnvironment(tier);
     const root = repoRoot(process.cwd());
-    return runSync(root, loadConfig(root), tier);
+    return runSync(root, loadConfig(root), args.includes('--frozen'));
   },
 };
 
 const runtimesCommand: Subcommand = {
   name: 'runtimes',
   synopsis: 'skills-sync runtimes',
-  blurb: 'List the built-in runtime presets a config may name.',
+  blurb: 'List built-in runtime presets.',
   usage: () => {
     console.log(`Usage: ${runtimesCommand.synopsis}
 
-Prints every runtime name 'runtime:' accepts and the mechanism behind it. A
-language that is not listed does not need a change here: name it with an inline
-'resolver:' in the repository's own ${CONFIG_DEFAULT}.
+Lists the built-in runtime presets accepted by ${CONFIG_DEFAULT}. Unknown
+runtimes can use an inline resolver in that file.
 
 Options:
   --help, -h      Print this message.`);
@@ -208,7 +122,7 @@ Options:
   },
 };
 
-const SUBCOMMANDS: Subcommand[] = [checkCommand, syncCommand, runtimesCommand];
+const SUBCOMMANDS: Subcommand[] = [syncCommand, runtimesCommand];
 
 export function main(argv: string[]): number {
   const [command, ...rest] = argv;
@@ -229,7 +143,6 @@ export function main(argv: string[]): number {
 
   const found = SUBCOMMANDS.find(c => c.name === command);
   if (!found) {
-    // Refused by name BEFORE any help handler can answer for it.
     console.error(
       `❌ unknown command '${command}'; skills-sync has exactly ${SUBCOMMANDS.length}: ${SUBCOMMANDS.map(c => c.name).join(', ')}`,
     );
