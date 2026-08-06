@@ -1,6 +1,6 @@
 # dlint
 
-Seven repo-agnostic repository linters behind one entrypoint. `dlint` runs in **any**
+Six repo-agnostic repository linters behind one entrypoint. `dlint` runs in **any**
 consuming repository: every repository-specific fact comes from that repository's own
 configuration file, never from a constant baked into the tool.
 
@@ -12,7 +12,7 @@ dlint --help
 dlint --version
 ```
 
-There are **exactly seven** checks. There are no aliases and no hidden checks. There is no
+There are **exactly six** checks. There are no aliases and no hidden checks. There is no
 `all` **check** either — running everything is the `--all-configured` flag. An unknown
 check exits `2` and lists the valid ones.
 
@@ -21,7 +21,6 @@ check exits `2` and lists the valid ones.
 | `action-pins <trusted\|non-trusted>` | An action reference has no authored trust classification; a `trusted` action is not on a major tag (`v3`); a `non-trusted` action is not on an exact 40-hex SHA whose trailing comment names its tag.                |
 | `exec-bits`                          | A tracked shell script is not executable, or is missing from the worktree.                                                                                                                                           |
 | `ci-wiring`                          | A CI entrypoint a workflow names is missing or not executable; an orchestrator job does not call a repository-local reusable workflow; a reusable workflow calls no CI entrypoint; an orchestrator declares no jobs. |
-| `skills-fresh`                       | The vendored tree moved in the worktree after its own regeneration command ran, or there is no tracked subject to judge at all.                                                                                      |
 | `toolchain-smoke`                    | A binary declared for a shell does not resolve INSIDE that shell, or the shell could not be entered at all.                                                                                                          |
 | `no-custom-derivations`              | A declared nix file uses a custom derivation builder instead of staying a plain declarative list.                                                                                                                    |
 | `workflow-policy`                    | A declared path in a declared workflow file does not hold its declared value, or is absent. One assertion is one caught fault.                                                                                       |
@@ -58,7 +57,7 @@ the invocation reported green.
 
 ## Configuration
 
-All seven checks read **one** file, and `dlint.yaml` is its canonical name (**D6
+All six checks read **one** file, and `dlint.yaml` is its canonical name (**D6
 ONE-CONFIG-NAME**). `dlint` looks for, in order:
 
 | Looked for      | Format                                                          |
@@ -116,11 +115,6 @@ Two properties are deliberate:
       "entrypointPattern": "scripts/ci/[A-Za-z0-9._-]+[.]sh",
       "orchestrators": [".github/workflows/ci.yaml", ".github/workflows/cd.yaml", ".github/workflows/release.yaml"]
     },
-    "skills-fresh": {
-      "regenerate": "bash scripts/local/skills-sync.sh",
-      "paths": [".claude/skills/vendor"],
-      "ignore": [".claude/skills/vendor/.gitkeep"]
-    },
     "toolchain-smoke": {
       "enter": "nix develop .#{shell} --command bash -c",
       "shells": {
@@ -153,9 +147,6 @@ One mechanism, applied uniformly: a section per check, keyed by the check's own 
 | `ci-wiring.entrypointPattern`           | yes      | —                   |
 | `ci-wiring.orchestrators`               | yes      | —                   |
 | `ci-wiring.workflowsDir`                | no       | `.github/workflows` |
-| `skills-fresh.regenerate`               | yes      | —                   |
-| `skills-fresh.paths`                    | yes      | —                   |
-| `skills-fresh.ignore`                   | no       | `[]`                |
 | `toolchain-smoke.shells`                | yes\*    | —                   |
 | `toolchain-smoke.enter`                 | yes\*    | — (needs `{shell}`) |
 | `toolchain-smoke.shell`                 | legacy   | —                   |
@@ -393,16 +384,11 @@ Every binary the checks call — `bash`, `coreutils`, `findutils`, `git`, `grep`
 on the consumer's `PATH`. The packages are declared individually rather than through the
 `atomiutils` bundle, because a bundle plus its own members collide inside a `buildEnv`.
 
-`skills-fresh` is the one check that runs a command from the configuration
-(`regenerate`), in a `bash -c` at the repository root. The consuming repository owns
-regeneration; `dlint` owns "regenerate, then refuse if the tree moved".
-
 ## Non-vacuity
 
 **No check passes without having inspected something.** A `✅` after zero subjects is the
 failure mode this repository's history keeps producing, so every check refuses instead:
 
-- `skills-fresh` refuses when zero tracked subjects survive the `ignore` filter.
 - `ci-wiring` requires at least one declared orchestrator, requires each to exist and to
   declare at least one job, and requires every job's reusable workflow to name a CI
   entrypoint — so a green `ci-wiring` has necessarily resolved at least one entrypoint.
@@ -424,7 +410,7 @@ Every check also prints its counts, so a run that inspected little says so on st
 
 ## Tests
 
-`tests/inject.sh` is the failure-injection harness: **176 arms**, each asserting the
+`tests/inject.sh` is the failure-injection harness: **166 arms**, each asserting the
 refusal **text** and not merely a non-zero status.
 
 ```bash
@@ -434,5 +420,5 @@ nix develop -c ./shellWrapper/dlint/tests/inject.sh --dlint /path/to/dlint
 
 The fixture in `tests/fixtures/conforming` is laid out like neither of the repositories
 `dlint` was extracted for: workflows in `ci/workflows`, CI entrypoints in `automation/`,
-the trust map at `trust/actions.json`, the vendored tree at `third_party/skills`. A
+the trust map at `trust/actions.json`, its per-shell tools under `tools/`. A
 diene-shaped or registry-shaped constant anywhere in `dlint` would fail these arms.

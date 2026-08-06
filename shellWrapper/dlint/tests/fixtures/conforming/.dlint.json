@@ -11,11 +11,6 @@
       "entrypointPattern": "automation/[A-Za-z0-9._-]+[.]sh",
       "orchestrators": ["ci/workflows/main.yaml"]
     },
-    "skills-fresh": {
-      "regenerate": "bash tools/regen.sh",
-      "paths": ["third_party/skills"],
-      "ignore": ["third_party/skills/.gitkeep"]
-    },
     "toolchain-smoke": {
       "enter": "bash tools/enter-shell.sh {shell}",
       "shells": {
