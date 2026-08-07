@@ -54,10 +54,6 @@ types:
   - type: fix
     section: 🐛 Bug Fixes 🐛
     desc: Fixed a bug within the repository
-    vae:
-      verb: fix
-      application: <title>
-      example: 'fix: dropdown flickering'
     scopes:
       default:
         desc: Generic fixes not under `drv` or `patch`
@@ -72,10 +68,6 @@ types:
   - type: new
     section: ✨ New Packages ✨
     desc: Release a new package
-    vae:
-      verb: add
-      application: <scope>, <title>
-      example: 'new(narwhal): a swiss army knife for docker'
     scopes:
       default:
         desc: Release a new package

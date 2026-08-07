@@ -2,36 +2,24 @@
   "schemaVersion": 1,
   "checks": {
     "action-pins": {
-      "trustMap": "trust/actions.json",
+      "trustedPattern": "^acme/",
       "workflowsDir": "ci/workflows"
     },
     "exec-bits": {},
     "ci-wiring": {
       "workflowsDir": "ci/workflows",
       "entrypointPattern": "automation/[A-Za-z0-9._-]+[.]sh",
-      "orchestrators": [
-        "ci/workflows/main.yaml"
-      ]
+      "orchestrators": ["ci/workflows/main.yaml"]
     },
     "toolchain-smoke": {
       "enter": "bash tools/enter-shell.sh {shell}",
       "shells": {
-        "full": [
-          "bash",
-          "git",
-          "fixture-tool"
-        ],
-        "lean": [
-          "bash",
-          "git"
-        ]
+        "full": ["bash", "git", "fixture-tool"],
+        "lean": ["bash", "git"]
       }
     },
     "no-custom-derivations": {
-      "paths": [
-        "nix/packages.nix",
-        "nix/env.nix"
-      ]
+      "paths": ["nix/packages.nix", "nix/env.nix"]
     }
   }
 }

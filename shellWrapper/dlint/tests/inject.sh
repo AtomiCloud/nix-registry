@@ -20,7 +20,7 @@
 #   * The fixture repository is deliberately laid out like NEITHER of the two
 #     repositories in play: its workflows live in `ci/workflows`, its CI
 #     entrypoints in `automation/`, and its per-shell tools in `tools/`. Its
-#     trust map in `trust/actions.json`. If dlint had a diene-shaped or
+#     trusted-actions regex is `^acme/`. If dlint had a diene-shaped or
 #     registry-shaped constant baked into it, these arms would fail.
 #
 # Usage:
@@ -279,31 +279,18 @@ m_nontrusted_comment_without_tag() {
     '1111111111111111111111111111111111111111 # pinned by hand'
 }
 
-m_unclassified_action() {
+m_unmatched_action_tag_pinned() {
   insert_before ci/workflows/reusable-build.yaml \
     '      - name: Build' \
-    '      - uses: stranger/unclassified-action@v1'
+    '      - uses: stranger/unlisted-action@v1'
 }
 
-m_trust_map_deleted() {
-  require_file trust/actions.json
-  rm -f trust/actions.json
+m_trusted_pattern_empty() {
+  edit_config '.checks["action-pins"].trustedPattern = ""'
 }
 
-m_trust_map_wrong_schema() {
-  local tmp=""
-  tmp="$(mktemp)"
-  jq '.schemaVersion = 2' trust/actions.json >"${tmp}"
-  cat "${tmp}" >trust/actions.json
-  rm -f "${tmp}"
-}
-
-m_trust_map_bad_classification() {
-  local tmp=""
-  tmp="$(mktemp)"
-  jq '.actions["acme/setup-toolchain"] = "probably-fine"' trust/actions.json >"${tmp}"
-  cat "${tmp}" >trust/actions.json
-  rm -f "${tmp}"
+m_trusted_pattern_invalid_regex() {
+  edit_config '.checks["action-pins"].trustedPattern = "*broken["'
 }
 
 m_workflows_dir_missing() {
@@ -334,8 +321,8 @@ m_section_removed_no_custom_derivations() { edit_config 'del(.checks["no-custom-
 m_section_disabled_exec_bits() { edit_config '.checks["exec-bits"] = false'; }
 m_section_true_exec_bits() { edit_config '.checks["exec-bits"] = true'; }
 
-m_trust_map_key_missing() { edit_config 'del(.checks["action-pins"].trustMap)'; }
-m_trust_map_key_wrong_type() { edit_config '.checks["action-pins"].trustMap = 7'; }
+m_trust_map_key_missing() { edit_config 'del(.checks["action-pins"].trustedPattern)'; }
+m_trust_map_key_wrong_type() { edit_config '.checks["action-pins"].trustedPattern = 7'; }
 m_orchestrators_empty() { edit_config '.checks["ci-wiring"].orchestrators = []'; }
 
 # -- toolchain-smoke ------------------------------------------------------- #
@@ -662,7 +649,6 @@ m_violation_and_absent_section() {
   edit_config 'del(.checks["ci-wiring"])'
 }
 
-
 # -- repo-agnosticism ------------------------------------------------------- #
 
 # Move the whole GitHub-shaped layout to the documented DEFAULT workflow
@@ -699,16 +685,14 @@ arm "non-trusted SHA without a tag comment" m_nontrusted_sha_without_comment 1 \
   "needs its tag as a trailing comment" -- action-pins non-trusted
 arm "trailing comment names no tag" m_nontrusted_comment_without_tag 1 \
   "trailing comment must name the source tag" -- action-pins non-trusted
-arm "unclassified action (trusted pass)" m_unclassified_action 1 \
-  "has no authored trust classification" -- action-pins trusted
-arm "unclassified action (non-trusted pass)" m_unclassified_action 1 \
-  "has no authored trust classification" -- action-pins non-trusted
-arm "trust map deleted" m_trust_map_deleted 3 \
-  "does not exist" -- action-pins trusted
-arm "trust map schemaVersion 2" m_trust_map_wrong_schema 4 \
-  "invalid schema or classification" -- action-pins trusted
-arm "trust map bad classification value" m_trust_map_bad_classification 4 \
-  "invalid schema or classification" -- action-pins trusted
+arm "unmatched action defaults to non-trusted (tag refused)" m_unmatched_action_tag_pinned 1 \
+  "must use an exact SHA" -- action-pins non-trusted
+arm "unmatched action is no business of the trusted pass" m_unmatched_action_tag_pinned 0 \
+  "✅ trusted action pins conform" -- action-pins trusted
+arm "empty trustedPattern refuses" m_trusted_pattern_empty 4 \
+  "must not be empty" -- action-pins trusted
+arm "invalid trustedPattern regex refuses" m_trusted_pattern_invalid_regex 4 \
+  "is not a valid regex" -- action-pins trusted
 arm "declared workflow dir absent" m_workflows_dir_missing 3 \
   "does not exist" -- action-pins trusted
 arm "no action reference refuses (not a pass)" m_no_action_reference 1 \

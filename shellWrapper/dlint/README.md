@@ -104,7 +104,7 @@ Two properties are deliberate:
   "schemaVersion": 1,
   "checks": {
     "action-pins": {
-      "trustMap": "config/action-trust.json",
+      "trustedPattern": "^AtomiCloud/",
       "workflowsDir": ".github/workflows"
     },
     "exec-bits": {
@@ -139,7 +139,7 @@ One mechanism, applied uniformly: a section per check, keyed by the check's own 
 
 | Key                                     | Required | Default             |
 | --------------------------------------- | -------- | ------------------- |
-| `action-pins.trustMap`                  | yes      | —                   |
+| `action-pins.trustedPattern`            | yes      | —                   |
 | `action-pins.workflowsDir`              | no       | `.github/workflows` |
 | `action-pins.requireSubjects`           | no       | `true`              |
 | `exec-bits.globs`                       | no       | `["*.sh"]`          |
@@ -166,18 +166,10 @@ Only facts that are conventions of a **tool** rather than of a repository have d
 particular repository is laid out must be declared, because a default there would be the
 tool guessing.
 
-The `action-pins` trust map is the same `schemaVersion: 1` shape the check has always
-read:
-
-```json
-{
-  "schemaVersion": 1,
-  "actions": {
-    "AtomiCloud/actions.setup-nix": "trusted",
-    "upsidr/merge-gatekeeper": "non-trusted"
-  }
-}
-```
+`action-pins` classifies by ONE regex: an action matching `trustedPattern` is trusted
+(major-tag pin), everything else is non-trusted (exact SHA plus tag comment). There is
+no list of non-trusted actions to maintain — not matching IS the classification, so an
+action nobody thought about gets the strictest pin by default.
 
 ### An absent subject is never a pass
 
@@ -420,5 +412,5 @@ nix develop -c ./shellWrapper/dlint/tests/inject.sh --dlint /path/to/dlint
 
 The fixture in `tests/fixtures/conforming` is laid out like neither of the repositories
 `dlint` was extracted for: workflows in `ci/workflows`, CI entrypoints in `automation/`,
-the trust map at `trust/actions.json`, its per-shell tools under `tools/`. A
+the trusted-actions regex `^acme/`, its per-shell tools under `tools/`. A
 diene-shaped or registry-shaped constant anywhere in `dlint` would fail these arms.
