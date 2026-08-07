@@ -1,3 +1,22 @@
+## [4.5.0](https://github.com/AtomiCloud/nix-registry/compare/v4.4.1...v4.5.0) (2026-08-07)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **dlint:** cover lock refusal paths ([633993e](https://github.com/AtomiCloud/nix-registry/commit/633993e2854816d001fdabfbc7d6f38c87d699fa))
+* **dlint:** harden lint configuration ([79d374a](https://github.com/AtomiCloud/nix-registry/commit/79d374a29d98139ebaee24ac1c90843cfdf20cfe))
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **minor:** add dlint lint and nixpkgs pins ([154cfca](https://github.com/AtomiCloud/nix-registry/commit/154cfca651164e5b61a72d27cfff7ed52cde5495))
+* **dlint:** flake-text assertion joins the nixpkgs-pin check ([0e0a8be](https://github.com/AtomiCloud/nix-registry/commit/0e0a8beb4779201f064a931ece2562f82978d2e8))
+* **dlint:** lint alias and nixpkgs-pin check in the real tool ([0918269](https://github.com/AtomiCloud/nix-registry/commit/0918269f3a368b815f8c8bf30ec973f4d018aa2a))
+* **skills-sync:** multi-runtime — runtimes list with unioned resolution ([48a4256](https://github.com/AtomiCloud/nix-registry/commit/48a4256f6f0434b9a99400d406b61e8fd75383c1))
+* **minor:** replace tiers with frozen enforcer ([c04b397](https://github.com/AtomiCloud/nix-registry/commit/c04b397e0c231733067d1943b0e953ddab979ee3))
+* **dlint:** retire nixpkgs-pin (owner order) ([3546851](https://github.com/AtomiCloud/nix-registry/commit/3546851812b6155d2989ace82bcca9407e4df6ba))
+* **dlint:** retire workflow-policy entirely ([2648267](https://github.com/AtomiCloud/nix-registry/commit/264826782eedfb7c832e509fb21ed4e8711697c8))
+
 ## [4.4.1](https://github.com/AtomiCloud/nix-registry/compare/v4.4.0...v4.4.1) (2026-08-06)
 
 
