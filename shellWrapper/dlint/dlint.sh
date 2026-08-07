@@ -118,9 +118,11 @@ Running several checks in ONE invocation:
 
 Checks (there are exactly six; there is no 'all' CHECK — the flag is --all-configured):
   action-pins <trusted|non-trusted>
-      Every GitHub Action reference carries the pin its authored trust
-      classification demands: a major tag for trusted actions, an exact 40-hex
-      SHA plus a trailing tag comment for non-trusted ones.
+      Every GitHub Action reference carries the pin its trust class demands: a
+      major tag for trusted actions, an exact 40-hex SHA plus a trailing tag
+      comment for non-trusted ones. An action is trusted iff it matches the
+      configured 'trustedPattern' regex; everything else is non-trusted, so an
+      unlisted action gets the strictest pin by default.
   exec-bits
       Every tracked shell script is executable.
   ci-wiring
@@ -161,7 +163,7 @@ Configuration:
     {
       "schemaVersion": 1,
       "checks": {
-        "action-pins":  { "trustMap": "config/action-trust.json" },
+        "action-pins":  { "trustedPattern": "^AtomiCloud/" },
         "exec-bits":    {},
         "ci-wiring":    {
           "entrypointPattern": "scripts/ci/[A-Za-z0-9._-]+[.]sh",
@@ -386,6 +388,13 @@ count_lines() {
 # action-pins
 # --------------------------------------------------------------------------- #
 
+# The one =~ site, wrapped so callers read a COMMAND status: a match is 0, a
+# non-match is 1, and a regex that does not compile is 2 — distinguishable
+# without the $?-of-a-condition pattern shellcheck rightly flags (SC2319).
+regex_matches() {
+  [[ $1 =~ $2 ]]
+}
+
 check_action_pins() {
   local mode="${1:-}"
   [ "$#" -le 1 ] ||
@@ -398,21 +407,21 @@ check_action_pins() {
 
   load_check_config action-pins
 
-  local map_file="" workflows_dir="" require_subjects=""
-  map_file="$(cfg_string trustMap)"
+  local trusted_pattern="" workflows_dir="" require_subjects=""
+  trusted_pattern="$(cfg_string trustedPattern)"
   workflows_dir="$(cfg_string workflowsDir '.github/workflows')"
   require_subjects="$(cfg_bool requireSubjects true)"
 
-  [ -f "${map_file}" ] ||
-    config_absent "action-pins: the trust map '${map_file}' declared in '${CFG_FILE}' does not exist. Every action reference needs an authored trust classification, so dlint refuses rather than pass an unclassified tree."
+  # A pattern that does not compile must refuse loudly, not classify everything
+  # non-trusted: =~ exits 2 on a bad regex, and only 0/1 are match verdicts.
+  # (cfg_string already refuses an EMPTY pattern, which would trust every action.)
+  local probe_rc=0
+  regex_matches probe "${trusted_pattern}" || probe_rc=$?
+  [ "${probe_rc}" -le 1 ] ||
+    config_invalid "action-pins: 'trustedPattern' '${trusted_pattern}' is not a valid regex"
+
   [ -d "${workflows_dir}" ] ||
     config_absent "action-pins: the workflow directory '${workflows_dir}' declared in '${CFG_FILE}' does not exist"
-
-  jq -e '.schemaVersion == 1
-      and (.actions | type == "object")
-      and ([.actions[] | select(. != "trusted" and . != "non-trusted")] | length == 0)' \
-    "${map_file}" >/dev/null 2>&1 ||
-    config_invalid "action-pins: '${map_file}' has an invalid schema or classification; it needs schemaVersion 1 and an '.actions' object mapping every action to \"trusted\" or \"non-trusted\""
 
   local matches="${WORK_DIR}/action-uses.txt" rg_status=0
   rg -n --no-heading --hidden \
@@ -441,10 +450,11 @@ check_action_pins() {
     action="${reference%@*}"
     ref="${reference##*@}"
 
-    classification="$(jq -r --arg action "${action}" '.actions[$action] // empty' "${map_file}")" ||
-      config_invalid "action-pins: could not read the classification of '${action}' from '${map_file}'"
-    [ -n "${classification}" ] ||
-      refuse "${file}:${line}: action '${action}' has no authored trust classification"
+    if regex_matches "${action}" "${trusted_pattern}"; then
+      classification="trusted"
+    else
+      classification="non-trusted"
+    fi
     [ "${classification}" = "${mode}" ] || continue
     in_mode=$((in_mode + 1))
 
