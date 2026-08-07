@@ -662,7 +662,6 @@ m_violation_and_absent_section() {
   edit_config 'del(.checks["ci-wiring"])'
 }
 
-
 # -- repo-agnosticism ------------------------------------------------------- #
 
 # Move the whole GitHub-shaped layout to the documented DEFAULT workflow
