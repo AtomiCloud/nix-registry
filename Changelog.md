@@ -1,3 +1,23 @@
+## [5.0.0](https://github.com/AtomiCloud/nix-registry/compare/v4.5.0...v5.0.0) (2026-08-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* **major:** the action-pins config key 'trustMap' (a JSON file
+classifying every action) is retired. The check now reads ONE regex,
+'trustedPattern': an action matching it is trusted (major-tag pin),
+everything else is non-trusted (exact SHA + tag comment). There is no
+non-trusted list to maintain — not matching IS the classification, so
+an action nobody thought about gets the strictest pin by default.
+Harness: 142/142.
+
+Also drops the two vae blocks (verb/application/example doc helpers)
+from atomi_release.yaml, per the same owner review round.
+
+### ⬆️ Packages Updated ⬆️
+
+* **major:** action-pins trusts by regex, retiring the trust map ([380ebb4](https://github.com/AtomiCloud/nix-registry/commit/380ebb43ac296c8488a4713ceb7899d796fbeecf))
+
 ## [4.5.0](https://github.com/AtomiCloud/nix-registry/compare/v4.4.1...v4.5.0) (2026-08-07)
 
 

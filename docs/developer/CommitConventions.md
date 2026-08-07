@@ -33,13 +33,6 @@ This page will document the types and scopes used.
 
 Fixed a bug within the repository
 
-| **V.A.E**       | V.A.E values                                                       |
-| --------------- | ------------------------------------------------------------------ |
-| verb            | fix                                                                |
-| application     | when this commit is applied, it will _fix_ `<title>`               |
-| example         | fix: dropdown flickering                                           |
-| example applied | when this commit is applied, it will _fix_ **dropdown flickering** |
-
 | Scope    | Description                                | Bump    |
 | -------- | ------------------------------------------ | ------- |
 | default  | Generic fixes not under `drv` or `patch`   | `patch` |
@@ -49,13 +42,6 @@ Fixed a bug within the repository
 ## new
 
 Release a new package
-
-| **V.A.E**       | V.A.E values                                                                            |
-| --------------- | --------------------------------------------------------------------------------------- |
-| verb            | add                                                                                     |
-| application     | when this commit is applied, it will _add_ `<scope>, <title>`                           |
-| example         | new(narwhal): a swiss army knife for docker                                             |
-| example applied | when this commit is applied, it will _add_ `narwhal`, **a swiss army knife for docker** |
 
 | Scope   | Description           | Bump    |
 | ------- | --------------------- | ------- |
