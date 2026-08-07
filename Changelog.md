@@ -1,3 +1,10 @@
+## [5.1.0](https://github.com/AtomiCloud/nix-registry/compare/v5.0.0...v5.1.0) (2026-08-07)
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **minor:** toolchain-smoke runs every binary, not just resolves it ([7a4c14d](https://github.com/AtomiCloud/nix-registry/commit/7a4c14de6c90dab11a1d2e043fb99fc1cd356de1))
+
 ## [5.0.0](https://github.com/AtomiCloud/nix-registry/compare/v4.5.0...v5.0.0) (2026-08-07)
 
 
