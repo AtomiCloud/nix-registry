@@ -116,7 +116,7 @@ Running several checks in ONE invocation:
   could not be trusted (3, 4, 5) outranks a known violation (1). An invocation
   that would inspect nothing refuses; it is never a pass.
 
-Checks (there are exactly six; there is no 'all' CHECK — the flag is --all-configured):
+Checks (there are exactly five; there is no 'all' CHECK — the flag is --all-configured):
   action-pins <trusted|non-trusted>
       Every GitHub Action reference carries the pin its trust class demands: a
       major tag for trusted actions, an exact 40-hex SHA plus a trailing tag
@@ -131,10 +131,12 @@ Checks (there are exactly six; there is no 'all' CHECK — the flag is --all-con
       executable.
   toolchain-smoke
       Enter each declared shell and verify that every binary declared FOR THAT
-      SHELL resolves inside it, so a green result is attributable to the shell it
-      names. The legacy single-'shell' form still works, but it inspects the
-      invocation environment and says so rather than naming a shell it never
-      entered.
+      SHELL resolves inside it AND runs: each entry is 'binary [probe args]'
+      (default probe '--version'), and the probe must exit 0. Resolution proves
+      the PATH delivers a file; the run proves the build behind it works — the
+      difference a broken nix pin upgrade hides. The legacy single-'shell' form
+      still works, but it inspects the invocation environment and says so rather
+      than naming a shell it never entered.
   no-custom-derivations
       Every declared nix file stays a plain declarative list: no custom derivation
       builder appears in it. The vocabulary of builders is printed with the result.
@@ -615,6 +617,32 @@ check_ci_wiring() {
 # toolchain-smoke
 # --------------------------------------------------------------------------- #
 
+# An entry is 'binary' or 'binary <probe args>'; the binary must RESOLVE and the
+# probe must RUN (exit 0). The default probe is '--version'. Probe args are
+# restricted to flag-shaped tokens because the probe is embedded into the enter
+# command's script string — a freer charset would be an injection surface.
+SMOKE_BINARY=""
+SMOKE_PROBE=""
+smoke_parse_entry() {
+  local -a parts=()
+  read -r -a parts <<<"$1"
+  [ "${#parts[@]}" -gt 0 ] ||
+    config_invalid "toolchain-smoke: an entry is empty; each entry is 'binary [probe args]'"
+  SMOKE_BINARY="${parts[0]}"
+  [[ ${SMOKE_BINARY} =~ ^[A-Za-z0-9._+-]+$ ]] ||
+    config_invalid "toolchain-smoke: binary '${SMOKE_BINARY}' is not a command name"
+  if [ "${#parts[@]}" -eq 1 ]; then
+    SMOKE_PROBE="--version"
+  else
+    local tok=""
+    for tok in "${parts[@]:1}"; do
+      [[ ${tok} =~ ^[A-Za-z0-9._+=-]+$ ]] ||
+        config_invalid "toolchain-smoke: probe argument '${tok}' of '${SMOKE_BINARY}' must be a flag-shaped token"
+    done
+    SMOKE_PROBE="${parts[*]:1}"
+  fi
+}
+
 check_toolchain_smoke() {
   [ "$#" -eq 0 ] || usage_error "toolchain-smoke takes no arguments, got '$1'"
 
@@ -696,23 +724,32 @@ check_toolchain_smoke_scoped() {
     [ "${#argv[@]}" -gt 0 ] ||
       config_invalid "toolchain-smoke: 'enter' expanded to nothing for shell '${shell}'"
 
-    for binary in "${binaries[@]}"; do
-      [[ ${binary} =~ ^[A-Za-z0-9._+-]+$ ]] ||
-        config_invalid "toolchain-smoke: binary '${binary}' is not a command name"
+    local entry="" probe=""
+    for entry in "${binaries[@]}"; do
+      smoke_parse_entry "${entry}"
+      binary="${SMOKE_BINARY}"
+      probe="${SMOKE_PROBE}"
 
       # The probe reports through a MARKER rather than through its exit status.
-      # 'not found' and 'could not enter the shell at all' both exit non-zero, and
-      # collapsing them would let a broken entry mechanism read as a missing
-      # binary — a wrong reason, loudly stated. A missing marker is UNKNOWN.
+      # 'not found', 'resolves but does not run' and 'could not enter the shell
+      # at all' all exit non-zero, and collapsing them would let a broken entry
+      # mechanism read as a missing binary — a wrong reason, loudly stated. A
+      # missing marker is UNKNOWN. The run half exists because resolution only
+      # proves the PATH delivers a file; executing it is what proves the build
+      # behind a nix pin actually works, which is the moment a pin upgrade
+      # would otherwise ship a binary that resolves and cannot run.
       errs="${WORK_DIR}/enter-${shell_count}.err"
       verdict=""
       rc=0
-      verdict="$("${argv[@]}" "command -v -- '${binary}' >/dev/null 2>&1 && printf DLINT_RESOLVED || printf DLINT_MISSING" 2>"${errs}")" || rc=$?
+      verdict="$("${argv[@]}" "command -v -- '${binary}' >/dev/null 2>&1 || { printf DLINT_MISSING; exit 0; }; if ${binary} ${probe} </dev/null >/dev/null 2>&1; then printf DLINT_RAN; else printf 'DLINT_RUNFAIL:%s' \$?; fi" 2>"${errs}")" || rc=$?
 
       case "${verdict}" in
-      DLINT_RESOLVED) ;;
+      DLINT_RAN) ;;
       DLINT_MISSING)
         refuse "shell '${shell}' is missing binary '${binary}'"
+        ;;
+      DLINT_RUNFAIL:*)
+        refuse "shell '${shell}' resolves binary '${binary}' but '${binary} ${probe}' exited ${verdict#DLINT_RUNFAIL:} — the build does not run"
         ;;
       *)
         printf '❌ %s\n' "toolchain-smoke: could not enter shell '${shell}' to look for '${binary}' (exit ${rc}); the toolchain of that shell is UNKNOWN, which is not a pass. The entry command was: ${argv[*]}" >&2
@@ -723,12 +760,12 @@ check_toolchain_smoke_scoped() {
       total=$((total + 1))
     done
 
-    log_info "shell '${shell}': ${#binaries[@]} binary/binaries resolved INSIDE it"
+    log_info "shell '${shell}': ${#binaries[@]} binary/binaries resolved AND ran INSIDE it"
     shell_count=$((shell_count + 1))
   done
 
   log_info "toolchain binaries inspected: ${total} across ${shell_count} shell(s): ${names[*]}"
-  ok "Every declared shell resolves its required binaries (${names[*]})"
+  ok "Every declared shell resolves and runs its required binaries (${names[*]})"
 }
 
 # The AMBIENT form, kept so a repository configured for the single 'shell' key
@@ -748,19 +785,25 @@ check_toolchain_smoke_ambient() {
   [ "${#binaries[@]}" -gt 0 ] ||
     config_invalid "toolchain-smoke: '.checks[\"toolchain-smoke\"].binaries' must name at least one binary; an empty list would inspect no toolchain"
 
-  local binary="" resolved="" count=0
-  for binary in "${binaries[@]}"; do
-    [[ ${binary} =~ ^[A-Za-z0-9._+-]+$ ]] ||
-      config_invalid "toolchain-smoke: binary '${binary}' is not a command name"
+  local entry="" binary="" resolved="" run_rc=0 count=0
+  for entry in "${binaries[@]}"; do
+    smoke_parse_entry "${entry}"
+    binary="${SMOKE_BINARY}"
     resolved="$(command -v -- "${binary}" 2>/dev/null || true)"
     [ -n "${resolved}" ] ||
       refuse "the invocation environment is missing binary '${binary}' (declared for shell '${shell}')"
+    run_rc=0
+    # SMOKE_PROBE is validated flag-shaped tokens; the split is intentional.
+    # shellcheck disable=SC2086
+    "${binary}" ${SMOKE_PROBE} </dev/null >/dev/null 2>&1 || run_rc=$?
+    [ "${run_rc}" -eq 0 ] ||
+      refuse "the invocation environment resolves binary '${binary}' but '${binary} ${SMOKE_PROBE}' exited ${run_rc} — the build does not run"
     count=$((count + 1))
   done
 
   log_info "toolchain binaries inspected: ${count} in the INVOCATION ENVIRONMENT (declared shell: ${shell}, not entered)"
   log_info "to attribute this result to a shell, declare 'shells' with an 'enter' command instead of 'shell'"
-  ok "The invocation environment resolves every binary declared for '${shell}'"
+  ok "The invocation environment resolves and runs every binary declared for '${shell}'"
 }
 
 # --------------------------------------------------------------------------- #

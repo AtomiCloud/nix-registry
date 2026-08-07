@@ -1,6 +1,6 @@
 # dlint
 
-Six repo-agnostic repository linters behind one entrypoint. `dlint` runs in **any**
+Five repo-agnostic repository linters behind one entrypoint. `dlint` runs in **any**
 consuming repository: every repository-specific fact comes from that repository's own
 configuration file, never from a constant baked into the tool.
 
@@ -12,18 +12,17 @@ dlint --help
 dlint --version
 ```
 
-There are **exactly six** checks. There are no aliases and no hidden checks. There is no
+There are **exactly five** checks. There are no aliases and no hidden checks. There is no
 `all` **check** either — running everything is the `--all-configured` flag. An unknown
 check exits `2` and lists the valid ones.
 
 | Check                                | Refuses when                                                                                                                                                                                                         |
 | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `action-pins <trusted\|non-trusted>` | An action reference has no authored trust classification; a `trusted` action is not on a major tag (`v3`); a `non-trusted` action is not on an exact 40-hex SHA whose trailing comment names its tag.                |
+| `action-pins <trusted\|non-trusted>` | A `trusted` action (one matching `trustedPattern`) is not on a major tag (`v3`); any other action — non-trusted by default — is not on an exact 40-hex SHA whose trailing comment names its tag.                |
 | `exec-bits`                          | A tracked shell script is not executable, or is missing from the worktree.                                                                                                                                           |
 | `ci-wiring`                          | A CI entrypoint a workflow names is missing or not executable; an orchestrator job does not call a repository-local reusable workflow; a reusable workflow calls no CI entrypoint; an orchestrator declares no jobs. |
-| `toolchain-smoke`                    | A binary declared for a shell does not resolve INSIDE that shell, or the shell could not be entered at all.                                                                                                          |
+| `toolchain-smoke`                    | A binary declared for a shell does not resolve INSIDE that shell, resolves but its probe (default `--version`) exits non-zero, or the shell could not be entered at all.                                                                                                          |
 | `no-custom-derivations`              | A declared nix file uses a custom derivation builder instead of staying a plain declarative list.                                                                                                                    |
-| `workflow-policy`                    | A declared path in a declared workflow file does not hold its declared value, or is absent. One assertion is one caught fault.                                                                                       |
 
 ## Several checks in one invocation
 
@@ -57,7 +56,7 @@ the invocation reported green.
 
 ## Configuration
 
-All six checks read **one** file, and `dlint.yaml` is its canonical name (**D6
+All five checks read **one** file, and `dlint.yaml` is its canonical name (**D6
 ONE-CONFIG-NAME**). `dlint` looks for, in order:
 
 | Looked for      | Format                                                          |
@@ -84,7 +83,7 @@ checks:
 
 and the JSON below describe the same thing. YAML is converted to JSON once per invocation and
 every reader is unchanged, so there is one code path rather than two that happen to agree
-today — and there are arms running all six checks AND `--all-configured` from a YAML config to hold that.
+today — and there are arms running all five checks AND `--all-configured` from a YAML config to hold that.
 
 Two properties are deliberate:
 
@@ -121,15 +120,8 @@ Two properties are deliberate:
         "default": ["bash", "git"]
       }
     },
-    "workflow-policy": {
-      "assertions": [
-        {
-          "file": ".github/workflows/release.yaml",
-          "path": ".concurrency.group",
-          "equals": "release",
-          "reason": "release concurrency group must be release"
-        }
-      ]
+    "no-custom-derivations": {
+      "paths": ["nix/packages.nix", "nix/env.nix"]
     }
   }
 }
@@ -154,7 +146,6 @@ One mechanism, applied uniformly: a section per check, keyed by the check's own 
 | `no-custom-derivations.paths`           | yes      | —                   |
 | `no-custom-derivations.forbid`          | no       | dlint's vocabulary  |
 | `no-custom-derivations.requireSubjects` | no       | `true`              |
-| `workflow-policy.assertions`            | yes      | —                   |
 | ` ↳ .file`                              | yes      | —                   |
 | ` ↳ .path`                              | yes      | —                   |
 
@@ -204,9 +195,13 @@ retry the wrong thing.
 
 ## Toolchain smoke
 
-`toolchain-smoke` **enters each declared shell** and resolves that shell's binaries inside it,
-so a green result is attributable to the shell it names. It does not inspect package
-declarations: a developer-installed binary must not make a declaration-only check pass.
+`toolchain-smoke` **enters each declared shell**, resolves that shell's binaries inside it,
+**and runs each one**: an entry is `binary` or `binary <probe args>` (default probe
+`--version`), and the probe must exit `0`. Resolution proves the PATH delivers a file;
+the run proves the build behind it works — the difference a broken nix pin upgrade
+hides, because a bad pin can still deliver a file that resolves and cannot execute. It
+does not inspect package declarations: a developer-installed binary must not make a
+declaration-only check pass.
 
 ```json
 {
@@ -214,7 +209,7 @@ declarations: a developer-installed binary must not make a declaration-only chec
     "toolchain-smoke": {
       "enter": "nix develop .#{shell} --command bash -c",
       "shells": {
-        "default": ["bash", "git"],
+        "default": ["bash", "git", "kubectl version --client"],
         "cd": ["skopeo", "helm"]
       }
     }
@@ -265,38 +260,11 @@ It no longer claims the named shell resolved anything, because it never entered 
 `no-custom-derivations` enforces **D7 RESOLVER-SHAPE**: template nix stays plain declarative
 lists, and custom builds live in the registry.
 
-## Workflow policy
-
-`workflow-policy` replaces hand-written `yq | jq` validators. The policy is
-repository-specific, so every assertion is declared: the file, the path, the expected value,
-and the reason to print when it does not hold.
-
 ```json
 {
   "checks": {
     "no-custom-derivations": {
       "paths": ["nix/packages.nix", "nix/pre-commit.nix", "nix/env.nix"]
-    "workflow-policy": {
-      "assertions": [
-        {
-          "file": ".github/workflows/release.yaml",
-          "path": ".on.workflow_run.workflows",
-          "equals": ["CI"],
-          "reason": "release must trigger from CI"
-        },
-        {
-          "file": ".github/workflows/release.yaml",
-          "path": ".concurrency.group",
-          "equals": "release",
-          "reason": "release concurrency group must be release"
-        },
-        {
-          "file": ".github/workflows/ci.yaml",
-          "path": ".name",
-          "equals": "CI",
-          "reason": "the CI workflow name must be exactly CI"
-        }
-      ]
     }
   }
 }

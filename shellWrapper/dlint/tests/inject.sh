@@ -343,6 +343,22 @@ m_toolchain_binary_missing_in_one_shell_only() {
   edit_config '.checks["toolchain-smoke"].shells.lean += ["fixture-tool"]'
 }
 
+# Resolution alone is not the verdict any more: a binary that resolves and
+# cannot RUN (the broken-pin shape) must refuse, with the probe's exit named.
+m_toolchain_binary_run_fails() {
+  require_file tools/bin-full/fixture-tool
+  printf '#!/usr/bin/env bash\nexit 7\n' >tools/bin-full/fixture-tool
+  chmod +x tools/bin-full/fixture-tool
+}
+
+m_toolchain_probe_args_entry() {
+  edit_config '.checks["toolchain-smoke"].shells.lean = ["bash", "git version"]'
+}
+
+m_toolchain_probe_args_bad_token() {
+  edit_config '.checks["toolchain-smoke"].shells.lean = ["git version; rm"]'
+}
+
 m_toolchain_shells_not_object() {
   edit_config '.checks["toolchain-smoke"].shells = ["full", "lean"]'
 }
@@ -674,7 +690,7 @@ arm "action-pins/trusted baseline" m_none 0 "✅ trusted action pins conform" --
 arm "action-pins/non-trusted baseline" m_none 0 "✅ non-trusted action pins conform" -- action-pins non-trusted
 arm "exec-bits baseline" m_none 0 "✅ Tracked shell scripts are executable" -- exec-bits
 arm "ci-wiring baseline" m_none 0 "✅ Workflow jobs resolve to existing CI scripts" -- ci-wiring
-arm "toolchain-smoke baseline (2 shells entered)" m_none 0 "✅ Every declared shell resolves its required binaries (full lean)" -- toolchain-smoke
+arm "toolchain-smoke baseline (2 shells entered)" m_none 0 "✅ Every declared shell resolves and runs its required binaries (full lean)" -- toolchain-smoke
 
 printf '\naction-pins mutations\n'
 arm "trusted action pinned to a SHA" m_trusted_pinned_to_sha 1 \
@@ -747,6 +763,12 @@ arm "a binary present in one shell is missing in another" m_toolchain_binary_mis
   "shell 'lean' is missing binary 'fixture-tool'" -- toolchain-smoke
 arm "the refusal names the shell, not the environment" m_toolchain_binary_missing_in_one_shell_only 1 \
   "'lean'" -- toolchain-smoke
+arm "a binary that resolves but cannot run refuses" m_toolchain_binary_run_fails 1 \
+  "resolves binary 'fixture-tool' but 'fixture-tool --version' exited 7 — the build does not run" -- toolchain-smoke
+arm "a probe-args entry runs the stated probe" m_toolchain_probe_args_entry 0 \
+  "✅ Every declared shell resolves and runs its required binaries (full lean)" -- toolchain-smoke
+arm "a probe argument with shell metacharacters refuses" m_toolchain_probe_args_bad_token 4 \
+  "must be a flag-shaped token" -- toolchain-smoke
 arm "an unenterable shell is UNKNOWN, not a missing binary" m_toolchain_unenterable_shell 5 \
   "could not enter shell 'nosuch'" -- toolchain-smoke
 arm "an unenterable shell says which command it ran" m_toolchain_unenterable_shell 5 \
@@ -769,7 +791,7 @@ arm "both shell and shells declared" m_toolchain_both_forms 4 \
 printf '\ntoolchain-smoke: the legacy single-shell form still works\n'
 # It keeps working, but its green may not be attributed to the shell it names.
 arm "legacy form passes" m_toolchain_legacy_form 0 \
-  "✅ The invocation environment resolves every binary declared for 'fixture'" -- toolchain-smoke
+  "✅ The invocation environment resolves and runs every binary declared for 'fixture'" -- toolchain-smoke
 arm "legacy form says it did NOT enter the shell" m_toolchain_legacy_form 0 \
   "not entered" -- toolchain-smoke
 arm "legacy form refusal blames the environment" m_toolchain_legacy_binary_missing 1 \
@@ -889,7 +911,7 @@ arm "yaml config / exec-bits" m_config_as_yaml 0 \
 arm "yaml config / ci-wiring" m_config_as_yaml 0 \
   "✅ Workflow jobs resolve to existing CI scripts" -- ci-wiring
 arm "yaml config / toolchain-smoke" m_config_as_yaml 0 \
-  "✅ Every declared shell resolves its required binaries (full lean)" -- toolchain-smoke
+  "✅ Every declared shell resolves and runs its required binaries (full lean)" -- toolchain-smoke
 arm "yaml config / --all-configured (every reader)" m_config_as_yaml 0 \
   "✅ every requested check passed (6)" -- --all-configured
 # Added by the #68 rebase, and predicted by the stale-scope law before it was found:
@@ -1010,7 +1032,7 @@ arm "action-pins/trusted rebaseline" m_none 0 "✅ trusted action pins conform" 
 arm "action-pins/non-trusted rebaseline" m_none 0 "✅ non-trusted action pins conform" -- action-pins non-trusted
 arm "exec-bits rebaseline" m_none 0 "✅ Tracked shell scripts are executable" -- exec-bits
 arm "ci-wiring rebaseline" m_none 0 "✅ Workflow jobs resolve to existing CI scripts" -- ci-wiring
-arm "toolchain-smoke rebaseline" m_none 0 "✅ Every declared shell resolves its required binaries (full lean)" -- toolchain-smoke
+arm "toolchain-smoke rebaseline" m_none 0 "✅ Every declared shell resolves and runs its required binaries (full lean)" -- toolchain-smoke
 arm "no-custom-derivations rebaseline" m_none 0 "✅ Template nix stays plain declarative lists" -- no-custom-derivations
 
 printf '\narms: %s/%s passed\n' "${ARMS_PASSED}" "${ARMS_RUN}"
