@@ -135,6 +135,29 @@ inherit-source position, so the child inventories `pkgs-2605` as an inherited id
 the real file does not. `--full` prints that contribution per arm, which is why the per-arm
 residual delta is now readable rather than something to be guessed at.
 
+### Every count in the summary states its unit
+
+The same class of defect had one more instance, in the closing line rather than in the lists.
+It used to read:
+
+```text
+❌ resolver-smoke: 6 refusal(s) across 6 resolver-managed file(s) in 70ms
+```
+
+The trailing number was the count of files **scanned**, not the count of files that refused —
+which on that run was **2**. Read naturally the line claims the whole tree refused, and a reader
+came close to quoting that fraction. A refusal count, a refusing-file count and a scanned-file
+count are three different numbers, and on a single-file subject all three agree, which is how the
+ambiguity survived. It now reads:
+
+```text
+❌ resolver-smoke: 6 refusal(s) across 2 refusing file(s) of 6 resolver-managed file(s) scanned, in 70ms
+```
+
+`--json`'s `summary` carries the same three as separately named keys — `refusals`,
+`refusingFiles`, `scannedFiles` — plus `passedFiles`, so the figures reconcile rather than having
+to be trusted. Group `L` holds the line to it against a tree where all three counts differ.
+
 ## Configuration
 
 Configuration is **optional**. With no file, `requireSubjects` is `true`, which is the
@@ -266,7 +289,7 @@ exclusion, which is why nothing in `nix/fmt.nix` had to change.
 | `tests/fixtures/collapse/packages.nixsrc`  | The **exact** defect shape, copied verbatim from the diene workspace's pre-fix `nix/packages.nix` on 2026-08-09: a function whose body is a `//` chain of several `with`-scoped sets. This must **fail**, and the refusal must carry the merger's own reason.                                                                                                                                                                                                                                                                                                                                     |
 | `tests/fixtures/wide-loss/packages.nixsrc` | Purpose-built for group `K`, and **acme-shaped on purpose** — arm `1`'s whole point is that no workspace constant is baked in, and a fixture that reintroduced one would undo it. It reproduces the real subject's _shape_ (a `stdenvNoCC.mkDerivation` in the top-level `let`, two per-system attrsets selected by `.${system}`, a `root = { inherit …; }` exposure attrset), which is what carries a `packages.nix` past the published guard's 24-name cap. Its byte length and sha256 are re-asserted on every use: those bytes decide which names land inside the cap and which fall past it. |
 
-The battery is **108 arms across eleven groups**, and every arm declares which of two directions
+The battery is **116 arms across twelve groups**, and every arm declares which of two directions
 it proves. The distinction matters because the vendored bundle fixed several of the defects
 the battery was originally written against, and an arm that quietly changed direction without
 saying so would look like coverage while proving the opposite of what its name claims.
@@ -284,6 +307,7 @@ saying so would look like coverage while proving the opposite of what its name c
 | `I`   | positive   | Comments, blank lines, trailing whitespace and a partial subject set are all benign. A gate that fires on a comment blocks every commit.                                                                                                                                              |
 | `J`   | positive   | The canonical baseline is re-asserted after the whole mutation battery, and the run is inside its 3s budget.                                                                                                                                                                          |
 | `K`   | disclosure | Both truncated lost-material lists can be escaped with `--full` / `--json`, and escaping them changes nothing else. `K3` is a MUST-DIFFER pair, so the flag cannot decay into a no-op; `K12` holds the new `ℹ️` line to being informational rather than a refusal.                    |
+| `L`   | disclosure | Every count in the summary line states its unit. The wide-loss tree refuses 3 times in 1 file out of 6 scanned, so all three figures differ and an assertion cannot pass by picking up the wrong one. `L4` is the MUST-DIFFER arm holding the old, ambiguous shape out of the output. |
 
 A **regression** arm still injects its shape and still runs the injection guards, so it cannot
 pass by decaying into an unmutated canonical run. A **refusal** arm asserts the refusal TEXT and

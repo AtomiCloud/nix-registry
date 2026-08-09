@@ -20,13 +20,16 @@
 #     file PASSES. They are the guard that the fix stays fixed; the injection
 #     guards below still prove the shape was really applied, so a regression arm
 #     cannot pass by decaying into an unmutated canonical run.
-#   * DISCLOSURE arms (group K) prove that the two truncated lost-material lists
+#   * DISCLOSURE arms (groups K and L) prove that the two truncated lost-material lists
 #     can be escaped, and that escaping them changes nothing else. Both lists
 #     truncate — resolver-smoke's own at 16 names, the published resolver's own
 #     refusal message at 24 — and a specification written against the truncated
 #     output had to guess at its own subject matter and guessed wrong. K3 is the
 #     MUST-DIFFER pair that keeps `--full` from decaying into a no-op, and K12
 #     keeps the new informational line from becoming a finding.
+#     Group L holds the summary line to stating a unit for every count it
+#     prints, after its trailing figure — files SCANNED — was read as the number
+#     of files that had refused.
 #   * REFUSAL arms (groups C, E, H1-H3, H5, H6) prove the gate still fires and
 #     still says why. Under @3 most refusals originate in the resolver itself:
 #     the published bundle wraps every merger in a loss guard that throws rather
@@ -61,7 +64,7 @@
 # sha256 38838467be749d2197180eb87baf0caa4efee150651e346c790e4b96cd7be82e, stored
 # byte-for-byte. A hand-written approximation of the defect is not the defect.
 #
-# The battery is 108 arms across eleven groups (A-K).
+# The battery is 116 arms across twelve groups (A-L).
 #
 # Usage:
 #   ./run.sh                                     # tests `bun <pkg>/index.ts`
@@ -998,6 +1001,35 @@ expect 'K10d and states the count semantics there too' 0 'never occurrences'
 run_in "${K}" "${SMOKE_CMD[@]}" --verbose
 expect 'K11 a plausible-but-wrong flag still exits 2' 2 ''
 expect_absent 'K11b and does not fall through to a run' 2 'resolver probe passed'
+
+# ---------------------------------------------------------------------------
+group 'L. SUMMARY UNITS — three counts, three units, never one number twice'
+# ---------------------------------------------------------------------------
+#
+# The summary line used to read `N refusal(s) across M resolver-managed file(s)`
+# where M was the number of files SCANNED. On a run that refused 2 of 6 files it
+# said "6 refusals across 6 resolver-managed files", which reads as though the
+# whole tree had refused — and a reader came close to quoting that fraction. The
+# refusal count, the refusing-file count and the scanned-file count are three
+# different numbers, so each one now says what it counts.
+#
+# The wide-loss tree is the arm that can prove it: 3 refusals, 1 refusing file, 6
+# files scanned. All three figures differ, so an assertion cannot pass by picking
+# up the wrong one — which is exactly why the defect survived until now, since on
+# a single-file subject every reading of the old line agreed.
+
+run_in "${K}" "${SMOKE_CMD[@]}"
+expect 'L1 the summary names the refusal count with its unit' 1 '3 refusal(s)'
+expect 'L2 and the refusing-file count as its own figure' 1 '1 refusing file(s)'
+expect 'L3 and the scanned-file count as a third, separate figure' 1 '6 resolver-managed file(s) scanned'
+expect_absent 'L4 MUST-DIFFER: the old shape, which used the scanned count as the denominator, is gone' 1 \
+  '3 refusal(s) across 6 resolver-managed file(s)'
+
+run_in "${K}" "${SMOKE_CMD[@]}" --json
+expect 'L5 --json names the refusal count' 1 '"refusals": 3'
+expect 'L5b --json names the refusing-file count separately' 1 '"refusingFiles": 1'
+expect 'L5c --json names the scanned-file count separately' 1 '"scannedFiles": 6'
+expect 'L5d --json names the passing-file count too, so the three reconcile' 1 '"passedFiles": 5'
 
 # ---------------------------------------------------------------------------
 group 'J. RE-ASSERTED BASELINE AND BUDGET'

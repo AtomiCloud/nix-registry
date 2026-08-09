@@ -453,9 +453,12 @@ function emitJson(
           code: entry.code,
           message: entry.message,
         })),
+        // Key names carry the unit for the same reason the human summary now does:
+        // `files` alone did not say whether it counted the tree or the failures.
         summary: {
-          files: files.length,
-          passed: files.filter(file => file.passed).length,
+          scannedFiles: files.length,
+          passedFiles: files.filter(file => file.passed).length,
+          refusingFiles: files.filter(file => !file.passed).length,
           refusals: findings.length,
           elapsedMs: elapsed,
           exitCode,
@@ -532,8 +535,15 @@ export async function runSmoke(
   }
   const elapsed = elapsedMs();
   if (allFindings.length > 0) {
+    // Three figures, three units, stated separately. This line used to read
+    // `N refusal(s) across M resolver-managed file(s)` where M was the number of
+    // files SCANNED — so a run that refused 2 of 6 files reported "6 refusals
+    // across 6 resolver-managed files" and read as though the whole tree had
+    // refused. A reader has already come close to quoting that wrong fraction.
+    // A refusal count, a refusing-file count and a scanned-file count are three
+    // different numbers; whenever they can differ, each one says what it counts.
     console.error(
-      `❌ resolver-smoke: ${allFindings.length} refusal(s) across ${present.length} resolver-managed file(s) in ${elapsed}ms`,
+      `❌ resolver-smoke: ${allFindings.length} refusal(s) across ${present.length - passed} refusing file(s) of ${present.length} resolver-managed file(s) scanned, in ${elapsed}ms`,
     );
     return exitCode;
   }
