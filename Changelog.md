@@ -1,3 +1,10 @@
+## [5.4.0](https://github.com/AtomiCloud/nix-registry/compare/v5.3.0...v5.4.0) (2026-08-09)
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **minor:** split infrautils/infralint into axis-pure tool bundles ([8065961](https://github.com/AtomiCloud/nix-registry/commit/80659613c68acbca0e3c0e0f94cee829f91fe816))
+
 ## [5.3.0](https://github.com/AtomiCloud/nix-registry/compare/v5.2.0...v5.3.0) (2026-08-09)
 
 
