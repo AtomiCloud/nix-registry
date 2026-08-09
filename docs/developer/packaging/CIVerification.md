@@ -29,7 +29,7 @@ The following packages are verified in CI with their respective commands:
 | pls                    | `pls --version`                    | Prettier + ESLint wrapper                                                     |
 | toml-cli               | `toml --version`                   | TOML CLI tool                                                                 |
 | nix-share              | `nix-share`                        | No --version flag available                                                   |
-| cyanprint              | `cyanprint --version`              | AtomiCloud template tool                                                      |
+| cyanprint              | `cyanprint --version`              | AtomiCloud template tool; also asserted at build time by `installCheckPhase`  |
 | worktrunk              | `wt --version`                     | Worktrunk CLI (binary is `wt`)                                                |
 | gardenio               | `garden version`                   | Garden CLI (uses `version` not `--version`)                                   |
 | codecov                | `codecov --version`                | Codecov CLI                                                                   |
