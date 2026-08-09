@@ -21,7 +21,7 @@ function skipTrivia(source: string, start: number): number {
   return index;
 }
 
-function bodyOpenAfterHeader(source: string, withName?: string): number | null {
+function bodyOpenAfterHeader(source: string, withName?: 'packages' | 'env'): number | null {
   const header = findFunctionHeader(source);
   if (!header) return null;
   let index = skipTrivia(source, header.colonIndex + 1);
@@ -118,6 +118,8 @@ function injectPrecommit(real: string, sentinel: string): string | null {
   return child.includes(`${sentinel} =`) ? child : null;
 }
 
+// When refreshing vendor/nix-v2.mjs via scripts/refresh-vendor.sh, re-derive
+// these skeletons from the refreshed bundle's pretty-printer output.
 export const NIX_PROBES: NixProbe[] = [
   {
     path: 'flake.nix',

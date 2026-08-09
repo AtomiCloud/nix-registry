@@ -15,8 +15,12 @@ TMPFILE="$(mktemp "${TMPDIR:-/tmp}/resolver-smoke-vendor.XXXXXX")"
 trap 'rm -f "${TMPFILE}"' EXIT
 
 case "${SOURCE}" in
-http://* | https://*)
-  curl --fail --location --silent --show-error "${SOURCE}" --output "${TMPFILE}"
+https://*)
+  curl --fail --location --silent --show-error --proto '=https' --proto-redir '=https' "${SOURCE}" --output "${TMPFILE}"
+  ;;
+http://*)
+  printf "resolver-smoke refresh: '%s' uses http; only https URLs are accepted\n" "${SOURCE}" >&2
+  exit 1
   ;;
 *)
   [ -f "${SOURCE}" ] || {

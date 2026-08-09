@@ -45,8 +45,8 @@ The following packages are verified in CI with their respective commands:
 | releaser               | `releaser --version`               | AtomiCloud release + commit-lint CLI                                          |
 | md-mermaid-lint        | `md-mermaid-lint --version`        | Mermaid diagram linter                                                        |
 | resolver-smoke         | `resolver-smoke --version`         | Template-authoring resolver gate; also runs its injection harness (see below) |
-| infrautils             | (removed from CI)                  | -                                                                             |
-| infralint              | (removed from CI)                  | -                                                                             |
+| infrautils             | (no execution command)             | In nix shell only                                                             |
+| infralint              | (no execution command)             | In nix shell only                                                             |
 
 ## Adding a New Package to CI
 

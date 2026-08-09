@@ -41,6 +41,12 @@
 #
 # RESOLVER_SMOKE may name a packaged binary; bun is only required when the
 # default is in use.
+#
+# Portability is a property of the harness, not a requirement on the host. Every
+# in-place fixture edit and the millisecond clock below are implemented without
+# GNU extensions — no `sed -i`, no `date +%s%N`, no `0,/re/` address, no
+# one-line `a\text` append — so a BSD/macOS userland runs the same battery and a
+# failure here is always resolver-smoke's, never the shell's.
 
 set -uo pipefail
 
@@ -147,11 +153,75 @@ expect_absent() {
 group() { printf '\n== %s\n' "$1"; }
 
 # ---------------------------------------------------------------------------
+# Millisecond clock. `date +%s%N` is a GNU extension: a BSD date prints a literal
+# `N`, which would leave CANON_MS non-numeric and turn the budget arm (J3) into a
+# shell error instead of an assertion. bash 5's EPOCHREALTIME needs no external
+# process at all, GNU nanoseconds are the next choice, and whole seconds are the
+# floor — coarse, but a 3000ms budget is still a real check at 1000ms resolution,
+# so the mode is reported in the header rather than silently assumed.
+# ---------------------------------------------------------------------------
+
+CLOCK_MODE=seconds
+CLOCK_RESOLUTION_MS=1000
+if [ -n "${EPOCHREALTIME:-}" ]; then
+  CLOCK_MODE=epochrealtime
+  CLOCK_RESOLUTION_MS=1
+else
+  case "$(date +%s%N 2>/dev/null)" in
+  '' | *[!0-9]*) ;;
+  *)
+    CLOCK_MODE=nanoseconds
+    CLOCK_RESOLUTION_MS=1
+    ;;
+  esac
+fi
+
+now_ms() {
+  local stamp int frac
+  case "${CLOCK_MODE}" in
+  epochrealtime)
+    # `seconds.microseconds`, except that the radix character follows the
+    # locale, so both `.` and `,` have to be accepted.
+    stamp="${EPOCHREALTIME}"
+    int="${stamp%%[.,]*}"
+    case "${stamp}" in
+    *[.,]*) frac="${stamp#*[.,]}" ;;
+    *) frac="" ;;
+    esac
+    frac="${frac}000000"
+    printf '%s' "$((int * 1000 + 10#${frac:0:3}))"
+    ;;
+  nanoseconds)
+    stamp="$(date +%s%N)"
+    printf '%s' "$((10#${stamp} / 1000000))"
+    ;;
+  *)
+    stamp="$(date +%s)"
+    printf '%s' "$((10#${stamp} * 1000))"
+    ;;
+  esac
+}
+
+case "$(now_ms)" in
+'' | *[!0-9]*) die "no numeric clock available (mode ${CLOCK_MODE})" ;;
+esac
+
+# ---------------------------------------------------------------------------
 # Fixture materialization. Sources carry a `.nixsrc` suffix so treefmt cannot
 # reach them; they become real `.nix` files only inside a throwaway repo.
 # ---------------------------------------------------------------------------
 
-sha_of() { sha256sum "$1" | cut -d' ' -f1; }
+# `sha256sum` is coreutils; a stock macOS has `shasum` instead. Both print the
+# digest as the first field, so the assertions downstream are unchanged.
+if command -v sha256sum >/dev/null 2>&1; then
+  SHA_CMD=(sha256sum)
+elif command -v shasum >/dev/null 2>&1; then
+  SHA_CMD=(shasum -a 256)
+else
+  die 'neither sha256sum nor shasum is on PATH; the fixture digests cannot be checked'
+fi
+
+sha_of() { "${SHA_CMD[@]}" "$1" | cut -d' ' -f1; }
 
 # materialize <arm-name> -> prints the fresh repo path
 materialize() {
@@ -212,9 +282,101 @@ rewrite_header() {
   guard_absent "${file}" "${old}"
 }
 
+# ---------------------------------------------------------------------------
+# Portable in-place editors. `sed -i` is not portable — GNU takes a bare `-i`,
+# BSD requires an argument — and neither are the extensions this battery needs: a
+# `\n` in a replacement, the `0,/re/` address, and a one-line `a\text` append.
+# These helpers perform the same edits with bash string handling and a whole-file
+# rewrite, so the injected bytes are identical on every userland. Each one dies
+# unless it matched something: the injection guards around the call sites make
+# the same demand, and a mutation that decays into a no-op would "prove" a
+# refusal resolver-smoke never had to produce.
+# ---------------------------------------------------------------------------
+
+# edit_write <file> <content> — stage, then replace, so a failed write cannot
+# leave a half-mutated fixture behind.
+edit_write() {
+  local file="$1" tmp="${TMPROOT}/.edit"
+  printf '%s' "$2" >"${tmp}" || die "could not stage an edit of ${file}"
+  mv "${tmp}" "${file}" || die "could not write ${file}"
+}
+
+# replace_first <file> <literal> <replacement> — replace the first occurrence of
+# a literal and require the fixture to contain exactly one matching line.
+replace_first() {
+  local file="$1" old="$2" new="$3"
+  local line out="" hits=0 pre post
+  while IFS= read -r line || [ -n "${line}" ]; do
+    case "${line}" in
+    *"${old}"*)
+      pre="${line%%"${old}"*}"
+      post="${line#*"${old}"}"
+      line="${pre}${new}${post}"
+      hits=$((hits + 1))
+      ;;
+    esac
+    out="${out}${line}"$'\n'
+  done <"${file}"
+  [ "${hits}" -eq 1 ] || die "injection guard: '${old}' matched ${hits} lines in ${file}, expected 1"
+  edit_write "${file}" "${out}"
+}
+
+# insert_after <file> <exact-line> <new-line>... — insert below the only line
+# that is exactly <exact-line>.
+insert_after() {
+  local file="$1" anchor="$2"
+  shift 2
+  local line out="" hits=0 extra
+  while IFS= read -r line || [ -n "${line}" ]; do
+    out="${out}${line}"$'\n'
+    if [ "${line}" = "${anchor}" ]; then
+      hits=$((hits + 1))
+      for extra in "$@"; do out="${out}${extra}"$'\n'; done
+    fi
+  done <"${file}"
+  [ "${hits}" -eq 1 ] || die "injection guard: ${hits} lines equal '${anchor}' in ${file}, expected 1"
+  edit_write "${file}" "${out}"
+}
+
+# insert_before <file> <exact-line> <new-line>... — insert above the only line
+# that is exactly <exact-line>.
+insert_before() {
+  local file="$1" anchor="$2"
+  shift 2
+  local line out="" hits=0 extra
+  while IFS= read -r line || [ -n "${line}" ]; do
+    if [ "${line}" = "${anchor}" ]; then
+      hits=$((hits + 1))
+      for extra in "$@"; do out="${out}${extra}"$'\n'; done
+    fi
+    out="${out}${line}"$'\n'
+  done <"${file}"
+  [ "${hits}" -eq 1 ] || die "injection guard: ${hits} lines equal '${anchor}' in ${file}, expected 1"
+  edit_write "${file}" "${out}"
+}
+
+# append_to_lines_ending <file> <suffix> <appended> — append to every line that
+# ends with <suffix> (`sed 's/;$/;   /'`).
+append_to_lines_ending() {
+  local file="$1" suffix="$2" appended="$3"
+  local line out="" hits=0
+  while IFS= read -r line || [ -n "${line}" ]; do
+    case "${line}" in
+    *"${suffix}")
+      line="${line}${appended}"
+      hits=$((hits + 1))
+      ;;
+    esac
+    out="${out}${line}"$'\n'
+  done <"${file}"
+  [ "${hits}" -ge 1 ] || die "injection guard: no line ends with '${suffix}' in ${file}"
+  edit_write "${file}" "${out}"
+}
+
 printf '=== resolver-smoke acceptance battery\n'
 printf '=== artifact under test: %s\n' "${RESOLVER_SMOKE}"
 printf '=== fixtures under: %s\n' "${TMPROOT}"
+printf '=== clock: %s (%sms resolution)\n' "${CLOCK_MODE}" "${CLOCK_RESOLUTION_MS}"
 run_in "${TMPROOT}" "${SMOKE_CMD[@]}" --version
 printf '=== reported version: %s (exit %s)\n' "${RUN_OUT}" "${RUN_RC}"
 
@@ -251,10 +413,10 @@ done
 expect 'B2 all six dispatch-table files were counted' 0 '6 resolver-managed file(s) passed'
 expect_absent 'B3 a passing run names no refusal' 0 'non-degenerate'
 
-CANON_MS_START="$(date +%s%N)"
+CANON_MS_START="$(now_ms)"
 run_in "${B}" "${SMOKE_CMD[@]}"
-CANON_MS_END="$(date +%s%N)"
-CANON_MS=$(((CANON_MS_END - CANON_MS_START) / 1000000))
+CANON_MS_END="$(now_ms)"
+CANON_MS=$((CANON_MS_END - CANON_MS_START))
 
 # ---------------------------------------------------------------------------
 group 'C. THE DEFECT — the exact pre-fix multi-set packages.nix must refuse'
@@ -284,12 +446,9 @@ group 'D. VENDOR INTEGRITY — a corrupted bundle is exit 4, never a pass'
 
 VENDOR_DIR="${PKG_DIR}/vendor"
 VENDOR_SHA_FILE="${VENDOR_DIR}/SHA256"
-VENDOR_BUNDLE=""
-if [ -d "${VENDOR_DIR}" ]; then
-  VENDOR_BUNDLE="$(find "${VENDOR_DIR}" -maxdepth 1 -type f ! -name 'SHA256' | LC_ALL=C sort | head -1)"
-fi
+VENDOR_BUNDLE="${VENDOR_DIR}/nix-v2.mjs"
 
-if [ -z "${VENDOR_BUNDLE}" ] || [ ! -f "${VENDOR_SHA_FILE}" ]; then
+if [ ! -f "${VENDOR_BUNDLE}" ] || [ ! -f "${VENDOR_SHA_FILE}" ]; then
   printf '  ⏭️ D1-D4 NOT RUN: %s does not yet hold a bundle and a SHA256 file.\n' "${VENDOR_DIR}"
   printf '     Vendor integrity is UNEXERCISED by this run.\n'
 else
@@ -306,7 +465,8 @@ else
   cp "${VENDOR_BUNDLE}" "${BAD_COPY}" || die 'could not copy the vendored bundle'
   chmod u+w "${GOOD_COPY}" "${BAD_COPY}"
   # One byte, in the bundle's leading banner, well inside every plausible file.
-  printf 'X' | dd of="${BAD_COPY}" bs=1 seek=8 conv=notrunc status=none ||
+  # `status=none` is a coreutils operand; silencing stderr works everywhere.
+  printf 'X' | dd of="${BAD_COPY}" bs=1 seek=8 conv=notrunc 2>/dev/null ||
     die 'could not corrupt the bundle copy'
   BAD_SHA="$(sha_of "${BAD_COPY}")"
   [ "${BAD_SHA}" != "${REAL_SHA}" ] ||
@@ -451,21 +611,23 @@ group 'H. GRAMMAR BATTERY — shapes outside the merger that still exit 0 today'
 
 H1="$(materialize grammar-nonrec)"
 guard_contains "${H1}/nix/packages.nix" 'all = rec {'
-sed -i 's/all = rec {/all = {/' "${H1}/nix/packages.nix"
+replace_first "${H1}/nix/packages.nix" 'all = rec {' 'all = {'
 guard_absent "${H1}/nix/packages.nix" 'all = rec {'
 run_in "${H1}" "${SMOKE_CMD[@]}"
 expect 'H1 a non-rec all block refuses — every package is dropped' 1 'nix/packages.nix'
 
 H2="$(materialize grammar-let-preamble)"
 guard_contains "${H2}/nix/packages.nix" 'let'
-sed -i '0,/^let$/s//let\n  acmeHelper = "dropped-by-the-merger";/' "${H2}/nix/packages.nix"
+insert_after "${H2}/nix/packages.nix" 'let' '  acmeHelper = "dropped-by-the-merger";'
 guard_contains "${H2}/nix/packages.nix" 'acmeHelper'
 run_in "${H2}" "${SMOKE_CMD[@]}"
 expect 'H2 a let-binding outside the all block refuses — the merger keeps only all' 1 'nix/packages.nix'
 
 H3="$(materialize grammar-resolver-throw)"
 guard_contains "${H3}/nix/fmt.nix" '    projectRootFile = "flake.nix";'
-sed -i '/^    projectRootFile = "flake.nix";$/a\    resolverSmokeUnsupported = true;' "${H3}/nix/fmt.nix"
+insert_after "${H3}/nix/fmt.nix" \
+  '    projectRootFile = "flake.nix";' \
+  '    resolverSmokeUnsupported = true;'
 guard_contains "${H3}/nix/fmt.nix" '    resolverSmokeUnsupported = true;'
 run_in "${H3}" "${SMOKE_CMD[@]}"
 expect 'H3 a published-merger refusal on well-formed input is a compatibility violation' 1 'nix/fmt.nix'
@@ -474,7 +636,9 @@ expect_absent 'H3c and the refusing file is not reported as passing' 1 'nix/fmt.
 
 H4="$(materialize grammar-dropped-option)"
 guard_contains "${H4}/nix/fmt.nix" '      prettier.enable = true;'
-sed -i '/^      prettier.enable = true;$/a\      prettier.package = pkgs.prettier;' "${H4}/nix/fmt.nix"
+insert_after "${H4}/nix/fmt.nix" \
+  '      prettier.enable = true;' \
+  '      prettier.package = pkgs.prettier;'
 guard_contains "${H4}/nix/fmt.nix" '      prettier.package = pkgs.prettier;'
 run_in "${H4}" "${SMOKE_CMD[@]}"
 expect 'H4 a formatter option the published merger silently drops is a violation' 1 'nix/fmt.nix'
@@ -486,14 +650,14 @@ group 'I. NO FALSE ALARMS — a gate that fires on comments blocks every commit'
 
 I1="$(materialize benign-comments)"
 guard_contains "${I1}/nix/env.nix" '  lint = ['
-sed -i 's/^  lint = \[/  # the lint category\n  lint = [/' "${I1}/nix/env.nix"
+insert_before "${I1}/nix/env.nix" '  lint = [' '  # the lint category'
 guard_contains "${I1}/nix/env.nix" '# the lint category'
 run_in "${I1}" "${SMOKE_CMD[@]}"
 expect 'I1 a comment above a binding is benign' 0 '6 resolver-managed file(s) passed'
 
 I2="$(materialize benign-inherit-comment)"
 guard_contains "${I2}/nix/packages.nix" '          git'
-sed -i 's/^          git$/          # pinned deliberately\n          git/' "${I2}/nix/packages.nix"
+insert_before "${I2}/nix/packages.nix" '          git' '          # pinned deliberately'
 guard_contains "${I2}/nix/packages.nix" '# pinned deliberately'
 run_in "${I2}" "${SMOKE_CMD[@]}"
 expect 'I2 a comment inside an inherit list is benign' 0 '6 resolver-managed file(s) passed'
@@ -501,7 +665,7 @@ expect 'I2 a comment inside an inherit list is benign' 0 '6 resolver-managed fil
 I3="$(materialize benign-blank-lines)"
 guard_contains "${I3}/nix/env.nix" '  main = ['
 I3_BEFORE="$(wc -l <"${I3}/nix/env.nix")"
-sed -i 's/^  main = \[/\n\n  main = [/' "${I3}/nix/env.nix"
+insert_before "${I3}/nix/env.nix" '  main = [' '' ''
 [ "$(wc -l <"${I3}/nix/env.nix")" -eq $((I3_BEFORE + 2)) ] ||
   die 'injection guard: the two extra blank lines were not inserted into nix/env.nix'
 run_in "${I3}" "${SMOKE_CMD[@]}"
@@ -509,7 +673,7 @@ expect 'I3 extra blank lines inside the body are benign' 0 '6 resolver-managed f
 
 I4="$(materialize benign-trailing-ws)"
 guard_contains "${I4}/nix/env.nix" 'with packages;'
-sed -i 's/;$/;   /' "${I4}/nix/env.nix"
+append_to_lines_ending "${I4}/nix/env.nix" ';' '   '
 grep -qF 'with packages;   ' "${I4}/nix/env.nix" ||
   die 'injection guard: trailing whitespace was not appended in nix/env.nix'
 run_in "${I4}" "${SMOKE_CMD[@]}"
