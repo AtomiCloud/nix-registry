@@ -1,3 +1,11 @@
+## [5.3.0](https://github.com/AtomiCloud/nix-registry/compare/v5.2.0...v5.3.0) (2026-08-09)
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **minor:** resolver-smoke vendors atomi/nix@3 ([dc1277c](https://github.com/AtomiCloud/nix-registry/commit/dc1277c77dc24870b8adf3d1f777d726460d3d79))
+* **patch:** rework resolver smoke arms for atomi/nix@3 ([eb48f36](https://github.com/AtomiCloud/nix-registry/commit/eb48f36094407c91d8e7a33881e352bd05378b88))
+
 ## [5.2.0](https://github.com/AtomiCloud/nix-registry/compare/v5.1.0...v5.2.0) (2026-08-09)
 
 
