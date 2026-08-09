@@ -16,10 +16,16 @@ set -eou pipefail
 # regardless.
 
 # `.#tool-bundle-contract` is the bundle contract check: building it builds all
-# eight tool aggregates and fails if any one's bin/ list drifted from what
+# nine tool aggregates and fails if any one's bin/ list drifted from what
 # binWrapper/bundleContract.nix declares. It is listed here (rather than only in
 # `nix flake check`) so the assertion runs on every platform this matrix covers
 # — pkgs.docker is client-only off Linux, so the expected lists differ by system.
+#
+# That is also how `workspace-validator-runtime` is covered without a line of its
+# own: the contract derivation takes the bundle as an input, so the bundle cannot
+# fail to build without failing the contract. It is a PATH, not a binary, so
+# there is no `--version` to run on it — what needs asserting is its contents,
+# and that is exactly what the contract asserts.
 
 echo "🔨 Building and smoke-testing all registry packages..."
 
@@ -46,6 +52,8 @@ nix shell --max-jobs 1 --cores 2 nixpkgs#bash \
   .#infralint \
   .#tool-bundle-contract \
   .#codecov \
+  .#dotnetPackage \
+  .#dotnet-pin-contract \
   .#dotnetlint \
   .#dn-inspect \
   .#helmlint \
@@ -81,6 +89,7 @@ nix shell --max-jobs 1 --cores 2 nixpkgs#bash \
   wt --version &&
   garden version &&
   codecov --version &&
+  dotnet --version &&
   dotnetlint --version &&
   dn-inspect --version &&
   deadcode --version &&

@@ -21,8 +21,14 @@ The repository uses Nix flakes with the following input sources:
 
 Packages are organized by language/type in directories:
 
-- `binWrapper/`: Binary wrapper packages (mirrord, cyanprint, gardenio, atomiutils, infrautils, infralint, codecov)
-- `shellWrapper/`: Shell script wrappers (pls, helmlint, helm-schema, dotnetlint)
+- `binWrapper/`: Binary wrapper packages (mirrord, cyanprint, gardenio, atomiutils, infrautils, infralint, codecov, workspace-validator-runtime)
+- `shellWrapper/`: Shell script wrappers (pls, helmlint, helm-schema, dotnetlint, dn-inspect)
+- `dotnet/`: The .NET SDK pin (`dotnetPackage`) the .NET wrappers default to. Read
+  from the `nixpkgs-dotnet` flake input, which is pinned to the exact revision the
+  fleet's .NET nodes pin, because `global.json` + `rollForward: disable` makes an
+  off-by-a-patch SDK a hard build failure. Asserted twice: at eval time by an
+  `assert` on the version, and at build time by `dotnet-pin-contract`, which runs
+  `dotnet --version`.
 - `node/22/`: Node.js 22 packages (uses nixpkgs `buildNpmPackage`)
 - `python/`: Python packages (aws-export-credentials)
 - `golang/`: Go packages (nix-share)
