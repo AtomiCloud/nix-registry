@@ -167,10 +167,37 @@ exclusion, which is why nothing in `nix/fmt.nix` had to change.
 | Fixture                                   | Provenance                                                                                                                                                                                                                                                    |
 | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `tests/fixtures/canonical/**`             | The canonical shape a cyanprint template is expected to have — `flake.nixsrc` plus the five `nix/*.nixsrc`. Every probe must pass on these.                                                                                                                   |
-| `tests/fixtures/collapse/packages.nixsrc` | The **exact** defect shape, copied verbatim from the diene workspace's pre-fix `nix/packages.nix` on 2026-08-09: a function whose body is a `//` chain of several `with`-scoped sets. This must **fail**, and the refusal must say the output was degenerate. |
+| `tests/fixtures/collapse/packages.nixsrc` | The **exact** defect shape, copied verbatim from the diene workspace's pre-fix `nix/packages.nix` on 2026-08-09: a function whose body is a `//` chain of several `with`-scoped sets. This must **fail**, and the refusal must carry the merger's own reason. |
 
-A corrupted `vendor/nix-v2.mjs` must exit `4`, not pass — that arm is the one that keeps the
-integrity check from quietly becoming decorative.
+The battery is **78 arms across ten groups**, and every arm declares which of two directions
+it proves. The distinction matters because the vendored bundle fixed several of the defects
+the battery was originally written against, and an arm that quietly changed direction without
+saying so would look like coverage while proving the opposite of what its name claims.
+
+| Group | Direction  | What it holds                                                                                                                                                                                                                                                                         |
+| ----- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `A`   | interface  | `--help`, `--version`, and refusal to guess at an unknown argument or positional.                                                                                                                                                                                                     |
+| `B`   | positive   | The canonical six each report their own passing probe, and the run counts all six.                                                                                                                                                                                                    |
+| `C`   | refusal    | The exact pre-fix collapse bytes are a violation naming `nix/packages.nix`, and the refusal carries the published merger's reason rather than a bare non-zero exit.                                                                                                                   |
+| `D`   | refusal    | A one-byte-corrupted bundle is exit `4`, naming both the expected and the actual sha256 — the arm that keeps the integrity check from becoming decorative.                                                                                                                            |
+| `E`   | refusal    | Vacuity refuses, and only a declared `requireSubjects: false` turns that into a pass. Bad configuration is exit `4`, never a silent off switch.                                                                                                                                       |
+| `F`   | positive   | Each documented configuration name is really read, and an undocumented one is really not.                                                                                                                                                                                             |
+| `G`   | regression | The three shapes the `@2` mergers lost silently — a multi-line header on `nix/packages.nix` and `nix/shells.nix`, a leading comment above the header on `nix/env.nix` — now merge losslessly and the gate reports the file **passing**. These are the guard that the fix stays fixed. |
+| `H`   | mixed      | Alien constructs the published merger refuses (`H1`–`H3`, `H5`, `H6`), each asserting the relayed reason; plus `H4`, a regression arm for the formatter option `@2` dropped and `@3` preserves.                                                                                       |
+| `I`   | positive   | Comments, blank lines, trailing whitespace and a partial subject set are all benign. A gate that fires on a comment blocks every commit.                                                                                                                                              |
+| `J`   | positive   | The canonical baseline is re-asserted after the whole mutation battery, and the run is inside its 3s budget.                                                                                                                                                                          |
+
+A **regression** arm still injects its shape and still runs the injection guards, so it cannot
+pass by decaying into an unmutated canonical run. A **refusal** arm asserts the refusal TEXT and
+not merely a non-zero exit; a gate that is only non-zero has not been shown to say why.
+
+Three of the refusal arms (`H2`, `H5`, `H6`, on `nix/packages.nix`, `nix/env.nix` and
+`nix/pre-commit.nix`) provoke the bundle's own loss guard — the wrapper that inventories every
+function argument, `with` prelude, inherited identifier and binding of each input and throws
+when one would not survive the merge. resolver-smoke relays that throw as a violation naming the
+file, which is the gate working: a shape the resolver will not merge is exactly what the
+operator needs to be told about. Covering three different files keeps a single merger going
+quiet from taking the whole proof with it.
 
 ```bash
 ./bunWrapper/resolver-smoke/tests/run.sh

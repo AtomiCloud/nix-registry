@@ -10,6 +10,25 @@
 # arm asserts the refusal TEXT and not merely a non-zero exit. A gate that is
 # only non-zero has not been shown to say why.
 #
+# The vendored bundle is now atomi/nix@3, which FIXED several of the @2 defects
+# this battery was written against, so the battery proves TWO directions and each
+# arm says which one it is:
+#
+#   * REGRESSION arms (group G, H4) are the shapes @2 lost silently — a
+#     multi-line function header, a leading comment above the header, a formatter
+#     option. @3 merges every one of them losslessly, so those arms now assert the
+#     file PASSES. They are the guard that the fix stays fixed; the injection
+#     guards below still prove the shape was really applied, so a regression arm
+#     cannot pass by decaying into an unmutated canonical run.
+#   * REFUSAL arms (groups C, E, H1-H3, H5, H6) prove the gate still fires and
+#     still says why. Under @3 most refusals originate in the resolver itself:
+#     the published bundle wraps every merger in a loss guard that throws rather
+#     than emit output missing a function argument, `with` prelude, inherited
+#     identifier or binding. resolver-smoke relays that as a violation naming the
+#     file, and a resolver refusal reaching the operator IS the gate working. The
+#     refusal arms therefore assert the RELAYED published-merger reason, which was
+#     read off a real run rather than written to match an assertion.
+#
 # Four properties are structural, and each exists because its absence has drawn
 # blood on this defect before:
 #
@@ -65,6 +84,13 @@ COLLAPSE_SRC="${FIXTURES}/collapse/packages.nixsrc"
 # The exact pre-fix workspace bytes. Re-asserted on every use.
 COLLAPSE_BYTES=344
 COLLAPSE_SHA=38838467be749d2197180eb87baf0caa4efee150651e346c790e4b96cd7be82e
+
+# The published merger's own reason for refusing a packages.nix it cannot model,
+# asserted by the collapse arms (C) and the non-rec arm (H1). Written once so the
+# two shapes that provoke it cannot drift apart. The backticks are literal text
+# inside the merger's message, not a command substitution.
+# shellcheck disable=SC2016
+PACKAGES_SHAPE_REFUSAL='`all = rec { ... }` registry block was not found'
 
 RESOLVER_SMOKE="${RESOLVER_SMOKE:-bun ${PKG_DIR}/index.ts}"
 # shellcheck disable=SC2206 # deliberate word split: the override may carry args
@@ -421,6 +447,16 @@ CANON_MS=$((CANON_MS_END - CANON_MS_START))
 # ---------------------------------------------------------------------------
 group 'C. THE DEFECT — the exact pre-fix multi-set packages.nix must refuse'
 # ---------------------------------------------------------------------------
+#
+# The verdict is unchanged from @2 — this shape is a violation and the operator
+# is told which file — but the MECHANISM moved, so the message-shape assertions
+# moved with it. Under @2 the merger emitted the empty 42-byte skeleton and
+# exited 0, and it was resolver-smoke's own `[non-degenerate]` probe that caught
+# it; C3 asserted the word `non-degenerate` for that reason. @3 refuses the shape
+# itself, so nothing degenerate is ever emitted and that word no longer appears.
+# The assertions below were read off a real run of the @3 bundle, never written
+# to match: the refusal reaching the operator is now the published merger's own
+# reason, relayed by resolver-smoke under `[<probe>/merge]`.
 
 C="$(materialize collapse)"
 collapse_into "${C}"
@@ -430,15 +466,16 @@ guard_absent "${C}/nix/packages.nix" 'all = rec {'
 run_in "${C}" "${SMOKE_CMD[@]}"
 expect 'C1 the collapse shape is a violation' 1 ''
 expect 'C2 the refusal names the file that was lost' 1 'nix/packages.nix'
-expect 'C3 the refusal names the non-degenerate probe' 1 'non-degenerate'
-expect 'C4 the refusal says what the output collapsed to' 1 'empty skeleton'
+expect 'C3 the refusal is relayed as a published-merger refusal' 1 'published resolver refused well-formed probe input'
+expect 'C4 the refusal names the construct the merger does not model' 1 "${PACKAGES_SHAPE_REFUSAL}"
+expect 'C4b and it says it refused INSTEAD of emitting the @2 skeleton' 1 'refusing rather than emitting an empty skeleton'
 expect_absent 'C5 and it does not claim the file passed' 1 'nix/packages.nix: resolver probe passed'
 expect_absent 'C6 a refusal is stated, not leaked as a stack trace' 1 'at <anonymous>'
 
 CONLY="$(materialize_empty collapse-only)"
 collapse_into "${CONLY}"
 run_in "${CONLY}" "${SMOKE_CMD[@]}"
-expect 'C7 the collapse shape refuses even as the only subject in the repo' 1 'empty skeleton'
+expect 'C7 the collapse shape refuses even as the only subject in the repo' 1 "${PACKAGES_SHAPE_REFUSAL}"
 
 # ---------------------------------------------------------------------------
 group 'D. VENDOR INTEGRITY — a corrupted bundle is exit 4, never a pass'
@@ -550,18 +587,28 @@ run_in "${FENV}" RESOLVER_SMOKE_CONFIG="${TMPROOT}/env-pointed.yaml" "${SMOKE_CM
 expect 'F4 the RESOLVER_SMOKE_CONFIG variable reads a config outside the repo' 0 ''
 
 # ---------------------------------------------------------------------------
-group 'G. HEADER-SHAPE BATTERY — the silent losses byte ratio cannot see'
+group 'G. HEADER-SHAPE REGRESSION BATTERY — the @2 silent losses stay fixed'
 # ---------------------------------------------------------------------------
 #
-# Four of the six mergers parse the function-argument header on line 1 ONLY, via
+# These three fixtures are the @2 defect shapes. Four of the six @2 mergers
+# parsed the function-argument header on line 1 ONLY, via
 # /^\s*\{([^}]+)\}\s*:\s*$/. A multi-line header, a leading comment, or a leading
-# blank line makes that match fail and the arguments — and the `with packages;` /
-# `with env;` prelude, and every `inherit shellHook;` — vanish with NO throw.
-# On nix/env.nix that catastrophe costs 33 bytes: 0.91x. A byte-ratio oracle
+# blank line made that match fail and the arguments — and the `with packages;` /
+# `with env;` prelude, and every `inherit shellHook;` — vanished with NO throw.
+# On nix/env.nix that catastrophe cost 33 bytes: 0.91x. A byte-ratio oracle
 # cannot see it, and healthy nix/fmt.nix output legitimately shrinks to 0.60x, so
-# no ratio threshold exists that separates the two. These arms exist to keep the
-# oracle honest. Their refusal wording is not fixed by the interface contract, so
-# they assert the exit code and the named file only.
+# no ratio threshold ever existed that separated the two.
+#
+# @3 parses all three shapes and merges them LOSSLESSLY, so these are now
+# REGRESSION arms: the same bytes, and the gate must report the file passing. A
+# pass here is a real assertion because resolver-smoke's material-survival probe
+# is what decides it — if any argument or prelude went missing again the file
+# could not be reported as passing. The `rewrite_header` guards still demand the
+# one-line header was present and is gone afterwards, so an arm that quietly
+# stopped mutating anything dies in the harness instead of reporting green.
+#
+# The @2-era counter-assertions are kept as the `b` arms, inverted: the loss
+# report that used to be mandatory must now be absent.
 
 G1="$(materialize hdr-packages)"
 rewrite_header "${G1}/nix/packages.nix" \
@@ -572,8 +619,8 @@ rewrite_header "${G1}/nix/packages.nix" \
   pkgs-unstable,
 }:'
 run_in "${G1}" "${SMOKE_CMD[@]}"
-expect 'G1 a multi-line header on packages.nix refuses (function args are lost)' 1 'nix/packages.nix'
-expect_absent 'G1b and packages.nix is not reported as passing' 1 'nix/packages.nix: resolver probe passed'
+expect 'G1 REGRESSION: a multi-line header on packages.nix merges losslessly and passes' 0 'nix/packages.nix: resolver probe passed'
+expect_absent 'G1b REGRESSION: and no refusal names packages.nix (the @2 argument loss is gone)' 0 'nix/packages.nix ['
 
 G2="$(materialize hdr-shells)"
 rewrite_header "${G2}/nix/shells.nix" \
@@ -585,8 +632,8 @@ rewrite_header "${G2}/nix/shells.nix" \
   shellHook,
 }:'
 run_in "${G2}" "${SMOKE_CMD[@]}"
-expect 'G2 a multi-line header on shells.nix refuses (args, the with-env prelude and shellHook are lost)' 1 'nix/shells.nix'
-expect_absent 'G2b and shells.nix is not reported as passing' 1 'nix/shells.nix: resolver probe passed'
+expect 'G2 REGRESSION: a multi-line header on shells.nix keeps the args, the with-env prelude and shellHook' 0 'nix/shells.nix: resolver probe passed'
+expect_absent 'G2b REGRESSION: and no refusal names shells.nix' 0 'nix/shells.nix ['
 
 G3="$(materialize hdr-env-comment)"
 guard_contains "${G3}/nix/env.nix" '{ pkgs, packages }:'
@@ -595,19 +642,32 @@ printf '# managed by the acme resolver\n%s' "$(cat "${G3}/nix/env.nix")" >"${TMP
 head -1 "${G3}/nix/env.nix" | grep -qF '# managed by' ||
   die 'injection guard: the leading comment was not prepended to nix/env.nix'
 run_in "${G3}" "${SMOKE_CMD[@]}"
-expect 'G3 a leading comment above the header on env.nix refuses' 1 'nix/env.nix'
-expect_absent 'G3b and env.nix is not reported as passing' 1 'nix/env.nix: resolver probe passed'
+expect 'G3 REGRESSION: a leading comment above the header on env.nix merges losslessly and passes' 0 'nix/env.nix: resolver probe passed'
+expect_absent 'G3b REGRESSION: and no refusal names env.nix' 0 'nix/env.nix ['
 
 G4="$(materialize hdr-env-ellipsis)"
 rewrite_header "${G4}/nix/env.nix" \
   '{ pkgs, packages }:' \
   '{ pkgs, packages, ... }:'
 run_in "${G4}" "${SMOKE_CMD[@]}"
-expect 'G4 MUST-DIFFER: an ellipsis header is legitimate and stays green' 0 '6 resolver-managed file(s) passed'
+expect 'G4 an ellipsis header is legitimate and the whole run stays green' 0 '6 resolver-managed file(s) passed'
 
 # ---------------------------------------------------------------------------
-group 'H. GRAMMAR BATTERY — shapes outside the merger that still exit 0 today'
+group 'H. GRAMMAR BATTERY — alien shapes the published merger refuses'
 # ---------------------------------------------------------------------------
+#
+# Each arm feeds the merger a construct it does not model. @3 refuses all of
+# them rather than emitting output that quietly drops something, and these are
+# the LIVE proof that the gate can still say no: H1 and H3 are the merger's own
+# shape checks, while H2, H5 and H6 come from the bundle's `withLossGuard` —
+# the wrapper that inventories every function argument, `with` prelude,
+# inherited identifier and binding of each input and throws when one of them
+# does not survive into the merged output. Three different files are covered so
+# a single merger going quiet cannot take the whole proof with it.
+#
+# resolver-smoke relays that throw as a violation naming the file, and each
+# arm's `b` partner asserts the relayed REASON: a gate that is only non-zero has
+# not been shown to say why. Every reason below was read off a real run.
 
 H1="$(materialize grammar-nonrec)"
 guard_contains "${H1}/nix/packages.nix" 'all = rec {'
@@ -615,6 +675,7 @@ replace_first "${H1}/nix/packages.nix" 'all = rec {' 'all = {'
 guard_absent "${H1}/nix/packages.nix" 'all = rec {'
 run_in "${H1}" "${SMOKE_CMD[@]}"
 expect 'H1 a non-rec all block refuses — every package is dropped' 1 'nix/packages.nix'
+expect 'H1b the refusal preserves the published merger reason' 1 "${PACKAGES_SHAPE_REFUSAL}"
 
 H2="$(materialize grammar-let-preamble)"
 guard_contains "${H2}/nix/packages.nix" 'let'
@@ -622,6 +683,7 @@ insert_after "${H2}/nix/packages.nix" 'let' '  acmeHelper = "dropped-by-the-merg
 guard_contains "${H2}/nix/packages.nix" 'acmeHelper'
 run_in "${H2}" "${SMOKE_CMD[@]}"
 expect 'H2 a let-binding outside the all block refuses — the merger keeps only all' 1 'nix/packages.nix'
+expect 'H2b LOSS GUARD: the refusal names the binding that would have been dropped' 1 "the merge lost binding 'acmeHelper'"
 
 H3="$(materialize grammar-resolver-throw)"
 guard_contains "${H3}/nix/fmt.nix" '    projectRootFile = "flake.nix";'
@@ -634,6 +696,14 @@ expect 'H3 a published-merger refusal on well-formed input is a compatibility vi
 expect 'H3b the refusal preserves the published merger reason' 1 'unknown top-level key "resolverSmokeUnsupported"'
 expect_absent 'H3c and the refusing file is not reported as passing' 1 'nix/fmt.nix: resolver probe passed'
 
+# H4 was an @2 defect arm: the @2 fmt merger re-rendered `prettier.enable` into
+# a nested block and silently dropped the sibling `prettier.package` option, and
+# resolver-smoke caught it as a lost `binding 'package'`. @3 keeps the option —
+# it re-renders the pair as `prettier = { enable = true; package = pkgs.prettier;
+# };`, value intact — so this is a REGRESSION arm now. It was checked by running,
+# not assumed: the @3 output was read back for this shape and for multi-line list
+# options, nested `settings.*` options and options on a program that has no other
+# entry, and no still-silent option loss was found in any of them.
 H4="$(materialize grammar-dropped-option)"
 guard_contains "${H4}/nix/fmt.nix" '      prettier.enable = true;'
 insert_after "${H4}/nix/fmt.nix" \
@@ -641,8 +711,27 @@ insert_after "${H4}/nix/fmt.nix" \
   '      prettier.package = pkgs.prettier;'
 guard_contains "${H4}/nix/fmt.nix" '      prettier.package = pkgs.prettier;'
 run_in "${H4}" "${SMOKE_CMD[@]}"
-expect 'H4 a formatter option the published merger silently drops is a violation' 1 'nix/fmt.nix'
-expect 'H4b normalising dotted paths still detects the genuinely lost binding' 1 "binding 'package'"
+expect 'H4 REGRESSION: a formatter option the @2 merger dropped now survives and fmt.nix passes' 0 'nix/fmt.nix: resolver probe passed'
+expect_absent 'H4b REGRESSION: and nothing reports the option lost' 0 "binding 'package'"
+
+H5="$(materialize grammar-alien-env-category)"
+guard_contains "${H5}/nix/env.nix" '  system = ['
+replace_first "${H5}/nix/env.nix" '  system = [' '  system = pkgs.lib.optionals true ['
+guard_contains "${H5}/nix/env.nix" '  system = pkgs.lib.optionals true ['
+run_in "${H5}" "${SMOKE_CMD[@]}"
+expect 'H5 a category whose value is not a plain list refuses — the env merger does not model it' 1 'nix/env.nix'
+expect 'H5b LOSS GUARD: the refusal names the category that would have been dropped' 1 "the merge lost binding 'system'"
+expect_absent 'H5c and env.nix is not reported as passing' 1 'nix/env.nix: resolver probe passed'
+
+H6="$(materialize grammar-alien-precommit-key)"
+guard_contains "${H6}/nix/pre-commit.nix" '  src = ../.;'
+guard_absent "${H6}/nix/pre-commit.nix" 'excludes'
+insert_after "${H6}/nix/pre-commit.nix" '  src = ../.;' '  excludes = [ "vendor/" ];'
+guard_contains "${H6}/nix/pre-commit.nix" '  excludes = [ "vendor/" ];'
+run_in "${H6}" "${SMOKE_CMD[@]}"
+expect 'H6 an unmodelled top-level key on pre-commit.nix refuses' 1 'nix/pre-commit.nix'
+expect 'H6b LOSS GUARD: the refusal names the key that would have been dropped' 1 "the merge lost binding 'excludes'"
+expect_absent 'H6c and pre-commit.nix is not reported as passing' 1 'nix/pre-commit.nix: resolver probe passed'
 
 # ---------------------------------------------------------------------------
 group 'I. NO FALSE ALARMS — a gate that fires on comments blocks every commit'
