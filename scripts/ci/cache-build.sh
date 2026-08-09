@@ -29,10 +29,12 @@ TO_PUSH=$(nix build \
   .#mmoney-cli \
   .#cyanprint \
   .#atomiutils \
+  .#workspace-validator-runtime \
   .#gardenio \
   .#infrautils \
   .#infralint \
   .#codecov \
+  .#dotnetPackage \
   .#dotnetlint \
   .#helmlint \
   .#helm-schema \

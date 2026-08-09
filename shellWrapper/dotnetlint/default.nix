@@ -1,11 +1,22 @@
-{ trivialBuilders, nixpkgs }:
+{ trivialBuilders, nixpkgs, dotnetPackage }:
 
 let
   # Version of the dotnetlint tool
   version = "0.1.0";
 
-  # Create a function that takes dotnetPackage as an argument
-  makeDotnetLint = { dotnetPackage ? nixpkgs.dotnetPackage or nixpkgs.dotnet-sdk_8 }:
+  # The registry's .NET SDK pin (dotnet/default.nix), bound out of the argument
+  # so the function parameter below can keep the name `dotnetPackage` without
+  # referring to itself.
+  registryDotnet = dotnetPackage;
+
+  # Create a function that takes dotnetPackage as an argument.
+  #
+  # The default is the registry's pin rather than a channel SDK. It used to be
+  # `nixpkgs.dotnetPackage or nixpkgs.dotnet-sdk_8` — an attribute nixpkgs does
+  # not have, so the fallback was always what ran, and every one of the six .NET
+  # nodes in the fleet overrode it to .NET 10. Nothing consumed the .NET 8
+  # default; it was a value only reachable by not asking for anything.
+  makeDotnetLint = { dotnetPackage ? registryDotnet }:
     trivialBuilders.writeShellScriptBin {
       name = "dotnetlint";
       inherit version;

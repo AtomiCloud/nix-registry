@@ -21,8 +21,9 @@ The repository uses Nix flakes with the following input sources:
 
 Packages are organized by language/type in directories:
 
-- `binWrapper/`: Binary wrapper packages (mirrord, cyanprint, gardenio, atomiutils, infrautils, infralint, codecov)
-- `shellWrapper/`: Shell script wrappers (pls, helmlint, helm-schema, dotnetlint)
+- `binWrapper/`: Binary wrapper packages (mirrord, cyanprint, gardenio, atomiutils, infrautils, infralint, codecov, workspace-validator-runtime)
+- `shellWrapper/`: Shell script wrappers (pls, helmlint, helm-schema, dotnetlint, dn-inspect)
+- `dotnet/`: The .NET SDK pin (`dotnetPackage`) the .NET wrappers default to
 - `node/22/`: Node.js 22 packages (uses nixpkgs `buildNpmPackage`)
 - `python/`: Python packages (aws-export-credentials)
 - `golang/`: Go packages (nix-share)

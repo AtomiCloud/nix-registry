@@ -20,6 +20,7 @@ AtomiCloud's Nix Registry for custom built packages.
 - cyanprint
 - releaser
 - helm-schema
+- dotnetPackage (the .NET SDK the registry's .NET tooling is built against)
 
 # Tool bundles
 
@@ -49,6 +50,27 @@ sets for the axes it keeps: a `wo-docker` node takes `infrautils-core` +
 `skopeo` sits on the docker axis because it is a container-image tool; it needs
 no daemon, so a `wo-docker` node that genuinely wants registry inspection can
 still compose `infralint-docker` on purpose.
+
+## `workspace-validator-runtime`
+
+The closed `PATH` a fleet node's `scripts/validate/*.sh` pre-commit hooks run
+under: `atomiutils` + `git`, and nothing else. Nodes used to each build this
+`buildEnv` in their own `nix/pre-commit.nix` — 44 of the 57 node refs carry one
+under exactly that name, 20 of them with contents this package reproduces
+exactly. Use it instead of hand-rolling one:
+
+```nix
+validator-runtime = atomi.workspace-validator-runtime;
+```
+
+It takes no arguments on purpose. A node that needs a tool this does not carry
+keeps its own `buildEnv` rather than reaching for an `.override` — see the
+comment at the top of `binWrapper/workspace-validator-runtime.nix`.
+
+Its contract is not a hand-written `bin/` list (that would be ~290 names). It is
+asserted to be **exactly** the union of `atomiutils` and `git`, computed from
+those two at build time, plus a presence check on the twelve tools node
+validators actually invoke.
 
 Every bundle's `bin/` list above is **enforced**, not documentation.
 `binWrapper/bundleContract.nix` declares it and fails the build on any

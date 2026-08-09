@@ -3,8 +3,15 @@ let trivialBuilders = import ./trivial.nix { inherit nixpkgs; }; in
 let
   # Node.js 22 CLI packages, built the official nixpkgs way via buildNpmPackage.
   node22 = import ./node/22/export.nix { nixpkgs = nixpkgs; nodejs = nixpkgs.nodejs_22; };
+  # .NET SDK pin, exported under its own name so the .NET wrappers below and any
+  # consuming node name the same SDK instead of each re-stating the version.
+  dotnetSdk = import ./dotnet/default.nix { inherit nixpkgs; };
+
   # Shell
-  shell = (import ./shellWrapper/default.nix { inherit nixpkgs trivialBuilders; });
+  shell = (import ./shellWrapper/default.nix {
+    inherit nixpkgs trivialBuilders;
+    inherit (dotnetSdk) dotnetPackage;
+  });
 
   # Python
   python = {
@@ -44,6 +51,12 @@ let
     infralint-docker = import ./binWrapper/infralint-docker.nix { inherit nixpkgs; };
     infralint-helm = import ./binWrapper/infralint-helm.nix { inherit nixpkgs; helmlint = shell.helmlint; };
 
+    # The closed PATH a fleet node's validator hooks run under. Hoisted out of
+    # nix/pre-commit.nix on the nodes that all carried the same buildEnv.
+    workspace-validator-runtime = import ./binWrapper/workspace-validator-runtime.nix {
+      inherit nixpkgs atomiutils;
+    };
+
     tool-bundle-contract = import ./binWrapper/bundleContract.nix {
       inherit nixpkgs;
       bundles = {
@@ -56,6 +69,30 @@ let
           infralint-core
           infralint-docker
           infralint-helm;
+      };
+      unions = {
+        workspace-validator-runtime = {
+          bundle = workspace-validator-runtime;
+          parts = [ atomiutils nixpkgs.git ];
+          # What a node's scripts/validate/*.sh hooks actually invoke: the five
+          # tools their buildEnvs named explicitly (bash, git, jq, rg, yq) plus
+          # the coreutils/findutils/grep/sed staples every one of those scripts
+          # uses.
+          requires = [
+            "awk"
+            "bash"
+            "cat"
+            "cp"
+            "find"
+            "git"
+            "grep"
+            "jq"
+            "rg"
+            "sed"
+            "sort"
+            "yq"
+          ];
+        };
       };
     };
     gardenio = import ./binWrapper/gardenio.nix { inherit nixpkgs; };
@@ -80,4 +117,5 @@ shell
 // bin
 // rust
 // dotnet
+// dotnetSdk
   // bun
