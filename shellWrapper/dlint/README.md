@@ -18,11 +18,11 @@ check exits `2` and lists the valid ones.
 
 | Check                                | Refuses when                                                                                                                                                                                                         |
 | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `action-pins <trusted\|non-trusted>` | A `trusted` action (one matching `trustedPattern`) is not on a major tag (`v3`); any other action — non-trusted by default — is not on an exact 40-hex SHA whose trailing comment names its tag.                |
+| `action-pins <trusted\|non-trusted>` | A `trusted` action (one matching `trustedPattern`) is not on a major tag (`v3`); any other action — non-trusted by default — is not on an exact 40-hex SHA whose trailing comment names its tag.                     |
 | `exec-bits`                          | A tracked shell script is not executable, or is missing from the worktree.                                                                                                                                           |
 | `ci-wiring`                          | A CI entrypoint a workflow names is missing or not executable; an orchestrator job does not call a repository-local reusable workflow; a reusable workflow calls no CI entrypoint; an orchestrator declares no jobs. |
-| `toolchain-smoke`                    | A binary declared for a shell does not resolve INSIDE that shell, resolves but its probe (default `--version`) exits non-zero, or the shell could not be entered at all.                                                                                                          |
-| `no-custom-derivations`              | A declared nix file uses a custom derivation builder instead of staying a plain declarative list.                                                                                                                    |
+| `toolchain-smoke`                    | A binary declared for a shell does not resolve INSIDE that shell, resolves but its probe (default `--version`) exits non-zero, or the shell could not be entered at all.                                             |
+| `no-custom-derivations`              | A declared nix file uses a custom derivation builder — outside its comments — instead of staying a plain declarative list. Every declared file is read to the end and every match is reported.                       |
 
 ## Several checks in one invocation
 
@@ -145,6 +145,7 @@ One mechanism, applied uniformly: a section per check, keyed by the check's own 
 | `toolchain-smoke.binaries`              | legacy   | —                   |
 | `no-custom-derivations.paths`           | yes      | —                   |
 | `no-custom-derivations.forbid`          | no       | dlint's vocabulary  |
+| `no-custom-derivations.discover`        | no       | `["nix/*.nix"]`     |
 | `no-custom-derivations.requireSubjects` | no       | `true`              |
 | ` ↳ .file`                              | yes      | —                   |
 | ` ↳ .path`                              | yes      | —                   |
@@ -310,12 +311,72 @@ A green that does not state its scope is the shape that retires doubt it never e
 narrow `forbid` to one builder, the green says `vocabulary enumerated (1)` and the reader can
 see for themselves how much the pass is worth.
 
-Mentions inside comments count. That is deliberate: the check reads the file as written, and a
-template that needs to discuss these builders in prose belongs in `docs/`, not in the nix
-file the rule is about.
-
 A declared path that does not exist is `3`, not clean — deleting the file a rule is about must
-never be how the rule gets satisfied.
+never be how the rule gets satisfied. A declared path that is a **directory** stands for every
+file beneath it.
+
+### Comments are prose, not code
+
+**Nix comments are stripped before matching.** `#` to end of line and `/* … */` blocks, both
+string forms respected, one output line per input line so a match still addresses the file as
+you wrote it — and the refusal quotes the line **as written**, comments and all.
+
+This is a fix for a measured inversion. On a live tree the check **refused** a file whose only
+occurrence of the vocabulary was a comment — a sentence explaining that the practice had been
+_avoided_ — while a file carrying three real `pkgs.buildEnv` derivations **passed**, because
+nothing declared it. Reword the comment and the same code flips from `1` to `0`: identical
+trees, one variable, and the variable was prose. The purest instance is a comment saying a node
+takes `go` from the registry _instead of_ carrying its own `overrideAttrs` — compliance
+documentation. _A gate that punishes documenting why you complied with it teaches people to
+stop explaining themselves._
+
+String contents are **kept**, never stripped: a builder written inside a string or an
+antiquotation is still a builder written in the file, and dropping it would be the silent
+direction again. Three arms are the must-differ controls for exactly that — a real builder on a
+line that also carries a trailing comment, a `#` inside a `"…"` string, and a `#` inside an
+`'' … ''` one all still refuse.
+
+### Every offender, in one run
+
+**Every declared file is read to the end, and every match is reported.** The check used to stop
+at the first offending file, so removing one offender was how a repository discovered the next.
+The report is grouped by file and then by builder, most specific first, and one line is reported
+under one builder:
+
+```text
+❌ no-custom-derivations: 'nix/packages.nix' uses 'symlinkJoin', so it is a custom build …
+       | 6:  custom = pkgs.symlinkJoin { name = "thing"; };
+❌ no-custom-derivations: 'nix/env.nix' uses 'runCommand', so it is a custom build …
+       | 5:  custom = pkgs.runCommand "thing" { } "true";
+❌ no-custom-derivations: 2 offending line(s) across 2 of 2 inspected file(s). Every declared
+   file was read to the end, so this is the whole list and not the first fault.
+```
+
+### Coverage honesty
+
+The other half of that inversion is that the file full of derivations was **never opened**, and
+nothing said so. So the green states the paths it scanned, and a nix file that exists here and
+is not covered by them is **named**:
+
+```text
+ℹ️ files inspected: 2 (nix/packages.nix nix/env.nix)
+⚠️ no-custom-derivations: 1 nix file(s) matching 'nix/*.nix' exist here and are NOT covered by
+   the declared paths, so this check never read them: nix/pre-commit.nix. Add them to
+   '.checks["no-custom-derivations"].paths', or narrow 'discover' if they are deliberately out
+   of scope.
+```
+
+This is a **warning and not a refusal**, and the exit code is unchanged: `dlint` cannot know
+that an undeclared file is in scope — that is the repository's call — but it can refuse to be
+quiet about it. _A declared-paths check that silently ignores an undeclared file full of
+derivations is how a green gets inverted._
+
+The sweep is `discover`, an array of globs defaulting to `["nix/*.nix"]`, declarable for the
+same reason `exec-bits.globs` is: a layout is repository-shaped, and a tool that bakes one in
+has stopped being repo-agnostic. An explicitly **empty** `discover` is refused (`4`) — it could
+never notice a file it does not read. The warning stays quiet when every discovered file is
+covered, and there is an arm asserting that **absence**, because "it fires when it should" and
+"it stays quiet when it should" are two different claims.
 **One assertion is one caught fault.** A single combined predicate over four fields refuses
 without saying which field moved, so each is declared and reported separately. A refusal
 names the reason, the path, the value it **found** and the value it expected.
@@ -339,7 +400,7 @@ that gets deleted for being unexplainable.
 
 ## Runtime
 
-Every binary the checks call — `bash`, `coreutils`, `findutils`, `git`, `grep`, `sed`,
+Every binary the checks call — `bash`, `coreutils`, `findutils`, `awk`, `git`, `grep`, `sed`,
 `jq`, `ripgrep`, `yq` — is in the derivation's runtime closure. Nothing is assumed to be
 on the consumer's `PATH`. The packages are declared individually rather than through the
 `atomiutils` bundle, because a bundle plus its own members collide inside a `buildEnv`.
@@ -370,8 +431,9 @@ Every check also prints its counts, so a run that inspected little says so on st
 
 ## Tests
 
-`tests/inject.sh` is the failure-injection harness: **166 arms**, each asserting the
-refusal **text** and not merely a non-zero status.
+`tests/inject.sh` is the failure-injection harness: **173 arms**, each asserting the
+refusal **text** and not merely a non-zero status. A few assert the **absence** of a text
+(`arm_absent`), which is the only way to prove a warning is scoped rather than unconditional.
 
 ```bash
 nix develop -c ./shellWrapper/dlint/tests/inject.sh                     # builds .#dlint from a clean tree

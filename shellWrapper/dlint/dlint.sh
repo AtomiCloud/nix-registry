@@ -61,6 +61,12 @@ log_info() { printf 'ℹ️ %s\n' "$1"; }
 ok() { printf '✅ %s\n' "$1"; }
 skipped() { printf '⏭️ %s\n' "$1"; }
 
+# A WARNING is not a refusal and never changes the exit code. It exists for the
+# one thing a refusal cannot express: that the check's own SCOPE may be narrower
+# than the reader assumes. It goes to stdout with the other findings of a run
+# rather than to stderr, because a green run is exactly when it must be read.
+warn() { printf '⚠️ %s\n' "$1"; }
+
 refuse() {
   printf '❌ %s\n' "$1" >&2
   exit "${EXIT_VIOLATION}"
@@ -139,7 +145,12 @@ Checks (there are exactly five; there is no 'all' CHECK — the flag is --all-co
       than naming a shell it never entered.
   no-custom-derivations
       Every declared nix file stays a plain declarative list: no custom derivation
-      builder appears in it. The vocabulary of builders is printed with the result.
+      builder appears in it. Nix comments are STRIPPED before matching, so prose
+      that documents a builder cannot trip the gate. EVERY declared file is read to
+      the end and EVERY match is reported in one run. The vocabulary of builders and
+      the paths scanned are printed with the result, and a nix file that exists here
+      but is not declared is named in a WARNING — a declared-paths check is only as
+      wide as its list.
 
 Configuration:
   All checks read ONE file. dlint looks for, in order:
@@ -827,6 +838,95 @@ check_toolchain_smoke_ambient() {
 # write a build, not a variant spelling of one.
 readonly DLINT_DERIVATION_BUILDERS="overrideAttrs overrideDerivation mkDerivation runCommand buildEnv symlinkJoin writeShellApplication writeShellScriptBin writeScriptBin writeTextFile derivation"
 
+# The globs this check uses to ask "is my own scope complete?". It is a layout
+# convention rather than a language one, so it is declarable ('discover'); it has
+# a default at all only because a repository that never declares it would get the
+# silence this warning exists to break.
+readonly DLINT_NIX_DISCOVER_GLOB="nix/*.nix"
+
+# Writes a comment-FREE copy of a Nix file, one output line per input line so the
+# line numbers of a match still address the file as the author wrote it.
+#
+# This exists because of a measured inversion: the check refused a file whose only
+# occurrence of a builder was inside a COMMENT — a sentence explaining that the
+# practice had been AVOIDED — while a file carrying three real derivations passed,
+# because it was not in the declared paths. A gate that reads prose as code and
+# code as nothing is blind in the direction that matters.
+#
+# The scanner is a state machine rather than a regex because the three contexts a
+# '#' can sit in are not distinguishable line by line: block comments and both
+# string forms span lines. STRING CONTENTS ARE KEPT, never stripped — a builder
+# written inside a string or an antiquotation is still a builder written in the
+# file, and dropping it would be the silent direction again. Only comments go.
+#
+# Outside a string and a comment, '#' in Nix ALWAYS starts a comment: neither the
+# URI literal nor the path literal admits '#' in its character set, so there is no
+# bare token this can mistake for one.
+# The apostrophe is passed IN as `q` rather than written into the program: the
+# program is single-quoted for the shell, and a literal apostrophe inside it would
+# have to be spelled with the '\'' dance at five separate sites — a scanner whose
+# quoting is unreadable is a scanner nobody can review.
+nocustom_strip_comments() {
+  local src="$1" dst="$2"
+  awk -v q="'" '
+    BEGIN { state = "code"; ident = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_" q }
+    {
+      line = $0; out = ""; i = 1; n = length(line)
+      while (i <= n) {
+        c = substr(line, i, 1)
+        two = substr(line, i, 2)
+        if (state == "code") {
+          if (c == "#") { break }
+          if (two == "/*") { state = "block"; i += 2; continue }
+          # An identifier may END in an apostrophe, so a doubled one opens an
+          # indented string only where an identifier cannot be continuing.
+          if (two == q q && (out == "" || index(ident, substr(out, length(out), 1)) == 0)) {
+            state = "indented"; out = out two; i += 2; continue
+          }
+          if (c == "\"") { state = "double"; out = out c; i += 1; continue }
+          out = out c; i += 1; continue
+        }
+        if (state == "double") {
+          if (c == "\\") { out = out substr(line, i, 2); i += 2; continue }
+          if (c == "\"") { state = "code" }
+          out = out c; i += 1; continue
+        }
+        if (state == "indented") {
+          if (two == q q) {
+            tail = substr(line, i + 2, 1)
+            # A THIRD apostrophe, a $ or a backslash after the pair is an ESCAPE
+            # inside an indented string, not the end of one.
+            if (tail == q || tail == "$" || tail == "\\") { out = out substr(line, i, 3); i += 3; continue }
+            state = "code"; out = out two; i += 2; continue
+          }
+          out = out c; i += 1; continue
+        }
+        # state == "block"
+        if (two == "*/") { state = "code"; i += 2; continue }
+        i += 1
+      }
+      print out
+    }
+  ' "${src}" >"${dst}" ||
+    tool_failure "no-custom-derivations: could not strip the comments of '${src}'"
+}
+
+# Is <file> covered by one of the declared paths? A declared FILE covers itself; a
+# declared DIRECTORY covers everything beneath it. Used only by the coverage
+# warning, so a false "covered" here would silence a warning and never hide a
+# match.
+nocustom_is_declared() {
+  local file="${1#./}" declared=""
+  shift
+  for declared in "$@"; do
+    declared="${declared#./}"
+    declared="${declared%/}"
+    [ "${file}" != "${declared}" ] || return 0
+    [ "${file#"${declared}"/}" = "${file}" ] || return 0
+  done
+  return 1
+}
+
 check_no_custom_derivations() {
   [ "$#" -eq 0 ] || usage_error "no-custom-derivations takes no arguments, got '$1'"
 
@@ -854,32 +954,140 @@ check_no_custom_derivations() {
   fi
   [ "${#forbid[@]}" -gt 0 ] || read -r -a forbid <<<"${DLINT_DERIVATION_BUILDERS}"
 
-  local path="" builder="" inspected=0 rg_status=0
+  # The globs the COVERAGE WARNING sweeps. Declarable for the same reason
+  # 'exec-bits.globs' is: 'nix/*.nix' is a layout convention, and a tool that bakes
+  # one in has stopped being repo-agnostic.
+  local discover_file="${WORK_DIR}/nocustom-discover.txt"
+  cfg_array discover optional >"${discover_file}"
+  local -a discover=()
+  mapfile -t discover <"${discover_file}"
+  if [ "$(jq -r '.checks["no-custom-derivations"].discover | type' "${CFG_JSON}")" = "array" ]; then
+    [ "${#discover[@]}" -gt 0 ] ||
+      config_invalid "no-custom-derivations: '.checks[\"no-custom-derivations\"].discover' is empty, so this check could never notice a nix file it does not read. Remove the key to use dlint's own glob, or name the globs to sweep."
+  fi
+  [ "${#discover[@]}" -gt 0 ] || discover=("${DLINT_NIX_DISCOVER_GLOB}")
+
+  # EVERY declared file is read to the end and EVERY match is collected before
+  # anything is reported. Stopping at the first offender makes removing one uncover
+  # the next, so a repository learns the size of its problem one run at a time.
+  local path="" file="" builder="" lineno="" original=""
+  local inspected=0 rg_status=0 offenders=0 offending_files=0
+  local -A claimed=()
+  local files="${WORK_DIR}/nocustom-files.txt"
+  local stripped="${WORK_DIR}/nocustom-stripped.txt"
   local hits="${WORK_DIR}/nocustom-hits.txt"
+  local found="${WORK_DIR}/nocustom-found.txt"
+  local selected="${WORK_DIR}/nocustom-selected.txt"
+  local report="${WORK_DIR}/nocustom-report.txt"
+  : >"${report}"
+
   for path in "${paths[@]}"; do
     # A declared path that is gone is absent, not clean. Deleting the file a rule
     # is about must never be the way to satisfy the rule.
     [ -e "${path}" ] ||
       config_absent "no-custom-derivations: '${path}', declared in '${CFG_FILE}', does not exist, so the resolver-shape rule has no subject there"
 
-    for builder in "${forbid[@]}"; do
-      rg_status=0
-      rg -n --no-heading --fixed-strings -- "${builder}" "${path}" >"${hits}" || rg_status=$?
-      [ "${rg_status}" -le 1 ] ||
-        tool_failure "no-custom-derivations: could not scan '${path}' for '${builder}' (rg exit ${rg_status})"
-      if [ "${rg_status}" -eq 0 ]; then
-        printf '❌ %s\n' "no-custom-derivations: '${path}' uses '${builder}', so it is a custom build rather than a plain declarative list. Templates compose through the cyanprint nix resolver, which merges simple attribute lists; a custom derivation is not resolver-mergeable. Hoist it to the registry." >&2
-        sed 's/^/       | /' "${hits}" >&2
-        exit "${EXIT_VIOLATION}"
-      fi
-    done
-    inspected=$((inspected + 1))
+    # A declared path may be a directory, which stands for every file beneath it.
+    if [ -d "${path}" ]; then
+      find "${path}" -type f -print | sort >"${files}" ||
+        tool_failure "no-custom-derivations: could not list the files under '${path}'"
+    else
+      printf '%s\n' "${path}" >"${files}"
+    fi
+
+    while IFS= read -r file; do
+      [ -n "${file}" ] || continue
+      inspected=$((inspected + 1))
+      nocustom_strip_comments "${file}" "${stripped}"
+
+      : >"${found}"
+      for builder in "${forbid[@]}"; do
+        rg_status=0
+        rg -n --no-filename --no-heading --fixed-strings -- "${builder}" "${stripped}" >"${hits}" || rg_status=$?
+        [ "${rg_status}" -le 1 ] ||
+          tool_failure "no-custom-derivations: could not scan '${file}' for '${builder}' (rg exit ${rg_status})"
+        [ "${rg_status}" -eq 0 ] || continue
+
+        # One LINE is reported under ONE builder: the vocabulary is ordered most
+        # specific first, so the first member to claim a line is the builder
+        # actually written rather than a shorter token inside it.
+        while IFS=: read -r lineno _; do
+          [ -n "${lineno}" ] || continue
+          [ -z "${claimed["${file}:${lineno}"]:-}" ] || continue
+          claimed["${file}:${lineno}"]="${builder}"
+          printf '%s\t%s\n' "${builder}" "${lineno}" >>"${found}"
+        done <"${hits}"
+      done
+
+      [ -s "${found}" ] || continue
+      offending_files=$((offending_files + 1))
+      for builder in "${forbid[@]}"; do
+        awk -F'\t' -v b="${builder}" '$1 == b { print $2 }' "${found}" >"${selected}" ||
+          tool_failure "no-custom-derivations: could not group the matches of '${file}'"
+        [ -s "${selected}" ] || continue
+        printf '❌ %s\n' "no-custom-derivations: '${file}' uses '${builder}', so it is a custom build rather than a plain declarative list. Templates compose through the cyanprint nix resolver, which merges simple attribute lists; a custom derivation is not resolver-mergeable. Hoist it to the registry." >>"${report}"
+        while IFS= read -r lineno; do
+          [ -n "${lineno}" ] || continue
+          # The line is quoted AS WRITTEN, comments and all: the match was made
+          # against the stripped copy, but the author has to find the line.
+          original="$(sed -n "${lineno}p" -- "${file}")" ||
+            tool_failure "no-custom-derivations: could not read line ${lineno} of '${file}'"
+          printf '       | %s:%s\n' "${lineno}" "${original}" >>"${report}"
+          offenders=$((offenders + 1))
+        done <"${selected}"
+      done
+    done <"${files}"
   done
 
   # The vocabulary is PRINTED, not merely applied: an absence claim is only as
-  # wide as its word list, so the green states what it was wide enough to see.
+  # wide as its word list, so the green states what it was wide enough to see. The
+  # PATHS are printed for the same reason — an absence claim is also only as wide
+  # as the files it opened.
   log_info "files inspected: ${inspected} (${paths[*]})"
   log_info "vocabulary enumerated (${#forbid[@]}): ${forbid[*]}"
+
+  # COVERAGE HONESTY. A declared-paths check that silently ignores an undeclared
+  # file full of derivations is how a green gets inverted: the file that broke the
+  # rule was never opened, and nothing said so. This is a WARNING and not a refusal
+  # because dlint cannot know that an undeclared file is in scope — but it can
+  # refuse to be quiet about it.
+  local -a undeclared=() matches=()
+  local -A discovered=()
+  local pattern="" candidate="" saved_ifs="${IFS}" nullglob_was_off=0
+  # A glob that matches nothing must expand to NOTHING, not to itself: the literal
+  # pattern would then be probed as a filename and quietly found absent.
+  shopt -q nullglob || nullglob_was_off=1
+  shopt -s nullglob
+  for pattern in "${discover[@]}"; do
+    # Pathname expansion with IFS emptied. The glob still yields one field per
+    # match, so a path containing spaces stays ONE candidate, and no word
+    # splitting happens on the pattern itself. (`compgen -G` says this more
+    # directly, but the bash a packaged dlint runs under is built without
+    # programmable completion and does not have it — found by running this
+    # harness against the built derivation rather than against the script.)
+    IFS=''
+    # shellcheck disable=SC2206 # deliberate: this IS the glob expansion
+    matches=(${pattern})
+    IFS="${saved_ifs}"
+    for candidate in "${matches[@]}"; do
+      [ -f "${candidate}" ] || continue
+      [ -z "${discovered["${candidate}"]:-}" ] || continue
+      discovered["${candidate}"]=1
+      nocustom_is_declared "${candidate}" "${paths[@]}" || undeclared+=("${candidate}")
+    done
+  done
+  [ "${nullglob_was_off}" -eq 0 ] || shopt -u nullglob
+  if [ "${#undeclared[@]}" -gt 0 ]; then
+    warn "no-custom-derivations: ${#undeclared[@]} nix file(s) matching '${discover[*]}' exist here and are NOT covered by the declared paths, so this check never read them: ${undeclared[*]}. Add them to '.checks[\"no-custom-derivations\"].paths', or narrow 'discover' if they are deliberately out of scope."
+  fi
+
+  if [ "${offenders}" -gt 0 ]; then
+    cat "${report}" >&2 ||
+      tool_failure "no-custom-derivations: could not report the matches it found"
+    printf '❌ %s\n' "no-custom-derivations: ${offenders} offending line(s) across ${offending_files} of ${inspected} inspected file(s). Every declared file was read to the end, so this is the whole list and not the first fault." >&2
+    exit "${EXIT_VIOLATION}"
+  fi
+
   if [ "${inspected}" -eq 0 ] && [ "${require_subjects}" = "true" ]; then
     refuse "no declared path was inspected; the resolver-shape check would pass vacuously. If this repository legitimately has none, declare it: '.checks[\"no-custom-derivations\"].requireSubjects': false"
   fi
