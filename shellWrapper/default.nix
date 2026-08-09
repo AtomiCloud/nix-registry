@@ -9,4 +9,6 @@ rec {
   dotnetlint = import ./dotnetlint/default.nix { inherit trivialBuilders nixpkgs; };
   dn-inspect = import ./dn-inspect/default.nix { inherit trivialBuilders nixpkgs; };
   helmlint = import ./helmlint/default.nix { inherit trivialBuilders nixpkgs; };
+  # No trivialBuilders: this one builds on nixpkgs' writeShellApplication, see its comment.
+  helm-schema = import ./helm-schema/default.nix { inherit nixpkgs; };
 }

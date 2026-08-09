@@ -49,6 +49,7 @@ nix shell --max-jobs 1 --cores 2 nixpkgs#bash \
   .#dotnetlint \
   .#dn-inspect \
   .#helmlint \
+  .#helm-schema \
   .#attic \
   .#cliproxyapi \
   .#deadcode \
@@ -90,6 +91,7 @@ nix shell --max-jobs 1 --cores 2 nixpkgs#bash \
   cup --version &&
   pd --version &&
   helmlint --version &&
+  helm-schema --version &&
   inspect --help &&
   attic --version &&
   cli-proxy-api --help &&
