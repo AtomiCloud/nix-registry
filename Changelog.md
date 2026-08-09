@@ -1,3 +1,11 @@
+## [5.2.0](https://github.com/AtomiCloud/nix-registry/compare/v5.1.0...v5.2.0) (2026-08-09)
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **minor:** add published resolver smoke gate ([cd09c22](https://github.com/AtomiCloud/nix-registry/commit/cd09c229165d25f517ec2516ee9bc387513554d4))
+* **minor:** harden resolver smoke maintenance ([4d90535](https://github.com/AtomiCloud/nix-registry/commit/4d9053577a011513d2b478b948ef0c2904148551))
+
 ## [5.1.0](https://github.com/AtomiCloud/nix-registry/compare/v5.0.0...v5.1.0) (2026-08-07)
 
 
