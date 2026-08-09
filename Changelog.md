@@ -1,3 +1,21 @@
+## [5.5.0](https://github.com/AtomiCloud/nix-registry/compare/v5.4.0...v5.5.0) (2026-08-09)
+
+
+### 🐛 Bug Fixes 🐛
+
+* state a unit for every count in resolver-smoke's summary line ([71850ff](https://github.com/AtomiCloud/nix-registry/commit/71850ff9a55562bbbaa69455b71263ea592b8172))
+
+
+### ✨ New Packages ✨
+
+* **helm-schema:** hoist the helm schema wrapper out of helm-wrapper ([79e0d0a](https://github.com/AtomiCloud/nix-registry/commit/79e0d0aac5b582f27b6e41f425e9c6c3116c40ca))
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **patch:** give resolver-smoke a complete lost-binding list mode ([0c64c81](https://github.com/AtomiCloud/nix-registry/commit/0c64c81ffb1f013339b37a81af3c7b6a5a15fba4))
+* **minor:** hoist dotnet-base's cyanprint internals into the registry ([6534490](https://github.com/AtomiCloud/nix-registry/commit/65344903288483b1d04c2dc43179ae5fa2afa0b5))
+
 ## [5.4.0](https://github.com/AtomiCloud/nix-registry/compare/v5.3.0...v5.4.0) (2026-08-09)
 
 
