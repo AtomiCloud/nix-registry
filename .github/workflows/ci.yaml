@@ -104,6 +104,7 @@ jobs:
           .#nsc
           .#obsidian_headless
           .#releaser
+          .#resolver-smoke
           -c bash -c '
           sg --version &&
           upstash --version &&
@@ -139,6 +140,8 @@ jobs:
           mmoney --version &&
           ob --version &&
           releaser --version &&
+          resolver-smoke --version &&
+          RESOLVER_SMOKE=resolver-smoke ./bunWrapper/resolver-smoke/tests/run.sh &&
           echo "🎉 Done"'
 
   release:

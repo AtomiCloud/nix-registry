@@ -1,0 +1,14 @@
+# Files prettier must not rewrite.
+#
+# treefmt hands prettier every `*.mjs` in the tree (see the formatter's include
+# list), and prettier honours this file even for paths passed explicitly on its
+# command line, so listing a path here is what actually keeps `nix fmt` off it.
+#
+# The vendored atomi/nix@2 merger is identified by the sha256 recorded in
+# bunWrapper/resolver-smoke/vendor/SHA256, and both resolver-smoke's build-time
+# installCheck and its runtime check compare the bundle against that one
+# constant. Reformatting the bundle would change the bytes without changing what
+# the program does, and the digest would then fail on content that is, in fact,
+# exactly what was published. The right answer is to leave the published bytes
+# alone, not to re-record the digest after a formatter has touched them.
+bunWrapper/resolver-smoke/vendor/nix-v2.mjs

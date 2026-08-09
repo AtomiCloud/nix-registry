@@ -3,5 +3,6 @@ let trivialBuilders = import ./trivialBuilders.nix { inherit nixpkgs bun; }; in
 {
   md-mermaid-lint = import ./md-mermaid-lint { inherit nixpkgs bun trivialBuilders; };
   releaser = import ./releaser { inherit nixpkgs bun; };
+  resolver-smoke = import ./resolver-smoke { inherit nixpkgs bun trivialBuilders; };
   skills-sync = import ./skills-sync { inherit nixpkgs bun trivialBuilders; };
 }

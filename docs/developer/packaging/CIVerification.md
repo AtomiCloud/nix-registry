@@ -16,36 +16,37 @@ The CI pipeline verifies that all packages in the registry build and run correct
 
 The following packages are verified in CI with their respective commands:
 
-| Package                | Command                            | Notes                                       |
-| ---------------------- | ---------------------------------- | ------------------------------------------- |
-| sg                     | `sg --version`                     | ast-grep                                    |
-| upstash                | `upstash --version`                | Upstash CLI                                 |
-| action_docs            | `action-docs --version`            | GitHub Actions docs generator               |
-| typescript_json_schema | `typescript-json-schema --version` | JSON schema generator                       |
-| swagger_typescript_api | `swagger-typescript-api --version` | API client generator                        |
-| dotnetsay              | `dotnetsay`                        | No --version flag available                 |
-| dotnet-ef              | `dotnet-ef --version`              | Entity Framework CLI                        |
-| mirrord                | `mirrord --version`                | Mirrord CLI                                 |
-| pls                    | `pls --version`                    | Prettier + ESLint wrapper                   |
-| toml-cli               | `toml --version`                   | TOML CLI tool                               |
-| nix-share              | `nix-share`                        | No --version flag available                 |
-| cyanprint              | `cyanprint --version`              | AtomiCloud template tool                    |
-| worktrunk              | `wt --version`                     | Worktrunk CLI (binary is `wt`)              |
-| gardenio               | `garden version`                   | Garden CLI (uses `version` not `--version`) |
-| codecov                | `codecov --version`                | Codecov CLI                                 |
-| dotnetlint             | `dotnetlint --version`             | .NET linting wrapper                        |
-| dn-inspect             | `dn-inspect --version`             | .NET inspection tool                        |
-| deadcode               | `deadcode --version`               | Dead code detector                          |
-| helmlint               | `helmlint --version`               | Helm linting wrapper                        |
-| dlint                  | `dlint --version`                  | Repo-agnostic repository linters            |
-| attic                  | `attic --version`                  | Attic binary cache client                   |
-| cliproxyapi            | `cli-proxy-api --help`             | Only has --help, no --version               |
-| aws-export-credentials | `aws-export-credentials --version` | AWS credential exporter                     |
-| mmoney-cli             | `mmoney --version`                 | Monarch Money CLI (binary is `mmoney`)      |
-| releaser               | `releaser --version`               | AtomiCloud release + commit-lint CLI        |
-| md-mermaid-lint        | `md-mermaid-lint --version`        | Mermaid diagram linter                      |
-| infrautils             | (removed from CI)                  | -                                           |
-| infralint              | (removed from CI)                  | -                                           |
+| Package                | Command                            | Notes                                                                         |
+| ---------------------- | ---------------------------------- | ----------------------------------------------------------------------------- |
+| sg                     | `sg --version`                     | ast-grep                                                                      |
+| upstash                | `upstash --version`                | Upstash CLI                                                                   |
+| action_docs            | `action-docs --version`            | GitHub Actions docs generator                                                 |
+| typescript_json_schema | `typescript-json-schema --version` | JSON schema generator                                                         |
+| swagger_typescript_api | `swagger-typescript-api --version` | API client generator                                                          |
+| dotnetsay              | `dotnetsay`                        | No --version flag available                                                   |
+| dotnet-ef              | `dotnet-ef --version`              | Entity Framework CLI                                                          |
+| mirrord                | `mirrord --version`                | Mirrord CLI                                                                   |
+| pls                    | `pls --version`                    | Prettier + ESLint wrapper                                                     |
+| toml-cli               | `toml --version`                   | TOML CLI tool                                                                 |
+| nix-share              | `nix-share`                        | No --version flag available                                                   |
+| cyanprint              | `cyanprint --version`              | AtomiCloud template tool                                                      |
+| worktrunk              | `wt --version`                     | Worktrunk CLI (binary is `wt`)                                                |
+| gardenio               | `garden version`                   | Garden CLI (uses `version` not `--version`)                                   |
+| codecov                | `codecov --version`                | Codecov CLI                                                                   |
+| dotnetlint             | `dotnetlint --version`             | .NET linting wrapper                                                          |
+| dn-inspect             | `dn-inspect --version`             | .NET inspection tool                                                          |
+| deadcode               | `deadcode --version`               | Dead code detector                                                            |
+| helmlint               | `helmlint --version`               | Helm linting wrapper                                                          |
+| dlint                  | `dlint --version`                  | Repo-agnostic repository linters                                              |
+| attic                  | `attic --version`                  | Attic binary cache client                                                     |
+| cliproxyapi            | `cli-proxy-api --help`             | Only has --help, no --version                                                 |
+| aws-export-credentials | `aws-export-credentials --version` | AWS credential exporter                                                       |
+| mmoney-cli             | `mmoney --version`                 | Monarch Money CLI (binary is `mmoney`)                                        |
+| releaser               | `releaser --version`               | AtomiCloud release + commit-lint CLI                                          |
+| md-mermaid-lint        | `md-mermaid-lint --version`        | Mermaid diagram linter                                                        |
+| resolver-smoke         | `resolver-smoke --version`         | Template-authoring resolver gate; also runs its injection harness (see below) |
+| infrautils             | (removed from CI)                  | -                                                                             |
+| infralint              | (removed from CI)                  | -                                                                             |
 
 ## Adding a New Package to CI
 
@@ -76,7 +77,29 @@ Add the verification command inside the bash script:
     '
 ```
 
-### Step 3: Handle Special Cases
+### Step 3: Run the Package's Own Test Harness (when it has one)
+
+`--version` proves the derivation built and the binary starts. For a package whose value is
+that it **refuses** correctly, that is not enough: a gate can start cleanly and still have
+stopped firing. Where a package ships a failure-injection harness, chain it in the same
+`&&` sequence, pointed at the **packaged binary** rather than at the source tree, so CI
+verifies the artifact it just built:
+
+```yaml
+resolver-smoke --version &&
+RESOLVER_SMOKE=resolver-smoke ./bunWrapper/resolver-smoke/tests/run.sh &&
+```
+
+The harness reads the binary under test from an environment variable and falls back to the
+source tree when it is unset, so the same script serves local development and CI. `dlint`'s
+`shellWrapper/dlint/tests/inject.sh` takes the same shape via `--dlint <path>`.
+
+Note that this is **build verification**, not consumer wiring. It proves the package works;
+it does not enable the package as a gate on this repository. Adding a package here is never
+a reason to also add it to `nix/pre-commit.nix`, `nix/registry.nix` or `nix/env.nix` — those
+are separate decisions with separate consequences.
+
+### Step 4: Handle Special Cases
 
 Some packages require special handling:
 
@@ -162,7 +185,9 @@ echo "All tests passed!"
 
 ## Example CI Configuration
 
-Here is the current CI verification configuration from `.github/workflows/ci.yaml` (lines 37-87):
+The excerpt below is an **abridged illustration of the shape**, not a mirror of the file.
+`.github/workflows/ci.yaml` is authoritative and already carries packages this excerpt does
+not; read it, do not copy from here.
 
 ```yaml
 - name: Nix Build
