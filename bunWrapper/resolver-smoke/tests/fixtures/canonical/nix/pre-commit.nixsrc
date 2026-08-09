@@ -1,0 +1,41 @@
+{
+  packages,
+  formatter,
+  pkgs,
+  pre-commit-lib,
+  env,
+}:
+let
+  envPath = pkgs.lib.makeBinPath (env.system ++ env.main ++ env.lint ++ env.dev);
+in
+pre-commit-lib.run {
+  src = ../.;
+
+  hooks = {
+    shellcheck = {
+      enable = false;
+    };
+
+    treefmt = {
+      enable = true;
+      package = formatter;
+    };
+
+    a-acmelint = {
+      enable = true;
+      name = "acmelint";
+      entry = "${packages.acmeutils}/bin/bash -c 'PATH=${envPath}:\$PATH ${packages.acmelint}/bin/acmelint lint'";
+      pass_filenames = false;
+      language = "system";
+    };
+
+    a-shellcheck = {
+      enable = true;
+      name = "Shellcheck";
+      entry = "${packages.shellcheck}/bin/shellcheck -x --source-path=SCRIPTDIR";
+      files = ".*\\.sh$";
+      pass_filenames = true;
+      language = "system";
+    };
+  };
+}

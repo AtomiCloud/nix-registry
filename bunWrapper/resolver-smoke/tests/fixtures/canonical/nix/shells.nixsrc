@@ -1,0 +1,13 @@
+{ pkgs, packages, env, shellHook }:
+with env;
+{
+  ci = pkgs.mkShell {
+    buildInputs = lint ++ main ++ system;
+    inherit shellHook;
+  };
+
+  default = pkgs.mkShell {
+    buildInputs = system ++ main ++ lint ++ dev;
+    inherit shellHook;
+  };
+}
