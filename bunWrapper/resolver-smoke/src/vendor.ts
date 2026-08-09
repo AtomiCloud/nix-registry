@@ -17,7 +17,7 @@ export type PublishedResolver = (input: { files: Variation[] }) => Promise<{ pat
 
 const VENDOR_DIR = join(import.meta.dir, '..', 'vendor');
 export const RECORDED_SHA256_PATH = join(VENDOR_DIR, 'SHA256');
-export const DEFAULT_VENDOR_PATH = join(VENDOR_DIR, 'nix-v2.mjs');
+export const DEFAULT_VENDOR_PATH = join(VENDOR_DIR, 'nix.mjs');
 
 function readRecordedDigest(): string {
   let digest = '';

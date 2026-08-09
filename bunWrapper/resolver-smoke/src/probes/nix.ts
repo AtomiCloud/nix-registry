@@ -118,7 +118,7 @@ function injectPrecommit(real: string, sentinel: string): string | null {
   return child.includes(`${sentinel} =`) ? child : null;
 }
 
-// When refreshing vendor/nix-v2.mjs via scripts/refresh-vendor.sh, re-derive
+// When refreshing vendor/nix.mjs via scripts/refresh-vendor.sh, re-derive
 // these skeletons from the refreshed bundle's pretty-printer output.
 export const NIX_PROBES: NixProbe[] = [
   {

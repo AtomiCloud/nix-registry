@@ -4,7 +4,7 @@ set -euo pipefail
 unset CDPATH
 
 if [ "$#" -ne 1 ]; then
-  printf 'Usage: %s <published-nix-v2-bundle-path-or-url>\n' "$0" >&2
+  printf 'Usage: %s <published-nix-bundle-path-or-url>\n' "$0" >&2
   exit 2
 fi
 
@@ -42,9 +42,9 @@ grep -q 'resolver' "${TMPFILE}" || {
 
 DIGEST="$(sha256sum "${TMPFILE}")"
 DIGEST="${DIGEST%% *}"
-install -m 0644 "${TMPFILE}" "${PACKAGE_DIR}/vendor/nix-v2.mjs"
+install -m 0644 "${TMPFILE}" "${PACKAGE_DIR}/vendor/nix.mjs"
 printf '%s\n' "${DIGEST}" >"${PACKAGE_DIR}/vendor/SHA256"
 
-printf 'refreshed vendor/nix-v2.mjs\n'
+printf 'refreshed vendor/nix.mjs\n'
 printf 'sha256 %s\n' "${DIGEST}"
 printf 'Run the injection harness and review the published resolver behavior before committing.\n'
