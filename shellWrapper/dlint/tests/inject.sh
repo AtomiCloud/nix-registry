@@ -194,9 +194,20 @@ edit_config() {
 # The stream is derived from the expected exit rather than declared: a pass must
 # report on stdout and every refusal must report on stderr, so a message that
 # moves streams fails the arm.
-arm() {
-  local name="$1" mutator="$2" want_rc="$3" want_text="$4"
-  shift 4
+arm() { arm_run present "$@"; }
+
+# arm_absent <name> <mutator> <expected-exit> <forbidden-text> -- <dlint args...>
+#
+# Same contract, inverted assertion: the text must appear NOWHERE, on either
+# stream. A warning is only proved to be scoped by looking for its ABSENCE on a
+# run that must not raise it — "it fires when it should" and "it stays quiet when
+# it should" are two different claims, and only the second one catches a warning
+# that fires unconditionally.
+arm_absent() { arm_run absent "$@"; }
+
+arm_run() {
+  local expect="$1" name="$2" mutator="$3" want_rc="$4" want_text="$5"
+  shift 5
   [ "${1:-}" = "--" ] && shift
 
   ARMS_RUN=$((ARMS_RUN + 1))
@@ -234,13 +245,24 @@ arm() {
     return 0
   fi
 
-  if ! grep -qF -- "${want_text}" "${stream}"; then
-    FAILURES=$((FAILURES + 1))
-    printf '  ❌ %-58s exit %s, but %s never said: %s\n' \
-      "${name}" "${rc}" "${stream_name}" "${want_text}"
-    sed 's/^/       stdout| /' "${out}"
-    sed 's/^/       stderr| /' "${err}"
-    return 0
+  if [ "${expect}" = "present" ]; then
+    if ! grep -qF -- "${want_text}" "${stream}"; then
+      FAILURES=$((FAILURES + 1))
+      printf '  ❌ %-58s exit %s, but %s never said: %s\n' \
+        "${name}" "${rc}" "${stream_name}" "${want_text}"
+      sed 's/^/       stdout| /' "${out}"
+      sed 's/^/       stderr| /' "${err}"
+      return 0
+    fi
+  else
+    if grep -qF -- "${want_text}" "${out}" "${err}"; then
+      FAILURES=$((FAILURES + 1))
+      printf '  ❌ %-58s exit %s, but it said what it must not: %s\n' \
+        "${name}" "${rc}" "${want_text}"
+      sed 's/^/       stdout| /' "${out}"
+      sed 's/^/       stderr| /' "${err}"
+      return 0
+    fi
   fi
 
   ARMS_PASSED=$((ARMS_PASSED + 1))
@@ -618,6 +640,137 @@ m_nocustom_in_second_path() {
     '  custom = pkgs.runCommand "thing" { } "true";'
 }
 
+# -- no-custom-derivations: a comment is PROSE, not code -------------------- #
+#
+# The measured inversion this fix is about. On a live tree the check REFUSED a
+# file whose only occurrence of a builder was inside a COMMENT — a sentence
+# explaining that the practice had been avoided — while a file carrying three real
+# derivations PASSED, because it was not in the declared paths. Blind in the
+# direction that matters, loud in the direction that does not.
+
+m_nocustom_comment_only() {
+  insert_before nix/packages.nix '  packages = with pkgs; [' \
+    '  # This list carries no pkgs.buildEnv: bundles are hoisted to the registry.'
+}
+
+# The A-B pair. IDENTICAL trees, ONE variable: the same sentence reworded to avoid
+# the vocabulary. Before this fix the two exits differed on the same code, which is
+# the whole defect stated as an experiment.
+m_nocustom_comment_reworded() {
+  insert_before nix/packages.nix '  packages = with pkgs; [' \
+    '  # This list carries no bundle builder: bundles are hoisted to the registry.'
+}
+
+# The purest instance: COMPLIANCE DOCUMENTATION. A comment saying the node takes go
+# from the registry INSTEAD of carrying its own builder is a file explaining why it
+# CONFORMS — and the gate refused it for saying so. A gate that punishes
+# documenting why you complied with it is the class in one sentence.
+m_nocustom_compliance_comment() {
+  insert_before nix/packages.nix '  packages = with pkgs; [' \
+    '  # go comes from the registry INSTEAD of carrying its own overrideAttrs here.'
+}
+
+m_nocustom_block_comment() {
+  insert_before nix/packages.nix '  packages = with pkgs; [' \
+    '  /* symlinkJoin and buildEnv are deliberately absent here; see docs/. */'
+}
+
+# A block comment that SPANS lines. The scanner is a state machine rather than a
+# regex because the context of a word cannot be decided one line at a time.
+m_nocustom_multiline_block_comment() {
+  insert_before nix/packages.nix '  packages = with pkgs; [' \
+    '  /* the registry owns every'
+  insert_before nix/packages.nix '  packages = with pkgs; [' \
+    '     mkDerivation and symlinkJoin this template would otherwise write */'
+}
+
+# THE MUST-DIFFER CONTROLS. A stripper that removed too much would turn this whole
+# check off, so each of these plants a REAL builder in a place a careless stripper
+# would drop.
+
+m_nocustom_code_with_trailing_comment() {
+  insert_before nix/packages.nix '  packages = with pkgs; [' \
+    '  custom = pkgs.symlinkJoin { name = "thing"; }; # to be hoisted, honestly'
+}
+
+# A '#' inside a STRING does not start a comment. Under a stripper that scanned for
+# the character without knowing where it sat, everything after it would vanish —
+# and the real builder on this line with it.
+m_nocustom_hash_inside_string() {
+  insert_before nix/packages.nix '  packages = with pkgs; [' \
+    '  src = "https://example.invalid/x#frag"; custom = pkgs.buildEnv { };'
+}
+
+# The same control for the indented-string form.
+m_nocustom_hash_inside_indented_string() {
+  insert_before nix/packages.nix '  packages = with pkgs; [' \
+    "  note = ''# not a comment''; custom = pkgs.writeTextFile { };"
+}
+
+# -- no-custom-derivations: every offender, in one run ---------------------- #
+#
+# Stopping at the first offender makes removing one uncover the next, so a
+# repository learns the size of its problem one run at a time.
+
+m_nocustom_three_in_one_file() {
+  insert_before nix/packages.nix '  packages = with pkgs; [' \
+    '  one = pkgs.buildEnv { name = "one"; };'
+  insert_before nix/packages.nix '  packages = with pkgs; [' \
+    '  two = pkgs.buildEnv { name = "two"; };'
+  insert_before nix/packages.nix '  packages = with pkgs; [' \
+    '  three = pkgs.buildEnv { name = "three"; };'
+}
+
+# Two DIFFERENT builders in one file: the report is grouped by builder, and both
+# groups must survive one run.
+m_nocustom_two_builders_one_file() {
+  plant_builder 'symlinkJoin'
+  plant_builder 'writeScriptBin'
+}
+
+# One offender in EACH declared file. Several arms share this mutator and each
+# asserts a DIFFERENT file's message, so together they prove the run did not stop
+# at the first file.
+m_nocustom_in_both_paths() {
+  plant_builder 'symlinkJoin'
+  insert_before nix/env.nix '  env = with pkgs; [' \
+    '  custom = pkgs.runCommand "thing" { } "true";'
+}
+
+# -- no-custom-derivations: coverage honesty -------------------------------- #
+#
+# The other half of the inversion: the file carrying three real derivations was
+# never opened, because nothing declared it — and nothing said so.
+
+m_nocustom_undeclared_nix_file() {
+  printf '{ pkgs }:\n{\n  extra = pkgs.buildEnv { name = "sneaky"; };\n}\n' >nix/overlays.nix
+}
+
+# Declaring the file dlint warned about turns the silent pass into the refusal it
+# should always have been.
+m_nocustom_undeclared_then_declared() {
+  m_nocustom_undeclared_nix_file
+  edit_config '.checks["no-custom-derivations"].paths += ["nix/overlays.nix"]'
+}
+
+# A declared DIRECTORY stands for every file beneath it, so it covers a file that
+# did not exist when the configuration was written.
+m_nocustom_directory_path() {
+  m_nocustom_undeclared_nix_file
+  edit_config '.checks["no-custom-derivations"].paths = ["nix"]'
+}
+
+# The escape hatch: a repository whose nix files legitimately live elsewhere
+# narrows the sweep, and the warning goes quiet because it was told to.
+m_nocustom_discover_narrowed() {
+  m_nocustom_undeclared_nix_file
+  edit_config '.checks["no-custom-derivations"].discover = ["no/such/dir/*.nix"]'
+}
+
+m_nocustom_discover_empty() {
+  edit_config '.checks["no-custom-derivations"].discover = []'
+}
+
 m_nocustom_paths_empty() { edit_config '.checks["no-custom-derivations"].paths = []'; }
 m_nocustom_forbid_empty() { edit_config '.checks["no-custom-derivations"].forbid = []'; }
 
@@ -844,6 +997,94 @@ arm "a narrowed vocabulary still catches what it names" m_nocustom_narrowed_voca
   "uses 'symlinkJoin'" -- no-custom-derivations
 arm "a narrowed vocabulary states its width" m_nocustom_narrow_vocabulary_misses 0 \
   "vocabulary enumerated (1): symlinkJoin" -- no-custom-derivations
+printf '\nno-custom-derivations: a comment is prose, not code\n'
+# THE ARM THAT NAMES THE DEFECT. The only occurrence of the vocabulary is a
+# sentence saying the practice was AVOIDED. This exits 1 under the implementation
+# that shipped, and must exit 0 now.
+arm "a builder named only in a comment PASSES" m_nocustom_comment_only 0 \
+  "✅ Template nix stays plain declarative lists" -- no-custom-derivations
+# The A-B pair: identical trees, one variable — the same sentence reworded to
+# avoid the vocabulary. The two exits must now agree, because the code does.
+arm "the same comment reworded PASSES too (the A-B control)" m_nocustom_comment_reworded 0 \
+  "✅ Template nix stays plain declarative lists" -- no-custom-derivations
+# The purest instance: a file documenting WHY IT COMPLIES was refused for saying so.
+arm "compliance documentation is not a violation" m_nocustom_compliance_comment 0 \
+  "✅ Template nix stays plain declarative lists" -- no-custom-derivations
+arm "a block comment is prose too" m_nocustom_block_comment 0 \
+  "✅ Template nix stays plain declarative lists" -- no-custom-derivations
+arm "a block comment spanning lines is prose too" m_nocustom_multiline_block_comment 0 \
+  "✅ Template nix stays plain declarative lists" -- no-custom-derivations
+# The must-differ controls. A stripper that removed too much would turn this check
+# off entirely, so each of these plants a REAL builder where a careless one would
+# drop it.
+arm "a real builder with a trailing comment still refuses" m_nocustom_code_with_trailing_comment 1 \
+  "uses 'symlinkJoin'" -- no-custom-derivations
+arm "a '#' inside a string does not hide the builder after it" m_nocustom_hash_inside_string 1 \
+  "uses 'buildEnv'" -- no-custom-derivations
+arm "a '#' inside an indented string does not either" m_nocustom_hash_inside_indented_string 1 \
+  "uses 'writeTextFile'" -- no-custom-derivations
+
+printf '\nno-custom-derivations: every offender, in one run\n'
+# Three arms, one mutator: each asserts a DIFFERENT planted line, so together they
+# prove the run did not stop at the first match. Removing one offender must not be
+# how a repository discovers the next.
+arm "three offenders: the first is reported" m_nocustom_three_in_one_file 1 \
+  'one = pkgs.buildEnv' -- no-custom-derivations
+arm "three offenders: the second is reported" m_nocustom_three_in_one_file 1 \
+  'two = pkgs.buildEnv' -- no-custom-derivations
+arm "three offenders: the third is reported" m_nocustom_three_in_one_file 1 \
+  'three = pkgs.buildEnv' -- no-custom-derivations
+arm "three offenders are counted, not just the first" m_nocustom_three_in_one_file 1 \
+  "3 offending line(s) across 1 of 2 inspected file(s)" -- no-custom-derivations
+arm "two builders in one file: the first group is reported" m_nocustom_two_builders_one_file 1 \
+  "uses 'symlinkJoin'" -- no-custom-derivations
+arm "two builders in one file: the second group is too" m_nocustom_two_builders_one_file 1 \
+  "uses 'writeScriptBin'" -- no-custom-derivations
+arm "offenders in both files: the first file is reported" m_nocustom_in_both_paths 1 \
+  "'nix/packages.nix' uses 'symlinkJoin'" -- no-custom-derivations
+arm "offenders in both files: the second file is too" m_nocustom_in_both_paths 1 \
+  "'nix/env.nix' uses 'runCommand'" -- no-custom-derivations
+arm "the summary states the whole list, not the first fault" m_nocustom_in_both_paths 1 \
+  "2 offending line(s) across 2 of 2 inspected file(s)" -- no-custom-derivations
+
+printf '\nno-custom-derivations: coverage honesty\n'
+# The green already states its vocabulary; it must state its SUBJECTS too. An
+# absence claim is only as wide as the files it opened.
+arm "the green PRINTS the paths it scanned" m_none 0 \
+  "files inspected: 2 (nix/packages.nix nix/env.nix)" -- no-custom-derivations
+# The other half of the measured inversion: a file full of derivations that nothing
+# declared. dlint cannot know it is in scope, so this is a WARNING — but it can
+# refuse to be quiet about it, and the warning NAMES the file.
+arm "an undeclared nix file is named in a warning" m_nocustom_undeclared_nix_file 0 \
+  "never read them: nix/overlays.nix" -- no-custom-derivations
+arm "the warning is a warning, not a refusal" m_nocustom_undeclared_nix_file 0 \
+  "⚠️ no-custom-derivations:" -- no-custom-derivations
+# The warning is about SCOPE, not a scan it did behind the configuration's back:
+# the undeclared file's builder is not reported, because it was never read.
+arm_absent "the warning does not pretend to have read the file" m_nocustom_undeclared_nix_file 0 \
+  "uses 'buildEnv'" -- no-custom-derivations
+# It must stay quiet when there is nothing to say — a warning that fires
+# unconditionally is noise, and noise is how a real one gets ignored.
+arm_absent "no undeclared nix file, no warning" m_none 0 \
+  "are NOT covered by the declared paths" -- no-custom-derivations
+# Declaring the file dlint named turns the silent pass into the refusal it should
+# always have been. This is the arm that closes the loop on the inversion.
+arm "declaring the warned-about file makes it refuse" m_nocustom_undeclared_then_declared 1 \
+  "'nix/overlays.nix' uses 'buildEnv'" -- no-custom-derivations
+arm_absent "and the warning goes quiet once it is declared" m_nocustom_undeclared_then_declared 1 \
+  "are NOT covered by the declared paths" -- no-custom-derivations
+# A declared DIRECTORY stands for every file beneath it, so it covers a file that
+# did not exist when the configuration was written.
+arm "a declared directory covers the files beneath it" m_nocustom_directory_path 1 \
+  "'nix/overlays.nix' uses 'buildEnv'" -- no-custom-derivations
+arm_absent "a declared directory raises no coverage warning" m_nocustom_directory_path 1 \
+  "are NOT covered by the declared paths" -- no-custom-derivations
+# The escape hatch, declared rather than assumed.
+arm_absent "a narrowed 'discover' silences the sweep it was told to skip" m_nocustom_discover_narrowed 0 \
+  "are NOT covered by the declared paths" -- no-custom-derivations
+arm "an empty 'discover' could never notice anything" m_nocustom_discover_empty 4 \
+  "could never notice a nix file it does not read" -- no-custom-derivations
+
 arm "no-custom paths list empty" m_nocustom_paths_empty 4 \
   "must name at least one path" -- no-custom-derivations
 arm "forbid list explicitly empty forbids nothing" m_nocustom_forbid_empty 4 \

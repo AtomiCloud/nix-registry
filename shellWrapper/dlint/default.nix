@@ -18,6 +18,7 @@ trivialBuilders.writeShellApplication {
     bash
     coreutils
     findutils
+    gawk
     git
     gnugrep
     gnused
