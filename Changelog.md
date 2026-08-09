@@ -1,3 +1,10 @@
+## [5.6.0](https://github.com/AtomiCloud/nix-registry/compare/v5.5.0...v5.6.0) (2026-08-09)
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **patch:** make dlint no-custom-derivations comment-aware ([1088bb7](https://github.com/AtomiCloud/nix-registry/commit/1088bb705ffc50665f001b72b3552b9114afad86))
+
 ## [5.5.0](https://github.com/AtomiCloud/nix-registry/compare/v5.4.0...v5.5.0) (2026-08-09)
 
 
