@@ -1,3 +1,15 @@
+## [5.7.0](https://github.com/AtomiCloud/nix-registry/compare/v5.6.0...v5.7.0) (2026-08-09)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **drv:** pin dotnetPackage to the fleet's SDK patch and assert it ([ddd9749](https://github.com/AtomiCloud/nix-registry/commit/ddd974995d29226230d5e6016f3eded0053c1819))
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **minor:** export dotnet ecosystem tools and validator runtime ([febf715](https://github.com/AtomiCloud/nix-registry/commit/febf7153e8ccce89a7ba6bff9d576622102bf531))
+
 ## [5.6.0](https://github.com/AtomiCloud/nix-registry/compare/v5.5.0...v5.6.0) (2026-08-09)
 
 
