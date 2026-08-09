@@ -20,7 +20,8 @@ AtomiCloud's Nix Registry for custom built packages.
 - cyanprint
 - releaser
 - helm-schema
-- dotnetPackage (the .NET SDK the registry's .NET tooling is built against)
+- dotnetPackage (the .NET SDK the registry's .NET tooling is built against, pinned
+  to the patch the fleet's .NET nodes name in their `global.json`)
 
 # Tool bundles
 

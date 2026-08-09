@@ -1,11 +1,11 @@
-{ nixpkgs, nixpkgs-2605, nixpkgs-unstable, fenix }:
+{ nixpkgs, nixpkgs-2605, nixpkgs-dotnet, nixpkgs-unstable, fenix }:
 let trivialBuilders = import ./trivial.nix { inherit nixpkgs; }; in
 let
   # Node.js 22 CLI packages, built the official nixpkgs way via buildNpmPackage.
   node22 = import ./node/22/export.nix { nixpkgs = nixpkgs; nodejs = nixpkgs.nodejs_22; };
   # .NET SDK pin, exported under its own name so the .NET wrappers below and any
   # consuming node name the same SDK instead of each re-stating the version.
-  dotnetSdk = import ./dotnet/default.nix { inherit nixpkgs; };
+  dotnetSdk = import ./dotnet/default.nix { inherit nixpkgs nixpkgs-dotnet; };
 
   # Shell
   shell = (import ./shellWrapper/default.nix {

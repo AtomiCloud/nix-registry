@@ -34,6 +34,7 @@ The following packages are verified in CI with their respective commands:
 | gardenio                    | `garden version`                   | Garden CLI (uses `version` not `--version`)                                   |
 | codecov                     | `codecov --version`                | Codecov CLI                                                                   |
 | dotnetPackage               | `dotnet --version`                 | The .NET SDK pin the wrappers below default to (`dotnet/default.nix`)         |
+| dotnet-pin-contract         | (no execution command)             | Build fails unless `dotnet --version` equals the declared fleet pin           |
 | dotnetlint                  | `dotnetlint --version`             | .NET linting wrapper; `--version` also prints the SDK it resolved             |
 | dn-inspect                  | `dn-inspect --version`             | .NET inspection tool; `--version` also prints the SDK it resolved             |
 | deadcode                    | `deadcode --version`               | Dead code detector                                                            |

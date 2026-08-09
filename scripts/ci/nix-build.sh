@@ -53,6 +53,7 @@ nix shell --max-jobs 1 --cores 2 nixpkgs#bash \
   .#tool-bundle-contract \
   .#codecov \
   .#dotnetPackage \
+  .#dotnet-pin-contract \
   .#dotnetlint \
   .#dn-inspect \
   .#helmlint \
