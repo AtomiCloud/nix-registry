@@ -35,6 +35,7 @@ TO_PUSH=$(nix build \
   .#codecov \
   .#dotnetlint \
   .#helmlint \
+  .#helm-schema \
   --print-out-paths)
 echo "✅ Successfully built all devShells"
 

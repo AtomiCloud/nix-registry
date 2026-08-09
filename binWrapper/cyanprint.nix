@@ -4,6 +4,13 @@ let
   inherit (stdenv.hostPlatform) system;
   throwSystem = throw "Unsupported system: ${system}";
 
+  # No x86_64-darwin entry, deliberately. sulfone.lite does publish a
+  # cyanprint_<version>_darwin_amd64.tar.gz, and the dotnet-base node's hand-written
+  # derivation selected it — but this flake dropped Intel macOS in v3.0.0 and only
+  # instantiates x86_64-linux, aarch64-linux and aarch64-darwin, so a fourth key
+  # here would be a platform this registry can never build and a digest nothing
+  # would ever re-verify. See the eachSystem list in flake.nix, which is where that
+  # decision is recorded; the hoist narrows that one platform on purpose.
   plat = {
     x86_64-linux = "linux_amd64";
     aarch64-linux = "linux_arm64";
@@ -28,6 +35,11 @@ stdenv.mkDerivation (finalAttrs: {
   # gardenio's, so stdenv can't infer a sourceRoot to cd into.
   sourceRoot = ".";
 
+  # Nothing here is compiled: the only inputs are an unpacker and, on Linux, the
+  # libraries autoPatchelfHook writes into the prebuilt binary's RPATH. Splitting
+  # host from build deps keeps that distinction honest rather than incidental.
+  strictDeps = true;
+
   # The upstream Linux binary is dynamically linked and its ELF interpreter
   # points at a Nix-store glibc that is not otherwise in this package's closure,
   # so it fails with "cannot execute: required file not found" on any clean
@@ -51,12 +63,31 @@ stdenv.mkDerivation (finalAttrs: {
   dontStrip = true;
 
   installPhase = ''
-    mkdir -p $out/bin
-    cp cyanprint $out/bin/cyanprint
-    chmod +x $out/bin/cyanprint
+    runHook preInstall
+    install -Dm755 cyanprint "$out/bin/cyanprint"
+    runHook postInstall
   '';
 
-  src = builtins.fetchurl {
+  # The `dontStrip` note above describes a degradation that is SILENT: a stripped
+  # cyanprint still runs, still reports a version, and only fails once a template
+  # is actually rendered. A comment cannot catch a regression; running the binary
+  # can. `--version` printing this exact version is the cheapest assertion that the
+  # Bun payload is still attached, because a bare Bun runtime prints Bun's version
+  # instead. Skipped when the build machine cannot execute the host binary, since a
+  # cross build has nothing to run it with.
+  doInstallCheck = stdenv.buildPlatform.canExecute stdenv.hostPlatform;
+  installCheckPhase = ''
+    runHook preInstallCheck
+    "$out/bin/cyanprint" --version | grep -Fx "cyanprint ${version}"
+    runHook postInstallCheck
+  '';
+
+  # `builtins.fetchurl` downloads at EVALUATION time: the bytes never become a
+  # fixed-output derivation, so they cannot be substituted from the binary cache and
+  # every evaluator needs network access of its own. `fetchurl` is the fetcher the
+  # rest of this registry uses (see mirrord.nix) and takes the same digest, since
+  # both hash the file itself.
+  src = fetchurl {
     url = "https://github.com/AtomiCloud/sulfone.lite/releases/download/v${version}/cyanprint_${version}_${plat}.tar.gz";
     inherit sha256;
   };

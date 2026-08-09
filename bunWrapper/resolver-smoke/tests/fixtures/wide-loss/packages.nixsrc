@@ -1,0 +1,80 @@
+{ atomi, pkgs, pkgs-2605, pkgs-unstable }:
+let
+  acmetoolVersion = "1.4.2";
+  acmetoolSystem = pkgs.stdenv.hostPlatform.system;
+  acmetoolPlatform =
+    ({
+      x86_64-linux = "linux_amd64";
+      aarch64-linux = "linux_arm64";
+      x86_64-darwin = "darwin_amd64";
+      aarch64-darwin = "darwin_arm64";
+    }).${acmetoolSystem};
+  acmetoolHash =
+    ({
+      x86_64-linux = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+      aarch64-linux = "sha256-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=";
+      x86_64-darwin = "sha256-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC=";
+      aarch64-darwin = "sha256-DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD=";
+    }).${acmetoolSystem};
+  acmetool = pkgs.stdenvNoCC.mkDerivation {
+    pname = "acmetool";
+    version = acmetoolVersion;
+    src = pkgs.fetchurl {
+      url = "https://example.invalid/acme/acmetool/v${acmetoolVersion}/acmetool_${acmetoolPlatform}.tar.gz";
+      hash = acmetoolHash;
+    };
+    sourceRoot = ".";
+    strictDeps = true;
+    dontStrip = true;
+    nativeBuildInputs = [ ];
+    buildInputs = [ ];
+    installPhase = ''
+      install -Dm755 acmetool "$out/bin/acmetool"
+    '';
+    doInstallCheck = true;
+    installCheckPhase = ''
+      "$out/bin/acmetool" --version
+    '';
+    meta.mainProgram = "acmetool";
+  };
+  all = rec {
+    acme-base = {
+      acmelint = atomi.acmelint.override { toolPackage = pkgs-2605.go-task; };
+      inherit (pkgs-2605) xmlstarlet;
+    };
+
+    atomipkgs = (
+      with atomi;
+      {
+        inherit
+          acmeutils
+          ;
+      }
+    );
+
+    nix-2605 = (
+      with pkgs-2605;
+      {
+        inherit
+          actionlint
+          git
+          go-task
+          shellcheck
+          treefmt
+          ;
+      }
+    );
+
+    nix-unstable = (
+      with pkgs-unstable;
+      {
+      }
+    );
+
+    root = {
+      inherit acmetool;
+    };
+  };
+in
+with all;
+atomipkgs // nix-2605 // nix-unstable // root // acme-base

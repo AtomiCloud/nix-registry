@@ -29,7 +29,7 @@ The following packages are verified in CI with their respective commands:
 | pls                    | `pls --version`                    | Prettier + ESLint wrapper                                                     |
 | toml-cli               | `toml --version`                   | TOML CLI tool                                                                 |
 | nix-share              | `nix-share`                        | No --version flag available                                                   |
-| cyanprint              | `cyanprint --version`              | AtomiCloud template tool                                                      |
+| cyanprint              | `cyanprint --version`              | AtomiCloud template tool; also asserted at build time by `installCheckPhase`  |
 | worktrunk              | `wt --version`                     | Worktrunk CLI (binary is `wt`)                                                |
 | gardenio               | `garden version`                   | Garden CLI (uses `version` not `--version`)                                   |
 | codecov                | `codecov --version`                | Codecov CLI                                                                   |
@@ -37,6 +37,7 @@ The following packages are verified in CI with their respective commands:
 | dn-inspect             | `dn-inspect --version`             | .NET inspection tool                                                          |
 | deadcode               | `deadcode --version`               | Dead code detector                                                            |
 | helmlint               | `helmlint --version`               | Helm linting wrapper                                                          |
+| helm-schema            | `helm-schema --version`            | helm schema plugin wrapper; ships `bin/helm-schema`, execs `helm schema`      |
 | dlint                  | `dlint --version`                  | Repo-agnostic repository linters                                              |
 | attic                  | `attic --version`                  | Attic binary cache client                                                     |
 | cliproxyapi            | `cli-proxy-api --help`             | Only has --help, no --version                                                 |

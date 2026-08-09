@@ -169,6 +169,42 @@ export interface MaterialInventory {
   withPreludes: Set<string>;
 }
 
+/**
+ * The four kinds the published bundle's loss guard inventories, in the bundle's
+ * own spelling. `identifier` is resolver-smoke's own FIFTH kind and is
+ * deliberately not here: the bundle has no equivalent, so any claim made about
+ * what the bundle withheld has to be made over these four and no others.
+ */
+export const GUARDED_KINDS = ['arg', 'binding', 'inherit', 'with'] as const;
+export type GuardedKind = (typeof GUARDED_KINDS)[number];
+
+export interface MaterialUnit {
+  kind: string;
+  name: string;
+}
+
+export interface GuardedUnit extends MaterialUnit {
+  kind: GuardedKind;
+}
+
+/**
+ * `args`, `bindings`, `inherited` and `withPreludes` below are kept
+ * BYTE-EQUIVALENT to `inventoryMaterial` in vendor/nix.mjs on purpose, down to
+ * the regexes. resolver-smoke claims that every name the published loss guard
+ * withheld is inside the candidate remainder it prints, and that claim is only
+ * true if resolver-smoke inventories the same units the guard does: a kind
+ * resolver-smoke cannot see is a name the bound cannot cover. The `with` regex
+ * in particular accepts a DOTTED path and strips interior whitespace, so
+ * `with pkgs.lib;` is one unit `with:pkgs.lib` rather than nothing at all.
+ *
+ * `identifiers` is the one deliberate addition. The bundle has no equivalent and
+ * does not guard it; resolver-smoke's own material-survival probe uses it to
+ * catch losses the guard permits, and it is excluded from every guarded-kind
+ * computation for exactly that reason.
+ *
+ * A vendor refresh MUST re-check this equivalence — see the vendor-refresh
+ * section of README.md. It is load-bearing now, not cosmetic.
+ */
 export function inventoryMaterial(source: string): MaterialInventory {
   const code = maskNixTrivia(source);
   const header = findFunctionHeader(source);
@@ -193,8 +229,8 @@ export function inventoryMaterial(source: string): MaterialInventory {
       inherited.add(identifier);
     }
   }
-  for (const match of code.matchAll(/\bwith\s+([a-zA-Z_][a-zA-Z0-9_'-]*)\s*;/g)) {
-    withPreludes.add(match[1]);
+  for (const match of code.matchAll(/\bwith\s+([a-zA-Z_][a-zA-Z0-9_'-]*(?:\s*\.\s*[a-zA-Z_][a-zA-Z0-9_'-]*)*)\s*;/g)) {
+    withPreludes.add(match[1].replace(/\s+/g, ''));
   }
   for (const identifier of code.match(/[a-zA-Z_][a-zA-Z0-9_'-]*/g) ?? []) {
     if (!NIX_KEYWORDS.has(identifier)) identifiers.add(identifier);
@@ -208,6 +244,51 @@ export function inventoryMaterial(source: string): MaterialInventory {
   for (const value of withPreludes) units.add(`with:${value}`);
 
   return { units, args, bindings, inherited, identifiers, withPreludes };
+}
+
+/**
+ * The bundle's own ordering, reproduced exactly:
+ *
+ *   lost.sort((a, b) => a.kind === b.kind
+ *     ? a.value.localeCompare(b.value)
+ *     : a.kind.localeCompare(b.kind));
+ *
+ * The published loss guard sorts the whole lost list with this comparator and
+ * only THEN slices the first 24, so every name it withheld sorts strictly after
+ * the last name it disclosed. That single fact is what turns the truncated
+ * message into a provable bound, and it holds only while this comparator matches
+ * the bundle's — `localeCompare` included, which orders `dn-inspect` before
+ * `doInstallCheck` where a code-unit comparison would not.
+ */
+export function compareGuardedUnits(a: MaterialUnit, b: MaterialUnit): number {
+  return a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind.localeCompare(b.kind);
+}
+
+export function guardedUnitKey(unit: MaterialUnit): string {
+  return `${unit.kind}:${unit.name}`;
+}
+
+/** Every guarded unit of one source, in the bundle's order. */
+export function guardedUnitsOf(source: string): GuardedUnit[] {
+  const inventory = inventoryMaterial(source);
+  const units: GuardedUnit[] = [];
+  for (const name of inventory.args) units.push({ kind: 'arg', name });
+  for (const name of inventory.bindings) units.push({ kind: 'binding', name });
+  for (const name of inventory.inherited) units.push({ kind: 'inherit', name });
+  for (const name of inventory.withPreludes) units.push({ kind: 'with', name });
+  return units.sort(compareGuardedUnits);
+}
+
+/** Split a `<kind>:<name>` inventory key back into its parts. */
+export function splitUnitKey(unit: string): MaterialUnit {
+  const separator = unit.indexOf(':');
+  return separator === -1
+    ? { kind: 'identifier', name: unit }
+    : { kind: unit.slice(0, separator), name: unit.slice(separator + 1) };
+}
+
+export function describeMaterialUnit(unit: MaterialUnit): string {
+  return describeUnit(guardedUnitKey(unit));
 }
 
 export function describeUnit(unit: string): string {

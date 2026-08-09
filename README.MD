@@ -19,6 +19,7 @@ AtomiCloud's Nix Registry for custom built packages.
 - aws-export-credentials
 - cyanprint
 - releaser
+- helm-schema
 
 # Tool bundles
 

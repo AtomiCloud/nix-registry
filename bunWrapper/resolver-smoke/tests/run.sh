@@ -20,6 +20,16 @@
 #     file PASSES. They are the guard that the fix stays fixed; the injection
 #     guards below still prove the shape was really applied, so a regression arm
 #     cannot pass by decaying into an unmutated canonical run.
+#   * DISCLOSURE arms (groups K and L) prove that the two truncated lost-material lists
+#     can be escaped, and that escaping them changes nothing else. Both lists
+#     truncate — resolver-smoke's own at 16 names, the published resolver's own
+#     refusal message at 24 — and a specification written against the truncated
+#     output had to guess at its own subject matter and guessed wrong. K3 is the
+#     MUST-DIFFER pair that keeps `--full` from decaying into a no-op, and K12
+#     keeps the new informational line from becoming a finding.
+#     Group L holds the summary line to stating a unit for every count it
+#     prints, after its trailing figure — files SCANNED — was read as the number
+#     of files that had refused.
 #   * REFUSAL arms (groups C, E, H1-H3, H5, H6) prove the gate still fires and
 #     still says why. Under @3 most refusals originate in the resolver itself:
 #     the published bundle wraps every merger in a loss guard that throws rather
@@ -54,6 +64,8 @@
 # sha256 38838467be749d2197180eb87baf0caa4efee150651e346c790e4b96cd7be82e, stored
 # byte-for-byte. A hand-written approximation of the defect is not the defect.
 #
+# The battery is 116 arms across twelve groups (A-L).
+#
 # Usage:
 #   ./run.sh                                     # tests `bun <pkg>/index.ts`
 #   RESOLVER_SMOKE=/path/to/resolver-smoke ./run.sh
@@ -80,10 +92,26 @@ PKG_DIR="$(dirname "${HERE}")"
 FIXTURES="${HERE}/fixtures"
 CANON_SRC="${FIXTURES}/canonical"
 COLLAPSE_SRC="${FIXTURES}/collapse/packages.nixsrc"
+WIDE_LOSS_SRC="${FIXTURES}/wide-loss/packages.nixsrc"
 
 # The exact pre-fix workspace bytes. Re-asserted on every use.
 COLLAPSE_BYTES=344
 COLLAPSE_SHA=38838467be749d2197180eb87baf0caa4efee150651e346c790e4b96cd7be82e
+
+# The wide-loss fixture (group K). Its bytes decide WHICH names land inside the
+# published guard's 24-name disclosure and which fall past it, so the K arms
+# assert exact unit names and the digest is re-asserted on every use exactly as
+# the collapse fixture's is. A formatter that reflowed it would move the cap
+# boundary and every K assertion with it.
+WIDE_LOSS_BYTES=1935
+WIDE_LOSS_SHA=29ce027719ddac3eadb1d09e5b3a25f0f325b2d18ffb81edefacbf99be333896
+
+# One guarded unit of the wide-loss fixture's inputs that sorts PAST the
+# published guard's cap, so it can appear only in `--full`'s candidate remainder.
+# K3 asserts it absent from default output and present under `--full`; that pair
+# is the whole proof the flag is not a no-op.
+# shellcheck disable=SC2016
+BEYOND_THE_CAP="prelude 'with all;'"
 
 # The published merger's own reason for refusing a packages.nix it cannot model,
 # asserted by the collapse arms (C) and the non-rec arm (H1). Written once so the
@@ -106,6 +134,7 @@ command -v "${SMOKE_CMD[0]}" >/dev/null 2>&1 ||
   die "'${SMOKE_CMD[0]}' is not on PATH (RESOLVER_SMOKE=${RESOLVER_SMOKE})"
 [ -d "${CANON_SRC}" ] || die "canonical fixture sources missing at ${CANON_SRC}"
 [ -f "${COLLAPSE_SRC}" ] || die "collapse fixture missing at ${COLLAPSE_SRC}"
+[ -f "${WIDE_LOSS_SRC}" ] || die "wide-loss fixture missing at ${WIDE_LOSS_SRC}"
 
 HARNESS_TMP_BASE="$(cd "${TMPDIR:-/tmp}" && pwd -P)" ||
   die "could not resolve temporary-directory base ${TMPDIR:-/tmp}"
@@ -174,6 +203,80 @@ expect_absent() {
     why="output contained '${forbidden}', which it must not"
   fi
   record "${name}" "${ok}" "${why}"
+}
+
+expect_count() {
+  local name="$1" want_rc="$2" literal="$3" want_n="$4"
+  local ok=1 why="" got
+  got="$(printf '%s\n' "${RUN_OUT}" | grep -cF -- "${literal}")"
+  if [ "${RUN_RC}" -ne "${want_rc}" ]; then
+    ok=0
+    why="exit ${RUN_RC}, wanted ${want_rc}"
+  elif [ "${got}" -ne "${want_n}" ]; then
+    ok=0
+    why="'${literal}' appeared ${got} time(s), wanted ${want_n}"
+  fi
+  record "${name}" "${ok}" "${why}"
+}
+
+# arm_block <marker> — the loss-detail block belonging to ONE arm: the `ℹ️` line
+# containing <marker> plus its indented continuation and unit lines, stopping at
+# the next line that starts in column 1 (the next `❌` finding or summary).
+#
+# Needed because the disclosure blocks are separate lines, so a whole-output
+# `grep` cannot tell `child-contributed — 0 unit(s)` on the single-input arm apart
+# from `— 2 unit(s)` on the two-input arms. An arm-blind assertion would have
+# passed with the two blocks swapped, which is precisely the arithmetic K5 exists
+# to pin down.
+arm_block() {
+  printf '%s\n' "${RUN_OUT}" | awk -v marker="$1" '
+    index($0, marker) { inside = 1; print; next }
+    inside && /^[^ ]/ { inside = 0 }
+    inside { print }
+  '
+}
+
+expect_block() {
+  local name="$1" want_rc="$2" marker="$3" want_text="$4"
+  local ok=1 why="" block
+  block="$(arm_block "${marker}")"
+  if [ "${RUN_RC}" -ne "${want_rc}" ]; then
+    ok=0
+    why="exit ${RUN_RC}, wanted ${want_rc}"
+  elif [ -z "${block}" ]; then
+    ok=0
+    why="no loss-detail block for '${marker}'"
+  elif ! printf '%s' "${block}" | grep -qF -- "${want_text}"; then
+    ok=0
+    why="the '${marker}' block did not contain '${want_text}'"
+  fi
+  record "${name}" "${ok}" "${why}"
+}
+
+# A JSON parser for the `--json` arms. Deliberately not hand-rolled: a shell
+# counter that tallied braces inside `findings` would agree with a malformed
+# report as readily as a well-formed one, and "stdout parses as JSON" is half of
+# what K6 asserts. `bun` is not assumed — RESOLVER_SMOKE may be a packaged binary
+# on a host that has no bun — so the parser is discovered, and its absence is
+# announced rather than passed over, exactly as the D group announces an absent
+# bundle.
+JSON_PARSER=""
+for candidate in jq bun node; do
+  if command -v "${candidate}" >/dev/null 2>&1; then
+    JSON_PARSER="${candidate}"
+    break
+  fi
+done
+
+# json_findings_len <json-text> — prints the length of `.findings`, or nothing
+# when the text does not parse.
+json_findings_len() {
+  case "${JSON_PARSER}" in
+  jq) printf '%s' "$1" | jq -e '.findings | length' 2>/dev/null ;;
+  bun) printf '%s' "$1" | bun -e 'console.log(JSON.parse(await Bun.stdin.text()).findings.length)' 2>/dev/null ;;
+  node) printf '%s' "$1" |
+    node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).findings.length))' 2>/dev/null ;;
+  esac
 }
 
 group() { printf '\n== %s\n' "$1"; }
@@ -283,6 +386,19 @@ collapse_into() {
     die "collapse fixture sha256 is ${got_sha}, expected ${COLLAPSE_SHA} — these are no longer the pre-fix bytes"
   mkdir -p "${dir}/nix"
   cp "${COLLAPSE_SRC}" "${dir}/nix/packages.nix" || die 'could not place the collapse fixture'
+}
+
+# wide_loss_into <repo> — drop the wide-loss bytes onto nix/packages.nix
+wide_loss_into() {
+  local dir="$1" got_bytes got_sha
+  got_bytes="$(wc -c <"${WIDE_LOSS_SRC}" | tr -d ' ')"
+  got_sha="$(sha_of "${WIDE_LOSS_SRC}")"
+  [ "${got_bytes}" = "${WIDE_LOSS_BYTES}" ] ||
+    die "wide-loss fixture is ${got_bytes} bytes, expected ${WIDE_LOSS_BYTES} — a formatter has rewritten it"
+  [ "${got_sha}" = "${WIDE_LOSS_SHA}" ] ||
+    die "wide-loss fixture sha256 is ${got_sha}, expected ${WIDE_LOSS_SHA} — the cap boundary the K arms assert has moved"
+  mkdir -p "${dir}/nix"
+  cp "${WIDE_LOSS_SRC}" "${dir}/nix/packages.nix" || die 'could not place the wide-loss fixture'
 }
 
 # guard_contains <file> <literal> — a mutation may never decay into a no-op
@@ -780,6 +896,140 @@ guard_contains "${I6}/nix/pre-commit.nix" '    shellcheck = {'
 guard_contains "${I6}/nix/pre-commit.nix" '      enable = false;'
 run_in "${I6}" "${SMOKE_CMD[@]}"
 expect 'I6 a single-key nested hook may be re-rendered as a dotted binding' 0 '6 resolver-managed file(s) passed'
+
+# ---------------------------------------------------------------------------
+group 'K. COMPLETE-LIST MODE — the truncation is now escapable'
+# ---------------------------------------------------------------------------
+#
+# resolver-smoke reports lost material in TWO lists and both truncate: its own
+# `[<arm>/material-survival]` finding at 16 names, and the published resolver's
+# own refusal message at 24. A hoist specification written against this tool had
+# to reconstruct part of its own subject matter by inferring the sort order out
+# of the truncated list, and got the reconstruction wrong — it reasoned only over
+# bindings, missed three lost `inherit` units, and floated an "occurrences"
+# reading of a count that is DISTINCT (kind, name) units. That is the defect this
+# group guards.
+#
+# The two halves are not symmetric and the arms say which is which:
+#
+#   * resolver-smoke's own 16-name cap is presentation only. `--full` and `--json`
+#     print the whole list, because resolver-smoke holds it.
+#   * the published 24-name cap belongs to `assertNoLoss` in vendor/nix.mjs, which
+#     THROWS instead of returning the merged output. The withheld names cannot be
+#     recovered from outside the bundle, so what `--full` adds is the complete
+#     disclosed set, the arm's synthetic-child contribution and a candidate
+#     remainder that is an upper BOUND — K4's label says `upper bound` for that
+#     reason and no arm here asserts the bound is tight.
+#
+# The fixture is acme-shaped, never diene-shaped: arm 1's whole point is that no
+# workspace constant is baked into resolver-smoke, and a group that reintroduced
+# one through its own fixture would undo it. It reproduces the real subject's
+# SHAPE — a `stdenvNoCC.mkDerivation` bound in the top-level `let`, two per-system
+# attrsets selected by `.${system}`, and a `root = { inherit ...; }` exposure
+# attrset — because that shape is what carries a packages.nix past 24 lost names.
+
+K="$(materialize wide-loss)"
+wide_loss_into "${K}"
+guard_contains "${K}/nix/packages.nix" 'all = rec {'
+guard_contains "${K}/nix/packages.nix" 'pkgs.stdenvNoCC.mkDerivation'
+# shellcheck disable=SC2016 # a literal Nix interpolation in the fixture, not a shell expansion
+# shellcheck disable=SC2016 # a literal Nix interpolation in the fixture, not a shell expansion
+guard_contains "${K}/nix/packages.nix" '}).${acmetoolSystem};'
+guard_contains "${K}/nix/packages.nix" '      inherit acmetool;'
+
+run_in "${K}" "${SMOKE_CMD[@]}"
+expect 'K1 the wide-loss shape is a violation naming the file' 1 'nix/packages.nix'
+expect 'K1b the refusal is relayed as a published-merger refusal' 1 'published resolver refused well-formed probe input'
+# shellcheck disable=SC2016
+expect 'K1c and the published list really is TRUNCATED' 1 ', plus 6 more'
+expect 'K2 default mode still states the loss arithmetic' 1 'nix/packages.nix [self-probe/loss-detail]'
+expect 'K2b and it settles the counting semantics in the same line' 1 'not occurrences'
+expect_absent "K3 MUST-DIFFER (default): ${BEYOND_THE_CAP} is NOT disclosed by default" 1 "${BEYOND_THE_CAP}"
+
+run_in "${K}" "${SMOKE_CMD[@]}" --full
+expect "K3b MUST-DIFFER (--full): the same unit IS disclosed — the flag is not a no-op" 1 "${BEYOND_THE_CAP}"
+expect 'K4 --full prints the candidate remainder as a counted UPPER BOUND' 1 'candidate (upper bound) — 16 unit(s)'
+expect 'K4b and it labels the disclosed set with its own count' 1 'disclosed — 24 unit(s)'
+expect_block 'K5 the single-input arm contributes no synthetic-child material' 1 \
+  '[self-probe/loss-detail]' 'child-contributed — 0 unit(s)'
+expect_block 'K5b MUST-DIFFER: the two-input arm contributes exactly 2 units' 1 \
+  '[synthetic-child/loss-detail]' 'child-contributed — 2 unit(s)'
+expect 'K12 the refusal count is UNCHANGED by --full — the ℹ️ line is not a finding' 1 '3 refusal(s)'
+run_in "${K}" "${SMOKE_CMD[@]}"
+expect 'K12b and default mode reports the same count' 1 '3 refusal(s)'
+
+run_in "${K}" "${SMOKE_CMD[@]}" --json
+expect 'K6 --json still follows the subject, not the flag' 1 ''
+if [ -z "${JSON_PARSER}" ]; then
+  printf '  ⏭️ K6b NOT RUN: no jq, bun or node on PATH, so the report was not parsed.\n'
+  # shellcheck disable=SC2016 # backticks are markdown in the notice, not a substitution
+  printf '     `--json` well-formedness is UNEXERCISED by this run.\n'
+else
+  K6_LEN="$(json_findings_len "${RUN_OUT}")"
+  RUN_OUT="findings length ${K6_LEN:-<did not parse>} (parser ${JSON_PARSER}); human mode reported 3 refusal(s)"
+  RUN_RC=$([ "${K6_LEN:-}" = "3" ] && echo 0 || echo 1)
+  expect 'K6b stdout parses as JSON and its findings agree with the human refusal count' 0 ''
+  run_in "${K}" "${SMOKE_CMD[@]}" --json
+fi
+expect_absent 'K7 --json emits no refusal line' 1 '❌'
+expect_absent 'K7b --json emits no pass line' 1 '✅'
+expect_absent 'K7c --json emits no informational line' 1 'ℹ️'
+
+KJ="$(materialize json-canonical)"
+run_in "${KJ}" "${SMOKE_CMD[@]}" --json
+expect 'K8 --json on the canonical fixture is still green' 0 '"exitCode": 0'
+expect_count 'K8b and reports every one of the six files passing' 0 '"passed": true' 6
+
+run_in "${K}" "${SMOKE_CMD[@]}" --full --json
+expect 'K9 --full and --json together are accepted, exit follows the subject' 1 '"tool": "resolver-smoke"'
+run_in "${KJ}" "${SMOKE_CMD[@]}" --json --full
+expect 'K9b and in either order' 0 '"exitCode": 0'
+
+KC="$(materialize_empty full-with-config)"
+config_body_for elsewhere.yaml >"${TMPROOT}/k-config.yaml"
+run_in "${KC}" "${SMOKE_CMD[@]}" --full --config "${TMPROOT}/k-config.yaml"
+expect 'K9c --full combines with --config <path>' 0 ''
+run_in "${KC}" "${SMOKE_CMD[@]}" "--config=${TMPROOT}/k-config.yaml" --full
+expect 'K9d and with --config=<path> in either position' 0 ''
+
+run_in "${K}" "${SMOKE_CMD[@]}" --help
+expect 'K10 --help names --full' 0 '--full'
+expect 'K10b --help names --json' 0 '--json'
+expect 'K10c and --help says the DEFAULT is truncated, naming both caps' 0 'the lost-material list is TRUNCATED'
+expect 'K10d and states the count semantics there too' 0 'never occurrences'
+
+run_in "${K}" "${SMOKE_CMD[@]}" --verbose
+expect 'K11 a plausible-but-wrong flag still exits 2' 2 ''
+expect_absent 'K11b and does not fall through to a run' 2 'resolver probe passed'
+
+# ---------------------------------------------------------------------------
+group 'L. SUMMARY UNITS — three counts, three units, never one number twice'
+# ---------------------------------------------------------------------------
+#
+# The summary line used to read `N refusal(s) across M resolver-managed file(s)`
+# where M was the number of files SCANNED. On a run that refused 2 of 6 files it
+# said "6 refusals across 6 resolver-managed files", which reads as though the
+# whole tree had refused — and a reader came close to quoting that fraction. The
+# refusal count, the refusing-file count and the scanned-file count are three
+# different numbers, so each one now says what it counts.
+#
+# The wide-loss tree is the arm that can prove it: 3 refusals, 1 refusing file, 6
+# files scanned. All three figures differ, so an assertion cannot pass by picking
+# up the wrong one — which is exactly why the defect survived until now, since on
+# a single-file subject every reading of the old line agreed.
+
+run_in "${K}" "${SMOKE_CMD[@]}"
+expect 'L1 the summary names the refusal count with its unit' 1 '3 refusal(s)'
+expect 'L2 and the refusing-file count as its own figure' 1 '1 refusing file(s)'
+expect 'L3 and the scanned-file count as a third, separate figure' 1 '6 resolver-managed file(s) scanned'
+expect_absent 'L4 MUST-DIFFER: the old shape, which used the scanned count as the denominator, is gone' 1 \
+  '3 refusal(s) across 6 resolver-managed file(s)'
+
+run_in "${K}" "${SMOKE_CMD[@]}" --json
+expect 'L5 --json names the refusal count' 1 '"refusals": 3'
+expect 'L5b --json names the refusing-file count separately' 1 '"refusingFiles": 1'
+expect 'L5c --json names the scanned-file count separately' 1 '"scannedFiles": 6'
+expect 'L5d --json names the passing-file count too, so the three reconcile' 1 '"passedFiles": 5'
 
 # ---------------------------------------------------------------------------
 group 'J. RE-ASSERTED BASELINE AND BUDGET'

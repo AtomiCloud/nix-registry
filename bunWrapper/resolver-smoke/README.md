@@ -48,12 +48,115 @@ inspect nothing refuses rather than reporting green; see `requireSubjects` below
 ```text
 resolver-smoke                    # probe every dispatch-table file present in this repo
 resolver-smoke --config <path>    # read configuration from an explicit path
+resolver-smoke --full             # print every lost unit and every disclosure block
+resolver-smoke --json             # emit one machine-readable report, no human lines
 resolver-smoke --help
 resolver-smoke --version
 ```
 
 There are no subcommands. `resolver-smoke` is run from the repository root and reads every
-path relative to it.
+path relative to it. `--full` and `--json` are accepted in any order, alone or together, and
+combine freely with `--config`. `--json` implies `--full` detail — a machine-readable report
+that truncated its own lists would be the defect the mode exists to remove — and suppresses
+every `✅`, `❌` and `ℹ️` line so stdout is one JSON document. Exit codes are identical in
+every mode; the flags change what is printed and nothing else.
+
+**The default is TRUNCATED**, and that is deliberate: a pre-push gate whose refusal is forty
+lines long gets skimmed. But a truncated list cannot serve as a **specification**, and on
+2026-08-09 one tried to. A hoist specification written against this tool
+(`diene/.ratchet-ops/handoffs/HOIST-SPEC-dotnet-base-cyanprint.md` §4) had to reconstruct part
+of its own subject matter by inferring the published resolver's sort order from the names it
+could see, and got the reconstruction wrong: it guessed "5 distinct names", reasoned only over
+bindings, and so missed the three lost `inherit` units entirely. If you are writing anything
+that has to be **complete**, use `--full` or `--json`.
+
+### The two caps, and which disclosure is a bound
+
+Lost material is reported by two different lists, with two different caps, and only one of
+them is resolver-smoke's:
+
+| Cap    | Whose it is                                                        | Escapable from here?                                           |
+| ------ | ------------------------------------------------------------------ | -------------------------------------------------------------- |
+| **16** | resolver-smoke's own `[<arm>/material-survival]` finding           | **Yes** — `--full` / `--json` print the whole list.            |
+| **24** | `assertNoLoss` in the published bundle, relayed by `[<arm>/merge]` | **No.** See below; `assertNoLoss` is the only possible source. |
+
+The 24 cannot be widened from here because of _how_ the guard refuses: `assertNoLoss` computes
+the merged output, sorts the complete lost list, slices the first 24 names into a message, and
+then **throws instead of returning the output**. The merged output is the only thing that could
+say which names sit past the cap, and the throw discards it. The bundle exports exactly one
+symbol (`resolver`), which `src/vendor.ts` asserts, so there is nowhere else to look. The
+withheld names are therefore not recoverable by any honest means, and resolver-smoke does not
+re-implement the mergers, mutate the subject to slide the disclosure window, or patch the
+vendored module to pretend otherwise. A wider disclosure has exactly one home: `assertNoLoss`
+in the published bundle.
+
+What `--full` and `--json` do deliver, completely, is four blocks per refusing arm:
+
+| Block                     | What it is                                                                                                                                              |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| the `ℹ️` counts line      | disclosed / withheld / total for this arm, and the counting semantics. Printed in **every** mode, including the default.                                |
+| `disclosed`               | every unit the published message named, parsed back into `(kind, name)` pairs. Exact, complete, all 24.                                                 |
+| `child-contributed`       | the guarded units resolver-smoke's own synthetic child brings that the real file does not have. Exact — resolver-smoke generated those bytes.           |
+| `candidate (upper bound)` | **a bound, not a result.** Every guarded unit of this arm's inputs that sorts strictly after the last disclosed unit under the bundle's own comparator. |
+
+The bound is sound because the guard sorts before it slices: every withheld name provably sits
+inside that set. It is not tight, because it also contains units that survived the merge — that
+is exactly what resolver-smoke cannot see. When the bound's size equals the withheld count the
+remainder **is** determined and the output says so in as many words
+(`remainder DETERMINED: the withheld names are exactly the N candidate(s) above`); until then
+it is labelled `upper bound` on every line it appears.
+
+### Counting semantics — settled, not open
+
+A count of lost material is **DISTINCT `(kind, name)` units, deduplicated across every probe
+input of the arm. It is never a count of occurrences.** This is not an interpretation; it is
+what the bundle does, and there are two pieces of evidence in `vendor/nix.mjs`:
+
+- `check()` keys its `seen` set on `` `${kind}:${value}` `` **before** pushing, so a name lost
+  from two attrsets counts **once** — and a name lost as both a binding and an inherited
+  identifier counts **twice**, because the kinds differ;
+- `lostUnits` iterates `for (const input of inputs)`, so on a two-input arm the **synthetic
+  child's own material is inventoried too**. The child is not a passive second layer.
+
+The observation that settled it was measured on 2026-08-09 against
+`diene.all@88418396:nix/packages.nix`, by running the vendored mergers with the loss guard
+removed in a throwaway scratch copy and inventorying the real merged output:
+
+| arm                   | inputs | distinct lost units | disclosed | withheld |
+| --------------------- | ------ | ------------------- | --------- | -------- |
+| `self-probe`          | 1      | **32**              | 24        | **8**    |
+| `synthetic-child`     | 2      | **34**              | 24        | **10**   |
+| `input-order-control` | 2      | **34**              | 24        | **10**   |
+
+The 8 → 10 difference is the synthetic child contributing exactly **2** units of its own —
+`inherited identifier 'pkgs-2605'` and the sentinel. `injectPackages` splices the sentinel
+directly after the first `inherit` keyword, which detaches `(pkgs-2605)` from its
+inherit-source position, so the child inventories `pkgs-2605` as an inherited identifier where
+the real file does not. `--full` prints that contribution per arm, which is why the per-arm
+residual delta is now readable rather than something to be guessed at.
+
+### Every count in the summary states its unit
+
+The same class of defect had one more instance, in the closing line rather than in the lists.
+It used to read:
+
+```text
+❌ resolver-smoke: 6 refusal(s) across 6 resolver-managed file(s) in 70ms
+```
+
+The trailing number was the count of files **scanned**, not the count of files that refused —
+which on that run was **2**. Read naturally the line claims the whole tree refused, and a reader
+came close to quoting that fraction. A refusal count, a refusing-file count and a scanned-file
+count are three different numbers, and on a single-file subject all three agree, which is how the
+ambiguity survived. It now reads:
+
+```text
+❌ resolver-smoke: 6 refusal(s) across 2 refusing file(s) of 6 resolver-managed file(s) scanned, in 70ms
+```
+
+`--json`'s `summary` carries the same three as separately named keys — `refusals`,
+`refusingFiles`, `scannedFiles` — plus `passedFiles`, so the figures reconcile rather than having
+to be trusted. Group `L` holds the line to it against a tree where all three counts differ.
 
 ## Configuration
 
@@ -156,6 +259,22 @@ Do not hand-edit `vendor/SHA256` to match whatever is on disk. That turns the gu
 rubber stamp, and the tool's only claim — that it ran _the published_ merger — stops being
 true.
 
+A refresh must also **re-check two things that are now load-bearing**, because the
+complete-list mode makes claims about the bundle's internals rather than only relaying its
+output:
+
+1. **The 24-name cap in `assertNoLoss`.** `PUBLISHED_DISCLOSURE_CAP` in `src/loss.ts` is the
+   number resolver-smoke reports and documents. If the published guard changes it — or changes
+   the message wording the parser bounds the unit list with — the loss detail must be
+   re-derived, not adjusted to fit.
+2. **The guarded-kind equivalence with `inventoryMaterial`.** `args`, `bindings`, `inherited`
+   and `withPreludes` in `src/probes/material.ts` are kept byte-equivalent to the bundle's
+   `inventoryMaterial`, regexes included. The candidate remainder is only a sound bound while
+   that holds: a kind resolver-smoke cannot see is a withheld name the bound cannot cover.
+
+Neither is checked automatically, because a check that read the bundle's source to confirm what
+the bundle does would pass on a bundle that had stopped doing it.
+
 ## Tests
 
 Every probe is proved by **injection**, not by being green. The fixtures live in
@@ -164,12 +283,13 @@ inputs whose exact bytes the assertions depend on, and `nixpkgs-fmt` normalises 
 file in this tree. The extension keeps them out of the formatter's reach without needing an
 exclusion, which is why nothing in `nix/fmt.nix` had to change.
 
-| Fixture                                   | Provenance                                                                                                                                                                                                                                                    |
-| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tests/fixtures/canonical/**`             | The canonical shape a cyanprint template is expected to have — `flake.nixsrc` plus the five `nix/*.nixsrc`. Every probe must pass on these.                                                                                                                   |
-| `tests/fixtures/collapse/packages.nixsrc` | The **exact** defect shape, copied verbatim from the diene workspace's pre-fix `nix/packages.nix` on 2026-08-09: a function whose body is a `//` chain of several `with`-scoped sets. This must **fail**, and the refusal must carry the merger's own reason. |
+| Fixture                                    | Provenance                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/fixtures/canonical/**`              | The canonical shape a cyanprint template is expected to have — `flake.nixsrc` plus the five `nix/*.nixsrc`. Every probe must pass on these.                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `tests/fixtures/collapse/packages.nixsrc`  | The **exact** defect shape, copied verbatim from the diene workspace's pre-fix `nix/packages.nix` on 2026-08-09: a function whose body is a `//` chain of several `with`-scoped sets. This must **fail**, and the refusal must carry the merger's own reason.                                                                                                                                                                                                                                                                                                                                     |
+| `tests/fixtures/wide-loss/packages.nixsrc` | Purpose-built for group `K`, and **acme-shaped on purpose** — arm `1`'s whole point is that no workspace constant is baked in, and a fixture that reintroduced one would undo it. It reproduces the real subject's _shape_ (a `stdenvNoCC.mkDerivation` in the top-level `let`, two per-system attrsets selected by `.${system}`, a `root = { inherit …; }` exposure attrset), which is what carries a `packages.nix` past the published guard's 24-name cap. Its byte length and sha256 are re-asserted on every use: those bytes decide which names land inside the cap and which fall past it. |
 
-The battery is **78 arms across ten groups**, and every arm declares which of two directions
+The battery is **116 arms across twelve groups**, and every arm declares which of two directions
 it proves. The distinction matters because the vendored bundle fixed several of the defects
 the battery was originally written against, and an arm that quietly changed direction without
 saying so would look like coverage while proving the opposite of what its name claims.
@@ -186,6 +306,8 @@ saying so would look like coverage while proving the opposite of what its name c
 | `H`   | mixed      | Alien constructs the published merger refuses (`H1`–`H3`, `H5`, `H6`), each asserting the relayed reason; plus `H4`, a regression arm for the formatter option `@2` dropped and `@3` preserves.                                                                                       |
 | `I`   | positive   | Comments, blank lines, trailing whitespace and a partial subject set are all benign. A gate that fires on a comment blocks every commit.                                                                                                                                              |
 | `J`   | positive   | The canonical baseline is re-asserted after the whole mutation battery, and the run is inside its 3s budget.                                                                                                                                                                          |
+| `K`   | disclosure | Both truncated lost-material lists can be escaped with `--full` / `--json`, and escaping them changes nothing else. `K3` is a MUST-DIFFER pair, so the flag cannot decay into a no-op; `K12` holds the new `ℹ️` line to being informational rather than a refusal.                    |
+| `L`   | disclosure | Every count in the summary line states its unit. The wide-loss tree refuses 3 times in 1 file out of 6 scanned, so all three figures differ and an assertion cannot pass by picking up the wrong one. `L4` is the MUST-DIFFER arm holding the old, ambiguous shape out of the output. |
 
 A **regression** arm still injects its shape and still runs the injection guards, so it cannot
 pass by decaying into an unmutated canonical run. A **refusal** arm asserts the refusal TEXT and
