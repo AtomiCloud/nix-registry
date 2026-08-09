@@ -42,7 +42,20 @@ function selectedVendorPath(): string {
   return isAbsolute(override) ? override : resolve(process.cwd(), override);
 }
 
-export async function loadPublishedResolver(): Promise<PublishedResolver> {
+/**
+ * The verified bundle, together with the path and digest the verification
+ * actually used. `--json` reports the digest, and it is threaded out of the read
+ * that already happened here rather than re-read in `run.ts`: a second read would
+ * be a second place the constant is written, and the one the report quoted could
+ * then differ from the one the integrity check compared.
+ */
+export interface LoadedResolver {
+  resolver: PublishedResolver;
+  path: string;
+  sha256: string;
+}
+
+export async function loadPublishedResolver(): Promise<LoadedResolver> {
   const expected = readRecordedDigest();
   const vendorPath = selectedVendorPath();
 
@@ -72,5 +85,5 @@ export async function loadPublishedResolver(): Promise<PublishedResolver> {
       `hash-verified vendored resolver '${vendorPath}' has unexpected exports [${exports.join(', ')}]; expected exactly [resolver]`,
     );
   }
-  return module.resolver as PublishedResolver;
+  return { resolver: module.resolver as PublishedResolver, path: vendorPath, sha256: actual };
 }
