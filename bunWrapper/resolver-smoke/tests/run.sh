@@ -483,7 +483,7 @@ group 'D. VENDOR INTEGRITY — a corrupted bundle is exit 4, never a pass'
 
 VENDOR_DIR="${PKG_DIR}/vendor"
 VENDOR_SHA_FILE="${VENDOR_DIR}/SHA256"
-VENDOR_BUNDLE="${VENDOR_DIR}/nix-v2.mjs"
+VENDOR_BUNDLE="${VENDOR_DIR}/nix.mjs"
 
 if [ ! -f "${VENDOR_BUNDLE}" ] || [ ! -f "${VENDOR_SHA_FILE}" ]; then
   printf '  ⏭️ D1-D4 NOT RUN: %s does not yet hold a bundle and a SHA256 file.\n' "${VENDOR_DIR}"

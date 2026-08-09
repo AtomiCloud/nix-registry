@@ -97,7 +97,7 @@ more serious answer than "the repository is wrong".
 
 ## The vendored resolver
 
-The published `atomi/nix@2` bundle is **vendored** at `vendor/nix-v2.mjs`. It is the bundle
+The published `atomi/nix@3` bundle is **vendored** at `vendor/nix.mjs`. It is the bundle
 as re-downloaded from the CyanPrint registry on 2026-08-09, and it is committed rather than
 fetched so that the check is **hermetic**: `resolver-smoke` reaches the network at no point,
 which is what lets it run as a pre-push gate on a machine that may be offline.
@@ -105,8 +105,8 @@ which is what lets it run as a pre-push gate on a machine that may be offline.
 Its exact provenance is:
 
 - registry metadata: `https://registry.cyanprint.dev/artifacts/resolver/atomi/nix/versions`;
-- artifact: `resolver__atomi__nix__2`, published `2026-08-09T07:44:03.519Z`;
-- bundle object: `resolver/atomi/nix/184b3aed-fce7-4587-b96c-55fd69ea51b8/bundle/bundle.js`.
+- artifact: `resolver__atomi__nix__3`, published `2026-08-09T10:55:18.053Z`;
+- bundle object: `resolver/atomi/nix/96da38b1-e0e9-4c9a-ac2e-016ecabc9289/bundle/bundle.js`.
 
 The metadata endpoint returns the bundle's object reference. To reproduce the download,
 POST that `object` as `{ "ref": <object> }` to
@@ -125,10 +125,10 @@ written. It is asserted twice, at two different moments:
 Neither assertion is redundant. Verify it yourself at any time:
 
 ```console
-$ sha256sum bunWrapper/resolver-smoke/vendor/nix-v2.mjs
-73dd848c49cf1ab1894fbb1f455ce066896cc1dfa39a42865926ea6f8c8182dd  bunWrapper/resolver-smoke/vendor/nix-v2.mjs
+$ sha256sum bunWrapper/resolver-smoke/vendor/nix.mjs
+14ebea789a5e6199992ef197f2ae9e3b4db8a33ceb3be6ee5659b4725ed6680d  bunWrapper/resolver-smoke/vendor/nix.mjs
 $ cat bunWrapper/resolver-smoke/vendor/SHA256
-73dd848c49cf1ab1894fbb1f455ce066896cc1dfa39a42865926ea6f8c8182dd
+14ebea789a5e6199992ef197f2ae9e3b4db8a33ceb3be6ee5659b4725ed6680d
 ```
 
 The digest above is a transcript, not a second copy of the constant: `vendor/SHA256` is
@@ -147,7 +147,7 @@ repository root, pass the published bundle you downloaded from the registry (or 
 the refresh script:
 
 ```bash
-./bunWrapper/resolver-smoke/scripts/refresh-vendor.sh <published-nix-v2-bundle-path-or-url>
+./bunWrapper/resolver-smoke/scripts/refresh-vendor.sh <published-nix-bundle-path-or-url>
 nix build path:.#resolver-smoke
 ./bunWrapper/resolver-smoke/tests/run.sh
 ```

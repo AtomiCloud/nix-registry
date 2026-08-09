@@ -32,7 +32,7 @@ in
   installCheckPhase = ''
     runHook preInstallCheck
 
-    bundle="$out/lib/resolver-smoke/vendor/nix-v2.mjs"
+    bundle="$out/lib/resolver-smoke/vendor/nix.mjs"
     record="$out/lib/resolver-smoke/vendor/SHA256"
 
     if [ ! -f "$bundle" ]; then
@@ -41,7 +41,7 @@ in
       echo "The check is hermetic only because the published atomi/nix@2 bundle" >&2
       echo "travels inside the derivation. Without it there is nothing to run the" >&2
       echo "probes against, and the tool would have to fetch a resolver at hook" >&2
-      echo "time. Restore vendor/nix-v2.mjs; do not make the bundle optional." >&2
+      echo "time. Restore vendor/nix.mjs; do not make the bundle optional." >&2
       exit 1
     fi
 
@@ -71,7 +71,7 @@ in
       echo "ERROR: vendor/SHA256 does not hold a sha256 digest." >&2
       echo "  read: '$expected'" >&2
       echo "It must be the 64 lowercase hex characters sha256sum prints for" >&2
-      echo "vendor/nix-v2.mjs, optionally followed by the file name." >&2
+      echo "vendor/nix.mjs, optionally followed by the file name." >&2
       exit 1
     fi
 
@@ -80,7 +80,7 @@ in
     if [ "$actual" != "$expected" ]; then
       echo "ERROR: the vendored atomi/nix@2 merger is not the bytes resolver-smoke recorded." >&2
       echo "  recorded (vendor/SHA256):     $expected" >&2
-      echo "  built    (vendor/nix-v2.mjs): $actual" >&2
+      echo "  built    (vendor/nix.mjs): $actual" >&2
       echo >&2
       echo "resolver-smoke proves a repository is resolver-friendly by RUNNING the" >&2
       echo "published merger over it. If the bundle is not the published bytes," >&2
