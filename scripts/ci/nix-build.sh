@@ -15,6 +15,12 @@ set -eou pipefail
 # the 16GB runner. Once the Namespace /nix cache is warm this run is ~1 min
 # regardless.
 
+# `.#tool-bundle-contract` is the bundle contract check: building it builds all
+# eight tool aggregates and fails if any one's bin/ list drifted from what
+# binWrapper/bundleContract.nix declares. It is listed here (rather than only in
+# `nix flake check`) so the assertion runs on every platform this matrix covers
+# — pkgs.docker is client-only off Linux, so the expected lists differ by system.
+
 echo "🔨 Building and smoke-testing all registry packages..."
 
 nix shell --max-jobs 1 --cores 2 nixpkgs#bash \
@@ -38,6 +44,7 @@ nix shell --max-jobs 1 --cores 2 nixpkgs#bash \
   .#gardenio \
   .#infrautils \
   .#infralint \
+  .#tool-bundle-contract \
   .#codecov \
   .#dotnetlint \
   .#dn-inspect \
