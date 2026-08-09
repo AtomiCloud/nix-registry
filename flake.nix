@@ -74,6 +74,9 @@
           checks = {
             pre-commit-check = pre-commit;
             format = formatter;
+            # Asserts every tool aggregate's bin/ list against its declared
+            # contract, so bundle contents can never drift silently.
+            tool-bundle-contract = packages.tool-bundle-contract;
           };
           packages = import ./default.nix
             {

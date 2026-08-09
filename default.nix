@@ -33,6 +33,31 @@ let
     atomiutils = import ./binWrapper/atomiutils.nix { inherit nixpkgs; };
     infrautils = import ./binWrapper/infrautils.nix { inherit nixpkgs gardenio mirrord; };
     infralint = import ./binWrapper/infralint.nix { inherit nixpkgs; helmlint = shell.helmlint; };
+
+    # Axis-pure slices of the two aggregates above, so a node can declare a
+    # toolchain without the tools it strips. The full bundles stay untouched for
+    # everyone else; see binWrapper/bundleContract.nix for what each provides.
+    infrautils-core = import ./binWrapper/infrautils-core.nix { inherit nixpkgs gardenio mirrord; };
+    infrautils-docker = import ./binWrapper/infrautils-docker.nix { inherit nixpkgs; };
+    infrautils-k8s = import ./binWrapper/infrautils-k8s.nix { inherit nixpkgs; };
+    infralint-core = import ./binWrapper/infralint-core.nix { inherit nixpkgs; };
+    infralint-docker = import ./binWrapper/infralint-docker.nix { inherit nixpkgs; };
+    infralint-helm = import ./binWrapper/infralint-helm.nix { inherit nixpkgs; helmlint = shell.helmlint; };
+
+    tool-bundle-contract = import ./binWrapper/bundleContract.nix {
+      inherit nixpkgs;
+      bundles = {
+        inherit
+          infrautils
+          infralint
+          infrautils-core
+          infrautils-docker
+          infrautils-k8s
+          infralint-core
+          infralint-docker
+          infralint-helm;
+      };
+    };
     gardenio = import ./binWrapper/gardenio.nix { inherit nixpkgs; };
     codecov = import ./binWrapper/codecov.nix { inherit nixpkgs; };
     coderabbit = import ./binWrapper/coderabbit.nix { inherit nixpkgs; };
