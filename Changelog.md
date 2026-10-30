@@ -1,3 +1,12 @@
+## [5.7.1](https://github.com/AtomiCloud/nix-registry/compare/v5.7.0...v5.7.1) (2026-10-30)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **drv:** fetch bun script deps in a fixed-output derivation ([875d4df](https://github.com/AtomiCloud/nix-registry/commit/875d4df08aa202d55af182a9d11eff301418c9a6))
+* **drv:** include bunfig.toml in the bun deps digest ([b9fa245](https://github.com/AtomiCloud/nix-registry/commit/b9fa24505bee260de52e423fafda8f380476a591))
+* **drv:** re-run the bun deps install whenever its lockfile changes ([5103826](https://github.com/AtomiCloud/nix-registry/commit/5103826935da2266e2a9cbc0f4e58095de1985a6))
+
 ## [5.7.0](https://github.com/AtomiCloud/nix-registry/compare/v5.6.0...v5.7.0) (2026-08-09)
 
 
