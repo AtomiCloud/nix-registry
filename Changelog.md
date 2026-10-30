@@ -1,3 +1,10 @@
+## [5.9.0](https://github.com/AtomiCloud/nix-registry/compare/v5.8.0...v5.9.0) (2026-10-30)
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **minor:** bump cyanprint to 4.10.1 ([1e45a06](https://github.com/AtomiCloud/nix-registry/commit/1e45a0622b502d6efbcaf16304b1908ff135feeb))
+
 ## [5.8.0](https://github.com/AtomiCloud/nix-registry/compare/v5.7.1...v5.8.0) (2026-10-30)
 
 
