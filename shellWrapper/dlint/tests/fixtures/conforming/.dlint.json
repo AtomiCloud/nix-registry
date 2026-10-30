@@ -20,6 +20,11 @@
     },
     "no-custom-derivations": {
       "paths": ["nix/packages.nix", "nix/env.nix"]
+    },
+    "release-gating": {
+      "workflow": "ci/workflows/release.yaml",
+      "triggerWorkflow": "Main",
+      "branch": "trunk"
     }
   }
 }
