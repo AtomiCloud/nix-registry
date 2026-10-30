@@ -16,7 +16,7 @@
 #     arm can never decay into a no-op that "proves" a refusal dlint never had to
 #     produce.
 #   * Every arm gets a FRESH fixture repository, so arms cannot contaminate each
-#     other, and the four baselines are re-asserted after all mutations.
+#     other, and every baseline is re-asserted after all mutations.
 #   * The fixture repository is deliberately laid out like NEITHER of the two
 #     repositories in play: its workflows live in `ci/workflows`, its CI
 #     entrypoints in `automation/`, and its per-shell tools in `tools/`. Its
@@ -794,6 +794,131 @@ m_nocustom_declared_path_missing() {
   rm -f nix/env.nix
 }
 
+# -- release-gating --------------------------------------------------------- #
+#
+# ONE ARM PER ASSERTION. The fixture's release workflow is gated on 'Main' and
+# 'trunk' — neither is the default — so the configured keys are what make the
+# baseline green, and a dlint that ignored them would fail it.
+
+m_release_trigger_moved() {
+  replace_in ci/workflows/release.yaml '    workflows: [Main]' '    workflows: [Other]'
+}
+
+# A SECOND branch, not a different one: the assertion is the exact list, so a
+# release that also fires from another branch is not gated on the release branch.
+m_release_branch_widened() {
+  replace_in ci/workflows/release.yaml '    branches: [trunk]' '    branches: [trunk, dev]'
+}
+
+m_release_types_moved() {
+  replace_in ci/workflows/release.yaml '    types: [completed]' '    types: [requested]'
+}
+
+m_release_success_condition_dropped() {
+  replace_in ci/workflows/release.yaml \
+    "    if: github.event.workflow_run.conclusion == 'success'" \
+    '    if: always()'
+}
+
+m_release_group_moved() {
+  replace_in ci/workflows/release.yaml '  group: release' '  group: deploy'
+}
+
+# All five at once. Several arms share this mutator and each asserts a DIFFERENT
+# reason, so together they prove every assertion ran rather than the first.
+m_release_all_moved() {
+  m_release_trigger_moved
+  m_release_branch_widened
+  m_release_types_moved
+  m_release_success_condition_dropped
+  m_release_group_moved
+}
+
+# A release on a plain `on: push` is not gated at all. Its `.on` is a STRING, so
+# every workflow_run path is unreadable — which must be five violations, not a jq
+# error reported as UNKNOWN.
+m_release_on_push() {
+  require_file ci/workflows/release.yaml
+  printf 'name: Release\non: push\njobs:\n  release:\n    uses: ./ci/workflows/reusable-deploy.yaml\n' \
+    >ci/workflows/release.yaml
+}
+
+m_release_workflow_missing() {
+  require_file ci/workflows/release.yaml
+  git rm -q --cached ci/workflows/release.yaml
+  rm -f ci/workflows/release.yaml
+}
+
+m_release_workflow_unparseable() {
+  require_file ci/workflows/release.yaml
+  printf 'name: Release\non:\n  workflow_run:\n    workflows: [Main\n' >ci/workflows/release.yaml
+}
+
+m_release_branch_wrong_type() { edit_config '.checks["release-gating"].branch = 7'; }
+m_release_trigger_empty() { edit_config '.checks["release-gating"].triggerWorkflow = ""'; }
+
+# Every key dropped and the workflow moved to the documented DEFAULT path with the
+# documented DEFAULT values, so each default is exercised rather than asserted.
+m_release_defaults() {
+  mkdir -p .github/workflows
+  sed -e 's/\[Main\]/[CI]/' -e 's/\[trunk\]/[main]/' ci/workflows/release.yaml \
+    >.github/workflows/release.yaml
+  require_match .github/workflows/release.yaml '    workflows: [CI]'
+  require_match .github/workflows/release.yaml '    branches: [main]'
+  edit_config '.checks["release-gating"] = {}'
+  git add -A
+}
+
+# The default is a real expectation, not a wildcard: drop the key on a repository
+# whose trigger is not 'CI' and the check must refuse it.
+m_release_default_trigger_applies() {
+  edit_config 'del(.checks["release-gating"].triggerWorkflow)'
+}
+
+m_section_removed_release_gating() { edit_config 'del(.checks["release-gating"])'; }
+
+# OPT-IN: an absent section is skipped by --all-configured, so a consumer that
+# picks up this version without configuring the check is not broken by it. These
+# two plant a real fault in the release workflow as well, so a skip is shown to
+# be a skip and not a pass of an inspection that happened to be clean.
+m_release_absent_with_fault() {
+  m_section_removed_release_gating
+  m_release_group_moved
+}
+
+# A PRESENT empty section enforces every default. The fixture's release workflow
+# is not at the default path, so an enforced '{}' must refuse it as absent.
+m_release_empty_section() { edit_config '.checks["release-gating"] = {}'; }
+
+m_release_disabled() { edit_config '.checks["release-gating"] = false'; }
+
+# A key that is PRESENT but null — YAML 'release-gating:' with nothing after it.
+# That is an author trying to configure the check, so it must be refused, never
+# mistaken for an absent key and skipped.
+m_release_null_section() { edit_config '.checks["release-gating"] = null'; }
+
+m_release_null_section_yaml() {
+  m_config_as_yaml
+  # Written as block YAML on purpose: the bare key with nothing after it is the
+  # shape under test, and only a block mapping can spell it.
+  local tmp=""
+  tmp="$(mktemp)"
+  yq -o=yaml -P 'del(.checks["release-gating"])' dlint.yaml >"${tmp}" ||
+    die "could not rewrite dlint.yaml as block YAML"
+  require_match "${tmp}" 'checks:'
+  awk '{ print } /^checks:/ { print "  release-gating:" }' "${tmp}" >dlint.yaml
+  rm -f "${tmp}"
+  [ "$(yq -o=json '.checks | has("release-gating")' dlint.yaml)" = "true" ] ||
+    die "the YAML null-section mutation lost the key"
+  [ "$(yq '.checks["release-gating"] | tag' dlint.yaml)" = "!!null" ] ||
+    die "the YAML null-section mutation did not leave the key null"
+}
+
+m_release_absent_with_violation() {
+  m_section_removed_release_gating
+  m_entrypoint_not_executable
+}
+
 # -- multiple checks in one invocation -------------------------------------- #
 
 m_all_checks_disabled() {
@@ -1094,6 +1219,54 @@ arm "a declared path that is gone is absent, not clean" m_nocustom_declared_path
 arm "no-custom-derivations rejects arguments" m_none 2 \
   "no-custom-derivations takes no arguments" -- no-custom-derivations --fix
 
+printf '\nrelease-gating mutations (one arm per assertion)\n'
+arm "release-gating baseline (configured trigger and branch)" m_none 0 \
+  "✅ Release workflow is gated on Main success on trunk" -- release-gating
+arm "the green states what it inspected" m_none 0 \
+  "release workflow inspected: ci/workflows/release.yaml (trigger: Main, branch: trunk, concurrency: release)" -- release-gating
+arm "trigger workflow moved" m_release_trigger_moved 1 \
+  "release must trigger from Main: 'ci/workflows/release.yaml' .on.workflow_run.workflows is [\"Other\"], expected [\"Main\"]" -- release-gating
+arm "a second release branch" m_release_branch_widened 1 \
+  "release must be limited to trunk: 'ci/workflows/release.yaml' .on.workflow_run.branches is [\"trunk\",\"dev\"], expected [\"trunk\"]" -- release-gating
+arm "workflow_run type moved" m_release_types_moved 1 \
+  "release workflow_run type must be completed: 'ci/workflows/release.yaml' .on.workflow_run.types is [\"requested\"]" -- release-gating
+arm "release job no longer requires success" m_release_success_condition_dropped 1 \
+  "release job must require Main success: 'ci/workflows/release.yaml' .jobs.release.if is \"always()\"" -- release-gating
+arm "concurrency group moved" m_release_group_moved 1 \
+  "release concurrency group must be release: 'ci/workflows/release.yaml' .concurrency.group is \"deploy\", expected \"release\"" -- release-gating
+arm "one fault is counted as one" m_release_group_moved 1 \
+  "1 of 5 assertion(s) failed" -- release-gating
+# Five arms, one mutator: each asserts a DIFFERENT reason, so together they prove
+# every assertion ran instead of stopping at the first.
+arm "all five moved: the trigger is reported" m_release_all_moved 1 \
+  "release must trigger from Main" -- release-gating
+arm "all five moved: the branch is reported" m_release_all_moved 1 \
+  "release must be limited to trunk" -- release-gating
+arm "all five moved: the type is reported" m_release_all_moved 1 \
+  "release workflow_run type must be completed" -- release-gating
+arm "all five moved: the condition is reported" m_release_all_moved 1 \
+  "release job must require Main success" -- release-gating
+arm "all five moved: the group is reported" m_release_all_moved 1 \
+  "release concurrency group must be release" -- release-gating
+arm "all five moved are counted" m_release_all_moved 1 \
+  "5 of 5 assertion(s) failed" -- release-gating
+arm "an ungated 'on: push' release is a violation, not UNKNOWN" m_release_on_push 1 \
+  '.on.workflow_run.workflows is "<absent>"' -- release-gating
+arm "an absent release workflow is absent, not a violation" m_release_workflow_missing 3 \
+  "the release workflow 'ci/workflows/release.yaml' does not exist" -- release-gating
+arm "an unparseable release workflow is UNKNOWN" m_release_workflow_unparseable 5 \
+  "could not read 'ci/workflows/release.yaml' as YAML" -- release-gating
+arm "a key of the wrong type" m_release_branch_wrong_type 4 \
+  "'.checks[\"release-gating\"].branch' must be a string, found number" -- release-gating
+arm "an empty key" m_release_trigger_empty 4 \
+  "'.checks[\"release-gating\"].triggerWorkflow' must not be empty" -- release-gating
+arm "every default at once" m_release_defaults 0 \
+  "✅ Release workflow is gated on CI success on main" -- release-gating
+arm "the default trigger is an expectation, not a wildcard" m_release_default_trigger_applies 1 \
+  "release must trigger from CI" -- release-gating
+arm "release-gating rejects arguments" m_none 2 \
+  "release-gating takes no arguments" -- release-gating --fix
+
 printf '\nconfiguration arms (an absent subject is never a pass)\n'
 arm "config file absent / action-pins" m_config_deleted 3 \
   "dlint configuration is missing" -- action-pins trusted
@@ -1105,6 +1278,8 @@ arm "config file absent / toolchain-smoke" m_config_deleted 3 \
   "dlint configuration is missing" -- toolchain-smoke
 arm "config file absent / no-custom-derivations" m_config_deleted 3 \
   "dlint configuration is missing" -- no-custom-derivations
+arm "config file absent / release-gating" m_config_deleted 3 \
+  "dlint configuration is missing" -- release-gating
 arm "config section absent / action-pins" m_section_removed_action_pins 3 \
   "An absent section is never a pass" -- action-pins trusted
 arm "config section absent / exec-bits" m_section_removed_exec_bits 3 \
@@ -1115,6 +1290,8 @@ arm "config section absent / toolchain-smoke" m_section_removed_toolchain_smoke 
   "An absent section is never a pass" -- toolchain-smoke
 arm "config section absent / no-custom-derivations" m_section_removed_no_custom_derivations 3 \
   "An absent section is never a pass" -- no-custom-derivations
+arm "config section absent / release-gating" m_section_removed_release_gating 3 \
+  "An absent section is never a pass" -- release-gating
 arm "explicit opt-out is honoured" m_section_disabled_exec_bits 0 \
   "⏭️ dlint exec-bits is disabled" -- exec-bits
 arm "section true configures nothing" m_section_true_exec_bits 4 \
@@ -1141,7 +1318,7 @@ arm "exec-bits rejects arguments" m_none 2 \
   "exec-bits takes no arguments" -- exec-bits --fix
 
 printf '\nYAML configuration (dlint.yaml is the canonical name)\n'
-# The same five checks, same fixture, config converted to YAML and the JSON
+# The same six checks, same fixture, config converted to YAML and the JSON
 # removed. These are the arms that show the two forms are ONE configuration.
 arm "yaml config / action-pins trusted" m_config_as_yaml 0 \
   "✅ trusted action pins conform" -- action-pins trusted
@@ -1154,7 +1331,7 @@ arm "yaml config / ci-wiring" m_config_as_yaml 0 \
 arm "yaml config / toolchain-smoke" m_config_as_yaml 0 \
   "✅ Every declared shell resolves and runs its required binaries (full lean)" -- toolchain-smoke
 arm "yaml config / --all-configured (every reader)" m_config_as_yaml 0 \
-  "✅ every requested check passed (6)" -- --all-configured
+  "✅ every requested check passed (7)" -- --all-configured
 # Added by the #68 rebase, and predicted by the stale-scope law before it was found:
 # no-custom-derivations reads its own `forbid` type directly, a reader this refactor
 # never saw. Under YAML that read would have been handed the YAML file. This arm is
@@ -1162,6 +1339,8 @@ arm "yaml config / --all-configured (every reader)" m_config_as_yaml 0 \
 # while every other arm in the suite still passes.
 arm "yaml config / no-custom-derivations" m_config_as_yaml 0 \
   "✅ Template nix stays plain declarative lists" -- no-custom-derivations
+arm "yaml config / release-gating" m_config_as_yaml 0 \
+  "✅ Release workflow is gated on Main success on trunk" -- release-gating
 
 # A green under YAML proves nothing on its own — the check has to still be able to
 # FAIL when read from YAML.
@@ -1194,10 +1373,10 @@ arm "DLINT_CONFIG naming a missing file is absent" m_none 3 \
   "named by DLINT_CONFIG, does not exist" -- exec-bits
 
 printf '\nmultiple checks in one invocation\n'
-arm "--all-configured baseline (6 specs from 5 sections)" m_none 0 \
-  "✅ every requested check passed (6)" -- --all-configured
+arm "--all-configured baseline (7 specs from 6 sections)" m_none 0 \
+  "✅ every requested check passed (7)" -- --all-configured
 arm "--all-configured counts what it ran" m_none 0 \
-  "checks run: 6 (did not pass: 0)" -- --all-configured
+  "checks run: 7 (did not pass: 0)" -- --all-configured
 # --all-configured reads dlint's OWN check list, so a check added to dlint is
 # enforced by it without anything else being edited: plant a fault in one check
 # and require the aggregate run to catch it.
@@ -1209,6 +1388,49 @@ arm "--all-configured enforces exec-bits too" m_entrypoint_not_executable 1 \
 # no-custom-derivations and THIS ARM WOULD BE GREEN while the check went unenforced.
 arm "--all-configured enforces no-custom-derivations too" m_nocustom_override_attrs 1 \
   "uses 'overrideAttrs'" -- --all-configured
+# And for release-gating: the same control, so the sixth check cannot be shipped
+# while --all-configured quietly skips it.
+arm "--all-configured enforces release-gating too" m_release_group_moved 1 \
+  "release concurrency group must be release" -- --all-configured
+
+printf '\nrelease-gating is opt-in under --all-configured\n'
+# The compatibility arms: every consumer floats on the major alias, so a
+# configuration written before this check existed must stay green.
+arm "absent section: --all-configured skips it and passes" m_section_removed_release_gating 0 \
+  "release-gating: not configured, skipped" -- --all-configured
+arm "absent section: the other checks still all ran" m_section_removed_release_gating 0 \
+  "✅ every requested check passed (6)" -- --all-configured
+arm "absent section: the skip is a skip, not an inspection" m_release_absent_with_fault 0 \
+  "release-gating: not configured, skipped" -- --all-configured
+arm_absent "absent section: nothing is claimed about the workflow" m_release_absent_with_fault 0 \
+  "release concurrency group must be" -- --all-configured
+arm "absent section: 'dlint lint' skips it too" m_section_removed_release_gating 0 \
+  "release-gating: not configured, skipped" -- lint
+# Only release-gating is opt-in: every other check keeps its absent-section 3.
+arm "absent section: other checks are NOT opt-in" m_section_removed_ci_wiring 3 \
+  "An absent section is never a pass" -- --all-configured
+arm "absent section: a violation elsewhere is still reported" m_release_absent_with_violation 1 \
+  "is tracked but not executable" -- --all-configured
+arm_absent "present section: no skip is reported" m_none 0 \
+  "release-gating: not configured, skipped" -- --all-configured
+# A present section, even '{}', is enforced exactly as a named run would.
+arm "present '{}': --all-configured enforces it" m_release_empty_section 3 \
+  "the release workflow '.github/workflows/release.yaml' does not exist" -- --all-configured
+arm "present '{}' with the defaults met: enforced and green" m_release_defaults 0 \
+  "✅ every requested check passed (7)" -- --all-configured
+arm "present section with a fault: --all-configured refuses it" m_release_group_moved 1 \
+  "1 of 5 assertion(s) failed" -- --all-configured
+arm "explicit false is still the disabled state, not the skip" m_release_disabled 0 \
+  "⏭️ dlint release-gating is disabled" -- --all-configured
+# Only an ABSENT key is skipped. A key present with a null value is an attempt to
+# configure the check, and must reach section validation and be refused.
+arm "present but null (JSON): refused, not skipped" m_release_null_section 3 \
+  "'.checks[\"release-gating\"]' section" -- --all-configured
+arm "present but null (YAML 'release-gating:'): refused, not skipped" m_release_null_section_yaml 3 \
+  "'.checks[\"release-gating\"]' section" -- --all-configured
+# Naming the check is asking for it, so an absent section still refuses there.
+arm "absent section: a named run still refuses" m_section_removed_release_gating 3 \
+  "An absent section is never a pass" -- --check release-gating
 
 # The expansion arm that matters: only the NON-TRUSTED pin is broken. An
 # --all-configured that ran just 'action-pins trusted' would report GREEN here,
@@ -1275,6 +1497,7 @@ arm "exec-bits rebaseline" m_none 0 "✅ Tracked shell scripts are executable" -
 arm "ci-wiring rebaseline" m_none 0 "✅ Workflow jobs resolve to existing CI scripts" -- ci-wiring
 arm "toolchain-smoke rebaseline" m_none 0 "✅ Every declared shell resolves and runs its required binaries (full lean)" -- toolchain-smoke
 arm "no-custom-derivations rebaseline" m_none 0 "✅ Template nix stays plain declarative lists" -- no-custom-derivations
+arm "release-gating rebaseline" m_none 0 "✅ Release workflow is gated on Main success on trunk" -- release-gating
 
 printf '\narms: %s/%s passed\n' "${ARMS_PASSED}" "${ARMS_RUN}"
 if [ "${FAILURES}" -ne 0 ]; then

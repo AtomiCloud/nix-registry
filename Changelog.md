@@ -1,3 +1,20 @@
+## [5.8.0](https://github.com/AtomiCloud/nix-registry/compare/v5.7.1...v5.8.0) (2026-10-30)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **drv:** skip dlint release-gating only when its key is absent ([8ee42fc](https://github.com/AtomiCloud/nix-registry/commit/8ee42fcdd477dcffe05afa62bc7a2b588fe1513f))
+
+
+### ✨ New Packages ✨
+
+* **dlint:** add the release-gating check ([7dabce4](https://github.com/AtomiCloud/nix-registry/commit/7dabce4702cab27490e5fa971f28e40d713c4ca4))
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **patch:** make dlint release-gating opt-in under --all-configured ([13a4485](https://github.com/AtomiCloud/nix-registry/commit/13a44857e72cdd0da325e4f180ddd5a6b4f5c2c9))
+
 ## [5.7.1](https://github.com/AtomiCloud/nix-registry/compare/v5.7.0...v5.7.1) (2026-10-30)
 
 
