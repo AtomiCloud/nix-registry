@@ -19,13 +19,13 @@ let
   }.${system} or throwSystem;
 
   sha256 = {
-    x86_64-linux = "sha256-PeFuwTrym0IPxFtW5UUFsB4FnrhRZhRzYbOjHd4y2GA=";
-    aarch64-linux = "sha256-l8ZbXBi6x+fSJFFTP2e7S8v7/uqN5WcX5v/pidrvIC8=";
+    x86_64-linux = "sha256-G1tw6JkZA/bs6ClzTlFZpp/mNJWI7iOshi319iYAcN4=";
+    aarch64-linux = "sha256-20Mn8cIjDp3tSSAupmZvS3hgU69mfSaFSGcrE6UNSfU=";
 
-    aarch64-darwin = "sha256-nqvipKksCM0HkmG8u1z5VktW86kIt+3c0o1Y8DOdBC0=";
+    aarch64-darwin = "sha256-9Yf5e1jT8cI78pNk2XEBuAKjCNPzsU9TdDpSvyy1tVA=";
   }.${system} or throwSystem;
 in
-let version = "4.9.2"; in
+let version = "4.10.1"; in
 
 stdenv.mkDerivation (finalAttrs: {
   pname = "cyanprint";
