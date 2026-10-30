@@ -14,11 +14,14 @@
 # `nix flake check`) so the assertion runs on every platform this matrix covers
 # — pkgs.docker is client-only off Linux, so the expected lists differ by system.
 #
-# That is also how `workspace-validator-runtime` is covered without a line of its
-# own: the contract derivation takes the bundle as an input, so the bundle cannot
-# fail to build without failing the contract. It is a PATH, not a binary, so
-# there is no `--version` to run on it — what needs asserting is its contents,
-# and that is exactly what the contract asserts.
+# The contract checks the axis bundles and `workspace-validator-runtime`; none
+# of them is a binary, so none has a `--version` for nix-build.sh to run, and
+# what needs asserting is their contents, which the contract asserts. They are
+# still listed below on lines of their own because the contract's OUTPUT is a
+# manifest that references none of them: `attic push` uploads an output's
+# runtime closure, so without their own entries consumers could not substitute
+# them from the cache. Listing them adds no build — the contract already built
+# them.
 
 REGISTRY_PACKAGES=(
   sg
@@ -41,6 +44,13 @@ REGISTRY_PACKAGES=(
   gardenio
   infrautils
   infralint
+  infrautils-core
+  infrautils-docker
+  infrautils-k8s
+  infralint-core
+  infralint-docker
+  infralint-helm
+  workspace-validator-runtime
   tool-bundle-contract
   codecov
   dotnetPackage
