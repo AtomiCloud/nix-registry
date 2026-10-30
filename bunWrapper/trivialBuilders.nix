@@ -18,6 +18,11 @@
    * setting `depsHash = nixpkgs.lib.fakeHash;` and taking the hash nix reports.
    * A package with no dependencies (no `bun.lock`) leaves it unset.
    *
+   * One string covers every system when the production tree is the same on all
+   * of them. A dependency that installs a platform-specific optional package
+   * makes the tree differ, and then `depsHash` is an attrset keyed by system
+   * (`{ x86_64-linux = "sha256-..."; aarch64-darwin = "sha256-..."; }`).
+   *
    * Example:
    * writeBunScriptBin {
    *   name = "my-tool";
@@ -35,11 +40,25 @@
     assert nixpkgs.lib.assertMsg (depsHash != null || !(builtins.pathExists (src + "/bun.lock")))
       "writeBunScriptBin: ${name} has a bun.lock but no depsHash. Set depsHash = nixpkgs.lib.fakeHash; and use the hash nix reports.";
     let
+      system = nixpkgs.stdenv.hostPlatform.system;
+      outputHash =
+        if builtins.isAttrs depsHash then
+          depsHash.${system} or (throw "writeBunScriptBin: ${name} has no depsHash for ${system}.")
+        else depsHash;
+
+      # A fixed-output path is named by its name and hash alone, so if bun.lock
+      # changed under an unchanged depsHash, nix would reuse the OLD node_modules
+      # without running the install, and nothing would check the new lockfile.
+      # Putting the manifest and lockfile digest in the name gives every change
+      # to them a new path: the install then runs, and a stale depsHash fails as
+      # a hash mismatch instead of shipping the old dependencies.
+      manifestDigest = builtins.substring 0 12 (builtins.hashString "sha256"
+        (builtins.readFile (src + "/package.json") + builtins.readFile (src + "/bun.lock")));
+
       # Production deps only, as the package build always installed: dev
-      # dependencies never reach the wrapper, and leaving them out keeps the
-      # tree free of platform-specific binaries so one hash covers every system.
+      # dependencies never reach the wrapper.
       deps = nixpkgs.stdenv.mkDerivation {
-        pname = "${name}-deps";
+        pname = "${name}-deps-${manifestDigest}";
         inherit version src;
         nativeBuildInputs = [ bun ];
         dontConfigure = true;
@@ -57,7 +76,7 @@
         dontFixup = true;
         outputHashMode = "recursive";
         outputHashAlgo = "sha256";
-        outputHash = depsHash;
+        inherit outputHash;
       };
     in
     nixpkgs.stdenv.mkDerivation {
