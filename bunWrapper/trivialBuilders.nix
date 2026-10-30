@@ -51,9 +51,14 @@
       # without running the install, and nothing would check the new lockfile.
       # Putting the manifest and lockfile digest in the name gives every change
       # to them a new path: the install then runs, and a stale depsHash fails as
-      # a hash mismatch instead of shipping the old dependencies.
+      # a hash mismatch instead of shipping the old dependencies. bunfig.toml is
+      # in it too because its [install] settings (optional, linker) change the
+      # tree; it is appended only when present, so a package without one keeps
+      # the digest it had before.
+      bunfig = src + "/bunfig.toml";
       manifestDigest = builtins.substring 0 12 (builtins.hashString "sha256"
-        (builtins.readFile (src + "/package.json") + builtins.readFile (src + "/bun.lock")));
+        (builtins.readFile (src + "/package.json") + builtins.readFile (src + "/bun.lock")
+          + nixpkgs.lib.optionalString (builtins.pathExists bunfig) (builtins.readFile bunfig)));
 
       # Production deps only, as the package build always installed: dev
       # dependencies never reach the wrapper.
