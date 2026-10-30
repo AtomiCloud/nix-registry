@@ -44,12 +44,26 @@ jobs:
     runs-on: ${{ matrix.platform.os }}
     steps:
       # Setup
+      # The Attic token is passed on main only: setup-nix logs in to Attic when
+      # it gets one, and only main pushes. Reads need no token.
       - uses: AtomiCloud/actions.setup-nix@v3
         with:
           namespacelabs: 'false'
+          attic-token: ${{ github.ref == 'refs/heads/main' && secrets.ATTIC_TOKEN || '' }}
 
       - name: Nix Build
         run: ./scripts/ci/nix-build.sh
+
+      # Push what was just built to the public Attic cache, so consumers of a
+      # release substitute it instead of building it cold. `primordial:primordial`
+      # is setup-nix's login alias and cache, the same cache it reads from.
+      #
+      # A failed push does not fail the job: `release` needs this job, and a
+      # cache outage should not hold a release back. The step still shows red.
+      - name: Push to Attic
+        if: github.ref == 'refs/heads/main'
+        continue-on-error: true
+        run: ./scripts/ci/cache-build.sh primordial:primordial
 
   # Informational leg — same build as `build`, deliberately absent from
   # `release.needs`. See the TEMPORARY POSTURE comment above.

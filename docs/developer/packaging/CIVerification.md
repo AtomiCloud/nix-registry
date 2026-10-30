@@ -4,7 +4,7 @@ This document explains how packages are verified in CI and how to add new packag
 
 ## How CI Verification Works
 
-The CI pipeline verifies that all packages in the registry build and run correctly. This is done in the `build` job in `.github/workflows/ci.yaml`.
+The CI pipeline verifies that all packages in the registry build and run correctly. This is done by `scripts/ci/nix-build.sh`, which the `build` and `build-macos` jobs in `.github/workflows/ci.yaml` run. The package list itself is `scripts/ci/packages.sh`, which `scripts/ci/cache-build.sh` also reads: on `main`, the Linux build jobs push every listed package (with its runtime closure) to the public Attic cache, so consumers substitute it instead of building it.
 
 ### Verification Process
 
@@ -56,24 +56,24 @@ The following packages are verified in CI with their respective commands:
 
 When adding a new package to the registry, you must also add it to CI verification.
 
-### Step 1: Add the Package to Nix Shell Command
+### Step 1: Add the Package to the Package List
 
-Add `.#<package-name>` to the `nix shell` command in `.github/workflows/ci.yaml`:
+Add `<package-name>` (no `.#`) to `REGISTRY_PACKAGES` in `scripts/ci/packages.sh`. That one
+entry makes CI build it on every platform and push it to the Attic cache from `main`:
 
-```yaml
-- name: Nix Build
-  run: >-
-    nix shell nixpkgs#bash
-    .#sg
-    .#your-new-package    # Add your package here
-    ...
+```bash
+REGISTRY_PACKAGES=(
+  sg
+  your-new-package # Add your package here
+  ...
+)
 ```
 
 ### Step 2: Add the Verification Command
 
-Add the verification command inside the bash script:
+Add the verification command inside the `bash -c` script in `scripts/ci/nix-build.sh`:
 
-```yaml
+```bash
     -c bash -c '
     sg --version &&
     your-new-package --version &&    # Add your command here
@@ -190,8 +190,8 @@ echo "All tests passed!"
 ## Example CI Configuration
 
 The excerpt below is an **abridged illustration of the shape**, not a mirror of the file.
-`.github/workflows/ci.yaml` is authoritative and already carries packages this excerpt does
-not; read it, do not copy from here.
+`scripts/ci/packages.sh` and `scripts/ci/nix-build.sh` are authoritative and already carry packages
+this excerpt does not; read them, do not copy from here.
 
 ```yaml
 - name: Nix Build
