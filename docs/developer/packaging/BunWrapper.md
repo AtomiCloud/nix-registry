@@ -21,6 +21,8 @@ Do NOT use bunWrapper when:
 
 Bun wrappers use the `trivialBuilders.writeBunScriptBin` function to create executable wrappers around TypeScript source code. Bun handles dependency installation and script execution, making it ideal for fast, self-contained tools.
 
+Dependencies are installed in a separate fixed-output derivation (`<name>-deps`), not in the package build. Nix builds run in a sandbox with no network, and a fixed-output derivation is the only kind allowed to fetch; its `depsHash` pins exactly what was fetched. This keeps the build working on a clean CI runner, not just where the output is already cached.
+
 ## File Structure
 
 Create your wrapper in the `bunWrapper/<name>/` directory:
@@ -45,6 +47,7 @@ trivialBuilders.writeBunScriptBin {
   name = "my-tool";
   version = "1.0.0";
   src = ./.;
+  depsHash = "sha256-...";  # Required when the package has a bun.lock
   buildInputs = [ ];  # Optional additional build dependencies
 };
 ```
@@ -56,7 +59,29 @@ trivialBuilders.writeBunScriptBin {
 | `name`        | Yes      | The name of the executable (appears in `/bin/<name>`)        |
 | `version`     | Yes      | Version string for the wrapper                               |
 | `src`         | Yes      | Source directory containing index.ts, package.json, bun.lock |
+| `depsHash`    | If deps  | Fixed-output hash of the production `node_modules`           |
 | `buildInputs` | No       | Additional packages needed at runtime                        |
+
+A package with a `bun.lock` must set `depsHash`; evaluation fails without it. To get the
+hash, set `depsHash = nixpkgs.lib.fakeHash;`, run `nix build .#<name>`, and copy the
+`got:` hash from the mismatch error. Re-derive it the same way whenever `bun.lock` changes.
+A package with no dependencies has no `bun.lock` and leaves `depsHash` unset.
+
+The deps derivation's name includes a digest of `package.json` and `bun.lock`, so
+changing either one always re-runs the install. If you forget to update `depsHash`, the
+build fails with a hash mismatch instead of reusing the old `node_modules`.
+
+One hash covers every system only when the production dependencies are the same on all
+of them. If a dependency installs a platform-specific optional package (a native binary,
+for example), the trees differ. Then give one hash per system:
+
+```nix
+depsHash = {
+  x86_64-linux = "sha256-...";
+  aarch64-linux = "sha256-...";
+  aarch64-darwin = "sha256-...";
+};
+```
 
 ## Required Files
 
@@ -116,6 +141,9 @@ trivialBuilders.writeBunScriptBin {
   inherit version;
   name = "my-tool";
   src = ./.;
+
+  # Fixed-output hash of the production node_modules; see writeBunScriptBin.
+  depsHash = nixpkgs.lib.fakeHash;
 
   # Add any runtime dependencies if needed
   buildInputs = with nixpkgs; [
