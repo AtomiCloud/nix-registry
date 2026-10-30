@@ -12,7 +12,7 @@ set -eou pipefail
 # The per-arch caches start cold on first run, so the heavy rust workspaces
 # (worktrunk, attic) are compiled from source. --max-jobs 1 serialises
 # derivations so only one of those links at a time, keeping peak memory within
-# the 16GB runner. Once the Namespace /nix cache is warm this run is ~1 min
+# the 16GB runner. Once the public Attic cache is warm this run is ~1 min
 # regardless.
 
 # `.#tool-bundle-contract` is the bundle contract check: building it builds all
