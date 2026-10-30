@@ -1349,15 +1349,17 @@ run_all_configured() {
   # from dlint's own list, an absent section reaches its normal exit-3 refusal
   # and `false` stays the one way to opt a check out. An OPT-IN check is the one
   # exception, and it is skipped OUT LOUD so the run still says what it did not
-  # enforce.
-  local specs_file="${WORK_DIR}/requested-specs.txt" opt_in="" section_type=""
+  # enforce. Only an ABSENT key is skipped: a key that is present but null (YAML
+  # 'release-gating:' with nothing after it) is someone trying to configure the
+  # check, so it goes on to the section validation and is refused there.
+  local specs_file="${WORK_DIR}/requested-specs.txt" opt_in="" present=""
   : >"${specs_file}"
   for candidate in ${DLINT_CHECKS}; do
     for opt_in in ${DLINT_OPT_IN_CHECKS}; do
       [ "${candidate}" = "${opt_in}" ] || continue
-      section_type="$(jq -r --arg c "${candidate}" '.checks[$c] | type' "${CFG_JSON}")" ||
+      present="$(jq -r --arg c "${candidate}" '.checks | has($c)' "${CFG_JSON}")" ||
         config_invalid "dlint configuration '${CFG_FILE}': could not read '.checks[\"${candidate}\"]'"
-      [ "${section_type}" = "null" ] || continue
+      [ "${present}" = "false" ] || continue
       skipped "${candidate}: not configured, skipped (opt-in: add a '${candidate}' section, even '{}', to enforce it)"
       continue 2
     done

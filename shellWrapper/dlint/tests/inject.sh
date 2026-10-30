@@ -892,6 +892,28 @@ m_release_empty_section() { edit_config '.checks["release-gating"] = {}'; }
 
 m_release_disabled() { edit_config '.checks["release-gating"] = false'; }
 
+# A key that is PRESENT but null — YAML 'release-gating:' with nothing after it.
+# That is an author trying to configure the check, so it must be refused, never
+# mistaken for an absent key and skipped.
+m_release_null_section() { edit_config '.checks["release-gating"] = null'; }
+
+m_release_null_section_yaml() {
+  m_config_as_yaml
+  # Written as block YAML on purpose: the bare key with nothing after it is the
+  # shape under test, and only a block mapping can spell it.
+  local tmp=""
+  tmp="$(mktemp)"
+  yq -o=yaml -P 'del(.checks["release-gating"])' dlint.yaml >"${tmp}" ||
+    die "could not rewrite dlint.yaml as block YAML"
+  require_match "${tmp}" 'checks:'
+  awk '{ print } /^checks:/ { print "  release-gating:" }' "${tmp}" >dlint.yaml
+  rm -f "${tmp}"
+  [ "$(yq -o=json '.checks | has("release-gating")' dlint.yaml)" = "true" ] ||
+    die "the YAML null-section mutation lost the key"
+  [ "$(yq '.checks["release-gating"] | tag' dlint.yaml)" = "!!null" ] ||
+    die "the YAML null-section mutation did not leave the key null"
+}
+
 m_release_absent_with_violation() {
   m_section_removed_release_gating
   m_entrypoint_not_executable
@@ -1400,6 +1422,12 @@ arm "present section with a fault: --all-configured refuses it" m_release_group_
   "1 of 5 assertion(s) failed" -- --all-configured
 arm "explicit false is still the disabled state, not the skip" m_release_disabled 0 \
   "⏭️ dlint release-gating is disabled" -- --all-configured
+# Only an ABSENT key is skipped. A key present with a null value is an attempt to
+# configure the check, and must reach section validation and be refused.
+arm "present but null (JSON): refused, not skipped" m_release_null_section 3 \
+  "'.checks[\"release-gating\"]' section" -- --all-configured
+arm "present but null (YAML 'release-gating:'): refused, not skipped" m_release_null_section_yaml 3 \
+  "'.checks[\"release-gating\"]' section" -- --all-configured
 # Naming the check is asking for it, so an absent section still refuses there.
 arm "absent section: a named run still refuses" m_section_removed_release_gating 3 \
   "An absent section is never a pass" -- --check release-gating
