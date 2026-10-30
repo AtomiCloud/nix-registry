@@ -9,41 +9,20 @@ if [ -z "$cache" ]; then
   exit 1
 fi
 
-BUILD_TARGETS=""
+# The same list nix-build.sh builds and smoke-tests; see packages.sh.
+# shellcheck disable=SC1091 # packages.sh is read at run time, not followed by the hook
+source "$(dirname "$0")/packages.sh"
 
-echo "🔨 Building $BUILD_TARGETS"
-# shellcheck disable=SC2086
-TO_PUSH=$(nix build \
-  .#sg \
-  .#upstash \
-  .#action_docs \
-  .#typescript_json_schema \
-  .#swagger_typescript_api \
-  .#dotnetsay \
-  .#dotnet-ef \
-  .#mirrord \
-  .#pls \
-  .#toml-cli \
-  .#nix-share \
-  .#aws-export-credentials \
-  .#mmoney-cli \
-  .#cyanprint \
-  .#atomiutils \
-  .#workspace-validator-runtime \
-  .#gardenio \
-  .#infrautils \
-  .#infralint \
-  .#codecov \
-  .#dotnetPackage \
-  .#dotnetlint \
-  .#helmlint \
-  .#helm-schema \
-  --print-out-paths)
-echo "✅ Successfully built all devShells"
+# Run after nix-build.sh in the same job, so every path is already in the store
+# and this build only resolves them.
+echo "🔨 Resolving ${#REGISTRY_PACKAGES[@]} registry packages"
+TO_PUSH=$(nix build --no-link --print-out-paths "${REGISTRY_PACKAGES[@]/#/.#}")
+echo "✅ Resolved all registry packages"
 
-echo "🫸 Pushing all shells to Attic $cache"
+# `attic push` uploads each path's whole runtime closure, so what a package
+# pulls in from this registry (gardenio and mirrord under infrautils, say) is
+# pushed with it.
+echo "🫸 Pushing registry packages to Attic $cache"
 # shellcheck disable=SC2086
 attic push "$cache" $TO_PUSH
-echo "✅ Successfully pushed all shells to Attic $cache"
-
-echo "🎉 All devShells have been built and pushed to cache!"
+echo "✅ Successfully pushed registry packages to Attic $cache"
