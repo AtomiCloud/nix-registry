@@ -6,14 +6,12 @@ on:
 jobs:
   precommit:
     name: Pre-Commit
-    runs-on:
-      - nscloud-ubuntu-22.04-amd64-4x8-with-cache
-      - nscloud-cache-size-50gb
-      - nscloud-cache-tag-nix-registry-nix-store-cache
-      - nscloud-git-mirror-1gb
+    runs-on: ubuntu-24.04
     steps:
       # Setup
       - uses: AtomiCloud/actions.setup-nix@v3
+        with:
+          namespacelabs: 'false'
       # pre commit
       - name: Run pre-commit
         run: nix develop .#ci -c ./scripts/ci/pre-commit.sh
@@ -22,50 +20,33 @@ jobs:
   #
   # `build` (linux) and `build-macos` are the same build, split into two jobs
   # ONLY so that `release` can depend on the linux legs without also waiting on
-  # macOS. The Namespace macOS runner pool has been sitting QUEUED for hours at
-  # a time, and because `needs` waits for the WHOLE matrix job, a single queued
-  # macOS leg was holding every release the downstream cascade depends on.
+  # macOS. `needs` waits for the WHOLE matrix job, so a single slow or queued
+  # macOS leg would hold every release the downstream cascade depends on.
   #
-  # macOS is informational until the runner pool stabilizes; linux is the
-  # release gate — the box and the CI consumers are linux. It is deliberately
-  # NOT `continue-on-error`: a real macOS break still shows red on the commit,
-  # it just no longer blocks the release.
+  # macOS is informational; linux is the release gate — the box and the CI
+  # consumers are linux. It is deliberately NOT `continue-on-error`: a real
+  # macOS break still shows red on the commit, it just no longer blocks the
+  # release.
   #
-  # To revert once the pool is healthy: fold the `build-macos` runner back in as
-  # a third `platform` entry and delete `build-macos` and this comment.
+  # To revert: fold the `build-macos` runner back in as a third `platform`
+  # entry and delete `build-macos` and this comment.
   build:
     name: Nix Build
     strategy:
-      # Per-arch caches are independent, so one arch failing/cold-building
-      # should not cancel the others.
+      # One arch failing/cold-building should not cancel the other.
       fail-fast: false
       matrix:
-        # Each architecture gets its OWN cache tag. amd64 and arm64 previously
-        # shared one tag (nix-registry-nix-build-store-cache); since both jobs
-        # mount and persist the same Namespace volume concurrently, the slower
-        # job's store would overwrite the faster one's, so the two arches kept
-        # clobbering each other's cache (one warm, the other cold every run).
-        #
-        # Linux runners are 8x16 (16GB): on a cold cache the heavy rust
-        # workspaces (worktrunk, attic) are built from source, and a
-        # single one needs more than the old 4x8 (8GB) runner had.
         platform:
           - name: Linux x86_64
-            os:
-              - nscloud-ubuntu-22.04-amd64-8x16-with-cache
-              - nscloud-cache-size-50gb
-              - nscloud-cache-tag-nix-registry-nix-build-store-cache-amd64
-              - nscloud-git-mirror-1gb
+            os: ubuntu-24.04
           - name: Linux aarch64
-            os:
-              - nscloud-ubuntu-22.04-arm64-8x16-with-cache
-              - nscloud-cache-size-50gb
-              - nscloud-cache-tag-nix-registry-nix-build-store-cache-arm64
-              - nscloud-git-mirror-1gb
+            os: ubuntu-24.04-arm
     runs-on: ${{ matrix.platform.os }}
     steps:
       # Setup
       - uses: AtomiCloud/actions.setup-nix@v3
+        with:
+          namespacelabs: 'false'
 
       - name: Nix Build
         run: ./scripts/ci/nix-build.sh
@@ -74,14 +55,12 @@ jobs:
   # `release.needs`. See the TEMPORARY POSTURE comment above.
   build-macos:
     name: Nix Build (MacOS aarch64)
-    runs-on:
-      - nscloud-macos-sequoia-arm64-6x14-with-cache
-      - nscloud-cache-size-50gb
-      - nscloud-cache-tag-nix-registry-nix-build-store-cache-macos-arm64
-      - nscloud-git-mirror-1gb
+    runs-on: macos-latest
     steps:
       # Setup
       - uses: AtomiCloud/actions.setup-nix@v3
+        with:
+          namespacelabs: 'false'
 
       - name: Nix Build
         run: ./scripts/ci/nix-build.sh
@@ -94,18 +73,17 @@ jobs:
       - precommit
       - build
     if: github.ref == 'refs/heads/main'
-    runs-on:
-      - nscloud-ubuntu-22.04-amd64-4x8-with-cache
-      - nscloud-cache-size-50gb
-      - nscloud-cache-tag-nix-registry-releaser-nix-store-cache
-      - nscloud-git-mirror-1gb
+    runs-on: ubuntu-24.04
     steps:
       # Setup
       - uses: AtomiCloud/actions.setup-nix@v3
         with:
+          namespacelabs: 'false'
           auth-bot-app-id: ${{ vars.AUTH_BOT_APP_ID }}
           auth-bot-secret-key: ${{ secrets.AUTH_BOT_SECRET_KEY }}
       - uses: AtomiCloud/actions.cache-npm@v1
+        with:
+          namespacelabs: 'false'
 
       # action
       - name: Release
