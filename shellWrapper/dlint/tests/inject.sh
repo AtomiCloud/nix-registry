@@ -877,6 +877,26 @@ m_release_default_trigger_applies() {
 
 m_section_removed_release_gating() { edit_config 'del(.checks["release-gating"])'; }
 
+# OPT-IN: an absent section is skipped by --all-configured, so a consumer that
+# picks up this version without configuring the check is not broken by it. These
+# two plant a real fault in the release workflow as well, so a skip is shown to
+# be a skip and not a pass of an inspection that happened to be clean.
+m_release_absent_with_fault() {
+  m_section_removed_release_gating
+  m_release_group_moved
+}
+
+# A PRESENT empty section enforces every default. The fixture's release workflow
+# is not at the default path, so an enforced '{}' must refuse it as absent.
+m_release_empty_section() { edit_config '.checks["release-gating"] = {}'; }
+
+m_release_disabled() { edit_config '.checks["release-gating"] = false'; }
+
+m_release_absent_with_violation() {
+  m_section_removed_release_gating
+  m_entrypoint_not_executable
+}
+
 # -- multiple checks in one invocation -------------------------------------- #
 
 m_all_checks_disabled() {
@@ -1350,6 +1370,39 @@ arm "--all-configured enforces no-custom-derivations too" m_nocustom_override_at
 # while --all-configured quietly skips it.
 arm "--all-configured enforces release-gating too" m_release_group_moved 1 \
   "release concurrency group must be release" -- --all-configured
+
+printf '\nrelease-gating is opt-in under --all-configured\n'
+# The compatibility arms: every consumer floats on the major alias, so a
+# configuration written before this check existed must stay green.
+arm "absent section: --all-configured skips it and passes" m_section_removed_release_gating 0 \
+  "release-gating: not configured, skipped" -- --all-configured
+arm "absent section: the other checks still all ran" m_section_removed_release_gating 0 \
+  "✅ every requested check passed (6)" -- --all-configured
+arm "absent section: the skip is a skip, not an inspection" m_release_absent_with_fault 0 \
+  "release-gating: not configured, skipped" -- --all-configured
+arm_absent "absent section: nothing is claimed about the workflow" m_release_absent_with_fault 0 \
+  "release concurrency group must be" -- --all-configured
+arm "absent section: 'dlint lint' skips it too" m_section_removed_release_gating 0 \
+  "release-gating: not configured, skipped" -- lint
+# Only release-gating is opt-in: every other check keeps its absent-section 3.
+arm "absent section: other checks are NOT opt-in" m_section_removed_ci_wiring 3 \
+  "An absent section is never a pass" -- --all-configured
+arm "absent section: a violation elsewhere is still reported" m_release_absent_with_violation 1 \
+  "is tracked but not executable" -- --all-configured
+arm_absent "present section: no skip is reported" m_none 0 \
+  "release-gating: not configured, skipped" -- --all-configured
+# A present section, even '{}', is enforced exactly as a named run would.
+arm "present '{}': --all-configured enforces it" m_release_empty_section 3 \
+  "the release workflow '.github/workflows/release.yaml' does not exist" -- --all-configured
+arm "present '{}' with the defaults met: enforced and green" m_release_defaults 0 \
+  "✅ every requested check passed (7)" -- --all-configured
+arm "present section with a fault: --all-configured refuses it" m_release_group_moved 1 \
+  "1 of 5 assertion(s) failed" -- --all-configured
+arm "explicit false is still the disabled state, not the skip" m_release_disabled 0 \
+  "⏭️ dlint release-gating is disabled" -- --all-configured
+# Naming the check is asking for it, so an absent section still refuses there.
+arm "absent section: a named run still refuses" m_section_removed_release_gating 3 \
+  "An absent section is never a pass" -- --check release-gating
 
 # The expansion arm that matters: only the NON-TRUSTED pin is broken. An
 # --all-configured that ran just 'action-pins trusted' would report GREEN here,

@@ -53,6 +53,14 @@ WORK_DIR=""
 # one list, so they cannot drift into disagreeing about what dlint has.
 readonly DLINT_CHECKS="action-pins exec-bits ci-wiring toolchain-smoke no-custom-derivations release-gating"
 
+# The checks --all-configured runs only when their section is PRESENT. Every
+# other check refuses an absent section (exit 3); these were added after
+# consumers already floated on the major alias, so enforcing them on an absent
+# section would break every existing configuration in a minor release. A present
+# section — even an empty one — enforces them exactly like any other check, and
+# running one by name still refuses an absent section.
+readonly DLINT_OPT_IN_CHECKS="release-gating"
+
 # --------------------------------------------------------------------------- #
 # reporting
 # --------------------------------------------------------------------------- #
@@ -115,6 +123,9 @@ Running several checks in ONE invocation:
                       going unenforced; '"<check>": false' stays the one way to opt
                       out. 'action-pins' runs BOTH trust classes, because enforcing
                       one and reporting green leaves the other unasserted.
+                      The one exception is OPT-IN: 'release-gating' runs only when
+                      its section is present (even '{}'); with no section it is
+                      reported as skipped, not refused.
 
   Every requested check RUNS, even after one refuses, so one invocation reports
   every fault rather than only the first. The invocation's exit code is the
@@ -1336,10 +1347,20 @@ run_all_configured() {
   # quietly stopped being enforced while this invocation still reported green —
   # the vacuous pass every other refusal in this tool exists to prevent. Read
   # from dlint's own list, an absent section reaches its normal exit-3 refusal
-  # and `false` stays the one way to opt a check out.
-  local specs_file="${WORK_DIR}/requested-specs.txt"
+  # and `false` stays the one way to opt a check out. An OPT-IN check is the one
+  # exception, and it is skipped OUT LOUD so the run still says what it did not
+  # enforce.
+  local specs_file="${WORK_DIR}/requested-specs.txt" opt_in="" section_type=""
   : >"${specs_file}"
   for candidate in ${DLINT_CHECKS}; do
+    for opt_in in ${DLINT_OPT_IN_CHECKS}; do
+      [ "${candidate}" = "${opt_in}" ] || continue
+      section_type="$(jq -r --arg c "${candidate}" '.checks[$c] | type' "${CFG_JSON}")" ||
+        config_invalid "dlint configuration '${CFG_FILE}': could not read '.checks[\"${candidate}\"]'"
+      [ "${section_type}" = "null" ] || continue
+      skipped "${candidate}: not configured, skipped (opt-in: add a '${candidate}' section, even '{}', to enforce it)"
+      continue 2
+    done
     specs_for_check "${candidate}" >>"${specs_file}"
   done
 

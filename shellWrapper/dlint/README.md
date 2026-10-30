@@ -51,6 +51,15 @@ Three properties hold, and each is asserted by its own arm in `tests/inject.sh`:
   remains the one way to opt out. A configured key `dlint` does not know exits `4`, so a
   misspelled check cannot sit in the file looking enforced.
 
+**One exception: `release-gating` is opt-in.** Under `--all-configured` / `dlint lint` it
+runs only when its section is **present**; with no section the run prints
+`⏭️ release-gating: not configured, skipped …` and that check does not change the exit code.
+It arrived after consumers were already floating on the major alias, so refusing an absent
+section would have broken every existing configuration in a minor release. A present section
+— even `release-gating: {}` — is enforced like any other check, `false` is still the
+disabled state, and naming it (`dlint release-gating`, `--check release-gating`) still
+refuses an absent section with `3`. Every other check keeps the rule above.
+
 A configured `action-pins` expands to **both** trust classes: the check enforces one class
 per invocation, so running only `trusted` would leave every non-trusted pin unasserted while
 the invocation reported green.
@@ -397,7 +406,9 @@ assertions, now configured rather than hard-coded:
 | `jobs.release.if`           | `github.event.workflow_run.conclusion == 'success'` |
 | `concurrency.group`         | `<concurrencyGroup>`                                |
 
-Every key has a default, so `release-gating: {}` enforces the usual shape. These defaults are a
+It is **opt-in** under `--all-configured` (see [Several checks in one invocation](#several-checks-in-one-invocation)):
+no section means skipped, any section means enforced. Every key has a default, so
+`release-gating: {}` enforces the usual shape. These defaults are a
 **deliberate exception** to "only tool conventions have defaults": they are the release shape
 the check was extracted to enforce, and a repository that differs says so.
 
@@ -474,7 +485,7 @@ Every check also prints its counts, so a run that inspected little says so on st
 
 ## Tests
 
-`tests/inject.sh` is the failure-injection harness: **200 arms**, each asserting the
+`tests/inject.sh` is the failure-injection harness: **213 arms**, each asserting the
 refusal **text** and not merely a non-zero status. A few assert the **absence** of a text
 (`arm_absent`), which is the only way to prove a warning is scoped rather than unconditional.
 
