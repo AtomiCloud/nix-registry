@@ -51,7 +51,7 @@ WORK_DIR=""
 # The checks dlint ships, in the order --all-configured runs them. The
 # dispatcher, the --all-configured enumerator and the usage text all read this
 # one list, so they cannot drift into disagreeing about what dlint has.
-readonly DLINT_CHECKS="action-pins exec-bits ci-wiring toolchain-smoke no-custom-derivations"
+readonly DLINT_CHECKS="action-pins exec-bits ci-wiring toolchain-smoke no-custom-derivations release-gating"
 
 # --------------------------------------------------------------------------- #
 # reporting
@@ -122,7 +122,7 @@ Running several checks in ONE invocation:
   could not be trusted (3, 4, 5) outranks a known violation (1). An invocation
   that would inspect nothing refuses; it is never a pass.
 
-Checks (there are exactly five; there is no 'all' CHECK — the flag is --all-configured):
+Checks (there are exactly six; there is no 'all' CHECK — the flag is --all-configured):
   action-pins <trusted|non-trusted>
       Every GitHub Action reference carries the pin its trust class demands: a
       major tag for trusted actions, an exact 40-hex SHA plus a trailing tag
@@ -151,6 +151,15 @@ Checks (there are exactly five; there is no 'all' CHECK — the flag is --all-co
       the paths scanned are printed with the result, and a nix file that exists here
       but is not declared is named in a WARNING — a declared-paths check is only as
       wide as its list.
+  release-gating
+      The release workflow runs only after the trigger workflow SUCCEEDS on the
+      release branch, and holds one concurrency group: on.workflow_run.workflows
+      is [triggerWorkflow], .branches is [branch], .types is [completed],
+      jobs.release.if requires conclusion == 'success', and concurrency.group is
+      concurrencyGroup. EVERY assertion runs and each failure names the field,
+      the value found and the value expected. Keys and defaults: workflow
+      (.github/workflows/release.yaml), triggerWorkflow (CI), branch (main),
+      concurrencyGroup (release).
 
 Configuration:
   All checks read ONE file. dlint looks for, in order:
@@ -1095,6 +1104,103 @@ check_no_custom_derivations() {
 }
 
 # --------------------------------------------------------------------------- #
+# release-gating
+# --------------------------------------------------------------------------- #
+
+# The one job whose `if` is asserted. It is the job a release workflow is named
+# for, not a layout of one repository, so it is not a key.
+readonly RELEASE_GATING_JOB="release"
+readonly RELEASE_GATING_CONDITION="github.event.workflow_run.conclusion == 'success'"
+
+# release_gating_assert <path> <expected-json> <reason>
+# Records a failure rather than exiting, so every assertion runs and one run
+# reports every field that moved instead of only the first. The expectation is
+# handed to jq as DATA (--argjson), never spliced into the program, so a
+# configured value cannot change what is being asserted. The read is wrapped in
+# `try`: a workflow whose `on:` is a plain string (`on: push`) is a release that
+# is not gated at all — a violation to report, not a jq error to give up on.
+RELEASE_GATING_FILE=""
+RELEASE_GATING_JSON=""
+RELEASE_GATING_FAILED=0
+release_gating_assert() {
+  local path="$1" expected="$2" reason="$3" status=0 found=""
+  jq -e --argjson want "${expected}" "(try (${path}) catch null) == \$want" \
+    "${RELEASE_GATING_JSON}" >/dev/null 2>&1 || status=$?
+  # jq -e is 1 for false; anything above that is jq failing to run, which makes
+  # the policy UNKNOWN rather than violated.
+  [ "${status}" -le 1 ] ||
+    tool_failure "release-gating: could not evaluate '${path}' against '${RELEASE_GATING_FILE}' (jq exit ${status})"
+  [ "${status}" -eq 1 ] || return 0
+
+  found="$(jq -c "try (${path}) catch null | if . == null then \"<absent>\" else . end" "${RELEASE_GATING_JSON}")" ||
+    tool_failure "release-gating: could not read '${path}' from '${RELEASE_GATING_FILE}'"
+  printf '❌ %s\n' "release-gating: ${reason}: '${RELEASE_GATING_FILE}' ${path} is ${found}, expected ${expected}" >&2
+  RELEASE_GATING_FAILED=$((RELEASE_GATING_FAILED + 1))
+}
+
+check_release_gating() {
+  [ "$#" -eq 0 ] || usage_error "release-gating takes no arguments, got '$1'"
+
+  load_check_config release-gating
+
+  local trigger="" branch="" group=""
+  RELEASE_GATING_FILE="$(cfg_string workflow '.github/workflows/release.yaml')"
+  trigger="$(cfg_string triggerWorkflow 'CI')"
+  branch="$(cfg_string branch 'main')"
+  group="$(cfg_string concurrencyGroup 'release')"
+
+  # The workflow a gate is about being gone is absent, not compliant and not a
+  # violation: deleting release.yaml must never be how the gate goes quiet.
+  [ -f "${RELEASE_GATING_FILE}" ] ||
+    config_absent "release-gating: the release workflow '${RELEASE_GATING_FILE}' does not exist, so its gating has no subject. Declare the workflow with '.checks[\"release-gating\"].workflow', or disable the check on purpose."
+
+  # yq writes to a file and its own status is checked, rather than being piped
+  # into jq: `yq | jq -e` takes its status from jq, so a yq that failed would leave
+  # jq reading empty input — and every assertion below reading as absent, or as
+  # a pass under a negated one.
+  RELEASE_GATING_JSON="${WORK_DIR}/release-gating.json"
+  local yq_status=0
+  yq -o=json '.' "${RELEASE_GATING_FILE}" >"${RELEASE_GATING_JSON}" 2>"${WORK_DIR}/release-gating.err" || yq_status=$?
+  if [ "${yq_status}" -ne 0 ]; then
+    printf '❌ %s\n' "release-gating: could not read '${RELEASE_GATING_FILE}' as YAML (yq exit ${yq_status}), so its gating is UNKNOWN" >&2
+    [ ! -s "${WORK_DIR}/release-gating.err" ] || sed 's/^/       | /' "${WORK_DIR}/release-gating.err" >&2
+    exit "${EXIT_TOOL}"
+  fi
+  [ "$(jq -r 'type' "${RELEASE_GATING_JSON}")" = "object" ] ||
+    tool_failure "release-gating: '${RELEASE_GATING_FILE}' is not a YAML mapping, so its gating is UNKNOWN"
+
+  # Each expectation is JSON-encoded by jq itself, so a configured value with a
+  # quote or a backslash in it is still exactly one string.
+  local trigger_json="" branch_json="" group_json="" condition_json=""
+  trigger_json="$(jq -cn --arg v "${trigger}" '[$v]')" ||
+    tool_failure "release-gating: could not encode the expected trigger workflow"
+  branch_json="$(jq -cn --arg v "${branch}" '[$v]')" ||
+    tool_failure "release-gating: could not encode the expected branch"
+  group_json="$(jq -cn --arg v "${group}" '$v')" ||
+    tool_failure "release-gating: could not encode the expected concurrency group"
+  condition_json="$(jq -cn --arg v "${RELEASE_GATING_CONDITION}" '$v')" ||
+    tool_failure "release-gating: could not encode the expected job condition"
+
+  release_gating_assert '.on.workflow_run.workflows' "${trigger_json}" \
+    "release must trigger from ${trigger}"
+  release_gating_assert '.on.workflow_run.branches' "${branch_json}" \
+    "release must be limited to ${branch}"
+  release_gating_assert '.on.workflow_run.types' '["completed"]' \
+    "release workflow_run type must be completed"
+  release_gating_assert ".jobs.${RELEASE_GATING_JOB}.if" "${condition_json}" \
+    "release job must require ${trigger} success"
+  release_gating_assert '.concurrency.group' "${group_json}" \
+    "release concurrency group must be ${group}"
+
+  log_info "release workflow inspected: ${RELEASE_GATING_FILE} (trigger: ${trigger}, branch: ${branch}, concurrency: ${group})"
+  if [ "${RELEASE_GATING_FAILED}" -gt 0 ]; then
+    printf '❌ %s\n' "release-gating: ${RELEASE_GATING_FAILED} of 5 assertion(s) failed. Every assertion ran, so this is the whole list and not the first fault." >&2
+    exit "${EXIT_VIOLATION}"
+  fi
+  ok "Release workflow is gated on ${trigger} success on ${branch}"
+}
+
+# --------------------------------------------------------------------------- #
 # dispatch
 # --------------------------------------------------------------------------- #
 
@@ -1111,6 +1217,7 @@ dispatch_check() {
   ci-wiring) check_ci_wiring "$@" ;;
   toolchain-smoke) check_toolchain_smoke "$@" ;;
   no-custom-derivations) check_no_custom_derivations "$@" ;;
+  release-gating) check_release_gating "$@" ;;
   *)
     usage_error "unknown check '${check}'; dlint has these: ${DLINT_CHECKS}"
     ;;

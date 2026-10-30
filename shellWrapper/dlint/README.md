@@ -1,6 +1,6 @@
 # dlint
 
-Five repo-agnostic repository linters behind one entrypoint. `dlint` runs in **any**
+Six repo-agnostic repository linters behind one entrypoint. `dlint` runs in **any**
 consuming repository: every repository-specific fact comes from that repository's own
 configuration file, never from a constant baked into the tool.
 
@@ -12,7 +12,7 @@ dlint --help
 dlint --version
 ```
 
-There are **exactly five** checks. There are no aliases and no hidden checks. There is no
+There are **exactly six** checks. There are no aliases and no hidden checks. There is no
 `all` **check** either — running everything is the `--all-configured` flag. An unknown
 check exits `2` and lists the valid ones.
 
@@ -23,6 +23,7 @@ check exits `2` and lists the valid ones.
 | `ci-wiring`                          | A CI entrypoint a workflow names is missing or not executable; an orchestrator job does not call a repository-local reusable workflow; a reusable workflow calls no CI entrypoint; an orchestrator declares no jobs. |
 | `toolchain-smoke`                    | A binary declared for a shell does not resolve INSIDE that shell, resolves but its probe (default `--version`) exits non-zero, or the shell could not be entered at all.                                             |
 | `no-custom-derivations`              | A declared nix file uses a custom derivation builder — outside its comments — instead of staying a plain declarative list. Every declared file is read to the end and every match is reported.                       |
+| `release-gating`                     | The release workflow can run without the trigger workflow succeeding on the release branch, or outside its one concurrency group. All five assertions run, and each refusal names the value it found.                |
 
 ## Several checks in one invocation
 
@@ -56,7 +57,7 @@ the invocation reported green.
 
 ## Configuration
 
-All five checks read **one** file, and `dlint.yaml` is its canonical name (**D6
+All six checks read **one** file, and `dlint.yaml` is its canonical name (**D6
 ONE-CONFIG-NAME**). `dlint` looks for, in order:
 
 | Looked for      | Format                                                          |
@@ -83,7 +84,7 @@ checks:
 
 and the JSON below describe the same thing. YAML is converted to JSON once per invocation and
 every reader is unchanged, so there is one code path rather than two that happen to agree
-today — and there are arms running all five checks AND `--all-configured` from a YAML config to hold that.
+today — and there are arms running all six checks AND `--all-configured` from a YAML config to hold that.
 
 Two properties are deliberate:
 
@@ -122,33 +123,36 @@ Two properties are deliberate:
     },
     "no-custom-derivations": {
       "paths": ["nix/packages.nix", "nix/env.nix"]
-    }
+    },
+    "release-gating": {}
   }
 }
 ```
 
 One mechanism, applied uniformly: a section per check, keyed by the check's own name.
 
-| Key                                     | Required | Default             |
-| --------------------------------------- | -------- | ------------------- |
-| `action-pins.trustedPattern`            | yes      | —                   |
-| `action-pins.workflowsDir`              | no       | `.github/workflows` |
-| `action-pins.requireSubjects`           | no       | `true`              |
-| `exec-bits.globs`                       | no       | `["*.sh"]`          |
-| `exec-bits.requireSubjects`             | no       | `true`              |
-| `ci-wiring.entrypointPattern`           | yes      | —                   |
-| `ci-wiring.orchestrators`               | yes      | —                   |
-| `ci-wiring.workflowsDir`                | no       | `.github/workflows` |
-| `toolchain-smoke.shells`                | yes\*    | —                   |
-| `toolchain-smoke.enter`                 | yes\*    | — (needs `{shell}`) |
-| `toolchain-smoke.shell`                 | legacy   | —                   |
-| `toolchain-smoke.binaries`              | legacy   | —                   |
-| `no-custom-derivations.paths`           | yes      | —                   |
-| `no-custom-derivations.forbid`          | no       | dlint's vocabulary  |
-| `no-custom-derivations.discover`        | no       | `["nix/*.nix"]`     |
-| `no-custom-derivations.requireSubjects` | no       | `true`              |
-| ` ↳ .file`                              | yes      | —                   |
-| ` ↳ .path`                              | yes      | —                   |
+| Key                                     | Required | Default                          |
+| --------------------------------------- | -------- | -------------------------------- |
+| `action-pins.trustedPattern`            | yes      | —                                |
+| `action-pins.workflowsDir`              | no       | `.github/workflows`              |
+| `action-pins.requireSubjects`           | no       | `true`                           |
+| `exec-bits.globs`                       | no       | `["*.sh"]`                       |
+| `exec-bits.requireSubjects`             | no       | `true`                           |
+| `ci-wiring.entrypointPattern`           | yes      | —                                |
+| `ci-wiring.orchestrators`               | yes      | —                                |
+| `ci-wiring.workflowsDir`                | no       | `.github/workflows`              |
+| `toolchain-smoke.shells`                | yes\*    | —                                |
+| `toolchain-smoke.enter`                 | yes\*    | — (needs `{shell}`)              |
+| `toolchain-smoke.shell`                 | legacy   | —                                |
+| `toolchain-smoke.binaries`              | legacy   | —                                |
+| `no-custom-derivations.paths`           | yes      | —                                |
+| `no-custom-derivations.forbid`          | no       | dlint's vocabulary               |
+| `no-custom-derivations.discover`        | no       | `["nix/*.nix"]`                  |
+| `no-custom-derivations.requireSubjects` | no       | `true`                           |
+| `release-gating.workflow`               | no       | `.github/workflows/release.yaml` |
+| `release-gating.triggerWorkflow`        | no       | `CI`                             |
+| `release-gating.branch`                 | no       | `main`                           |
+| `release-gating.concurrencyGroup`       | no       | `release`                        |
 
 `yes*` means required **in the scoped form**. `shells` + `enter` is that form; `shell` +
 `binaries` is the legacy single-shell one. Declare one form or the other, never both.
@@ -377,26 +381,65 @@ has stopped being repo-agnostic. An explicitly **empty** `discover` is refused (
 never notice a file it does not read. The warning stays quiet when every discovered file is
 covered, and there is an arm asserting that **absence**, because "it fires when it should" and
 "it stays quiet when it should" are two different claims.
-**One assertion is one caught fault.** A single combined predicate over four fields refuses
-without saying which field moved, so each is declared and reported separately. A refusal
-names the reason, the path, the value it **found** and the value it expected.
+
+## Release gating
+
+`release-gating` asserts that the release workflow publishes only after the trigger workflow
+**succeeds** on the release branch, and that releases never run concurrently. It replaces a
+hand-written `yq`/`jq` validator (`scripts/validate/release-policy.sh`) with the same five
+assertions, now configured rather than hard-coded:
+
+| Assertion                   | Expected                                            |
+| --------------------------- | --------------------------------------------------- |
+| `on.workflow_run.workflows` | `[<triggerWorkflow>]`                               |
+| `on.workflow_run.branches`  | `[<branch>]`                                        |
+| `on.workflow_run.types`     | `["completed"]`                                     |
+| `jobs.release.if`           | `github.event.workflow_run.conclusion == 'success'` |
+| `concurrency.group`         | `<concurrencyGroup>`                                |
+
+Every key has a default, so `release-gating: {}` enforces the usual shape. These defaults are a
+**deliberate exception** to "only tool conventions have defaults": they are the release shape
+the check was extracted to enforce, and a repository that differs says so.
+
+
+```yaml
+checks:
+  release-gating:
+    workflow: .github/workflows/release.yaml # default
+    triggerWorkflow: CI # default
+    branch: main # default
+    concurrencyGroup: release # default
+```
+
+The lists are compared **exactly**: a release that also fires from a second branch is not
+gated on the release branch. The job is always `release` and the event type always
+`completed` — those are what a gated release _is_, not how one repository is laid out.
+
+**Every assertion runs, and each failure names what it found.** One combined predicate would
+refuse without saying which field moved, and stopping at the first would make fixing one fault
+the way to discover the next:
+
+```text
+❌ release-gating: release must trigger from CI: '.github/workflows/release.yaml' .on.workflow_run.workflows is ["Build"], expected ["CI"]
+❌ release-gating: release concurrency group must be release: '.github/workflows/release.yaml' .concurrency.group is "<absent>", expected "release"
+❌ release-gating: 2 of 5 assertion(s) failed. Every assertion ran, so this is the whole list and not the first fault.
+```
 
 Four properties matter, and each has its own arm:
 
 - **The read is not a pipeline.** `yq … | jq -e …` takes its exit status from `jq`, so a `yq`
-  that fails and writes to stderr can leave `jq` reading empty input and the whole thing
-  exiting `0`. That is a real defect in the validators this check replaces. Here `yq` writes
-  to a file, its own status is checked, and only then is the file read.
-- **An unreadable subject is `5`, never a pass.** A workflow file that does not parse makes
-  the policy UNKNOWN, and UNKNOWN is not FAILED and is certainly not conforming.
-- **A declared file that does not exist is `3`, not `1`.** An absent subject is not a
-  violation; conflating the two misreports why the gate is red.
-- **`null` cannot be an expectation.** It is how this check reports an absent path, so
-  allowing it as a value would make "the field is missing" and "the field is correctly null"
-  the same answer. `equals: null` is a configuration error.
+  that fails and writes to stderr can leave `jq` reading empty input. Here `yq` writes to a
+  file, its own status is checked, and only then is the file read.
+- **An unreadable workflow is `5`, never a pass.** A release workflow that does not parse makes
+  the gating UNKNOWN, and UNKNOWN is not conforming.
+- **A release workflow that does not exist is `3`, not `1`.** Deleting `release.yaml` must
+  never be how the gate goes quiet, and an absent subject is not a violation either.
+- **An ungated release is a violation, not UNKNOWN.** `on: push` makes every `workflow_run`
+  path unreadable; each read is guarded, so that is five refusals rather than a `jq` error.
 
-`reason` is required. A refusal that cannot name the policy it enforces is the kind of gate
-that gets deleted for being unexplainable.
+Expected values are handed to `jq` as data, never spliced into its program, so a configured
+value cannot change what is being asserted.
+
 
 ## Runtime
 
@@ -431,7 +474,7 @@ Every check also prints its counts, so a run that inspected little says so on st
 
 ## Tests
 
-`tests/inject.sh` is the failure-injection harness: **173 arms**, each asserting the
+`tests/inject.sh` is the failure-injection harness: **200 arms**, each asserting the
 refusal **text** and not merely a non-zero status. A few assert the **absence** of a text
 (`arm_absent`), which is the only way to prove a warning is scoped rather than unconditional.
 
