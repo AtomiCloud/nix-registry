@@ -16,10 +16,10 @@ pkgs.runCommand "infralint-core"
   ];
 } ''
   mkdir -p $out/bin
-  cp ${pkgs.terraform-docs}/bin/* $out/bin/
-  cp ${pkgs.tfsec}/bin/* $out/bin/
-  cp ${pkgs.tflint}/bin/* $out/bin/
+  ln -s ${pkgs.terraform-docs}/bin/* $out/bin/
+  ln -s ${pkgs.tfsec}/bin/* $out/bin/
+  ln -s ${pkgs.tflint}/bin/* $out/bin/
 
-  cp ${pkgs.kubeconform}/bin/* $out/bin/
-  cp ${pkgs.kyverno}/bin/* $out/bin/
+  ln -s ${pkgs.kubeconform}/bin/* $out/bin/
+  ln -s ${pkgs.kyverno}/bin/* $out/bin/
 ''

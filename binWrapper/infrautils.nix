@@ -19,16 +19,16 @@ pkgs.runCommand "infrautils"
   ];
 } ''
   mkdir -p $out/bin
-  cp ${pkgs.kubernetes-helm}/bin/* $out/bin/
-  cp ${pkgs.kubectl}/bin/* $out/bin/
-  cp ${pkgs.k3d}/bin/* $out/bin/
-  cp ${pkgs.kubectx}/bin/* $out/bin/
+  ln -s ${pkgs.kubernetes-helm}/bin/* $out/bin/
+  ln -s ${pkgs.kubectl}/bin/* $out/bin/
+  ln -s ${pkgs.k3d}/bin/* $out/bin/
+  ln -s ${pkgs.kubectx}/bin/* $out/bin/
 
-  cp ${pkgs.docker}/bin/* $out/bin/
-  cp ${pkgs.tilt}/bin/* $out/bin/
+  ln -s ${pkgs.docker}/bin/* $out/bin/
+  ln -s ${pkgs.tilt}/bin/* $out/bin/
 
-  cp ${pkgs.opentofu}/bin/* $out/bin/
+  ln -s ${pkgs.opentofu}/bin/* $out/bin/
 
-  cp ${gardenio}/bin/* $out/bin/
-  cp ${mirrord}/bin/* $out/bin/
+  ln -s ${gardenio}/bin/* $out/bin/
+  ln -s ${mirrord}/bin/* $out/bin/
 ''

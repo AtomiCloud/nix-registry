@@ -16,6 +16,6 @@ pkgs.runCommand "infralint-docker"
   ];
 } ''
   mkdir -p $out/bin
-  cp ${pkgs.hadolint}/bin/* $out/bin/
-  cp ${pkgs.skopeo}/bin/* $out/bin/
+  ln -s ${pkgs.hadolint}/bin/* $out/bin/
+  ln -s ${pkgs.skopeo}/bin/* $out/bin/
 ''

@@ -31,23 +31,23 @@ pkgs.runCommand "atomiutils"
   ];
 } ''
   mkdir -p $out/bin
-  cp ${pkgs.toybox}/bin/* $out/bin/
-  cp -f ${pkgs.coreutils}/bin/* $out/bin/
-  cp -f ${pkgs.findutils}/bin/* $out/bin/
-  cp -f ${pkgs.uutils-coreutils-noprefix}/bin/* $out/bin/
+  ln -s ${pkgs.toybox}/bin/* $out/bin/
+  ln -sf ${pkgs.coreutils}/bin/* $out/bin/
+  ln -sf ${pkgs.findutils}/bin/* $out/bin/
+  ln -sf ${pkgs.uutils-coreutils-noprefix}/bin/* $out/bin/
 
-  cp -f ${pkgs.gnused}/bin/* $out/bin/
-  cp -f ${pkgs.gnugrep}/bin/* $out/bin/
-  cp -f ${pkgs.ripgrep}/bin/* $out/bin/
-  cp -f ${pkgs.gnutar}/bin/* $out/bin/
-  cp -f ${pkgs.gawk}/bin/* $out/bin/
+  ln -sf ${pkgs.gnused}/bin/* $out/bin/
+  ln -sf ${pkgs.gnugrep}/bin/* $out/bin/
+  ln -sf ${pkgs.ripgrep}/bin/* $out/bin/
+  ln -sf ${pkgs.gnutar}/bin/* $out/bin/
+  ln -sf ${pkgs.gawk}/bin/* $out/bin/
 
-  cp -f ${pkgs.curl}/bin/* $out/bin/
-  cp -f ${pkgs.gomplate}/bin/* $out/bin/
+  ln -sf ${pkgs.curl}/bin/* $out/bin/
+  ln -sf ${pkgs.gomplate}/bin/* $out/bin/
 
-  cp ${pkgs.jq}/bin/* $out/bin/
-  cp ${pkgs.yq-go}/bin/* $out/bin/
+  ln -s ${pkgs.jq}/bin/* $out/bin/
+  ln -s ${pkgs.yq-go}/bin/* $out/bin/
 
-  cp -f ${pkgs.bc}/bin/* $out/bin/
-  cp ${pkgs.bash}/bin/* $out/bin/
+  ln -sf ${pkgs.bc}/bin/* $out/bin/
+  ln -s ${pkgs.bash}/bin/* $out/bin/
 ''
