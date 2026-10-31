@@ -13,8 +13,8 @@ pkgs.runCommand "infrautils-k8s"
   ];
 } ''
   mkdir -p $out/bin
-  cp ${pkgs.kubernetes-helm}/bin/* $out/bin/
-  cp ${pkgs.kubectl}/bin/* $out/bin/
-  cp ${pkgs.k3d}/bin/* $out/bin/
-  cp ${pkgs.kubectx}/bin/* $out/bin/
+  ln -s ${pkgs.kubernetes-helm}/bin/* $out/bin/
+  ln -s ${pkgs.kubectl}/bin/* $out/bin/
+  ln -s ${pkgs.k3d}/bin/* $out/bin/
+  ln -s ${pkgs.kubectx}/bin/* $out/bin/
 ''

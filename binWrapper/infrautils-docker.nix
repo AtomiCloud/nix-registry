@@ -10,5 +10,5 @@ pkgs.runCommand "infrautils-docker"
   ];
 } ''
   mkdir -p $out/bin
-  cp ${pkgs.docker}/bin/* $out/bin/
+  ln -s ${pkgs.docker}/bin/* $out/bin/
 ''

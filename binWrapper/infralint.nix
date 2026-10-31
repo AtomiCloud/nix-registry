@@ -19,15 +19,15 @@ pkgs.runCommand "infralint"
   ];
 } ''
   mkdir -p $out/bin
-  cp ${pkgs.hadolint}/bin/* $out/bin/
-  cp ${pkgs.helm-docs}/bin/* $out/bin/
+  ln -s ${pkgs.hadolint}/bin/* $out/bin/
+  ln -s ${pkgs.helm-docs}/bin/* $out/bin/
 
-  cp ${pkgs.terraform-docs}/bin/* $out/bin/
-  cp ${pkgs.tfsec}/bin/* $out/bin/
-  cp ${pkgs.tflint}/bin/* $out/bin/
-  cp ${hl}/bin/* $out/bin/
+  ln -s ${pkgs.terraform-docs}/bin/* $out/bin/
+  ln -s ${pkgs.tfsec}/bin/* $out/bin/
+  ln -s ${pkgs.tflint}/bin/* $out/bin/
+  ln -s ${hl}/bin/* $out/bin/
 
-  cp ${pkgs.kubeconform}/bin/* $out/bin/
-  cp ${pkgs.kyverno}/bin/* $out/bin/
-  cp ${pkgs.skopeo}/bin/* $out/bin/
+  ln -s ${pkgs.kubeconform}/bin/* $out/bin/
+  ln -s ${pkgs.kyverno}/bin/* $out/bin/
+  ln -s ${pkgs.skopeo}/bin/* $out/bin/
 ''

@@ -16,6 +16,6 @@ pkgs.runCommand "infralint-helm"
   ];
 } ''
   mkdir -p $out/bin
-  cp ${pkgs.helm-docs}/bin/* $out/bin/
-  cp ${hl}/bin/* $out/bin/
+  ln -s ${pkgs.helm-docs}/bin/* $out/bin/
+  ln -s ${hl}/bin/* $out/bin/
 ''

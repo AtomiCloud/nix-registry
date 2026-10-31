@@ -16,10 +16,10 @@ pkgs.runCommand "infrautils-core"
   ];
 } ''
   mkdir -p $out/bin
-  cp ${pkgs.tilt}/bin/* $out/bin/
+  ln -s ${pkgs.tilt}/bin/* $out/bin/
 
-  cp ${pkgs.opentofu}/bin/* $out/bin/
+  ln -s ${pkgs.opentofu}/bin/* $out/bin/
 
-  cp ${gardenio}/bin/* $out/bin/
-  cp ${mirrord}/bin/* $out/bin/
+  ln -s ${gardenio}/bin/* $out/bin/
+  ln -s ${mirrord}/bin/* $out/bin/
 ''
