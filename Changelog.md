@@ -1,3 +1,10 @@
+## [5.9.1](https://github.com/AtomiCloud/nix-registry/compare/v5.9.0...v5.9.1) (2026-10-31)
+
+
+### 🐛 Bug Fixes 🐛
+
+* symlink bundle tools instead of copying them ([bd2a19e](https://github.com/AtomiCloud/nix-registry/commit/bd2a19e8fd4295f7d7a9d61391f14ffae9f1d39e)), closes [#98](https://github.com/AtomiCloud/nix-registry/issues/98)
+
 ## [5.9.0](https://github.com/AtomiCloud/nix-registry/compare/v5.8.0...v5.9.0) (2026-10-30)
 
 
