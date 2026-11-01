@@ -101,6 +101,17 @@
             # Asserts the .NET SDK the wrappers ship really is the fleet-pinned
             # patch, by running it. See dotnet/default.nix.
             dotnet-pin-contract = packages.dotnet-pin-contract;
+            # Builds a fixture CLI with lib.buildBunCli and runs it, so the
+            # builder itself is covered, not only its consumers.
+            bun-cli-builder = packages.bun-cli-fixture;
+          };
+          # Builders for consumers: a function is not a derivation, so it cannot
+          # live in `packages`. Use as `atomipkgs.lib.${system}.buildBunCli`.
+          lib = {
+            buildBunCli = import ./bunWrapper/buildBunCli.nix {
+              nixpkgs = pkgs;
+              defaultBun = pkgs-unstable.bun;
+            };
           };
           packages = import ./default.nix
             {
@@ -119,7 +130,7 @@
           };
         };
         {
-          inherit checks formatter packages devShells defaultPackage;
+          inherit checks formatter packages devShells defaultPackage lib;
         }
       )
     )
