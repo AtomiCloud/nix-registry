@@ -188,7 +188,7 @@ It builds a `<name>-deps-<digest>` fixed-output derivation (`bun install --froze
 `node_modules` free of platform-specific dev binaries, so one `depsHash` covers every
 system; if a runtime dependency breaks that, pass a per-system attrset. Get the hash with
 `depsHash = nixpkgs.lib.fakeHash;` as for `writeBunScriptBin`. The registry tests the
-builder with `bunWrapper/bun-cli-fixture` (`nix build .#bun-cli-builder`, also run by CI).
+builder with `bunWrapper/bun-cli-fixture` (`nix build .#bun-cli-fixture`, or `nix flake check` for the `checks.bun-cli-builder` entry; CI builds and runs it).
 
 ## Pattern: Compiled Binary from a Pinned Source Tag
 
