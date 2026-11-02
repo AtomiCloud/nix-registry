@@ -1,3 +1,15 @@
+## [5.10.0](https://github.com/AtomiCloud/nix-registry/compare/v5.9.1...v5.10.0) (2026-11-02)
+
+
+### ✨ New Packages ✨
+
+* **buildBunCli:** add reusable bun-compiled CLI builder ([302e49a](https://github.com/AtomiCloud/nix-registry/commit/302e49a0d7cbcd3591233af3662b75aa4cefe6ec))
+
+
+### Documentation Updates
+
+* point BunWrapper test command at the fixture package ([1e0c3ea](https://github.com/AtomiCloud/nix-registry/commit/1e0c3ea1622827c1d0fcdfcfd24474e44d0f0d8f))
+
 ## [5.9.1](https://github.com/AtomiCloud/nix-registry/compare/v5.9.0...v5.9.1) (2026-10-31)
 
 
