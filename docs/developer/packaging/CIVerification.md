@@ -48,6 +48,7 @@ The following packages are verified in CI with their respective commands:
 | releaser                    | `releaser --version`               | AtomiCloud release + commit-lint CLI                                          |
 | md-mermaid-lint             | `md-mermaid-lint --version`        | Mermaid diagram linter                                                        |
 | resolver-smoke              | `resolver-smoke --version`         | Template-authoring resolver gate; also runs its injection harness (see below) |
+| bun-cli-fixture             | `bun-cli-fixture --version`        | Smoke for `lib.buildBunCli`; also asserted at build time                      |
 | infrautils                  | (no execution command)             | In nix shell only                                                             |
 | infralint                   | (no execution command)             | In nix shell only                                                             |
 | workspace-validator-runtime | (no execution command)             | A PATH, not a binary; built and content-asserted by `.#tool-bundle-contract`  |

@@ -153,6 +153,43 @@ trivialBuilders.writeBunScriptBin {
 }
 ```
 
+## Pattern: Compiled Binary from Your Own Source (`lib.buildBunCli`)
+
+A consumer repo that ships a Bun CLI as a single compiled executable must not carry its
+own derivations. The registry exports the builder as a flake `lib` output (a function is
+not a derivation, so it is not in `packages`):
+
+```nix
+# in the consumer's flake, with the registry as input `atomipkgs`
+let buildBunCli = atomipkgs.lib.${system}.buildBunCli; in
+buildBunCli {
+  name = "my-cli";
+  version = "1.0.0";
+  src = ./.;
+  entrypoint = "src/main.ts";
+  depsHash = "sha256-...";
+}
+```
+
+| Parameter    | Required | Description                                                         |
+| ------------ | -------- | ------------------------------------------------------------------- |
+| `name`       | Yes      | Binary name (`$out/bin/<name>`, also `meta.mainProgram`)            |
+| `version`    | Yes      | Version string                                                      |
+| `src`        | Yes      | Source with `package.json`, `bun.lock` and the entrypoint           |
+| `entrypoint` | Yes      | Entry file, relative to `src`                                       |
+| `depsHash`   | Yes      | Fixed-output hash of `node_modules` (string, or attrset per system) |
+| `bun`        | No       | Bun package for install and compile (default: the registry's bun)   |
+| `production` | No       | Install only `dependencies` (default: `true`)                       |
+| `buildArgs`  | No       | Extra flags appended to `bun build` (default: `""`)                 |
+| `meta`       | No       | Merged over `{ mainProgram = name; }`                               |
+
+It builds a `<name>-deps-<digest>` fixed-output derivation (`bun install --frozen-lockfile
+--production`), then compiles with `bun build --compile`. Production-only keeps
+`node_modules` free of platform-specific dev binaries, so one `depsHash` covers every
+system; if a runtime dependency breaks that, pass a per-system attrset. Get the hash with
+`depsHash = nixpkgs.lib.fakeHash;` as for `writeBunScriptBin`. The registry tests the
+builder with `bunWrapper/bun-cli-fixture` (`nix build .#bun-cli-fixture`, or `nix flake check` for the `checks.bun-cli-builder` entry; CI builds and runs it).
+
 ## Pattern: Compiled Binary from a Pinned Source Tag
 
 For upstream Bun CLIs published as a tagged repository (rather than local

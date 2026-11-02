@@ -74,4 +74,5 @@ REGISTRY_PACKAGES=(
   obsidian_headless
   releaser
   resolver-smoke
+  bun-cli-fixture
 )
