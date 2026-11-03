@@ -9,17 +9,18 @@
 # Complexity is hoisted to the registry so a consuming template can keep a plain
 # `go` entry.
 #
-# CVE protection for GO-2026-5856 is therefore this version plus `govulncheck`
-# evidence, NOT a per-template override.
+# CVE protection for GO-2026-5856, GO-2026-5972, GO-2026-6090, GO-2026-6607 and
+# GO-2026-6809 is therefore this version plus `govulncheck` evidence, NOT a
+# per-template override.
 let
-  version = "1.26.5";
+  version = "1.26.10";
 in
 (nixpkgs.go.overrideAttrs (
   finalAttrs: _previousAttrs: {
     inherit version;
     src = nixpkgs.fetchurl {
       url = "https://go.dev/dl/go${finalAttrs.version}.src.tar.gz";
-      hash = "sha256-SVvkvIcXasVnOS5bQRar2YRm0z17SdQedkzMaXay3EI=";
+      hash = "sha256-/WPog7ovK/ypPBZGsx6+9j4rHk0rMXyXidl2po2B828=";
     };
   }
 )).overrideAttrs
