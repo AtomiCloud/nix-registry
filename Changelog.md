@@ -1,3 +1,10 @@
+## [5.11.0](https://github.com/AtomiCloud/nix-registry/compare/v5.10.0...v5.11.0) (2026-11-03)
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **patch:** bump go to 1.26.10 ([4135e27](https://github.com/AtomiCloud/nix-registry/commit/4135e27470551cf4d968dd01bc6fc7a169e624df))
+
 ## [5.10.0](https://github.com/AtomiCloud/nix-registry/compare/v5.9.1...v5.10.0) (2026-11-02)
 
 
