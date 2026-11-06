@@ -21,13 +21,14 @@ let
   };
 
   # Go
-  golang = {
+  golang = rec {
     # The registry guarantees the Go version, so a template can keep a plain entry
     # instead of carrying an overrideAttrs (R14 / D7 RESOLVER-SHAPE).
     go = import ./golang/go/default.nix { inherit nixpkgs; };
     nix-share = import ./golang/nix-share/default.nix { inherit nixpkgs; };
     ccc = import ./golang/ccc/default.nix { inherit nixpkgs; };
     dashboard-linter = import ./golang/dashboard-linter/default.nix { inherit nixpkgs; };
+    gorelease = import ./golang/gorelease/default.nix { inherit nixpkgs go; };
   };
 
   # dotnet
