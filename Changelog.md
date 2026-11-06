@@ -1,3 +1,15 @@
+## [5.12.0](https://github.com/AtomiCloud/nix-registry/compare/v5.11.0...v5.12.0) (2026-11-06)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **drv:** trim gorelease comments ([2c6b3d6](https://github.com/AtomiCloud/nix-registry/commit/2c6b3d6cd1aae311915ad30caa1a43ee362cf16f))
+
+
+### ✨ New Packages ✨
+
+* **gorelease:** add golang.org/x/exp/cmd/gorelease ([fc32ede](https://github.com/AtomiCloud/nix-registry/commit/fc32edea386390eb8bccc889252e657c8df0dafa))
+
 ## [5.11.0](https://github.com/AtomiCloud/nix-registry/compare/v5.10.0...v5.11.0) (2026-11-03)
 
 
