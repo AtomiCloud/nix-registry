@@ -270,7 +270,8 @@ wrap_json_schema() { # entry file
             scope: "Namespaced",
             versions: [{
               name: $version, served: true, storage: true,
-              schema: {openAPIV3Schema: {type: "object", properties: {spec: ($spec | clean)}}}
+              schema: {openAPIV3Schema: ({type: "object", properties: {spec: ($spec | clean)}}
+                + (if ((.required // []) | index("spec")) != null then {required: ["spec"]} else {} end))}
             }]
           }
         }' | yq -P '.'

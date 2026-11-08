@@ -284,6 +284,9 @@ expect "unknown field on the JSON-schema kind is red" 1 "unknown field" "surpris
 run "${D}" check "${M}/bad-logtoapp-missing-field.yaml"
 expect "missing required field on the JSON-schema kind is red" 1 "resourceRefs"
 
+run "${D}" check "${M}/bad-logtoapp-no-spec.yaml"
+expect "a JSON-schema kind with no spec is red (root required carried over)" 1 "spec"
+
 run "${D}" check "${M}/good.yaml" "${M}/bad-latest-image.yaml"
 expect "several files: one bad file is red" 1 "no-latest-tag"
 

@@ -106,6 +106,7 @@ number; `chart-checks` refuses it with a message saying so.
 A `json-schema` entry takes a whole-object JSON Schema, uses its `properties.spec` as the CRD's
 spec schema, turns `const` into a one-value `enum` and drops `additionalProperties: false` (a
 CRD structural schema forbids it next to `properties`; unknown fields are refused regardless).
+A root `required: ["spec"]` is carried over, so an object with no `spec` is refused too.
 
 ## Step 0: `kubectl-validate` or `kubeconform` + a converter?
 
