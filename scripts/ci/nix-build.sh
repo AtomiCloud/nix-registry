@@ -44,6 +44,7 @@ nix shell --max-jobs 1 --cores 2 nixpkgs#bash \
   dn-inspect --version &&
   deadcode --version &&
   dlint --version &&
+  chart-checks --version &&
   coderabbit --version &&
   ccc --version &&
   md-mermaid-lint --version &&

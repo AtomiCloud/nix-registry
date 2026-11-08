@@ -63,6 +63,8 @@ REGISTRY_PACKAGES=(
   cliproxyapi
   deadcode
   dlint
+  chart-checks
+  chart-checks-tests
   coderabbit
   ccc
   md-mermaid-lint

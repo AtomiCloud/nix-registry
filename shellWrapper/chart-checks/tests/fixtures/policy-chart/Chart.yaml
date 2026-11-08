@@ -1,0 +1,4 @@
+apiVersion: v2
+name: fixture-policies
+description: Policy chart fixture for the chart-checks tests
+version: 0.1.0

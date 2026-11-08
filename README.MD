@@ -20,6 +20,7 @@ AtomiCloud's Nix Registry for custom built packages.
 - cyanprint
 - releaser
 - helm-schema
+- chart-checks (fetch pinned policy/CRD inputs, then validate rendered manifests offline; see `shellWrapper/chart-checks/README.md`)
 - dotnetPackage (the .NET SDK the registry's .NET tooling is built against, pinned
   to the patch the fleet's .NET nodes name in their `global.json`)
 

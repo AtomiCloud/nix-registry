@@ -22,7 +22,7 @@ The repository uses Nix flakes with the following input sources:
 Packages are organized by language/type in directories:
 
 - `binWrapper/`: Binary wrapper packages (mirrord, cyanprint, gardenio, atomiutils, infrautils, infralint, codecov, workspace-validator-runtime)
-- `shellWrapper/`: Shell script wrappers (pls, helmlint, helm-schema, dotnetlint, dn-inspect)
+- `shellWrapper/`: Shell script wrappers (pls, helmlint, helm-schema, chart-checks, dotnetlint, dn-inspect)
 - `dotnet/`: The .NET SDK pin (`dotnetPackage`) the .NET wrappers default to. Read
   from the `nixpkgs-dotnet` flake input, which is pinned to the exact revision the
   fleet's .NET nodes pin, because `global.json` + `rollForward: disable` makes an
