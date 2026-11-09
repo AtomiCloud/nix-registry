@@ -1,3 +1,15 @@
+## [5.13.0](https://github.com/AtomiCloud/nix-registry/compare/v5.12.0...v5.13.0) (2026-11-09)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **drv:** carry root required spec into wrapped CRD ([c1b7aef](https://github.com/AtomiCloud/nix-registry/commit/c1b7aefff8ef91a6cef93c91879487ccccbb1133))
+
+
+### ✨ New Packages ✨
+
+* **chart-checks:** add offline manifest validation tool ([29613b4](https://github.com/AtomiCloud/nix-registry/commit/29613b4453ba760db956d7ebebc9a122dbc3785f))
+
 ## [5.12.0](https://github.com/AtomiCloud/nix-registry/compare/v5.11.0...v5.12.0) (2026-11-06)
 
 
