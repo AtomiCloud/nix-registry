@@ -104,6 +104,9 @@
             # Builds a fixture CLI with lib.buildBunCli and runs it, so the
             # builder itself is covered, not only its consumers.
             bun-cli-builder = packages.bun-cli-fixture;
+            # Runs chart-checks end to end in the sandbox (no network): every source kind,
+            # every refusal, and `check` offline after `install`.
+            chart-checks-tests = packages.chart-checks-tests;
           };
           # Builders for consumers: a function is not a derivation, so it cannot
           # live in `packages`. Use as `atomipkgs.lib.${system}.buildBunCli`.

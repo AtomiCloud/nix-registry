@@ -1,0 +1,9 @@
+# A binding to a policy that does not exist. chart-checks must never hand it to kyverno:
+# if it did, this chart would stop being usable.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: no-latest-tag-binding
+spec:
+  policyName: does-not-exist
+  validationActions: [Deny]

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": { "type": "string" },
+    "kind": { "const": "LogtoApp" },
+    "metadata": { "type": "object", "required": ["name"] },
+    "spec": {
+      "type": "object",
+      "required": ["identityRef", "paths", "extraRedirectUris", "resourceRefs"],
+      "properties": {
+        "identityRef": {
+          "type": "object",
+          "required": ["platform", "landscape"],
+          "properties": {
+            "platform": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" },
+            "landscape": { "type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$" }
+          },
+          "additionalProperties": false
+        },
+        "paths": { "type": "array", "items": { "type": "string", "pattern": "^/" } },
+        "extraRedirectUris": { "type": "array", "items": { "type": "string" } },
+        "resourceRefs": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

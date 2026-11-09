@@ -5,6 +5,9 @@ rec {
   inherit pls please;
   deadcode = import ./deadcode/default.nix { inherit trivialBuilders nixpkgs; };
   dlint = import ./dlint/default.nix { inherit trivialBuilders nixpkgs; };
+  chart-checks = import ./chart-checks/default.nix { inherit trivialBuilders nixpkgs; };
+  # Offline test run of chart-checks: a build, so it has no network by construction.
+  chart-checks-tests = chart-checks.passthru.tests;
   go-validator = import ./go-validator/default.nix { inherit trivialBuilders nixpkgs; };
   # Both .NET wrappers take the registry's SDK pin (dotnet/default.nix) as their
   # default `dotnetPackage`, so the pin is one decision in one place.
