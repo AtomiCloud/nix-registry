@@ -9,8 +9,11 @@ import (
 // declares, per scope (package/module/namespace/library, and each struct/class/record/enum),
 // exactly as gen_<lang>.go spells it. Lint refuses a definition when two entries of one
 // scope are equal (L230) or an entry shadows a name the generated code or its standard
-// library relies on (L231). TestSymbolModelMatchesGo cross-checks the Go model against
-// the parsed Go output; the other generators are covered by the planted files.
+// library relies on (L231). It is a hand-kept mirror, not a proof of completeness:
+// TestGoCollisionsAreCompileErrors type-checks the generated Go of the planted Go collision
+// files, and the generative compile test (SPIKE fuzz/) compiles hundreds of random lint-clean
+// definitions in all four languages to catch what this model misses. Expression-context
+// references in C# are fully qualified (gen_cs.go q) so properties cannot shadow them.
 //
 // Keep this file in step with the generators: a new generated identifier goes here first.
 
@@ -211,6 +214,7 @@ func checkSymbols(m *Module, add func(string, Pos, string, ...any)) {
 			}
 			continue
 		}
+		csOwnName(t.Name, o, t.Pos, csObjectDeclared, add)
 		rec := r.scope("cs", "record "+t.Name)
 		rec.fixed("__Read", "__Write")
 		rec.fixed(csRecordMembers...)
@@ -224,6 +228,7 @@ func checkSymbols(m *Module, add func(string, Pos, string, ...any)) {
 		o := "problem " + p.ID
 		n := Pascal(p.ID)
 		ns.put(n, o, p.Pos)
+		csOwnName(n, o, p.Pos, csProblemDeclared, add)
 		rec := r.scope("cs", "record "+n)
 		rec.fixed("Meta", "Instance", "Cause", "ReceivedType", "ReceivedDetail", "Detail",
 			"LogLine", "WriteData", "RetryAfterSeconds", "Parse", "__Closed", "__Read", "__Write",
@@ -261,11 +266,22 @@ func checkSymbols(m *Module, add func(string, Pos, string, ...any)) {
 			}
 		}
 	}
+	// Dart class members shadow library-level names inside the class body, and generated
+	// bodies call the library-level helpers: a private field `decodeInner` (member
+	// _decodeInner) would capture the call to the helper _decodeInner.
+	var dartHelpers []string
+	for _, t := range m.Types {
+		dartHelpers = append(dartHelpers, "_decode"+t.Name)
+		if !t.IsEnum {
+			dartHelpers = append(dartHelpers, "_write"+t.Name)
+		}
+	}
 	for _, p := range m.Problems {
 		o := "problem " + p.ID
 		n := Pascal(p.ID)
 		lib.put(n, o, p.Pos)
 		cl := r.scope("dart", "class "+n)
+		cl.fixed(dartHelpers...)
 		cl.fixed("_meta", "meta", "retryAfterSeconds", "detail", "logLine", "hasData", "writeData",
 			"_decode", "instance", "cause", "_received", "receivedType", "parse")
 		cl.fixed(dartObjectMembers...)
@@ -300,6 +316,23 @@ func goStruct(st *symScope, fields []*Field, owner string, fo func(*Field, strin
 		}
 		if f.Optional {
 			st.put("With"+Pascal(f.Name), fo(f, owner)+" (setter)", f.Pos)
+		}
+	}
+}
+
+// Members a generated C# record DECLARES (written by the generator or synthesised by the
+// compiler for every record). A record cannot be named like one of its own declared members
+// (CS0542); inherited members (Instance, Cause, GetType, ...) are fine.
+var (
+	csSynthesised     = []string{"EqualityContract", "PrintMembers", "Equals", "GetHashCode", "ToString"}
+	csObjectDeclared  = append([]string{"__Read", "__Write"}, csSynthesised...)
+	csProblemDeclared = append([]string{"Meta", "Detail", "LogLine", "WriteData", "RetryAfterSeconds", "__Closed", "__Read"}, csSynthesised...)
+)
+
+func csOwnName(name, origin string, p Pos, declared []string, add func(string, Pos, string, ...any)) {
+	for _, d := range declared {
+		if d == name {
+			add("L231", p, "%s becomes C# record %s, which declares a member %s (CS0542)", origin, name, d)
 		}
 	}
 }

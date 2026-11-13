@@ -176,7 +176,7 @@ func TestConfigBounds(t *testing.T) {
 		_, err := LoadConfig(p)
 		return err
 	}
-	one := "\n  - definition: x.yaml\n    outputs: {}"
+	one := "\n  - definition: x.yaml\n    outputs: { catalog: { file: c.json } }"
 	if err := write(strings.Repeat("a", 63), one); err != nil {
 		t.Errorf("63-char platform refused: %v", err)
 	}

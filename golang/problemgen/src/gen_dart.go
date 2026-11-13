@@ -168,8 +168,9 @@ func (g *dartGen) file(source string) string {
 	g.parseFn()
 	g.p("}")
 	g.p("")
+	reach := publicReach(g.m)
 	for _, t := range g.m.Types {
-		g.namedType(t)
+		g.namedType(t, reach[t.Name])
 	}
 	for _, p := range g.m.Problems {
 		g.problem(p)
@@ -180,7 +181,10 @@ func (g *dartGen) file(source string) string {
 
 // ---- named types ----
 
-func (g *dartGen) namedType(t *NamedType) {
+// namedType emits the type, and its wire helpers only when a public field reaches it: a type
+// used only by private fields is never written or decoded, and an unused private helper is
+// an analyzer warning (unused_element) in the consuming project.
+func (g *dartGen) namedType(t *NamedType, wire bool) {
 	if t.IsEnum {
 		doc := t.Name
 		if t.Description != "" {
@@ -202,6 +206,9 @@ func (g *dartGen) namedType(t *NamedType) {
 		g.p("  final String wire;")
 		g.p("}")
 		g.p("")
+		if !wire {
+			return
+		}
 		g.p("%s _decode%s(Object? r) {", t.Name, t.Name)
 		g.p("  final s = rt.decodeString(r);")
 		g.p("  for (final v in %s.values) {", t.Name)
@@ -233,6 +240,9 @@ func (g *dartGen) namedType(t *NamedType) {
 	}
 	g.p("}")
 	g.p("")
+	if !wire {
+		return
+	}
 	g.p("void _write%s(rt.Writer w, %s v) {", t.Name, t.Name)
 	g.p("  w.beginObject();")
 	n := 0
@@ -626,4 +636,33 @@ func (g *dartGen) parseFn() {
 	g.p("        return Unknown._(e, 'unknown id \"${a.id}\"');")
 	g.p("    }")
 	g.p("  }")
+}
+
+// publicReach returns the named types a public field of some problem needs (transitively):
+// the only types that are ever written to or read from the wire.
+func publicReach(m *Module) map[string]bool {
+	out := map[string]bool{}
+	var visit func(t FieldType)
+	visit = func(t FieldType) {
+		switch t.Kind {
+		case KArray:
+			visit(*t.Items)
+		case KRef:
+			if out[t.Ref] {
+				return
+			}
+			out[t.Ref] = true
+			if nt := m.TypeByName(t.Ref); nt != nil && !nt.IsEnum {
+				for _, f := range nt.Fields {
+					visit(f.Type)
+				}
+			}
+		}
+	}
+	for _, p := range m.Problems {
+		for _, f := range p.PublicData() {
+			visit(f.Type)
+		}
+	}
+	return out
 }

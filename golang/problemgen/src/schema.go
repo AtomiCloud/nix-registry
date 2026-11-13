@@ -80,28 +80,28 @@ func yamlToJSON(n *yaml.Node, buf *bytes.Buffer) error {
 		case "!!int":
 			i, err := strconv.ParseInt(n.Value, 0, 64)
 			if err != nil {
-				return fmt.Errorf("line %d: integer %q out of range", n.Line, n.Value)
+				return &nodeError{n, fmt.Sprintf("integer %q out of range", n.Value)}
 			}
 			buf.WriteString(strconv.FormatInt(i, 10))
 		case "!!float":
 			f, err := strconv.ParseFloat(n.Value, 64)
 			if err != nil || strings.ContainsAny(strings.ToLower(n.Value), "in") {
-				return fmt.Errorf("line %d: %q is not a finite JSON number", n.Line, n.Value)
+				return &nodeError{n, fmt.Sprintf("%q is not a finite JSON number", n.Value)}
 			}
 			buf.WriteString(strconv.FormatFloat(f, 'g', -1, 64))
 		case "!!bool":
 			if n.Value == "true" || n.Value == "false" {
 				buf.WriteString(n.Value)
 			} else {
-				return fmt.Errorf("line %d: write booleans as true/false, not %q", n.Line, n.Value)
+				return &nodeError{n, fmt.Sprintf("write booleans as true/false, not %q", n.Value)}
 			}
 		case "!!null":
 			buf.WriteString("null")
 		default:
-			return fmt.Errorf("line %d: unsupported YAML scalar type %s", n.Line, n.Tag)
+			return &nodeError{n, fmt.Sprintf("unsupported YAML scalar type %s", n.Tag)}
 		}
 	default:
-		return fmt.Errorf("line %d: unsupported YAML node", n.Line)
+		return &nodeError{n, fmt.Sprintf("unsupported YAML node")}
 	}
 	return nil
 }
@@ -139,7 +139,12 @@ func nodeAt(root *yaml.Node, path []string) *yaml.Node {
 func validateSchema(file string, root *yaml.Node) []Diag {
 	var buf bytes.Buffer
 	if err := yamlToJSON(root, &buf); err != nil {
-		return []Diag{{"P005", Pos{File: file}, err.Error()}}
+		p := Pos{File: file}
+		var ne *nodeError
+		if errors.As(err, &ne) {
+			p = pos(file, ne.node)
+		}
+		return []Diag{{"P005", p, err.Error()}}
 	}
 	sch, err := definitionSchema()
 	if err != nil {
@@ -190,3 +195,11 @@ func validateSchema(file string, root *yaml.Node) []Diag {
 }
 
 var enPrinter = message.NewPrinter(language.English)
+
+// nodeError is a conversion error located at a YAML node (so diagnostics carry its position).
+type nodeError struct {
+	node *yaml.Node
+	msg  string
+}
+
+func (e *nodeError) Error() string { return fmt.Sprintf("line %d: %s", e.node.Line, e.msg) }

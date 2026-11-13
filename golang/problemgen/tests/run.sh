@@ -79,10 +79,18 @@ grep -q 'regexMatch "^\[a-z0-9\]' "$rec" && grep -q '{{ fail ' "$rec" && ok "rec
 grep -Eq '^    - id: "[a-z_0-9]+"$' "$rec" && ! grep -Eq '^ *(id|platform|service|module|version|namespace): [^"]' "$rec" &&
   ok "record strings quoted" || bad "record has an unquoted string"
 
-# verify finds stale generated files in its output directories; an empty module list is refused.
-(cd "$work/fx" && "$PG" generate >/dev/null && cp out/go/confv1/problems.gen.go out/go/confv1/old.gen.go &&
-  ! "$PG" verify >/dev/null 2>&1 && rm out/go/confv1/old.gen.go && "$PG" verify >/dev/null) &&
-  ok "verify detects a stale generated file" || bad "verify missed a stale generated file"
+# The manifest (<config>.outputs) lists what this config generated: dropping an output makes
+# verify report the stale file and generate remove it; a hand-made file is never claimed.
+(cd "$work/fx" && "$PG" generate >/dev/null && [ -s problemgen.yaml.outputs ] &&
+  cp out/go/confv1/problems.gen.go out/go/confv1/hand.gen.go && "$PG" verify >/dev/null &&
+  rm out/go/confv1/hand.gen.go) && ok "verify ignores files it did not generate" || bad "verify claimed a file it did not generate"
+(cd "$work/fx" && cp problemgen.yaml cfg.bak && grep -v 'catalog:' cfg.bak >problemgen.yaml &&
+  ! "$PG" verify >/dev/null 2>&1 && "$PG" generate >gen.log && grep -q 'removed stale' gen.log && [ ! -e out/catalog/conf.v1.json ] &&
+  "$PG" verify >/dev/null && mv cfg.bak problemgen.yaml && "$PG" generate >/dev/null) &&
+  ok "dropped catalog output: verify reports it, generate removes it" || bad "stale catalog not handled"
+sed 's/^    outputs:$/    outputs: {}/; /^      /d' "$work/fx/problemgen.yaml" >"$work/nooutputs.yaml"
+out=$("$PG" verify -c "$work/nooutputs.yaml" 2>&1 || true)
+grep -q 'has no outputs' <<<"$out" && ok "verify refuses a module without outputs" || bad "verify accepted a module without outputs"
 sed '/^modules:/,$d' "$work/fx/problemgen.yaml" >"$work/empty.yaml" && echo "modules: []" >>"$work/empty.yaml"
 ! "$PG" verify -c "$work/empty.yaml" >/dev/null 2>&1 && ok "verify refuses an empty module list" || bad "verify accepted no modules"
 

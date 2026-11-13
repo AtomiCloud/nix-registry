@@ -95,15 +95,18 @@ func (g *csGen) file(src string) string {
 				vs = append(vs, Pascal(v))
 			}
 			g.p("public enum %s { %s }", nt.Name, strings.Join(vs, ", "))
+			// Inside the helper class an enum named like an inherited object member or a helper
+			// method (GetType, Equals, Write, Read, ...) would bind to the method: qualify it.
+			qt := g.q(nt.Name)
 			g.p("internal static class __%sWire {", nt.Name)
-			g.p(" internal static string Write(%s v) => v switch {", nt.Name)
+			g.p(" internal static string Write(%s v) => v switch {", qt)
 			for _, v := range nt.Values {
-				g.p("  %s.%s => %s,", nt.Name, Pascal(v), csString(v))
+				g.p("  %s.%s => %s,", qt, Pascal(v), csString(v))
 			}
 			g.p("  _ => throw new global::System.ArgumentOutOfRangeException(nameof(v), \"invalid enum\") };")
-			g.p(" internal static %s Read(global::System.Text.Json.JsonElement e) => __Rt.Decode.String(e) switch {", nt.Name)
+			g.p(" internal static %s Read(global::System.Text.Json.JsonElement e) => __Rt.Decode.String(e) switch {", qt)
 			for _, v := range nt.Values {
-				g.p("  %s => %s.%s,", csString(v), nt.Name, Pascal(v))
+				g.p("  %s => %s.%s,", csString(v), qt, Pascal(v))
 			}
 			g.p("  _ => throw new global::System.FormatException(\"invalid enum\") };\n}")
 		} else {
@@ -126,7 +129,7 @@ func (g *csGen) file(src string) string {
 	g.p("  if(a is null || a[2]!=%s || a[3]!=%s || a[4]!=%s || a[5]!=%s) return new Unknown(e,\"foreign address\");", csString(g.c.Platform), csString(g.c.Service), csString(g.m.Def.Module), csString(g.m.Def.Version))
 	g.p("  try { return a[6] switch {")
 	for _, p := range g.m.Problems {
-		g.p("   %s when e.Status == %d => %s.__Read(e),", csString(p.ID), p.Status, Pascal(p.ID))
+		g.p("   %s when e.Status == %d => %s.__Read(e),", csString(p.ID), p.Status, g.q(Pascal(p.ID)))
 	}
 	g.p("   _ => new Unknown(e,\"unknown id or mismatched status\") };")
 	g.p("  } catch(global::System.Exception ex) when(ex is global::System.FormatException or global::System.Text.Json.JsonException or global::System.InvalidOperationException or global::System.OverflowException or global::System.ArgumentException) { return new Unknown(e, ex.Message); }")
@@ -284,12 +287,19 @@ func (g *csGen) writeValue(t FieldType, e string) {
 		g.p("  } w.EndArray();")
 	case KRef:
 		if g.enum(t) {
-			g.p("  w.String(__%sWire.Write(%s));", t.Ref, e)
+			g.p("  w.String(%s.Write(%s));", g.q("__"+t.Ref+"Wire"), e)
 		} else {
 			g.p("  %s.__Write(w);", e)
 		}
 	}
 }
+
+// q qualifies a generated type used in an expression. Inside a record a property can share
+// a generated type's name (field `inner` of type array<Inner> is property Inner), and C#
+// then binds the simple name to the property (CS0120); a fully qualified name cannot be
+// shadowed. Type positions (declarations, generic arguments) do not need it.
+func (g *csGen) q(name string) string { return "global::" + g.o.Namespace + "." + name }
+
 func (g *csGen) decode(t FieldType, e string) string {
 	switch t.Kind {
 	case KString:
@@ -306,9 +316,9 @@ func (g *csGen) decode(t FieldType, e string) string {
 		return "__Rt.Decode.DateTime(" + e + ")"
 	case KRef:
 		if g.enum(t) {
-			return "__" + t.Ref + "Wire.Read(" + e + ")"
+			return g.q("__"+t.Ref+"Wire") + ".Read(" + e + ")"
 		}
-		return t.Ref + ".__Read(" + e + ")"
+		return g.q(t.Ref) + ".__Read(" + e + ")"
 	case KArray:
 		return "__Rt.Decode.Array(" + e + ", item => " + g.decode(*t.Items, "item") + ")"
 	}
@@ -342,7 +352,7 @@ func (g *csGen) template(p *Problem, t *Template, log bool) string {
 		case f.Type.Kind == KDateTime:
 			expr = "__Rt.Text.DateTime(" + value + ")"
 		case g.enum(f.Type):
-			expr = "__" + f.Type.Ref + "Wire.Write(" + value + ")"
+			expr = g.q("__"+f.Type.Ref+"Wire") + ".Write(" + value + ")"
 		}
 		wrap := "Detail"
 		if log {

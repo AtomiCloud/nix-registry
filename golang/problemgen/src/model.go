@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -211,13 +212,13 @@ func ParseDef(name string, src []byte) (*Def, []Diag) {
 	}
 	root := doc.Content[0]
 	if diags := rejectYAMLFeatures(name, root); len(diags) > 0 {
-		return nil, diags
+		return nil, redactPrivate(root, diags)
 	}
 	if diags := checkStatusLexical(name, root); len(diags) > 0 {
-		return nil, diags
+		return nil, redactPrivate(root, diags)
 	}
 	if diags := validateSchema(name, root); len(diags) > 0 {
-		return nil, diags
+		return nil, redactPrivate(root, diags)
 	}
 	sum := sha256.Sum256(src)
 	d := &Def{File: name, SHA256: hex.EncodeToString(sum[:]), Root: root}
@@ -590,7 +591,7 @@ func LoadModule(path string) (*Module, []Diag) {
 	m, rd := Resolve(d)
 	diags = append(diags, rd...)
 	diags = append(diags, Lint(m)...)
-	return m, diags
+	return m, redactPrivate(d.Root, diags)
 }
 
 var plainStatus = regexp.MustCompile(`^[1-9][0-9]{2}$`)
@@ -610,6 +611,79 @@ func checkStatusLexical(file string, root *yaml.Node) []Diag {
 				}
 			}
 		}
+	}
+	return out
+}
+
+// redactPrivate keeps a private field's metadata (example, description, deprecation note)
+// out of every diagnostic, whatever stage produced it: CI logs are not private. A diagnostic
+// located on a line that holds such text gets a generic message; any other message has the
+// text itself replaced. The private flag is read from the raw YAML, so this works before the
+// schema has accepted the file.
+func redactPrivate(root *yaml.Node, ds []Diag) []Diag {
+	if root == nil || len(ds) == 0 {
+		return ds
+	}
+	var texts []string
+	lines := map[int]bool{}
+	var collect func(n *yaml.Node)
+	collect = func(n *yaml.Node) {
+		if n.Kind == yaml.ScalarNode {
+			if n.Value != "" {
+				texts = append(texts, n.Value)
+			}
+			lines[n.Line] = true
+			return
+		}
+		lines[n.Line] = true
+		for _, c := range n.Content {
+			collect(c)
+		}
+	}
+	for _, kv := range pairs(root) {
+		if kv[0].Value != "problems" {
+			continue
+		}
+		for _, p := range pairs(kv[1]) {
+			for _, pk := range pairs(p[1]) {
+				if pk[0].Value != "data" {
+					continue
+				}
+				for _, f := range pairs(pk[1]) {
+					fields := pairs(f[1])
+					private := false
+					for _, fk := range fields {
+						if fk[0].Value == "private" && !(fk[1].Kind == yaml.ScalarNode && fk[1].Value == "false") {
+							private = true
+						}
+					}
+					if !private {
+						continue
+					}
+					for _, fk := range fields {
+						switch fk[0].Value {
+						case "example", "description", "deprecated":
+							collect(fk[1])
+						}
+					}
+				}
+			}
+		}
+	}
+	if len(texts) == 0 && len(lines) == 0 {
+		return ds
+	}
+	sort.Slice(texts, func(i, j int) bool { return len(texts[i]) > len(texts[j]) })
+	out := make([]Diag, len(ds))
+	for i, d := range ds {
+		if lines[d.Pos.Line] {
+			d.Msg = "a private field's example, description or deprecation note is invalid here (private, not shown)"
+		} else {
+			for _, t := range texts {
+				d.Msg = strings.ReplaceAll(d.Msg, t, "(private, not shown)")
+			}
+		}
+		out[i] = d
 	}
 	return out
 }

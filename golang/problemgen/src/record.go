@@ -172,7 +172,7 @@ func RenderRecordYAML(m *Module, cfg *Config, landscape, source string) string {
 	fmt.Fprintf(&b, "  platform: %s\n  service: %s\n  module: %s\n  landscape: %s\n  version: %s\n", q(cfg.Platform), q(cfg.Service), q(mod), q(l), q(ver))
 	if len(m.Problems) == 0 {
 		b.WriteString("  problems: []\n")
-		return b.String()
+		return yamlSafe(b.String())
 	}
 	b.WriteString("  problems:\n")
 	for _, p := range m.Problems {
@@ -182,6 +182,27 @@ func RenderRecordYAML(m *Module, cfg *Config, landscape, source string) string {
 		fmt.Fprintf(&b, "      status: %d\n", p.Status)
 		fmt.Fprintf(&b, "      recoverable: %v\n", p.Recoverable)
 		fmt.Fprintf(&b, "      schema: %s\n", DataSchema(m, p))
+	}
+	return yamlSafe(b.String())
+}
+
+// yamlSafe escapes, as \uXXXX, every character a YAML reader would not carry literally
+// inside a double-quoted scalar (C1 controls, NEL and U+2028/2029, which YAML 1.1 readers
+// treat as line breaks, U+FEFF, noncharacters). Every such character in the record sits in a
+// double-quoted YAML or JSON string, where \uXXXX means the same character. Lint (L242)
+// already refuses them in definitions; this is the backstop.
+func yamlSafe(s string) string {
+	var b strings.Builder
+	for _, c := range s {
+		if c != '\n' && unsafeTextRune(c) {
+			if c > 0xffff {
+				fmt.Fprintf(&b, "\\U%08X", c)
+			} else {
+				fmt.Fprintf(&b, "\\u%04X", c)
+			}
+			continue
+		}
+		b.WriteRune(c)
 	}
 	return b.String()
 }

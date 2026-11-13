@@ -1,0 +1,17 @@
+# expect: L231
+# fuzz repro (seed 1 batch-003 f0096). Lint: clean. C# (dotnet build):
+#   Gen/f.g.cs: error CS1001: Identifier expected / CS1525: Invalid expression term 'char'
+# The constructor parameter is emitted as `long char`. `char` is the only C# reserved keyword
+# missing from reservedFieldNames (checked all 77; TS `debugger` is also accepted but compiles).
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+problems:
+  p:
+    title: P
+    status: 400
+    recoverable: true
+    detail: d
+    data:
+      char: { type: integer }

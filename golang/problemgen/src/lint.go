@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"gopkg.in/yaml.v3"
 )
 
 // LintRules documents every semantic rule (structural rules come from the JSON Schema, code P006).
@@ -35,6 +37,7 @@ var LintRules = map[string]string{
 	"L231": "a name is reserved (a keyword, a generated member, or a standard-library type in one of the four languages)",
 	"L240": "record-bound text contains `{{` or `}}` (would break the Helm-rendered record)",
 	"L241": "the Problem record for this module exceeds the size budget",
+	"L242": "text holds a character a target reads as a line break, or an invisible control (C1, U+2028/2029, U+FEFF, bidi controls, noncharacters)",
 }
 
 // reservedFieldNames are refused as field names: keywords and predeclared identifiers of
@@ -63,7 +66,7 @@ var reservedFieldNames = setOf(
 	"extern", "fixed", "float", "foreach", "implicit", "internal", "lock", "long", "namespace",
 	"object", "operator", "out", "override", "params", "private", "protected", "public",
 	"readonly", "ref", "sbyte", "sealed", "short", "sizeof", "stackalloc", "static", "ushort",
-	"ulong", "uint", "unchecked", "unsafe", "using", "virtual", "volatile", "value",
+	"ulong", "uint", "unchecked", "unsafe", "using", "virtual", "volatile", "value", "char",
 	// TypeScript / JavaScript
 	"arguments", "eval", "export", "function", "let", "typeof", "instanceof", "undefined",
 	"implements", "package", "yield", "enum", "await", "symbol", "never", "unknown", "number",
@@ -208,6 +211,7 @@ func Lint(m *Module) []Diag {
 
 	// Problems.
 	checkSymbols(m, add)
+	checkTextChars(m, add)
 	for _, p := range m.Problems {
 		pn := Pascal(p.ID)
 		if reservedTypeNames[pn] {
@@ -454,5 +458,64 @@ func lintExample(f *Field, m *Module, add func(string, Pos, string, ...any)) {
 	}
 	if !ok {
 		add("L206", f.Pos, "field %q: example %s does not match type %s", f.Name, shown, typeSig(t))
+	}
+}
+
+// unsafeTextRune reports runes refused in definition text. C# and JavaScript end a // comment
+// at U+0085/U+2028/U+2029 and C# refuses them inside string literals; YAML 1.1 readers treat
+// NEL and U+2028/2029 as line breaks; C1 controls, U+FEFF and noncharacters are invisible or
+// invalid in YAML; bidi controls can make generated source read differently than it compiles
+// ("trojan source").
+func unsafeTextRune(r rune) bool {
+	switch {
+	case r < 0x20 || (r >= 0x7f && r <= 0x9f):
+		return true
+	case r == 0x2028 || r == 0x2029 || r == 0xfeff || r == 0xfffe || r == 0xffff:
+		return true
+	case (r >= 0x202a && r <= 0x202e) || (r >= 0x2066 && r <= 0x2069) || r == 0x200e || r == 0x200f || r == 0x061c:
+		return true
+	case r >= 0xfdd0 && r <= 0xfdef, r&0xfffe == 0xfffe:
+		return true
+	}
+	return false
+}
+
+// checkTextChars applies L242 to every free text of the definition. The message names the
+// code point, never the text (private descriptions stay out of logs).
+func checkTextChars(m *Module, add func(string, Pos, string, ...any)) {
+	check := func(p Pos, what, text string) {
+		for _, r := range text {
+			if unsafeTextRune(r) {
+				add("L242", p, "%s contains U+%04X (refused: line break or invisible control in some target)", what, r)
+				return
+			}
+		}
+	}
+	field := func(f *Field, owner string) {
+		check(f.Pos, fmt.Sprintf("the description of field %q of %s", f.Name, owner), f.Description)
+		check(f.Pos, fmt.Sprintf("the deprecation note of field %q of %s", f.Name, owner), f.Deprecated)
+		if f.Example != nil && f.Example.Kind == yaml.ScalarNode {
+			check(f.Pos, fmt.Sprintf("the example of field %q of %s", f.Name, owner), f.Example.Value)
+		}
+	}
+	for _, t := range m.Types {
+		check(t.Pos, "the description of type "+t.Name, t.Description)
+		for _, v := range t.Values {
+			check(t.Pos, "a value of enum "+t.Name, v)
+		}
+		for _, f := range t.Fields {
+			field(f, "type "+t.Name)
+		}
+	}
+	for _, p := range m.Problems {
+		o := "problem " + p.ID
+		check(p.Pos, "the title of "+o, p.Title)
+		check(p.Pos, "the description of "+o, p.Description)
+		check(p.Pos, "the deprecation note of "+o, p.Deprecated)
+		check(p.Pos, "the detail template of "+o, p.DetailSrc)
+		check(p.Pos, "the log template of "+o, p.LogSrc)
+		for _, f := range p.Data {
+			field(f, o)
+		}
 	}
 }

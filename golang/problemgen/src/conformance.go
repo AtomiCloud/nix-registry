@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -178,6 +179,12 @@ func cmdConformance(args []string) int {
 		fmt.Fprintln(os.Stderr, "conformance: oracle | emit | check-emit | check-parse | wire-file")
 		return 2
 	}
+	switch args[0] {
+	case "random-defs": // hidden: adversarial definitions for SPIKE/fuzz (fuzzdefs.go)
+		return cmdRandomDefs(args[1:])
+	case "batch-emit", "batch-wires", "batch-check-emit", "batch-check-parse":
+		return cmdBatch(args[0], args[1:])
+	}
 	fs := flag.NewFlagSet("conformance", flag.ContinueOnError)
 	cfgPath := fs.String("c", "", "generator config")
 	def := fs.String("def", "", "definition file")
@@ -346,4 +353,154 @@ func sortedNames[T any](m map[string]T) []string {
 	}
 	sort.Strings(ks)
 	return ks
+}
+
+// ---- batch mode: many modules per compiled harness (SPIKE/fuzz) ----
+//
+// A batch is one problemgen.yaml listing several modules; module <key> is defs/<key>.problems.yaml
+// with its vectors in defs/<key>.vectors.json. Case names are "<key>/<case>" everywhere, so one
+// program per language emits every module's cases and parses every module's wires.
+
+// BatchModule is one module of a batch.
+type BatchModule struct {
+	Key string
+	M   *Module
+	Out Outputs
+	V   *Vectors
+}
+
+// LoadBatch loads every module of a batch config with its vectors.
+func LoadBatch(cfgPath string) (*Config, []BatchModule, error) {
+	cfg, err := LoadConfig(cfgPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	var out []BatchModule
+	for _, mc := range cfg.Modules {
+		def := cfg.Path(mc.Definition)
+		m, ds := LoadModule(def)
+		if len(ds) > 0 {
+			var b strings.Builder
+			for _, d := range ds {
+				b.WriteString(d.String() + "\n")
+			}
+			return nil, nil, fmt.Errorf("%s does not lint:\n%s", def, b.String())
+		}
+		v, err := LoadVectors(strings.TrimSuffix(def, ".problems.yaml") + ".vectors.json")
+		if err != nil {
+			return nil, nil, err
+		}
+		out = append(out, BatchModule{Key: strings.TrimSuffix(filepath.Base(def), ".problems.yaml"), M: m, Out: mc.Outputs, V: v})
+	}
+	return cfg, out, nil
+}
+
+// batchHarnesses maps a language to its batch-harness emitter (harness_<lang>.go).
+var batchHarnesses = map[string]func(cfg *Config, mods []BatchModule) string{}
+
+func cmdBatch(sub string, args []string) int {
+	fs := flag.NewFlagSet(sub, flag.ContinueOnError)
+	cfgPath := fs.String("c", "", "batch generator config")
+	lang := fs.String("lang", "", "harness language (batch-emit)")
+	results := fs.String("results", "", "harness output (jsonl)")
+	if err := fs.Parse(args); err != nil || *cfgPath == "" {
+		return 2
+	}
+	cfg, mods, err := LoadBatch(*cfgPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetEscapeHTML(false)
+	oracle := func(bm BatchModule) ([]Expected, bool) {
+		exp, err := Oracle(bm.M, cfg, bm.V)
+		if err != nil {
+			fmt.Printf("FAIL %s: oracle: %v\n", bm.Key, err)
+			return nil, false
+		}
+		return exp, true
+	}
+	switch sub {
+	case "batch-emit":
+		h, ok := batchHarnesses[*lang]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "no batch harness for %q\n", *lang)
+			return 2
+		}
+		os.Stdout.WriteString(h(cfg, mods))
+		return 0
+	case "batch-wires":
+		for _, bm := range mods {
+			exp, ok := oracle(bm)
+			if !ok {
+				return 1
+			}
+			for _, e := range exp {
+				if e.OK {
+					_ = enc.Encode(map[string]string{"name": bm.Key + "/" + e.Name, "wire": e.Wire})
+				}
+			}
+		}
+		return 0
+	}
+	got, _, err := readLines(*results)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	fail, total := 0, 0
+	for _, bm := range mods {
+		exp, ok := oracle(bm)
+		if !ok {
+			fail++
+			continue
+		}
+		for _, e := range exp {
+			name := bm.Key + "/" + e.Name
+			g, ok := got[name]
+			if sub == "batch-check-emit" {
+				total++
+				switch {
+				case !ok:
+					fmt.Printf("FAIL %s: missing\n", name)
+					fail++
+				case e.OK != g.OK:
+					fmt.Printf("FAIL %s: oracle ok=%v (%s) harness ok=%v (%s)\n", name, e.OK, e.Error, g.OK, g.Error)
+					fail++
+				case e.OK && e.Wire != g.Wire:
+					fmt.Printf("FAIL %s wire:\n  want %s\n  got  %s\n", name, e.Wire, g.Wire)
+					fail++
+				case e.OK && e.Log != g.Log:
+					fmt.Printf("FAIL %s log:\n  want %q\n  got  %q\n", name, e.Log, g.Log)
+					fail++
+				}
+				continue
+			}
+			if !e.OK {
+				continue
+			}
+			total++
+			switch {
+			case !ok:
+				fmt.Printf("FAIL %s: missing\n", name)
+				fail++
+			case g.Variant != e.Problem:
+				fmt.Printf("FAIL %s: variant %q, want %q (%s)\n", name, g.Variant, e.Problem, g.Error)
+				fail++
+			case g.Rewire != e.Wire:
+				fmt.Printf("FAIL %s rewire:\n  want %s\n  got  %s\n", name, e.Wire, g.Rewire)
+				fail++
+			}
+		}
+	}
+	what := "emit"
+	if sub == "batch-check-parse" {
+		what = "parse"
+	}
+	fmt.Printf("%s %s: %d/%d match\n", what, *results, total-fail, total)
+	if fail > 0 {
+		return 1
+	}
+	return 0
 }

@@ -1,0 +1,14 @@
+# unicode letters, emoji, CJK, RTL script, combining marks, ZWJ are fine (L242 refuses only controls)
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+problems:
+  p:
+    title: "Café 東京 🎉 مرحبا"
+    status: 400
+    recoverable: true
+    description: "e\u0301 👩‍💻 \"quoted\" back\\slash"
+    detail: "Ünïcödé {name} ✓"
+    data:
+      name: { type: string, description: "名前", example: "שלום" }

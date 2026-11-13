@@ -6,7 +6,11 @@ Machine-readable structure: `tool/schema/problems.schema.json` (`problemgen sche
 Every rule below names its enforcer: `lint`, `diff`, `verify` (shipped in the tool), or
 the compiler / a per-language lint / an architecture rule (configured in each service; the
 tool does not ship those). A file holds exactly one YAML document (P001); `status` is a
-plain three-digit decimal integer (P007: `4.22e2`, `0x1a6` are refused).
+plain three-digit decimal integer (P007: `4.22e2`, `0x1a6` are refused). Free text (titles,
+descriptions, deprecation notes, templates, string examples) may hold any Unicode except
+characters some target reads as a line break or that are invisible controls: C0/C1 controls,
+U+2028/2029, U+FEFF, bidi controls, noncharacters (L242). A private field's example,
+description and deprecation note never appear in a diagnostic, at any stage.
 
 ## 1. The rule this format serves
 
@@ -136,6 +140,9 @@ validated at run time (lint validates examples).
 - `number`: ECMAScript `Number.prototype.toString` of the float64 (shortest round-trip;
   plain for 1e−7 < |x| < 1e21, else `d.ddde±x`); `-0` → `0`. NaN/±Infinity: **refused**.
 - `date-time`: `YYYY-MM-DDTHH:MM:SS.mmmZ`, UTC, truncated to milliseconds; years 0001–9999.
+  Parsing accepts any RFC 3339 offset; the lexical year is four digits `0000`–`9999`, and the 0001–9999 rule applies
+  only to the **UTC instant after applying the offset** (`0000-12-31T23:00:00-01:00` is valid; `0000-01-01T00:00:00Z` and
+  `9999-12-31T23:30:00-01:00` are not).
 - No whitespace. Content-Type `application/problem+json`.
 - "Refused" = the serialiser returns an error (Go) or throws a non-Problem programming error
   (TS `RangeError`, C# `ArgumentOutOfRangeException`/`InvalidOperationException`, Dart
@@ -231,9 +238,13 @@ the format (they would be a second, unenforced naming scheme).
 ## 13. Outputs
 
 - **Code** (Go/TS/C#/Dart): one file per module per language, committed. Header carries the
-  tool version and the definition's sha256. `problemgen verify` fails CI on any difference
-  in a configured output, and on a problemgen-generated file in an output directory that the
-  config no longer plans (stale). An empty `modules` list is refused.
+  tool version and the definition's sha256. `generate` also writes the config's manifest
+  `<config>.outputs` (every file it generated, config-relative). `problemgen verify` fails CI
+  on any difference in a configured output or the manifest, and on a file the committed
+  manifest lists that is no longer an output (stale; `generate` removes it, after checking it
+  carries the problemgen header or is a catalog). Another config's files, even in the same
+  directory, are never listed and never touched. An empty `modules` list and a module with
+  no outputs are refused.
 - **Problem record** (`atomi.cloud/v1alpha1 Problem`, one per module × version, error-portal
   row shape): `metadata.name = {service}.{module}.{landscape}.{version}`, `spec.problems[]`
   = `{id, type, title, status, recoverable, schema}`. The only Helm input is the landscape:

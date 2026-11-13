@@ -104,6 +104,10 @@ func LoadConfig(path string) (*Config, error) {
 		if mc.Definition == "" {
 			return nil, fmt.Errorf("%s: a module has no definition", path)
 		}
+		o := mc.Outputs
+		if o.Go == nil && o.TypeScript == nil && o.CSharp == nil && o.Dart == nil && o.Record == nil && o.Catalog == nil {
+			return nil, fmt.Errorf("%s: module %s has no outputs (it would verify nothing)", path, mc.Definition)
+		}
 		if seen[mc.Definition] {
 			return nil, fmt.Errorf("%s: definition %s listed twice", path, mc.Definition)
 		}
