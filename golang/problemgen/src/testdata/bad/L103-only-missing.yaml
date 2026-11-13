@@ -1,0 +1,7 @@
+# expect: L103
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+imports: [{ from: builtin:generic/v1, only: [not_there] }]
+problems: {}

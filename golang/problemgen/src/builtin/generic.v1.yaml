@@ -1,0 +1,60 @@
+# The portable generic catalog (concepts/lib-contracts.md §2.2), written ONCE for all four
+# languages. Import it with `imports: [builtin:generic/v1]` (or pick with `only:`).
+# The imported problems are addressed under the importing module and version.
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemLibrary
+name: generic
+types:
+  ValidationIssue:
+    description: One invalid input.
+    fields:
+      path:
+        type: array
+        items: { type: string }
+        description: Path to the invalid input; array indexes are written as decimal strings.
+      message: { type: string, description: Human-readable reason. }
+      code: { type: string, optional: true, description: 'Machine-readable reason, when the validator has one.' }
+problems:
+  validation_error:
+    title: Validation Error
+    status: 400
+    recoverable: true
+    detail: 'The request has {issues|count} invalid input(s).'
+    data:
+      issues:
+        type: array
+        items: { type: ValidationIssue }
+  entity_not_found:
+    title: Entity Not Found
+    status: 404
+    recoverable: false
+    detail: "{entityType} '{id}' was not found."
+    data:
+      entityType: { type: string, example: Note }
+      id: { type: string, example: '0190c2a8-7d8e-7b6a-9c1d-2f3e4a5b6c7d' }
+  conflict:
+    title: Conflict
+    status: 409
+    recoverable: true
+    detail: "{entityType} '{id}' conflicts with its current state."
+    data:
+      entityType: { type: string, example: Note }
+      id: { type: string }
+  unauthenticated:
+    title: Unauthenticated
+    status: 401
+    recoverable: true
+    detail: 'Authentication is required.'
+  unauthorized:
+    title: Unauthorized
+    status: 403
+    recoverable: false
+    detail: 'You are not allowed to perform this action.'
+  invalid_json:
+    title: Invalid JSON
+    status: 400
+    recoverable: true
+    detail: 'The request body is not valid JSON.'
+    log: 'invalid JSON body: {reason}'
+    data:
+      reason: { type: string, private: true, description: 'The parser message. Logged, never sent.' }

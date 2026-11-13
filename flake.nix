@@ -107,6 +107,9 @@
             # Runs chart-checks end to end in the sandbox (no network): every source kind,
             # every refusal, and `check` offline after `install`.
             chart-checks-tests = packages.chart-checks-tests;
+            # Runs problemgen end to end in the sandbox: every lint/diff refusal, generate,
+            # verify and drift detection.
+            problemgen-tests = packages.problemgen-tests;
           };
           # Builders for consumers: a function is not a derivation, so it cannot
           # live in `packages`. Use as `atomipkgs.lib.${system}.buildBunCli`.

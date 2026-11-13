@@ -1,0 +1,13 @@
+# expect: L220
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+problems:
+  p:
+    title: P
+    status: 429
+    recoverable: true
+    retryAfter: wait
+    detail: d
+    data: { wait: { type: string } }

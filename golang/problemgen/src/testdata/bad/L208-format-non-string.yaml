@@ -1,0 +1,12 @@
+# expect: L208
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+problems:
+  p:
+    title: P
+    status: 400
+    recoverable: true
+    detail: d
+    data: { n: { type: array, items: { type: integer, format: uuid } } }

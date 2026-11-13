@@ -1,0 +1,15 @@
+# expect: L202
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+types:
+  A: { fields: { b: { type: B } } }
+  B: { fields: { a: { type: A, optional: true } } }
+problems:
+  p:
+    title: P
+    status: 400
+    recoverable: true
+    detail: d
+    data: { x: { type: A } }

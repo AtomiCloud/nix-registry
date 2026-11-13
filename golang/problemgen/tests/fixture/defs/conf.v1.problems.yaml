@@ -1,0 +1,83 @@
+# Conformance module: every supported type, template feature and edge, plus the
+# built-in generic catalog. One file drives all four languages.
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: conf
+version: v1
+imports:
+  - builtin:generic/v1
+types:
+  Severity:
+    description: How bad it is.
+    enum: [low, medium, high, very_high]
+  Span:
+    fields:
+      start: { type: integer }
+      end: { type: integer }
+  Location:
+    description: Where in a file.
+    fields:
+      file: { type: string }
+      line: { type: integer }
+      span: { type: Span, optional: true }
+problems:
+  everything:
+    title: Everything
+    status: 422
+    recoverable: false
+    description: Exercises every field type.
+    detail: "{s} i={i} big={big} n={n} b={b} at={at} sev={sev} tags={tags|count} opt={opt|default:none} optInt={optInt|default:-}"
+    log: "secret={secret} s={s} sev={sev} n={n} opt={opt|default:none}"
+    data:
+      s: { type: string, example: hello }
+      i: { type: integer, example: 42 }
+      big: { type: int64, example: "9223372036854775807" }
+      n: { type: number, example: 1.5 }
+      b: { type: boolean, example: true }
+      at: { type: date-time, example: "2024-03-15T14:30:00.000Z" }
+      sev: { type: Severity, example: high }
+      uid: { type: string, format: uuid, example: "0190c2a8-7d8e-7b6a-9c1d-2f3e4a5b6c7d" }
+      day: { type: string, format: date, example: "2024-03-15" }
+      link: { type: string, format: uri, example: "https://example.com/a" }
+      tags: { type: array, items: { type: string } }
+      counts: { type: array, items: { type: integer } }
+      sevs: { type: array, items: { type: Severity } }
+      times: { type: array, items: { type: date-time } }
+      where: { type: Location }
+      wheres: { type: array, items: { type: Location } }
+      opt: { type: string, optional: true }
+      optInt: { type: integer, optional: true }
+      optWhere: { type: Location, optional: true }
+      optTags: { type: array, items: { type: string }, optional: true }
+      secret: { type: string, private: true }
+  quota_exceeded:
+    title: Quota Exceeded
+    status: 429
+    recoverable: true
+    retryAfter: retryInSeconds
+    detail: "Quota of {limit} requests used; retry in {retryInSeconds}s."
+    data:
+      limit: { type: integer }
+      retryInSeconds: { type: integer }
+  braces:
+    title: Braces
+    status: 400
+    recoverable: true
+    detail: "literal {{x}} and {{{name}}} end"
+    data:
+      name: { type: string }
+  only_private:
+    title: Only Private
+    status: 500
+    recoverable: false
+    detail: "Something failed."
+    log: "failed at {step} after {attempts} attempt(s)"
+    data:
+      step: { type: string, private: true }
+      attempts: { type: integer, private: true }
+  old_thing:
+    title: Old Thing
+    status: 410
+    recoverable: false
+    deprecated: use entity_not_found
+    detail: "Gone."

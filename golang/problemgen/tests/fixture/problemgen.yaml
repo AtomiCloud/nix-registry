@@ -1,0 +1,14 @@
+apiVersion: problems.atomi.cloud/v1
+kind: GeneratorConfig
+platform: nitroso
+service: zinc
+portal: https://errors.atomi.cloud
+modules:
+  - definition: defs/conf.v1.problems.yaml
+    outputs:
+      go: { file: out/go/confv1/problems.gen.go, package: confv1, runtime: github.com/AtomiCloud/diene/problemrt }
+      typescript: { file: out/ts/conf.v1.problems.gen.ts, runtime: "@atomicloud/problemrt" }
+      csharp: { file: out/cs/ConfV1Problems.g.cs, namespace: Conf.Gen.V1, runtime: AtomiCloud.Problems.Runtime }
+      dart: { file: out/dart/conf_v1_problems.g.dart, runtime: "package:problemrt/problemrt.dart" }
+      record: { file: out/record/conf.v1.yaml }
+      catalog: { file: out/catalog/conf.v1.json }

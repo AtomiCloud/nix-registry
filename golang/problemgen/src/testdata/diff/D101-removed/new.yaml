@@ -1,0 +1,11 @@
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+types:
+  Level: { enum: [a, b] }
+  Box:
+    fields:
+      w: { type: integer }
+problems:
+  q: { title: Q, status: 400, recoverable: true, detail: d, data: { l: { type: Level }, b: { type: Box } } }

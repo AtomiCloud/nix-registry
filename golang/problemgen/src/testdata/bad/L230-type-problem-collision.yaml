@@ -1,0 +1,9 @@
+# expect: L230
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+types:
+  NoteLocked: { enum: [a] }
+problems:
+  note_locked: { title: A, status: 400, recoverable: true, detail: d, data: { x: { type: NoteLocked } } }

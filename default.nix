@@ -29,6 +29,11 @@ let
     ccc = import ./golang/ccc/default.nix { inherit nixpkgs; };
     dashboard-linter = import ./golang/dashboard-linter/default.nix { inherit nixpkgs; };
     gorelease = import ./golang/gorelease/default.nix { inherit nixpkgs go; };
+    # Definition-first RFC 9457 problems: lint/diff problems.yaml, generate Go/TS/C#/Dart + the
+    # Problem record. See golang/problemgen/default.nix.
+    problemgen = import ./golang/problemgen/default.nix { inherit nixpkgs go; };
+    # Offline end-to-end test of problemgen: a build, so no network by construction.
+    problemgen-tests = problemgen.passthru.tests;
   };
 
   # dotnet
