@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -140,8 +141,15 @@ func yamlQuote(s string) string {
 	return b.String()
 }
 
+// landscapeRe is the DNS-label rule for a landscape, enforced at render time (Helm) and for a
+// literal landscape. Kept in step with dnsLabel in config.go.
+const landscapeRe = `^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`
+
 // RenderRecordYAML renders the Problem CR for one module. landscape == "" renders the Helm
-// form (one required value, .Values.landscape); otherwise the literal landscape is used.
+// form (the only input is .Values.landscape, required and checked as a DNS label); otherwise
+// the literal landscape is used and must already be a DNS label (ValidLandscape).
+// Every string-valued field is a YAML double-quoted scalar, so values such as 123, yes or on
+// stay strings under YAML 1.1 and 1.2 readers alike.
 func RenderRecordYAML(m *Module, cfg *Config, landscape, source string) string {
 	l := landscape
 	var b strings.Builder
@@ -150,25 +158,27 @@ func RenderRecordYAML(m *Module, cfg *Config, landscape, source string) string {
 		b.WriteString("# source: " + source + " sha256:" + m.Def.SHA256 + "\n")
 	}
 	if landscape == "" {
-		b.WriteString("# The only Helm expression is the landscape; everything else is literal.\n")
-		b.WriteString(`{{- $landscape := required "problemgen: .Values.landscape is required" .Values.landscape }}` + "\n")
+		b.WriteString("# The only Helm input is the landscape (required, a DNS label); everything else is literal.\n")
+		b.WriteString(`{{- $landscape := toString (required "problemgen: .Values.landscape is required" .Values.landscape) }}` + "\n")
+		b.WriteString(`{{- if not (regexMatch "` + landscapeRe + `" $landscape) }}{{ fail "problemgen: .Values.landscape must be a DNS label (a-z, 0-9, -; at most 63 characters)" }}{{ end }}` + "\n")
 		l = "{{ $landscape }}"
 	}
+	q := yamlQuote
 	mod, ver := m.Def.Module, m.Def.Version
 	b.WriteString("apiVersion: atomi.cloud/v1alpha1\nkind: Problem\nmetadata:\n")
-	fmt.Fprintf(&b, "  name: %s.%s.%s.%s\n", cfg.Service, mod, l, ver)
-	fmt.Fprintf(&b, "  namespace: %s\n", cfg.Platform)
+	fmt.Fprintf(&b, "  name: %s\n", q(cfg.Service+"."+mod+"."+l+"."+ver))
+	fmt.Fprintf(&b, "  namespace: %s\n", q(cfg.Platform))
 	b.WriteString("spec:\n")
-	fmt.Fprintf(&b, "  platform: %s\n  service: %s\n  module: %s\n  landscape: %s\n  version: %s\n", cfg.Platform, cfg.Service, mod, l, ver)
+	fmt.Fprintf(&b, "  platform: %s\n  service: %s\n  module: %s\n  landscape: %s\n  version: %s\n", q(cfg.Platform), q(cfg.Service), q(mod), q(l), q(ver))
 	if len(m.Problems) == 0 {
 		b.WriteString("  problems: []\n")
 		return b.String()
 	}
 	b.WriteString("  problems:\n")
 	for _, p := range m.Problems {
-		fmt.Fprintf(&b, "    - id: %s\n", p.ID)
-		fmt.Fprintf(&b, "      type: %s\n", TypeURI(cfg.Portal, l, cfg.Platform, cfg.Service, mod, ver, p.ID))
-		fmt.Fprintf(&b, "      title: %s\n", yamlQuote(p.Title))
+		fmt.Fprintf(&b, "    - id: %s\n", q(p.ID))
+		fmt.Fprintf(&b, "      type: %s\n", q(TypeURI(cfg.Portal, l, cfg.Platform, cfg.Service, mod, ver, p.ID)))
+		fmt.Fprintf(&b, "      title: %s\n", q(p.Title))
 		fmt.Fprintf(&b, "      status: %d\n", p.Status)
 		fmt.Fprintf(&b, "      recoverable: %v\n", p.Recoverable)
 		fmt.Fprintf(&b, "      schema: %s\n", DataSchema(m, p))
@@ -203,3 +213,8 @@ func RenderCatalogJSON(m *Module, cfg *Config) string {
 	b.WriteString("]\n")
 	return b.String()
 }
+
+var landscapeLabel = regexp.MustCompile(landscapeRe)
+
+// ValidLandscape reports whether s can be a landscape (a DNS label of at most 63 characters).
+func ValidLandscape(s string) bool { return landscapeLabel.MatchString(s) }

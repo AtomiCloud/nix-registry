@@ -163,15 +163,23 @@ func (g *csGen) record(n string, fs []*Field, p *Problem) {
 		}
 		g.p(" public %s %s { get; init; }", typ, Pascal(f.Name))
 	}
+	// Required fields are positional parameters. Optional public fields are set with init
+	// (object initialiser). Optional private fields have no public setter, so they are
+	// trailing optional parameters: the only way to supply them.
 	var args []string
 	for _, f := range fs {
 		if !f.Optional {
 			args = append(args, csType(f.Type)+" "+f.Name)
 		}
 	}
+	for _, f := range fs {
+		if f.Optional && f.Private {
+			args = append(args, csType(f.Type)+"? "+f.Name+" = null")
+		}
+	}
 	g.p(" public %s(%s) {", n, strings.Join(args, ", "))
 	for _, f := range fs {
-		if !f.Optional {
+		if !f.Optional || f.Private {
 			g.p("  %s = %s;", Pascal(f.Name), f.Name)
 		}
 	}

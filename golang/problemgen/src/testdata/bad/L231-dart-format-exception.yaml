@@ -1,0 +1,7 @@
+# expect: L231
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+problems:
+  format_exception: { title: Format, status: 400, recoverable: true, detail: d }

@@ -1,0 +1,8 @@
+# only: takes the transitive type closure of the selected problems (no unused imported types)
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+imports:
+  - { from: 'builtin:generic/v1', only: [unauthenticated] }
+problems: {}

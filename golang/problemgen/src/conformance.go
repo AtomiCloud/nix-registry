@@ -48,6 +48,9 @@ func LoadVectors(path string) (*Vectors, error) {
 	if l, ok := root.Get("landscape"); ok {
 		v.Landscape = l.GoString()
 	}
+	if !ValidLandscape(v.Landscape) {
+		return nil, fmt.Errorf("%s: landscape %q is not a DNS label (a-z, 0-9, -; at most 63 characters)", path, v.Landscape)
+	}
 	cs, _ := root.Get("cases")
 	if cs != nil {
 		for _, c := range cs.Arr {

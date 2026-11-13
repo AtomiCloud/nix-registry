@@ -1,0 +1,9 @@
+# expect: L231
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+types:
+  Promise: { fields: { x: { type: string } } }
+problems:
+  p: { title: P, status: 400, recoverable: true, detail: d, data: { f: { type: Promise } } }

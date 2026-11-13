@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"embed"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -174,9 +178,13 @@ func readSource(path string) ([]byte, string, error) {
 		}
 		return b, path, nil
 	}
-	b, err := os.ReadFile(path)
+	b, err := readFile(path)
 	return b, path, err
 }
+
+// readFile is the source of definition and library files. diff --git swaps it for a reader
+// that serves every file (top-level and imports) from one git ref.
+var readFile = os.ReadFile
 
 // LoadDef parses one file: schema validation first, then the typed model.
 func LoadDef(path string) (*Def, []Diag) {
@@ -190,14 +198,22 @@ func LoadDef(path string) (*Def, []Diag) {
 // ParseDef parses definition bytes.
 func ParseDef(name string, src []byte) (*Def, []Diag) {
 	var doc yaml.Node
-	if err := yaml.Unmarshal(src, &doc); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(src))
+	if err := dec.Decode(&doc); err != nil {
 		return nil, []Diag{{Code: "P001", Pos: Pos{File: name}, Msg: "not valid YAML: " + err.Error()}}
+	}
+	var extra yaml.Node
+	if err := dec.Decode(&extra); err != io.EOF {
+		return nil, []Diag{{Code: "P001", Pos: Pos{File: name, Line: extra.Line}, Msg: "a definition file holds exactly one YAML document"}}
 	}
 	if doc.Kind != yaml.DocumentNode || len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
 		return nil, []Diag{{Code: "P001", Pos: Pos{File: name}, Msg: "the file must be one YAML mapping"}}
 	}
 	root := doc.Content[0]
 	if diags := rejectYAMLFeatures(name, root); len(diags) > 0 {
+		return nil, diags
+	}
+	if diags := checkStatusLexical(name, root); len(diags) > 0 {
 		return nil, diags
 	}
 	if diags := validateSchema(name, root); len(diags) > 0 {
@@ -384,7 +400,7 @@ func parseProblem(file string, k, v *yaml.Node) *Problem {
 		case "title":
 			p.Title = val.Value
 		case "status":
-			fmt.Sscan(val.Value, &p.Status)
+			p.Status, _ = strconv.Atoi(val.Value) // lexical form checked by checkStatusLexical
 		case "recoverable":
 			p.Recoverable = val.Value == "true"
 		case "detail":
@@ -457,8 +473,43 @@ func Resolve(d *Def) (*Module, []Diag) {
 			want[o] = true
 		}
 		found := map[string]bool{}
+		// With only:, import exactly the named types the selected problems reach
+		// (transitively); without only:, every type of the library.
+		needed := map[string]bool{}
+		if len(want) > 0 {
+			var reach func(t FieldType)
+			reach = func(t FieldType) {
+				switch t.Kind {
+				case KArray:
+					if t.Items != nil {
+						reach(*t.Items)
+					}
+				case KRef:
+					if needed[t.Ref] {
+						return
+					}
+					needed[t.Ref] = true
+					for _, lt := range lib.Types {
+						if lt.Name == t.Ref {
+							for _, f := range lt.Fields {
+								reach(f.Type)
+							}
+						}
+					}
+				}
+			}
+			for _, p := range lib.Problems {
+				if want[p.ID] {
+					for _, f := range p.Data {
+						reach(f.Type)
+					}
+				}
+			}
+		}
 		for _, t := range lib.Types {
-			addType(t, imp.Pos)
+			if len(want) == 0 || needed[t.Name] {
+				addType(t, imp.Pos)
+			}
 		}
 		for _, p := range lib.Problems {
 			if len(want) > 0 && !want[p.ID] {
@@ -540,4 +591,25 @@ func LoadModule(path string) (*Module, []Diag) {
 	diags = append(diags, rd...)
 	diags = append(diags, Lint(m)...)
 	return m, diags
+}
+
+var plainStatus = regexp.MustCompile(`^[1-9][0-9]{2}$`)
+
+// checkStatusLexical refuses any status that is not a plain decimal integer: YAML would
+// otherwise accept 4.22e2, 0x1a6 or 0o646 as numbers whose meaning differs by reader.
+func checkStatusLexical(file string, root *yaml.Node) []Diag {
+	var out []Diag
+	for _, kv := range pairs(root) {
+		if kv[0].Value != "problems" {
+			continue
+		}
+		for _, p := range pairs(kv[1]) {
+			for _, f := range pairs(p[1]) {
+				if f[0].Value == "status" && (f[1].Kind != yaml.ScalarNode || f[1].Tag != "!!int" || !plainStatus.MatchString(f[1].Value)) {
+					out = append(out, Diag{"P007", pos(file, f[1]), fmt.Sprintf("problem %q: status must be a plain three-digit decimal integer, not %q", p[0].Value, f[1].Value)})
+				}
+			}
+		}
+	}
+	return out
 }

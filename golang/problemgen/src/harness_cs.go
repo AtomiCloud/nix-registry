@@ -59,17 +59,19 @@ func csLit(m *Module, t FieldType, v *JV) string {
 	return "null!"
 }
 func csCtor(m *Module, n string, fs []*Field, data *JV, extras []string) string {
-	var args []string
+	var args, named []string
 	opts := append([]string{}, extras...)
 	for _, f := range fs {
 		v, ok := data.Get(f.Name)
 		if !f.Optional {
 			args = append(args, csLit(m, f.Type, v))
+		} else if f.Private && ok && v.Kind != 'z' {
+			named = append(named, f.Name+": "+csLit(m, f.Type, v)) // optional private: constructor parameter
 		} else if ok && v.Kind != 'z' {
 			opts = append(opts, Pascal(f.Name)+" = "+csLit(m, f.Type, v))
 		}
 	}
-	e := "new " + n + "(" + strings.Join(args, ", ") + ")"
+	e := "new " + n + "(" + strings.Join(append(args, named...), ", ") + ")"
 	if len(opts) > 0 {
 		e += " { " + strings.Join(opts, ", ") + " }"
 	}

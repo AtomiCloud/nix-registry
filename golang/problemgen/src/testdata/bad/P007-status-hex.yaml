@@ -1,0 +1,7 @@
+# expect: P007
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+problems:
+  p: { title: P, status: 0x1a6, recoverable: true, detail: d }

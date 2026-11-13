@@ -75,6 +75,14 @@ problems:
     data:
       step: { type: string, private: true }
       attempts: { type: integer, private: true }
+  private_optional:
+    title: Private Optional
+    status: 500
+    recoverable: false
+    detail: "Something failed."
+    log: "trace={trace|default:none}"
+    data:
+      trace: { type: string, private: true, optional: true }
   old_thing:
     title: Old Thing
     status: 410

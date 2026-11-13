@@ -254,11 +254,13 @@ func (g *dartGen) namedType(t *NamedType) {
 }
 
 func (g *dartGen) fieldDecl(f *Field, indent string, private bool) {
+	// A private field's description and deprecation note are definition metadata that never
+	// leave the server; they are not copied into generated source either.
 	desc := f.Description
-	if desc != "" {
+	if desc != "" && !private {
 		g.p("%s/// %s", indent, dartDoc(desc))
 	}
-	if f.Deprecated != "" {
+	if f.Deprecated != "" && !private {
 		g.p("%s@Deprecated(%s)", indent, dartStr(f.Deprecated))
 	}
 	ty := g.dartType(f.Type)

@@ -155,26 +155,24 @@ func cmdDiff(args []string) int {
 	case *oldPath != "":
 		old, ds = LoadModule(*oldPath)
 	case *gitRef != "":
-		abs, _ := filepath.Abs(newPath)
-		dir := filepath.Dir(abs)
-		top, err := exec.Command("git", "-C", dir, "rev-parse", "--show-toplevel").Output()
+		snap, err := openGitSnapshot(newPath, *gitRef)
 		if err != nil {
-			fmt.Fprintln(os.Stderr, "diff: not in a git repository")
+			fmt.Fprintln(os.Stderr, "diff: "+err.Error())
 			return 2
 		}
-		rel, _ := filepath.Rel(strings.TrimSpace(string(top)), abs)
-		src, err := exec.Command("git", "-C", dir, "show", *gitRef+":"+filepath.ToSlash(rel)).Output()
+		exists, err := snap.exists(snap.top)
 		if err != nil {
-			fmt.Printf("%s: no previous version at %s (new file): ok\n", newPath, *gitRef)
+			fmt.Fprintln(os.Stderr, "diff: "+err.Error())
+			return 2
+		}
+		if !exists {
+			fmt.Printf("%s: no previous version at %s (%s; new file): ok\n", newPath, *gitRef, snap.commit[:12])
 			return 0
 		}
-		tmp := filepath.Join(dir, ".problemgen-old-"+filepath.Base(newPath))
-		if err := os.WriteFile(tmp, src, 0o644); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return 2
-		}
-		defer os.Remove(tmp)
-		old, ds = LoadModule(tmp)
+		// The old definition AND every library it imports are read from the same commit.
+		readFile = snap.read
+		old, ds = LoadModule(snap.top)
+		readFile = os.ReadFile
 	default:
 		fmt.Fprintln(os.Stderr, "diff: --old or --git is required")
 		return 2
@@ -195,6 +193,95 @@ func cmdDiff(args []string) int {
 	}
 	fmt.Printf("%s: no breaking changes\n", newPath)
 	return 0
+}
+
+// gitSnapshot serves files from one commit. Every failure other than "this path does not
+// exist in that commit" is an error: diff never mistakes a broken ref for a new file.
+type gitSnapshot struct {
+	root   string // repository top level (symlinks resolved)
+	commit string // the ref, resolved once to a commit id
+	top    string // absolute path of the definition file
+}
+
+func openGitSnapshot(newPath, ref string) (*gitSnapshot, error) {
+	abs, err := filepath.Abs(newPath)
+	if err != nil {
+		return nil, err
+	}
+	if abs, err = filepath.EvalSymlinks(abs); err != nil {
+		return nil, err
+	}
+	out, err := gitOut(filepath.Dir(abs), "rev-parse", "--show-toplevel")
+	if err != nil {
+		return nil, fmt.Errorf("not in a git repository: %v", err)
+	}
+	root, err := filepath.EvalSymlinks(strings.TrimSpace(out))
+	if err != nil {
+		return nil, err
+	}
+	if strings.HasPrefix(ref, "-") {
+		return nil, fmt.Errorf("invalid git ref %q", ref)
+	}
+	c, err := gitOut(root, "rev-parse", "--verify", "--quiet", "--end-of-options", ref+"^{commit}")
+	if err != nil {
+		return nil, fmt.Errorf("git ref %q does not name a commit here (shallow clone or unfetched base? fetch it first): %v", ref, err)
+	}
+	return &gitSnapshot{root: root, commit: strings.TrimSpace(c), top: abs}, nil
+}
+
+func (g *gitSnapshot) rel(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	r, err := filepath.Rel(g.root, abs)
+	if err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("%s is outside the repository %s", path, g.root)
+	}
+	return filepath.ToSlash(r), nil
+}
+
+// exists reports whether path is a file in the commit; a git failure is an error.
+func (g *gitSnapshot) exists(path string) (bool, error) {
+	r, err := g.rel(path)
+	if err != nil {
+		return false, err
+	}
+	out, err := gitOut(g.root, "ls-tree", "--name-only", "-z", g.commit, "--", r)
+	if err != nil {
+		return false, fmt.Errorf("git ls-tree %s %s: %v", g.commit[:12], r, err)
+	}
+	return strings.TrimSuffix(out, "\x00") == r, nil
+}
+
+func (g *gitSnapshot) read(path string) ([]byte, error) {
+	ok, err := g.exists(path)
+	if err != nil {
+		return nil, err
+	}
+	r, _ := g.rel(path)
+	if !ok {
+		return nil, fmt.Errorf("%s does not exist at %s", r, g.commit[:12])
+	}
+	out, err := gitOut(g.root, "cat-file", "blob", g.commit+":"+r)
+	if err != nil {
+		return nil, fmt.Errorf("git cat-file %s:%s: %v", g.commit[:12], r, err)
+	}
+	return []byte(out), nil
+}
+
+func gitOut(dir string, args ...string) (string, error) {
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		if msg := strings.TrimSpace(stderr.String()); msg != "" {
+			return "", fmt.Errorf("%v: %s", err, msg)
+		}
+		return "", err
+	}
+	return string(out), nil
 }
 
 type plannedFile struct {
@@ -276,6 +363,17 @@ func cmdGenerate(args []string, verify bool) int {
 		}
 		fmt.Println("wrote " + f.path)
 	}
+	if verify {
+		orphans, err := findOrphans(cfg, seen)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+		for _, o := range orphans {
+			fmt.Fprintf(os.Stderr, "stale generated file: %s (its definition is gone or no longer lists it; delete it)\n", o)
+			drift++
+		}
+	}
 	if drift > 0 {
 		return 1
 	}
@@ -283,6 +381,75 @@ func cmdGenerate(args []string, verify bool) int {
 		fmt.Printf("%d generated file(s) up to date\n", len(files))
 	}
 	return 0
+}
+
+// findOrphans looks in every directory this config writes into (not recursively) for files
+// problemgen generated (by their header) that this config does not plan: their source
+// definition is listed here but the file is no longer an output (a renamed or removed
+// output), or their source definition no longer exists (a deleted module). Files generated
+// from another config's definitions that still exist are left alone.
+func findOrphans(cfg *Config, planned map[string]bool) ([]string, error) {
+	defs := map[string]bool{}
+	for _, mc := range cfg.Modules {
+		defs[filepath.Clean(cfg.Path(mc.Definition))] = true
+	}
+	dirs := map[string]bool{}
+	for p := range planned {
+		dirs[filepath.Dir(p)] = true
+	}
+	var out []string
+	for dir := range dirs {
+		ents, err := os.ReadDir(dir)
+		if err != nil {
+			return nil, err
+		}
+		for _, e := range ents {
+			p := filepath.Join(dir, e.Name())
+			if e.IsDir() || planned[p] {
+				continue
+			}
+			switch filepath.Ext(p) {
+			case ".go", ".ts", ".cs", ".dart", ".yaml", ".yml":
+			default:
+				continue
+			}
+			f, err := os.Open(p)
+			if err != nil {
+				return nil, err
+			}
+			head := make([]byte, 1024)
+			n, _ := f.Read(head)
+			f.Close()
+			src := generatedSource(string(head[:n]))
+			if src == "" {
+				continue
+			}
+			def := filepath.Clean(cfg.Path(filepath.FromSlash(src)))
+			if defs[def] {
+				out = append(out, p)
+			} else if _, err := os.Stat(def); os.IsNotExist(err) {
+				out = append(out, p)
+			}
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// generatedSource returns the definition path named in a problemgen header, or "".
+func generatedSource(head string) string {
+	if !strings.Contains(head, "Code generated by problemgen") {
+		return ""
+	}
+	for _, line := range strings.Split(head, "\n") {
+		line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "/#"))
+		if rest, ok := strings.CutPrefix(line, "source: "); ok {
+			if i := strings.Index(rest, " sha256:"); i > 0 {
+				return rest[:i]
+			}
+		}
+	}
+	return ""
 }
 
 func cmdRules() int {

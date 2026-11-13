@@ -1,0 +1,14 @@
+# expect: L240
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+types:
+  Inner:
+    fields:
+      message: { type: string, description: 'Literal {{braces}}' }
+  Outer:
+    fields:
+      inner: { type: Inner }
+problems:
+  p: { title: P, status: 400, recoverable: true, detail: d, data: { o: { type: array, items: { type: Outer } } } }

@@ -2,7 +2,7 @@
 # shellcheck disable=SC2015 # `cmd && ok || bad`: ok/bad only echo and count, so the C-branch-after-A case cannot happen
 # shellcheck disable=SC2016 # the literal string "$schema" is grepped on purpose
 # End-to-end test of the problemgen binary, run inside a nix build (no network).
-#   run.sh --problemgen <bin> --src <tool source dir>
+#   run.sh --problemgen <bin> --src <tool source dir> [--out <package output>]
 set -euo pipefail
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -12,6 +12,10 @@ while [ $# -gt 0 ]; do
     ;;
   --src)
     SRC="$2"
+    shift 2
+    ;;
+  --out)
+    OUT="$2"
     shift 2
     ;;
   *)
@@ -43,6 +47,11 @@ for f in "$SRC"/testdata/bad/*.yaml; do
   elif grep -q " $want " <<<"$out"; then ok "lint $want $(basename "$f")"; else bad "lint $f: want $want, got: $out"; fi
 done
 
+# Every good definition lints clean (e.g. `only:` takes just the selected problems' types).
+for f in "$SRC"/testdata/good/*.yaml; do
+  (cd "$(dirname "$f")" && "$PG" lint "$(basename "$f")" >/dev/null 2>&1) && ok "lint clean $(basename "$f")" || bad "lint refused good $f"
+done
+
 # Every diff pair is refused with its code; ok-* pass.
 for d in "$SRC"/testdata/diff/*/; do
   name=$(basename "$d")
@@ -63,8 +72,44 @@ echo "// hand edit" >>"$work/fx/out/go/confv1/problems.gen.go"
 (cd "$work/fx" && ! "$PG" verify >/dev/null 2>&1) && ok "verify detects a hand edit" || bad "verify missed a hand edit"
 (cd "$work/fx" && "$PG" generate >/dev/null && sed -i 's/status: 422/status: 409/' defs/conf.v1.problems.yaml && ! "$PG" verify >/dev/null 2>&1) &&
   ok "verify detects a definition change" || bad "verify missed a definition change"
-grep -q 'name: zinc.conf.{{ $landscape }}.v1' "$work/fx/out/record/conf.v1.yaml" && ok "record dotted name" || bad "record name"
-grep -q '^  module: conf$' "$work/fx/out/record/conf.v1.yaml" && ok "record module field" || bad "record module"
+rec="$work/fx/out/record/conf.v1.yaml"
+grep -q 'name: "zinc.conf.{{ $landscape }}.v1"' "$rec" && ok "record dotted name" || bad "record name"
+grep -q '^  module: "conf"$' "$rec" && ok "record module field (quoted)" || bad "record module"
+grep -q 'regexMatch "^\[a-z0-9\]' "$rec" && grep -q '{{ fail ' "$rec" && ok "record validates the landscape" || bad "record landscape check"
+grep -Eq '^    - id: "[a-z_0-9]+"$' "$rec" && ! grep -Eq '^ *(id|platform|service|module|version|namespace): [^"]' "$rec" &&
+  ok "record strings quoted" || bad "record has an unquoted string"
+
+# verify finds stale generated files in its output directories; an empty module list is refused.
+(cd "$work/fx" && "$PG" generate >/dev/null && cp out/go/confv1/problems.gen.go out/go/confv1/old.gen.go &&
+  ! "$PG" verify >/dev/null 2>&1 && rm out/go/confv1/old.gen.go && "$PG" verify >/dev/null) &&
+  ok "verify detects a stale generated file" || bad "verify missed a stale generated file"
+sed '/^modules:/,$d' "$work/fx/problemgen.yaml" >"$work/empty.yaml" && echo "modules: []" >>"$work/empty.yaml"
+! "$PG" verify -c "$work/empty.yaml" >/dev/null 2>&1 && ok "verify refuses an empty module list" || bad "verify accepted no modules"
+
+# diff --git: the old definition AND its imports come from the ref; git failures fail closed.
+repo="$work/repo"
+mkdir -p "$repo"
+printf 'apiVersion: problems.atomi.cloud/v1\nkind: ProblemLibrary\nname: shared\nproblems:\n  bad_input: { title: Bad Input, status: 422, recoverable: true, detail: d }\n' >"$repo/shared.yaml"
+printf 'apiVersion: problems.atomi.cloud/v1\nkind: ProblemSet\nmodule: notes\nversion: v1\nimports:\n  - { from: ./shared.yaml }\nproblems: {}\n' >"$repo/notes.yaml"
+g() { git -C "$repo" -c user.name=t -c user.email=t@e -c commit.gpgsign=false "$@"; }
+g init -q && g add . && g commit -q -m base
+sed -i 's/status: 422/status: 409/' "$repo/shared.yaml"
+out=$("$PG" diff --git HEAD "$repo/notes.yaml" 2>&1) && bad "diff --git missed an imported change" ||
+  { grep -q ' D102 ' <<<"$out" && ok "diff --git reads imports at the ref" || bad "diff --git: $out"; }
+set +e
+"$PG" diff --git no-such-ref "$repo/notes.yaml" >/dev/null 2>&1
+[ $? -eq 2 ] && ok "diff --git fails closed on a missing ref" || bad "diff --git accepted a missing ref"
+set -e
+left=$(find "$repo" -maxdepth 1 -name '.problemgen*' | head -1)
+[ -z "$left" ] && ok "diff --git leaves no temp file" || bad "diff --git left a temp file: $left"
+if [ -n "${OUT:-}" ]; then
+  # the packaged binary finds git with an empty PATH (git is a wrapped runtime input)
+  out=$(env -i HOME="$work" "$PG" diff --git HEAD "$repo/notes.yaml" 2>&1) || true
+  grep -q ' D102 ' <<<"$out" && ok "diff --git works without git on PATH" || bad "packaged diff --git needs git on PATH: $out"
+  for m in gopkg.in/yaml.v3/LICENSE gopkg.in/yaml.v3/NOTICE golang.org/x/text/LICENSE github.com/santhosh-tekuri/jsonschema/v6/LICENSE; do
+    [ -s "$OUT/share/licenses/problemgen/$m" ] && ok "notice $m" || bad "missing notice $m"
+  done
+fi
 "$PG" schema | grep -q '"\$schema"' && ok schema || bad schema
 
 echo "problemgen tests: $pass passed, $fail failed"

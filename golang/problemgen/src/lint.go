@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -29,8 +31,8 @@ var LintRules = map[string]string{
 	"L217": "a private field is never used in `log`",
 	"L220": "retryAfter must name a required, public, integer field",
 	"L221": "retryAfter is only allowed on a recoverable problem",
-	"L230": "two names map to the same generated identifier",
-	"L231": "a name is reserved (a keyword or a generated member in one of the four languages)",
+	"L230": "two generated identifiers collide in one scope of one language (see symbols.go)",
+	"L231": "a name is reserved (a keyword, a generated member, or a standard-library type in one of the four languages)",
 	"L240": "record-bound text contains `{{` or `}}` (would break the Helm-rendered record)",
 	"L241": "the Problem record for this module exceeds the size budget",
 }
@@ -155,13 +157,8 @@ func Lint(m *Module) []Diag {
 		if reservedTypeNames[t.Name] {
 			add("L231", t.Pos, "type name %q is reserved", t.Name)
 		}
-		seenVals := map[string]string{}
 		for _, v := range t.Values {
 			c := Camel(v)
-			if prev, ok := seenVals[c]; ok {
-				add("L230", t.Pos, "enum %s: values %q and %q both become %q", t.Name, prev, v, c)
-			}
-			seenVals[c] = v
 			if reservedFieldNames[c] {
 				add("L231", t.Pos, "enum %s: value %q becomes the reserved identifier %q", t.Name, v, c)
 			}
@@ -210,16 +207,9 @@ func Lint(m *Module) []Diag {
 	}
 
 	// Problems.
-	pascalSeen := map[string]string{}
-	for _, t := range m.Types {
-		pascalSeen[t.Name] = "type " + t.Name
-	}
+	checkSymbols(m, add)
 	for _, p := range m.Problems {
 		pn := Pascal(p.ID)
-		if prev, ok := pascalSeen[pn]; ok {
-			add("L230", p.Pos, "problem %q becomes identifier %s, already used by %s", p.ID, pn, prev)
-		}
-		pascalSeen[pn] = "problem " + p.ID
 		if reservedTypeNames[pn] {
 			add("L231", p.Pos, "problem %q becomes the reserved identifier %s", p.ID, pn)
 		}
@@ -229,15 +219,9 @@ func Lint(m *Module) []Diag {
 				add("L231", f.Pos, "problem %q: field %q becomes a member named like its type (C# CS0542)", p.ID, f.Name)
 			}
 		}
-		for _, txt := range []string{p.Title, p.Description} {
-			if strings.Contains(txt, "{{") || strings.Contains(txt, "}}") {
-				add("L240", p.Pos, "problem %q: title/description must not contain {{ or }}", p.ID)
-			}
-		}
-		for _, f := range p.Data {
-			if strings.Contains(f.Description, "{{") || strings.Contains(f.Description, "}}") ||
-				(f.Example != nil && (strings.Contains(f.Example.Value, "{{") || strings.Contains(f.Example.Value, "}}"))) {
-				add("L240", f.Pos, "field %q: description/example must not contain {{ or }}", f.Name)
+		for _, rt := range recordText(m, p) {
+			if strings.Contains(rt.text, "{{") || strings.Contains(rt.text, "}}") {
+				add("L240", rt.pos, "problem %q: %s must not contain {{ or }} (it is copied into the Helm-rendered record)", p.ID, rt.what)
 			}
 		}
 
@@ -257,7 +241,11 @@ func Lint(m *Module) []Diag {
 		}
 		p.Log = lt
 		usedInLog := map[string]bool{}
-		for which, t := range map[string]*Template{"detail": dt, "log": lt} {
+		for _, wt := range []struct {
+			which string
+			t     *Template
+		}{{"detail", dt}, {"log", lt}} {
+			which, t := wt.which, wt.t
 			if t == nil {
 				continue
 			}
@@ -316,15 +304,86 @@ func Lint(m *Module) []Diag {
 		}
 	}
 
-	// Record size budget (etcd's object limit is 1.5 MiB; keep a margin for metadata/status).
+	// Record size budget (etcd's object limit is 1.5 MiB; keep a margin for metadata/status),
+	// and a backstop for L240: the rendered record body must not open a template action,
+	// whatever model path put the text there.
 	if len(ds) == 0 && m.Def.Kind == "ProblemSet" {
 		cfg := &Config{Platform: "p", Service: "s", Portal: "https://errors.example.com"}
 		rec := RenderRecordYAML(m, cfg, "x", "")
+		// Only {{ opens a Helm action; nested JSON objects legitimately end in }}.
+		if strings.Contains(rec, "{{") {
+			add("L240", Pos{File: m.Def.File, Line: 1, Col: 1}, "the rendered Problem record contains {{ outside the landscape expression")
+		}
 		if len(rec) > recordBudget {
 			add("L241", Pos{File: m.Def.File, Line: 1, Col: 1}, "the Problem record is %d bytes; the budget is %d (etcd limit 1.5 MiB). Split the module", len(rec), recordBudget)
 		}
 	}
+	sort.SliceStable(ds, func(i, j int) bool {
+		a, b := ds[i], ds[j]
+		if a.Pos.File != b.Pos.File {
+			return a.Pos.File < b.Pos.File
+		}
+		if a.Pos.Line != b.Pos.Line {
+			return a.Pos.Line < b.Pos.Line
+		}
+		if a.Pos.Col != b.Pos.Col {
+			return a.Pos.Col < b.Pos.Col
+		}
+		if a.Code != b.Code {
+			return a.Code < b.Code
+		}
+		return a.Msg < b.Msg
+	})
 	return ds
+}
+
+type recordString struct {
+	pos  Pos
+	what string
+	text string
+}
+
+// recordText lists every definition string the Problem record copies for one problem:
+// title, description, and through the data schema each public field's description and
+// example plus, transitively, every named type it reaches (type description, nested field
+// descriptions and examples, enum values). Private fields never reach the record.
+func recordText(m *Module, p *Problem) []recordString {
+	out := []recordString{{p.Pos, "the title", p.Title}, {p.Pos, "the description", p.Description}}
+	seen := map[string]bool{}
+	var field func(f *Field, owner string)
+	var typ func(t FieldType)
+	typ = func(t FieldType) {
+		switch t.Kind {
+		case KArray:
+			if t.Items != nil {
+				typ(*t.Items)
+			}
+		case KRef:
+			nt := m.TypeByName(t.Ref)
+			if nt == nil || seen[nt.Name] {
+				return
+			}
+			seen[nt.Name] = true
+			out = append(out, recordString{nt.Pos, "the description of type " + nt.Name, nt.Description})
+			for _, v := range nt.Values {
+				out = append(out, recordString{nt.Pos, "a value of enum " + nt.Name, v})
+			}
+			for _, f := range nt.Fields {
+				field(f, "type "+nt.Name)
+			}
+		}
+	}
+	field = func(f *Field, owner string) {
+		out = append(out, recordString{f.Pos, fmt.Sprintf("the description of field %q of %s", f.Name, owner), f.Description})
+		if f.Example != nil {
+			out = append(out, recordString{f.Pos, fmt.Sprintf("the example of field %q of %s", f.Name, owner), f.Example.Value})
+		}
+		typ(f.Type)
+	}
+	for _, f := range p.PublicData() {
+		field(f, "problem "+p.ID)
+	}
+	return out
 }
 
 const recordBudget = 900 * 1024
@@ -332,6 +391,10 @@ const recordBudget = 900 * 1024
 func lintExample(f *Field, m *Module, add func(string, Pos, string, ...any)) {
 	ex := f.Example
 	t := f.Type
+	shown := strconv.Quote(ex.Value)
+	if f.Private {
+		shown = "(private, not shown)" // diagnostics are logged by CI; private metadata stays out
+	}
 	switch t.Kind {
 	case KArray:
 		add("L207", f.Pos, "field %q: examples are only allowed on scalar fields", f.Name)
@@ -350,7 +413,7 @@ func lintExample(f *Field, m *Module, add func(string, Pos, string, ...any)) {
 				return
 			}
 		}
-		add("L206", f.Pos, "field %q: example %q is not a value of %s", f.Name, ex.Value, nt.Name)
+		add("L206", f.Pos, "field %q: example %s is not a value of %s", f.Name, shown, nt.Name)
 		return
 	}
 	ok := false
@@ -374,9 +437,22 @@ func lintExample(f *Field, m *Module, add func(string, Pos, string, ...any)) {
 			ok = err == nil
 		case t.Kind == KString && t.Format != "":
 			ok = checkFormat(t.Format, ex.Value) == nil
+		case t.Kind == KInteger:
+			// The generated schema says minimum/maximum ±(2^53-1); the example must obey it.
+			i, err := strconv.ParseInt(ex.Value, 0, 64)
+			ok = err == nil && i >= -MaxSafeInteger && i <= MaxSafeInteger
+		case t.Kind == KNumber:
+			fl, err := strconv.ParseFloat(strings.ReplaceAll(ex.Value, "_", ""), 64)
+			if ex.Tag == "!!int" {
+				var i int64
+				i, err = strconv.ParseInt(ex.Value, 0, 64)
+				fl = float64(i)
+			}
+			_, ferr := formatNumber(fl)
+			ok = err == nil && ferr == nil // finite only: .inf / .nan have no JSON form
 		}
 	}
 	if !ok {
-		add("L206", f.Pos, "field %q: example %q does not match type %s", f.Name, ex.Value, typeSig(t))
+		add("L206", f.Pos, "field %q: example %s does not match type %s", f.Name, shown, typeSig(t))
 	}
 }

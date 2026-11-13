@@ -1,10 +1,12 @@
 <!-- Copied from the problemgen spike SPEC.md; the format reference for problemgen 0.1.0. -->
 # Problem definitions — format v1 (`problemgen`)
 
-Status: spike spec, 2026-11-13. Tool: `problemgen` 0.1.0 (Go, single static binary).
+Status: spike spec, 2026-11-13. Tool: `problemgen` 0.1.0 (Go, one static binary; `diff --git` runs git).
 Machine-readable structure: `tool/schema/problems.schema.json` (`problemgen schema`).
-Every rule below that a developer could break is enforced by `lint`, `diff`, `verify`,
-the compiler, or a per-language lint. Each rule names its enforcer.
+Every rule below names its enforcer: `lint`, `diff`, `verify` (shipped in the tool), or
+the compiler / a per-language lint / an architecture rule (configured in each service; the
+tool does not ship those). A file holds exactly one YAML document (P001); `status` is a
+plain three-digit decimal integer (P007: `4.22e2`, `0x1a6` are refused).
 
 ## 1. The rule this format serves
 
@@ -176,18 +178,27 @@ in `data`.
 
 - `imports` lists `builtin:<name>` (shipped in the tool; `builtin:generic/v1` = the §2.2
   baseline) or relative paths to `ProblemLibrary` files. Libraries are flat (no imports).
-  `only:` picks problems (L103 if missing).
+  `only:` picks problems (L103 if missing) and imports exactly the named types those
+  problems reach, transitively; without `only:` every problem and type is imported.
 - Imported problems become problems **of the importing module and version** (their address
   uses the importing module), exactly as lib-contracts §2.2 expects them in each row.
 - A local id equal to an imported id is an error (L102); a local definition never overrides
   an import. The same id/type from two imports is accepted only if byte-identical (diamond).
-- Generated identifiers that collide after case conversion are an error (L230); names that
-  are keywords or generated members in any of the four languages are refused (L231).
+- Every identifier the generators declare is modelled per language and scope (package /
+  module / namespace / library; each struct, class, record, enum; Dart constructor
+  parameters) in `tool/symbols.go`. Two equal identifiers in one scope are an error (L230),
+  e.g. Go `NewFoo` from problem `foo` and type `NewFoo` from `new_foo`, or an optional
+  `a` (setter `WithA`) next to a field `withA`. Keywords, generated members and
+  standard-library type names the generated code relies on (dart:core, TS globals, C#
+  System; e.g. `format_exception` → `FormatException`) are refused (L231).
 
 ## 11. Versioning, breaking changes, deprecation
 
 `problemgen diff --old <file> new.yaml` or `--git <ref> new.yaml`. Within one (module,
-version):
+version). With `--git`, the old definition **and every file it imports** are read from
+the one commit the ref resolves to (`builtin:` libraries come from the running binary). A ref
+that is not a commit, or any git failure, exits 2; only "the path does not exist in that
+commit" counts as a new file.
 
 | Change | Verdict |
 |---|---|
@@ -220,12 +231,19 @@ the format (they would be a second, unenforced naming scheme).
 ## 13. Outputs
 
 - **Code** (Go/TS/C#/Dart): one file per module per language, committed. Header carries the
-  tool version and the definition's sha256. `problemgen verify` fails CI on any difference.
+  tool version and the definition's sha256. `problemgen verify` fails CI on any difference
+  in a configured output, and on a problemgen-generated file in an output directory that the
+  config no longer plans (stale). An empty `modules` list is refused.
 - **Problem record** (`atomi.cloud/v1alpha1 Problem`, one per module × version, error-portal
   row shape): `metadata.name = {service}.{module}.{landscape}.{version}`, `spec.problems[]`
-  = `{id, type, title, status, recoverable, schema}`. The only Helm expression is the
-  landscape (`required .Values.landscape`); everything else is literal. Lint refuses `{{`/`}}`
-  in any record-bound text (L240) and records over 900 KiB (L241; etcd limit 1.5 MiB).
+  = `{id, type, title, status, recoverable, schema}`. The only Helm input is the landscape:
+  `required`, then `fail` unless it is a DNS label (`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`);
+  everything else is literal, and every string field is a YAML double-quoted scalar (so
+  `123`, `yes`, `on` stay strings). Lint refuses `{{`/`}}` in any record-bound text —
+  titles, descriptions, public fields and every named type they reach (descriptions, nested
+  fields, examples, enum values) — and checks the rendered record for `{{` (L240); records
+  over 900 KiB are refused (L241; etcd limit 1.5 MiB). Platform/service are DNS labels of at
+  most 63 characters.
 - **schema** = JSON Schema of the public `data` only: `type: object`, `properties` in
   declaration order, `required`, field `description`/`examples`/`deprecated`; `integer` with
   ±(2^53−1) bounds; `int64` as string + pattern; `date-time`/`uuid`/`date`/`uri` as
@@ -247,6 +265,8 @@ Generated `Parse(body)` per module:
   envelope + a reason) — never an exception;
 - otherwise the typed value; unknown extra members are ignored (forward compatible); `null`
   members read as absent. The portal host and landscape are not checked.
+  An absent `status` is "not a problem"; a present `status` that is `null` reads as 0, so the
+  status check fails and the body is **`Unknown`** (all four runtimes agree).
 - A parsed value keeps the received `type` and `detail`, so re-serialising it is lossless.
 
 ## 15. Commands

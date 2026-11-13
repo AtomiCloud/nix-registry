@@ -70,7 +70,7 @@ type FileOut struct {
 }
 
 var (
-	dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+	dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`) // RFC 1123 label, at most 63
 	portalRe = regexp.MustCompile(`^https://[a-z0-9.-]+(:[0-9]+)?$`)
 )
 
@@ -91,10 +91,13 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("%s: want apiVersion problems.atomi.cloud/v1, kind GeneratorConfig", path)
 	}
 	if !dnsLabel.MatchString(c.Platform) || !dnsLabel.MatchString(c.Service) {
-		return nil, fmt.Errorf("%s: platform and service must be DNS labels", path)
+		return nil, fmt.Errorf("%s: platform and service must be DNS labels (a-z, 0-9, -; at most 63 characters)", path)
 	}
 	if !portalRe.MatchString(c.Portal) {
 		return nil, fmt.Errorf("%s: portal must be https://host[:port] with no path", path)
+	}
+	if len(c.Modules) == 0 {
+		return nil, fmt.Errorf("%s: modules is empty: list every definition (an empty list would verify nothing)", path)
 	}
 	seen := map[string]bool{}
 	for _, mc := range c.Modules {
