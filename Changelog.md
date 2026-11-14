@@ -1,3 +1,24 @@
+## [5.14.0](https://github.com/AtomiCloud/nix-registry/compare/v5.13.0...v5.14.0) (2026-11-14)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **problemgen:** address CodeRabbit review threads ([53c750c](https://github.com/AtomiCloud/nix-registry/commit/53c750c663f78497bd6ec07dd40f1744347a2eaa))
+* **problemgen:** close review gaps in lint, record, diff and packaging ([7e9962f](https://github.com/AtomiCloud/nix-registry/commit/7e9962fcc9e12ccfca6ea85533cc5c9c748a133b))
+* **problemgen:** close second review gaps; add generative compile test ([48bc363](https://github.com/AtomiCloud/nix-registry/commit/48bc3634c4d7271ff91a2e0c23f93f06a284cdd3))
+* **problemgen:** contain manifest deletions; third review fixes ([b3eec4e](https://github.com/AtomiCloud/nix-registry/commit/b3eec4ed163a1541120992fe02ebb948a5c4ccf6)), closes [#64](https://github.com/AtomiCloud/nix-registry/issues/64)
+* **problemgen:** guard every write path; one origin rule everywhere ([cf39df7](https://github.com/AtomiCloud/nix-registry/commit/cf39df722a33fb86c1726c4a2cdfccee1495d088))
+
+
+### ✨ New Packages ✨
+
+* **problemgen:** add definition-first RFC 9457 problem generator ([30fb535](https://github.com/AtomiCloud/nix-registry/commit/30fb5358890b598edae7b98ddbe662cdac9a9b73))
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **problemgen:** portal at run time; six more generics ([402d065](https://github.com/AtomiCloud/nix-registry/commit/402d06504b276d9d441b700d77cd3a996b499cea))
+
 ## [5.13.0](https://github.com/AtomiCloud/nix-registry/compare/v5.12.0...v5.13.0) (2026-11-09)
 
 
