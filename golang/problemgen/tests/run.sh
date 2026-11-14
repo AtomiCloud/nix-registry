@@ -84,10 +84,22 @@ grep -Eq '^    - id: "[a-z_0-9]+"$' "$rec" && ! grep -Eq '^ *(id|platform|servic
 (cd "$work/fx" && "$PG" generate >/dev/null && [ -s problemgen.yaml.outputs ] &&
   cp out/go/confv1/problems.gen.go out/go/confv1/hand.gen.go && "$PG" verify >/dev/null &&
   rm out/go/confv1/hand.gen.go) && ok "verify ignores files it did not generate" || bad "verify claimed a file it did not generate"
+# A dropped catalog (no ownership header) is reported, never deleted, and stays listed until a
+# person removes it; a dropped code output that is unchanged and owned is removed.
 (cd "$work/fx" && cp problemgen.yaml cfg.bak && grep -v 'catalog:' cfg.bak >problemgen.yaml &&
-  ! "$PG" verify >/dev/null 2>&1 && "$PG" generate >gen.log && grep -q 'removed stale' gen.log && [ ! -e out/catalog/conf.v1.json ] &&
+  ! "$PG" verify >/dev/null 2>&1 && ! "$PG" generate >gen.log 2>&1 && grep -q 'not removing.*catalog' gen.log &&
+  [ -e out/catalog/conf.v1.json ] && ! "$PG" verify >/dev/null 2>&1 && rm out/catalog/conf.v1.json &&
+  "$PG" generate >/dev/null && "$PG" verify >/dev/null && mv cfg.bak problemgen.yaml && "$PG" generate >/dev/null) &&
+  ok "dropped catalog output: reported, kept listed, never deleted" || bad "stale catalog not handled"
+(cd "$work/fx" && cp problemgen.yaml cfg.bak && grep -v 'typescript:' cfg.bak >problemgen.yaml &&
+  "$PG" generate >gen.log && grep -q 'removed stale' gen.log && [ ! -e out/ts/conf.v1.problems.gen.ts ] &&
   "$PG" verify >/dev/null && mv cfg.bak problemgen.yaml && "$PG" generate >/dev/null) &&
-  ok "dropped catalog output: verify reports it, generate removes it" || bad "stale catalog not handled"
+  ok "dropped code output: owned and unchanged, so generate removes it" || bad "stale code output not removed"
+(cd "$work/fx" && cp problemgen.yaml cfg.bak && grep -v 'typescript:' cfg.bak >problemgen.yaml &&
+  echo "// edited" >>out/ts/conf.v1.problems.gen.ts && ! "$PG" generate >gen.log 2>&1 &&
+  grep -q 'not removing.*content' gen.log && [ -e out/ts/conf.v1.problems.gen.ts ] &&
+  rm out/ts/conf.v1.problems.gen.ts && mv cfg.bak problemgen.yaml && "$PG" generate >/dev/null) &&
+  ok "an edited stale file is never deleted" || bad "generate deleted an edited file"
 sed 's/^    outputs:$/    outputs: {}/; /^      /d' "$work/fx/problemgen.yaml" >"$work/nooutputs.yaml"
 out=$("$PG" verify -c "$work/nooutputs.yaml" 2>&1 || true)
 grep -q 'has no outputs' <<<"$out" && ok "verify refuses a module without outputs" || bad "verify accepted a module without outputs"

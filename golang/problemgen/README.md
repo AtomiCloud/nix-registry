@@ -9,8 +9,14 @@ tool does not ship those). A file holds exactly one YAML document (P001); `statu
 plain three-digit decimal integer (P007: `4.22e2`, `0x1a6` are refused). Free text (titles,
 descriptions, deprecation notes, templates, string examples) may hold any Unicode except
 characters some target reads as a line break or that are invisible controls: C0/C1 controls,
-U+2028/2029, U+FEFF, bidi controls, noncharacters (L242). A private field's example,
-description and deprecation note never appear in a diagnostic, at any stage.
+U+2028/2029, U+FEFF, bidi embeddings/overrides/isolates (U+202A–202E, U+2066–2069),
+noncharacters (L242). The plain marks LRM, RLM and ALM (U+200E, U+200F, U+061C) are allowed.
+Tabs and newlines are refused by the schema's text pattern (P006), so every text is one line:
+no YAML folded (`>`) or literal (`|`) blocks. A private field's example, description and
+deprecation note (in problem data, and in a named type's fields, where `private` is refused
+later by L204) are kept out of diagnostics at every stage: a diagnostic located at such a value
+gets a generic message; elsewhere in the same file, whole tokens equal to a value of at least
+3 characters are replaced. Values of 1–2 characters are not redacted.
 
 ## 1. The rule this format serves
 
@@ -238,13 +244,19 @@ the format (they would be a second, unenforced naming scheme).
 ## 13. Outputs
 
 - **Code** (Go/TS/C#/Dart): one file per module per language, committed. Header carries the
-  tool version and the definition's sha256. `generate` also writes the config's manifest
-  `<config>.outputs` (every file it generated, config-relative). `problemgen verify` fails CI
-  on any difference in a configured output or the manifest, and on a file the committed
-  manifest lists that is no longer an output (stale; `generate` removes it, after checking it
-  carries the problemgen header or is a catalog). Another config's files, even in the same
-  directory, are never listed and never touched. An empty `modules` list and a module with
-  no outputs are refused.
+  tool version, the definition's path **relative to the generated file** (so it names exactly
+  one definition) and its sha256. `generate` also writes the config's manifest
+  `<config>.outputs`: one line per file it generated, `<sha256 of the content>  <path relative
+  to the config>`. `problemgen verify` fails CI on any difference in a configured output or the
+  manifest, and on a file the manifest lists that is no longer an output (stale). `generate`
+  deletes a stale file only if all hold: the entry is a relative path inside the config
+  directory or a directory the config writes to now; no component is a symlink; the content
+  still has the recorded sha256; its header's source is one of this config's definitions.
+  Catalogs carry no header, so they are never deleted. A stale file that is not deleted stays
+  in the manifest, and verify keeps failing until a person removes it. `generate` refuses to
+  overwrite a file whose header names another existing definition. An empty `modules` list
+  and a module with no outputs are refused. (Two configs generating the same file from the
+  same definition cannot be told apart; that is a configuration error.)
 - **Problem record** (`atomi.cloud/v1alpha1 Problem`, one per module × version, error-portal
   row shape): `metadata.name = {service}.{module}.{landscape}.{version}`, `spec.problems[]`
   = `{id, type, title, status, recoverable, schema}`. The only Helm input is the landscape:

@@ -151,24 +151,40 @@ func TestManifestOwnership(t *testing.T) {
 			t.Errorf("verify %s claims another config's files: %d %s", c, code, out)
 		}
 	}
-	// Drop a's catalog output: verify reports the stale JSON; generate removes it, b untouched.
+	// Drop a's catalog output: verify reports the stale JSON. A catalog has no ownership
+	// header, so generate never deletes it (review 3): it reports it, keeps it listed, and
+	// verify keeps failing until a person removes it. b is untouched throughout.
 	os.WriteFile(a, []byte(cfg("a", "{ typescript: { file: ../shared/a.ts, runtime: r } }")), 0o644)
 	if code, out := run("verify", "-c", a); code != 1 || !strings.Contains(out, "stale generated file") || !strings.Contains(out, "a.json") {
 		t.Errorf("verify missed the stale catalog: %d %s", code, out)
 	}
-	if code, out := run("generate", "-c", a); code != 0 || !strings.Contains(out, "removed stale") {
-		t.Errorf("generate did not remove the stale catalog: %d %s", code, out)
+	if code, out := run("generate", "-c", a); code != 1 || !strings.Contains(out, "not removing") || !strings.Contains(out, "catalog") {
+		t.Errorf("generate must refuse to delete a catalog: %d %s", code, out)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "shared", "a.json")); !os.IsNotExist(err) {
-		t.Errorf("a.json still present")
+	if code, out := run("verify", "-c", a); code != 1 || !strings.Contains(out, "a.json") {
+		t.Errorf("the refused stale catalog was forgotten (R3-4): %d %s", code, out)
+	}
+	os.Remove(filepath.Join(dir, "shared", "a.json"))
+	if code, out := run("generate", "-c", a); code != 0 {
+		t.Errorf("generate after removing the catalog by hand: %d %s", code, out)
+	}
+	// Drop a's TypeScript output too: an unchanged, contained, owned code file is removed.
+	os.WriteFile(a, []byte(cfg("a", "{ record: { file: ../shared/a.record.yaml } }")), 0o644)
+	if code, out := run("generate", "-c", a); code != 0 || !strings.Contains(out, "removed stale") {
+		t.Errorf("generate did not remove its own stale TS file: %d %s", code, out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "shared", "a.ts")); !os.IsNotExist(err) {
+		t.Errorf("a.ts still present")
 	}
 	for _, f := range []string{"b.ts", "b.json"} {
 		if _, err := os.Stat(filepath.Join(dir, "shared", f)); err != nil {
 			t.Errorf("b's %s was touched: %v", f, err)
 		}
 	}
-	if code, out := run("verify", "-c", a); code != 0 {
-		t.Errorf("verify after regenerate: %d %s", code, out)
+	for _, c := range []string{a, b} {
+		if code, out := run("verify", "-c", c); code != 0 {
+			t.Errorf("verify %s after regenerate: %d %s", c, code, out)
+		}
 	}
 	// Outputless module.
 	os.WriteFile(a, []byte(cfg("a", "{}")), 0o644)

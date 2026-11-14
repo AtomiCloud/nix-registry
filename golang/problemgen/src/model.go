@@ -212,13 +212,13 @@ func ParseDef(name string, src []byte) (*Def, []Diag) {
 	}
 	root := doc.Content[0]
 	if diags := rejectYAMLFeatures(name, root); len(diags) > 0 {
-		return nil, redactPrivate(root, diags)
+		return nil, redactPrivate(name, root, diags)
 	}
 	if diags := checkStatusLexical(name, root); len(diags) > 0 {
-		return nil, redactPrivate(root, diags)
+		return nil, redactPrivate(name, root, diags)
 	}
 	if diags := validateSchema(name, root); len(diags) > 0 {
-		return nil, redactPrivate(root, diags)
+		return nil, redactPrivate(name, root, diags)
 	}
 	sum := sha256.Sum256(src)
 	d := &Def{File: name, SHA256: hex.EncodeToString(sum[:]), Root: root}
@@ -591,7 +591,7 @@ func LoadModule(path string) (*Module, []Diag) {
 	m, rd := Resolve(d)
 	diags = append(diags, rd...)
 	diags = append(diags, Lint(m)...)
-	return m, redactPrivate(d.Root, diags)
+	return m, redactPrivate(d.File, d.Root, diags)
 }
 
 var plainStatus = regexp.MustCompile(`^[1-9][0-9]{2}$`)
@@ -616,74 +616,86 @@ func checkStatusLexical(file string, root *yaml.Node) []Diag {
 }
 
 // redactPrivate keeps a private field's metadata (example, description, deprecation note)
-// out of every diagnostic, whatever stage produced it: CI logs are not private. A diagnostic
-// located on a line that holds such text gets a generic message; any other message has the
-// text itself replaced. The private flag is read from the raw YAML, so this works before the
-// schema has accepted the file.
-func redactPrivate(root *yaml.Node, ds []Diag) []Diag {
+// out of every diagnostic, whatever stage produced it: CI logs are not private. Any mapping
+// with a private key that is not literally false counts, wherever it sits (problem data or a
+// named type's fields, which lint refuses later with L204). A diagnostic located exactly at
+// such a value (same file, line and column) gets a generic message; in any other diagnostic
+// of the same file only whole tokens equal to the value (quoted, or bounded by non-word
+// characters) are replaced, and only values of at least minRedactLen characters, so ordinary
+// words in a message are never garbled.
+func redactPrivate(file string, root *yaml.Node, ds []Diag) []Diag {
 	if root == nil || len(ds) == 0 {
 		return ds
 	}
 	var texts []string
-	lines := map[int]bool{}
+	at := map[[2]int]bool{}
 	var collect func(n *yaml.Node)
 	collect = func(n *yaml.Node) {
+		at[[2]int{n.Line, n.Column}] = true
 		if n.Kind == yaml.ScalarNode {
-			if n.Value != "" {
+			if len([]rune(n.Value)) >= minRedactLen {
 				texts = append(texts, n.Value)
 			}
-			lines[n.Line] = true
 			return
 		}
-		lines[n.Line] = true
 		for _, c := range n.Content {
 			collect(c)
 		}
 	}
-	for _, kv := range pairs(root) {
-		if kv[0].Value != "problems" {
-			continue
-		}
-		for _, p := range pairs(kv[1]) {
-			for _, pk := range pairs(p[1]) {
-				if pk[0].Value != "data" {
-					continue
-				}
-				for _, f := range pairs(pk[1]) {
-					fields := pairs(f[1])
-					private := false
-					for _, fk := range fields {
-						if fk[0].Value == "private" && !(fk[1].Kind == yaml.ScalarNode && fk[1].Value == "false") {
-							private = true
-						}
-					}
-					if !private {
-						continue
-					}
-					for _, fk := range fields {
-						switch fk[0].Value {
-						case "example", "description", "deprecated":
-							collect(fk[1])
-						}
-					}
+	var walk func(n *yaml.Node)
+	walk = func(n *yaml.Node) {
+		if n.Kind == yaml.MappingNode {
+			kvs := pairs(n)
+			private := false
+			for _, kv := range kvs {
+				if kv[0].Value == "private" && !(kv[1].Kind == yaml.ScalarNode && kv[1].Value == "false") {
+					private = true
 				}
 			}
+			for _, kv := range kvs {
+				switch {
+				case private && (kv[0].Value == "example" || kv[0].Value == "description" || kv[0].Value == "deprecated"):
+					collect(kv[1])
+				default:
+					walk(kv[1])
+				}
+			}
+			return
+		}
+		for _, c := range n.Content {
+			walk(c)
 		}
 	}
-	if len(texts) == 0 && len(lines) == 0 {
+	walk(root)
+	if len(at) == 0 {
 		return ds
 	}
 	sort.Slice(texts, func(i, j int) bool { return len(texts[i]) > len(texts[j]) })
+	type redactor struct{ quoted, token *regexp.Regexp }
+	var rs []redactor
+	for _, t := range texts {
+		q := regexp.QuoteMeta(t)
+		rs = append(rs, redactor{
+			quoted: regexp.MustCompile(`"` + q + `"|'` + q + `'|` + regexp.QuoteMeta(strconv.Quote(t))),
+			token:  regexp.MustCompile(`(^|[^\pL\pN_])` + q + `($|[^\pL\pN_])`),
+		})
+	}
+	const hidden = "(private, not shown)"
 	out := make([]Diag, len(ds))
 	for i, d := range ds {
-		if lines[d.Pos.Line] {
-			d.Msg = "a private field's example, description or deprecation note is invalid here (private, not shown)"
-		} else {
-			for _, t := range texts {
-				d.Msg = strings.ReplaceAll(d.Msg, t, "(private, not shown)")
+		if d.Pos.File == file {
+			if at[[2]int{d.Pos.Line, d.Pos.Col}] {
+				d.Msg = "a private field's example, description or deprecation note is invalid here " + hidden
+			} else {
+				for _, r := range rs {
+					d.Msg = r.quoted.ReplaceAllLiteralString(d.Msg, hidden)
+					d.Msg = r.token.ReplaceAllString(d.Msg, "${1}"+hidden+"${2}")
+				}
 			}
 		}
 		out[i] = d
 	}
 	return out
 }
+
+const minRedactLen = 3

@@ -4,7 +4,8 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
+	"crypto/sha256"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"os"
@@ -288,6 +289,7 @@ func gitOut(dir string, args ...string) (string, error) {
 type plannedFile struct {
 	path    string
 	content string
+	def     string // absolute definition path the file is generated from ("" for the manifest)
 }
 
 func planOutputs(cfg *Config) ([]plannedFile, []Diag) {
@@ -300,7 +302,16 @@ func planOutputs(cfg *Config) ([]plannedFile, []Diag) {
 			all = append(all, ds...)
 			continue
 		}
-		src := filepath.ToSlash(mc.Definition)
+		def := absClean(defPath)
+		// The header's source is relative to the generated file, so it names exactly one
+		// definition wherever the config lives (ownership checks rely on it).
+		src := func(out string) string {
+			r, err := filepath.Rel(filepath.Dir(absClean(out)), def)
+			if err != nil {
+				return filepath.ToSlash(mc.Definition)
+			}
+			return filepath.ToSlash(r)
+		}
 		names := make([]string, 0, len(langs))
 		for n := range langs {
 			names = append(names, n)
@@ -309,14 +320,16 @@ func planOutputs(cfg *Config) ([]plannedFile, []Diag) {
 		for _, n := range names {
 			l := langs[n]
 			if f := l.File(mc.Outputs); f != "" {
-				out = append(out, plannedFile{cfg.Path(f), l.Generate(m, cfg, mc.Outputs, src)})
+				p := cfg.Path(f)
+				out = append(out, plannedFile{p, l.Generate(m, cfg, mc.Outputs, src(p)), def})
 			}
 		}
 		if mc.Outputs.Record != nil {
-			out = append(out, plannedFile{cfg.Path(mc.Outputs.Record.File), RenderRecordYAML(m, cfg, "", src)})
+			p := cfg.Path(mc.Outputs.Record.File)
+			out = append(out, plannedFile{p, RenderRecordYAML(m, cfg, "", src(p)), def})
 		}
 		if mc.Outputs.Catalog != nil {
-			out = append(out, plannedFile{cfg.Path(mc.Outputs.Catalog.File), RenderCatalogJSON(m, cfg)})
+			out = append(out, plannedFile{cfg.Path(mc.Outputs.Catalog.File), RenderCatalogJSON(m, cfg), def})
 		}
 	}
 	return out, all
@@ -338,24 +351,58 @@ func cmdGenerate(args []string, verify bool) int {
 		printDiags(ds)
 		return 1
 	}
-	// The manifest lists every file this config generates. It is itself an output, so
-	// verify sees it drift, and it is how generate/verify know which files THIS config
-	// wrote earlier: another config's outputs, even in the same directory, are never listed.
+	// The manifest (<config>.outputs) lists, with a sha256, every file this config generated.
+	// It is how generate/verify know which earlier files are theirs; deleting one is further
+	// guarded by safeToRemove. Stale entries that cannot be removed stay listed, so verify
+	// keeps failing until a person deals with them.
 	mpath := manifestPath(*cfgPath)
-	previous, err := readManifest(cfg, mpath)
+	previous, err := readManifest(mpath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
-	files = append(files, plannedFile{mpath, renderManifest(cfg, files)})
 	seen := map[string]bool{}
-	drift := 0
+	defs := map[string]bool{}
+	var writeDirs []string
 	for _, f := range files {
 		if seen[f.path] {
 			fmt.Fprintf(os.Stderr, "two outputs write %s\n", f.path)
 			return 2
 		}
 		seen[f.path] = true
+		defs[f.def] = true
+		writeDirs = append(writeDirs, filepath.Dir(f.path))
+	}
+	drift := 0
+	var kept []manifestEntry
+	for _, e := range previous {
+		p := cfg.Path(filepath.FromSlash(e.rel))
+		if !filepath.IsAbs(filepath.FromSlash(e.rel)) && seen[p] {
+			continue
+		}
+		if _, err := os.Lstat(p); err != nil {
+			continue // already gone: forget it
+		}
+		if verify {
+			fmt.Fprintf(os.Stderr, "stale generated file: %s (listed in %s, no longer an output; run problemgen generate)\n", p, mpath)
+			kept = append(kept, e)
+			drift++
+			continue
+		}
+		if why := safeToRemove(cfg, e, writeDirs, defs); why != "" {
+			fmt.Fprintf(os.Stderr, "not removing %s: %s; delete it by hand (it stays listed in %s until then)\n", p, why, mpath)
+			kept = append(kept, e)
+			drift++
+			continue
+		}
+		if err := os.Remove(p); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			return 2
+		}
+		fmt.Println("removed stale " + p)
+	}
+	files = append(files, plannedFile{mpath, renderManifest(cfg, files, kept), ""})
+	for _, f := range files {
 		if verify {
 			cur, err := os.ReadFile(f.path)
 			if err != nil || !bytes.Equal(cur, []byte(f.content)) {
@@ -363,6 +410,10 @@ func cmdGenerate(args []string, verify bool) int {
 				drift++
 			}
 			continue
+		}
+		if owner := foreignOwner(f); owner != "" {
+			fmt.Fprintf(os.Stderr, "refusing to overwrite %s: it was generated from %s, not %s\n", f.path, owner, f.def)
+			return 2
 		}
 		if err := os.MkdirAll(filepath.Dir(f.path), 0o755); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -373,30 +424,6 @@ func cmdGenerate(args []string, verify bool) int {
 			return 2
 		}
 		fmt.Println("wrote " + f.path)
-	}
-	// Files an earlier generate of this config wrote that are no longer planned.
-	for _, p := range previous {
-		if seen[p] {
-			continue
-		}
-		if _, err := os.Stat(p); err != nil {
-			continue
-		}
-		if verify {
-			fmt.Fprintf(os.Stderr, "stale generated file: %s (listed in %s, no longer an output; run problemgen generate)\n", p, mpath)
-			drift++
-			continue
-		}
-		if !looksGenerated(p) {
-			fmt.Fprintf(os.Stderr, "not removing %s: listed in %s but not recognisably generated by problemgen; delete it by hand\n", p, mpath)
-			drift++
-			continue
-		}
-		if err := os.Remove(p); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return 2
-		}
-		fmt.Println("removed stale " + p)
 	}
 	if drift > 0 {
 		return 1
@@ -430,29 +457,39 @@ func cmdRules() int {
 // manifestPath is the output manifest of a config: <config file>.outputs, next to it.
 func manifestPath(cfgPath string) string { return cfgPath + ".outputs" }
 
-// renderManifest lists the planned outputs, config-relative, sorted.
-func renderManifest(cfg *Config, files []plannedFile) string {
-	var rel []string
+type manifestEntry struct {
+	sha string // sha256 of the content this config wrote
+	rel string // path relative to the config, slash-separated
+}
+
+// renderManifest lists the planned outputs (and stale entries kept), config-relative, sorted,
+// each with the sha256 of its content.
+func renderManifest(cfg *Config, files []plannedFile, kept []manifestEntry) string {
+	var es []manifestEntry
 	for _, f := range files {
-		r, err := filepath.Rel(cfg.Path("."), f.path)
+		r, err := filepath.Rel(absClean(cfg.Path(".")), absClean(f.path))
 		if err != nil {
 			r = f.path
 		}
-		rel = append(rel, filepath.ToSlash(r))
+		sum := sha256.Sum256([]byte(f.content))
+		es = append(es, manifestEntry{hex.EncodeToString(sum[:]), filepath.ToSlash(r)})
 	}
-	sort.Strings(rel)
+	es = append(es, kept...)
+	sort.Slice(es, func(i, j int) bool { return es[i].rel < es[j].rel })
 	var b strings.Builder
 	b.WriteString("# Code generated by problemgen " + toolVersion + ". DO NOT EDIT.\n")
-	b.WriteString("# Files generated from this config (paths relative to it). problemgen generate removes\n")
-	b.WriteString("# a listed file once it is no longer an output; problemgen verify reports it.\n")
-	for _, r := range rel {
-		b.WriteString(r + "\n")
+	b.WriteString("# Files generated from this config: sha256 of the content written, path relative to the\n")
+	b.WriteString("# config. A listed file that is no longer an output is reported by verify; generate removes\n")
+	b.WriteString("# it only if it is unchanged, contained, not behind a symlink and generated from one of this\n")
+	b.WriteString("# config's definitions (catalogs: never; delete them by hand).\n")
+	for _, e := range es {
+		b.WriteString(e.sha + "  " + e.rel + "\n")
 	}
 	return b.String()
 }
 
-// readManifest returns the absolute paths listed in an existing manifest (none if absent).
-func readManifest(cfg *Config, path string) ([]string, error) {
+// readManifest returns the entries of an existing manifest (none if absent).
+func readManifest(path string) ([]manifestEntry, error) {
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		return nil, nil
@@ -460,42 +497,118 @@ func readManifest(cfg *Config, path string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	var out []string
+	var out []manifestEntry
 	for _, line := range strings.Split(string(b), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
-		out = append(out, cfg.Path(filepath.FromSlash(line)))
+		sha, rel, ok := strings.Cut(line, "  ")
+		if !ok { // a hand-written line without a hash: listed, never removable
+			sha, rel = "", line
+		}
+		out = append(out, manifestEntry{sha, strings.TrimSpace(rel)})
 	}
 	return out, nil
 }
 
-// looksGenerated is the safety check before generate deletes a stale listed file: a code or
-// record file must carry the problemgen header; a catalog must be a JSON array of catalog
-// entries.
-func looksGenerated(p string) bool {
+// safeToRemove returns "" when generate may delete a stale manifest entry, else the reason.
+// All must hold: (1) the entry is a relative path that stays inside the config directory or
+// a directory this config writes to now; (2) no component of it is a symlink (the real path
+// equals the lexical one); (3) the content is exactly what this config wrote (sha256);
+// (4) it carries the problemgen header whose source (relative to the file) is one of this
+// config's definitions. Catalogs have no header, so ownership cannot be proven: never removed.
+func safeToRemove(cfg *Config, e manifestEntry, writeDirs []string, defs map[string]bool) string {
+	rel := filepath.FromSlash(e.rel)
+	if rel == "" || filepath.IsAbs(rel) {
+		return "the manifest entry is not a relative path"
+	}
+	p := absClean(cfg.Path(rel))
+	inside := func(root string) bool {
+		r, err := filepath.Rel(absClean(root), p)
+		return err == nil && r != "." && r != ".." && !strings.HasPrefix(r, ".."+string(filepath.Separator))
+	}
+	contained := inside(cfg.Path("."))
+	for _, d := range writeDirs {
+		contained = contained || inside(d)
+	}
+	if !contained {
+		return "it is outside the config directory and the directories this config writes to"
+	}
+	realCfg, err := filepath.EvalSymlinks(absClean(cfg.Path(".")))
+	if err != nil {
+		return err.Error()
+	}
+	r, _ := filepath.Rel(absClean(cfg.Path(".")), p)
+	realP, err := filepath.EvalSymlinks(p)
+	if err != nil || realP != filepath.Join(realCfg, r) {
+		return "its path goes through a symlink"
+	}
+	if filepath.Ext(p) == ".json" {
+		return "a catalog carries no ownership header"
+	}
 	b, err := os.ReadFile(p)
 	if err != nil {
-		return false
+		return err.Error()
 	}
-	head := string(b[:min(len(b), 512)])
-	if strings.Contains(head, "Code generated by problemgen") {
-		return true
+	sum := sha256.Sum256(b)
+	if e.sha == "" || hex.EncodeToString(sum[:]) != e.sha {
+		return "its content is not what this config generated (edited by hand, or the manifest was)"
 	}
-	if filepath.Ext(p) != ".json" {
-		return false
+	src := generatedSource(string(b[:min(len(b), 1024)]))
+	if src == "" {
+		return "it has no problemgen header"
 	}
-	var entries []map[string]any
-	if json.Unmarshal(b, &entries) != nil {
-		return false
+	if !defs[absClean(filepath.Join(filepath.Dir(p), filepath.FromSlash(src)))] {
+		return "its header names a definition this config does not list"
 	}
-	for _, e := range entries {
-		for _, k := range []string{"platform", "service", "module", "version", "id"} {
-			if _, ok := e[k]; !ok {
-				return false
+	return ""
+}
+
+// foreignOwner returns the definition an existing generated file names in its header when
+// that definition exists and is not the one f is generated from: another config's output.
+func foreignOwner(f plannedFile) string {
+	if f.def == "" {
+		return ""
+	}
+	b, err := os.ReadFile(f.path)
+	if err != nil {
+		return ""
+	}
+	src := generatedSource(string(b[:min(len(b), 1024)]))
+	if src == "" {
+		return ""
+	}
+	owner := absClean(filepath.Join(filepath.Dir(f.path), filepath.FromSlash(src)))
+	if owner == f.def {
+		return ""
+	}
+	if st, err := os.Stat(owner); err != nil || st.IsDir() {
+		return "" // stale or pre-0.1 header (config-relative source): nothing to protect
+	}
+	return owner
+}
+
+// generatedSource returns the definition path named in a problemgen header, or "".
+func generatedSource(head string) string {
+	if !strings.Contains(head, "Code generated by problemgen") {
+		return ""
+	}
+	for _, line := range strings.Split(head, "\n") {
+		line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "/#"))
+		if rest, ok := strings.CutPrefix(line, "source: "); ok {
+			if i := strings.Index(rest, " sha256:"); i > 0 {
+				return rest[:i]
 			}
 		}
 	}
-	return true
+	return ""
+}
+
+func absClean(p string) string {
+	a, err := filepath.Abs(p)
+	if err != nil {
+		return filepath.Clean(p)
+	}
+	return a
 }

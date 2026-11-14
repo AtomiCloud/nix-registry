@@ -37,7 +37,7 @@ var LintRules = map[string]string{
 	"L231": "a name is reserved (a keyword, a generated member, or a standard-library type in one of the four languages)",
 	"L240": "record-bound text contains `{{` or `}}` (would break the Helm-rendered record)",
 	"L241": "the Problem record for this module exceeds the size budget",
-	"L242": "text holds a character a target reads as a line break, or an invisible control (C1, U+2028/2029, U+FEFF, bidi controls, noncharacters)",
+	"L242": "text holds a character a target reads as a line break, or an invisible control (C1, U+2028/2029, U+FEFF, bidi embeddings/overrides/isolates, noncharacters)",
 }
 
 // reservedFieldNames are refused as field names: keywords and predeclared identifiers of
@@ -464,15 +464,18 @@ func lintExample(f *Field, m *Module, add func(string, Pos, string, ...any)) {
 // unsafeTextRune reports runes refused in definition text. C# and JavaScript end a // comment
 // at U+0085/U+2028/U+2029 and C# refuses them inside string literals; YAML 1.1 readers treat
 // NEL and U+2028/2029 as line breaks; C1 controls, U+FEFF and noncharacters are invisible or
-// invalid in YAML; bidi controls can make generated source read differently than it compiles
-// ("trojan source").
+// invalid in YAML; bidi embedding/override/isolate controls can make generated source read
+// differently than it compiles ("trojan source"). Tabs and newlines are refused earlier by the
+// schema's text pattern (P006), so a description is one line (no folded/literal blocks).
 func unsafeTextRune(r rune) bool {
 	switch {
 	case r < 0x20 || (r >= 0x7f && r <= 0x9f):
 		return true
 	case r == 0x2028 || r == 0x2029 || r == 0xfeff || r == 0xfffe || r == 0xffff:
 		return true
-	case (r >= 0x202a && r <= 0x202e) || (r >= 0x2066 && r <= 0x2069) || r == 0x200e || r == 0x200f || r == 0x061c:
+	case (r >= 0x202a && r <= 0x202e) || (r >= 0x2066 && r <= 0x2069):
+		// embeddings, overrides and isolates; the plain marks LRM, RLM and ALM
+		// (U+200E, U+200F, U+061C) are allowed: real RTL text needs them
 		return true
 	case r >= 0xfdd0 && r <= 0xfdef, r&0xfffe == 0xfffe:
 		return true

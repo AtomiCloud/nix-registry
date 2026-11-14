@@ -89,10 +89,11 @@ func dartStrUnits(u []uint16) string {
 	return b.String()
 }
 
-// dartDoc flattens text for a /// comment.
+// dartDoc flattens text for a /// comment. "{@" starts a Dart doc directive
+// ({@template}, {@macro}, ...); an unknown one is an analyzer warning, so the
+// "@" is written as an HTML entity (dartdoc renders it as "@").
 func dartDoc(s string) string {
-	s = strings.NewReplacer("\r", " ", "\n", " ").Replace(s)
-	return s
+	return strings.NewReplacer("\r", " ", "\n", " ", "{@", "{&#64;").Replace(s)
 }
 
 // dartEnumBad are enum constant names Dart does not allow (or that would shadow members).
