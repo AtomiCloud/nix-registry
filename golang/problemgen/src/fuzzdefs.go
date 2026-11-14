@@ -663,7 +663,7 @@ func fzCandidate(seed uint64, i int) *fzDef {
 
 	// Problems.
 	ids := map[string]bool{}
-	for id := range importedIDs {
+	for _, id := range sortedNames(importedIDs) {
 		ids[id] = g.p(0.95) // occasionally clash with an import (L102)
 	}
 	nProblems := 1 + g.r.IntN(4)

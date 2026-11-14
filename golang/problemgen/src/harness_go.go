@@ -137,7 +137,13 @@ func emitGoHarness(m *Module, cfg *Config, o Outputs, v *Vectors) string {
 	w("var enc = json.NewEncoder(os.Stdout)")
 	w("")
 	w("// emitAt builds its own site, as a service does at start-up from errorPortal.url.")
-	w("func emitAt(name, portal, landscape string, p %s.Problem) {", pkg)
+	w("func emitAt(name, portal, landscape string, mk func() %s.Problem) {", pkg)
+	w("\tdefer func() {")
+	w("\t\tif r := recover(); r != nil { // a vector the runtime must refuse can panic while it is built (a bad date-time)")
+	w("\t\t\t_ = enc.Encode(line{Name: name, Error: fmt.Sprint(r)})")
+	w("\t\t}")
+	w("\t}()")
+	w("\tp := mk()")
 	w("\ts, err := rt.NewSite(portal, landscape)")
 	w("\tif err != nil {")
 	w("\t\t_ = enc.Encode(line{Name: name, Error: err.Error()})")
@@ -151,7 +157,13 @@ func emitGoHarness(m *Module, cfg *Config, o Outputs, v *Vectors) string {
 	w("\t_ = enc.Encode(line{Name: name, OK: true, Wire: string(b), Log: p.LogLine()})")
 	w("}")
 	w("")
-	w("func emit(name string, p %s.Problem) {", pkg)
+	w("func emit(name string, mk func() %s.Problem) {", pkg)
+	w("\tdefer func() {")
+	w("\t\tif r := recover(); r != nil { // a vector the runtime must refuse can panic while it is built (a bad date-time)")
+	w("\t\t\t_ = enc.Encode(line{Name: name, Error: fmt.Sprint(r)})")
+	w("\t\t}")
+	w("\t}()")
+	w("\tp := mk()")
 	w("\tb, err := rt.Marshal(p, site)")
 	w("\tif err != nil {")
 	w("\t\t_ = enc.Encode(line{Name: name, Error: err.Error()})")
@@ -227,14 +239,14 @@ func emitGoHarness(m *Module, cfg *Config, o Outputs, v *Vectors) string {
 	w("\t\treturn")
 	w("\t}")
 	for _, c := range v.Cases {
-		w("\temit(%q, %s)", c.Name, goCaseExpr(m, pkg, c))
+		w("\temit(%q, func() %s.Problem { return %s })", c.Name, pkg, goCaseExpr(m, pkg, c))
 	}
 	if c, _, ok := originBase(m, cfg, v); ok {
 		for i, o := range v.Origins.Accepted {
-			w("\temitAt(%q, %q, %q, %s)", originName("ok", i), o, v.Landscape, goCaseExpr(m, pkg, c))
+			w("\temitAt(%q, %q, %q, func() %s.Problem { return %s })", originName("ok", i), o, v.Landscape, pkg, goCaseExpr(m, pkg, c))
 		}
 		for i, o := range v.Origins.Refused {
-			w("\temitAt(%q, %q, %q, %s)", originName("refused", i), o, v.Landscape, goCaseExpr(m, pkg, c))
+			w("\temitAt(%q, %q, %q, func() %s.Problem { return %s })", originName("refused", i), o, v.Landscape, pkg, goCaseExpr(m, pkg, c))
 		}
 	}
 	w("}")
@@ -272,6 +284,7 @@ func emitGoBatch(cfg *Config, mods []BatchModule) string {
 	w("import (")
 	w("\t\"bufio\"")
 	w("\t\"encoding/json\"")
+	w("\t\"fmt\"")
 	w("\t\"math\"")
 	w("\t\"os\"")
 	w("\t\"strings\"")
@@ -307,7 +320,13 @@ func emitGoBatch(cfg *Config, mods []BatchModule) string {
 	w("")
 	goMustSite(w)
 	w("")
-	w("func emit(name string, site rt.Site, p rt.Problem) {")
+	w("func emit(name string, site rt.Site, mk func() rt.Problem) {")
+	w("\tdefer func() {")
+	w("\t\tif r := recover(); r != nil { // a vector the runtime must refuse can panic while it is built (a bad date-time)")
+	w("\t\t\t_ = enc.Encode(line{Name: name, Error: fmt.Sprint(r)})")
+	w("\t\t}")
+	w("\t}()")
+	w("\tp := mk()")
 	w("\tb, err := rt.Marshal(p, site)")
 	w("\tif err != nil {")
 	w("\t\t_ = enc.Encode(line{Name: name, Error: err.Error()})")
@@ -370,7 +389,7 @@ func emitGoBatch(cfg *Config, mods []BatchModule) string {
 	w("\t}")
 	for _, bm := range mods {
 		for _, c := range bm.V.Cases {
-			w("\temit(%q, mustSite(%q, %q), %s)", bm.Key+"/"+c.Name, bm.V.Portal, bm.V.Landscape, goCaseExpr(bm.M, bm.Out.Go.Package, c))
+			w("\temit(%q, mustSite(%q, %q), func() rt.Problem { return %s })", bm.Key+"/"+c.Name, bm.V.Portal, bm.V.Landscape, goCaseExpr(bm.M, bm.Out.Go.Package, c))
 		}
 	}
 	w("}")

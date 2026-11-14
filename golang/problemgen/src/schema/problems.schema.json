@@ -70,7 +70,11 @@
       "if": { "properties": { "kind": { "const": "ProblemLibrary" } } },
       "then": {
         "required": ["name"],
-        "allOf": [{ "not": { "required": ["module"] } }, { "not": { "required": ["version"] } }]
+        "allOf": [
+          { "not": { "required": ["module"] } },
+          { "not": { "required": ["version"] } },
+          { "not": { "required": ["imports"] }, "$comment": "libraries are flat: no transitive imports (L100)" }
+        ]
       }
     }
   ],

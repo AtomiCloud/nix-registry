@@ -231,6 +231,17 @@ func RenderVector(m *Module, cfg *Config, portal, landscape string, p *Problem, 
 			return Rendered{}, fmt.Errorf("required field %q missing", f.Name)
 		}
 	}
+	// Private fields never reach the wire, so writeObject would not check them: check each one
+	// against its declared type here, or a bad private value (a `{xs|count}` over ["bad"])
+	// renders and the oracle says every language accepts what a typed constructor cannot hold.
+	for _, f := range p.Data {
+		if v, ok := vals[f.Name]; f.Private && ok && v.Kind != 'z' {
+			var scratch strings.Builder
+			if err := writeValue(&scratch, m, f.Type, v); err != nil {
+				return Rendered{}, fmt.Errorf("field %q: %w", f.Name, err)
+			}
+		}
+	}
 	var b strings.Builder
 	b.WriteString(`{"type":`)
 	writeJSONString(&b, TypeURI(portal, landscape, cfg.Platform, cfg.Service, m.Def.Module, m.Def.Version, p.ID))

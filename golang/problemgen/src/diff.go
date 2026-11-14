@@ -30,6 +30,7 @@ type DiffResult struct {
 // Diff compares the resolved old and new modules.
 func Diff(old, cur *Module) DiffResult {
 	var r DiffResult
+	memo := map[string]string{} // named-type comparisons, one per Diff call
 	brk := func(code string, p Pos, f string, a ...any) {
 		r.Breaking = append(r.Breaking, Diag{code, p, fmt.Sprintf(f, a...)})
 	}
@@ -74,7 +75,7 @@ func Diff(old, cur *Module) DiffResult {
 		if p.Deprecated != np.Deprecated {
 			ok("problem %q: deprecation changed", p.ID)
 		}
-		diffFields(old, cur, "problem "+p.ID, p.Data, np.Data, true, brk, ok)
+		diffFields(old, cur, "problem "+p.ID, p.Data, np.Data, true, memo, brk, ok)
 	}
 	for _, p := range cur.Problems {
 		if _, found := oldByID[p.ID]; !found {
@@ -84,7 +85,7 @@ func Diff(old, cur *Module) DiffResult {
 	return r
 }
 
-func diffFields(old, cur *Module, where string, of, nf []*Field, top bool,
+func diffFields(old, cur *Module, where string, of, nf []*Field, top bool, memo map[string]string,
 	brk func(string, Pos, string, ...any), ok func(string, ...any)) {
 	nByName := map[string]*Field{}
 	for _, f := range nf {
@@ -114,7 +115,7 @@ func diffFields(old, cur *Module, where string, of, nf []*Field, top bool,
 		if f.Optional != n.Optional {
 			brk("D107", n.Pos, "%s: field %q optional %v -> %v", where, f.Name, f.Optional, n.Optional)
 		}
-		if why := typeChange(old, cur, f.Type, n.Type, map[string]bool{}); why != "" {
+		if why := typeChange(old, cur, f.Type, n.Type, map[string]bool{}, memo); why != "" {
 			code := "D106"
 			if strings.HasPrefix(why, "enum ") {
 				code = "D109"
@@ -142,7 +143,7 @@ func posOr(f *Field, m *Module) Pos {
 }
 
 // typeChange returns a reason when the wire type changed; "" when compatible.
-func typeChange(old, cur *Module, a, b FieldType, seen map[string]bool) string {
+func typeChange(old, cur *Module, a, b FieldType, seen map[string]bool, memo map[string]string) string {
 	if a.Kind != b.Kind || a.Format != b.Format {
 		return fmt.Sprintf("type %s -> %s", typeSig(a), typeSig(b))
 	}
@@ -151,7 +152,7 @@ func typeChange(old, cur *Module, a, b FieldType, seen map[string]bool) string {
 		if a.Items == nil || b.Items == nil {
 			return ""
 		}
-		if w := typeChange(old, cur, *a.Items, *b.Items, seen); w != "" {
+		if w := typeChange(old, cur, *a.Items, *b.Items, seen, memo); w != "" {
 			return "array items: " + w
 		}
 	case KRef:
@@ -175,13 +176,23 @@ func typeChange(old, cur *Module, a, b FieldType, seen map[string]bool) string {
 			}
 			return ""
 		}
-		var reasons []string
-		diffFields(old, cur, "type "+a.Ref, ot.Fields, nt.Fields, false,
-			func(code string, _ Pos, f string, x ...any) { reasons = append(reasons, code+" "+fmt.Sprintf(f, x...)) },
-			func(string, ...any) {})
-		if len(reasons) > 0 {
-			return strings.Join(reasons, "; ")
+		// Every path to a shared named type compares it again: without a memo, a chain of N types
+		// that each hold two fields of the next costs 2^N calls. The entry is recorded (empty)
+		// before recursing, so a cycle that slipped past lint ends here too.
+		if r, done := memo[a.Ref]; done {
+			return r
 		}
+		memo[a.Ref] = ""
+		var reasons []string
+		diffFields(old, cur, "type "+a.Ref, ot.Fields, nt.Fields, false, memo,
+			func(code string, _ Pos, f string, x ...any) {
+				if len(reasons) == 0 { // first reason only: nested reasons would double in length at every level
+					reasons = append(reasons, code+" "+fmt.Sprintf(f, x...))
+				}
+			},
+			func(string, ...any) {})
+		memo[a.Ref] = strings.Join(reasons, "; ")
+		return memo[a.Ref]
 	}
 	return ""
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -19,13 +20,14 @@ type JV struct {
 	Vals []*JV
 }
 
-// Get returns an object member.
+// Get returns an object member. A duplicated name yields its last member, as RenderVector
+// and encoding/json do.
 func (v *JV) Get(k string) (*JV, bool) {
 	if v == nil || v.Kind != 'o' {
 		return nil, false
 	}
-	for i, kk := range v.Keys {
-		if kk == k {
+	for i := len(v.Keys) - 1; i >= 0; i-- {
+		if v.Keys[i] == k {
 			return v.Vals[i], true
 		}
 	}
@@ -49,6 +51,10 @@ func stringToUnits(s string) []uint16 {
 	}
 	return utf16.Encode(rs)
 }
+
+// jsonNumber is the RFC 8259 number grammar; ParseFloat alone also accepts "1.", "-.5" and
+// "0x1p-2", which are not JSON.
+var jsonNumber = regexp.MustCompile(`^-?(0|[1-9][0-9]*)(\.[0-9]+)?([eE][+-]?[0-9]+)?$`)
 
 // ParseJV parses JSON text.
 func ParseJV(src []byte) (*JV, error) {
@@ -172,6 +178,9 @@ func (p *jp) value() (*JV, error) {
 			p.i++
 		}
 		txt := string(p.s[st:p.i])
+		if !jsonNumber.MatchString(txt) {
+			return nil, p.errf("bad number %q", txt)
+		}
 		if _, err := strconv.ParseFloat(txt, 64); err != nil {
 			if ne, ok := err.(*strconv.NumError); !ok || ne.Err != strconv.ErrRange {
 				return nil, p.errf("bad number %q", txt)

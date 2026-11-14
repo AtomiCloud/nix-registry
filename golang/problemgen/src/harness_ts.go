@@ -44,11 +44,13 @@ func tsLit(m *Module, t FieldType, v *JV) string {
 	case KBoolean:
 		return strconv.FormatBool(v.Bool)
 	case KDateTime:
-		s := v.GoString()
-		if tm, err := parseCanonicalDateTime(s); err == nil {
-			s = formatDateTime(tm)
+		tm, err := parseCanonicalDateTime(v.GoString())
+		if err != nil {
+			// The oracle refuses this value. new Date("2024-02-30T00:00:00Z") would roll over to a
+			// valid March date, so emit an Invalid Date, which serialisation throws on.
+			return "new Date(NaN)"
 		}
-		return "new Date(" + strconv.Quote(s) + ")"
+		return "new Date(" + strconv.Quote(formatDateTime(tm)) + ")"
 	case KArray:
 		var parts []string
 		for _, e := range v.Arr {

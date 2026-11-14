@@ -109,6 +109,24 @@ func LoadConfig(path string) (*Config, error) {
 		if o.Go == nil && o.TypeScript == nil && o.CSharp == nil && o.Dart == nil && o.Record == nil && o.Catalog == nil {
 			return nil, fmt.Errorf("%s: module %s has no outputs (it would verify nothing)", path, mc.Definition)
 		}
+		// An enabled output with no file is skipped by planOutputs (or, for record and catalog,
+		// aims at the config directory): generate would write nothing and verify would pass.
+		for _, e := range []struct {
+			name string
+			set  bool
+			file func() string
+		}{
+			{"go", o.Go != nil, func() string { return o.Go.File }},
+			{"typescript", o.TypeScript != nil, func() string { return o.TypeScript.File }},
+			{"csharp", o.CSharp != nil, func() string { return o.CSharp.File }},
+			{"dart", o.Dart != nil, func() string { return o.Dart.File }},
+			{"record", o.Record != nil, func() string { return o.Record.File }},
+			{"catalog", o.Catalog != nil, func() string { return o.Catalog.File }},
+		} {
+			if e.set && e.file() == "" {
+				return nil, fmt.Errorf("%s: module %s: output %s has no file (it would generate nothing and verify nothing)", path, mc.Definition, e.name)
+			}
+		}
 		if seen[mc.Definition] {
 			return nil, fmt.Errorf("%s: definition %s listed twice", path, mc.Definition)
 		}

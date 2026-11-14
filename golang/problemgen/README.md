@@ -2,7 +2,7 @@
 # Problem definitions — format v1 (`problemgen`)
 
 Status: spike spec, 2026-11-13. Tool: `problemgen` 0.1.0 (Go, one static binary; `diff --git` runs git).
-Machine-readable structure: `tool/schema/problems.schema.json` (`problemgen schema`).
+Machine-readable structure: `src/schema/problems.schema.json` (`problemgen schema`).
 Every rule below names its enforcer: `lint`, `diff`, `verify` (shipped in the tool), or
 the compiler / a per-language lint / an architecture rule (configured in each service; the
 tool does not ship those). A file holds exactly one YAML document (P001); `status` is a
@@ -169,7 +169,7 @@ At start-up each service builds a **site** from `errorPortal.url` and its landsc
 `rt.NewSite`, TS `rt.Site.of`, C# `Site.Create`, Dart `rt.Site(...)` — which refuses a
 missing or malformed value (landscape a DNS label; portal by the origin rule below), so the
 service stops before it serves anything. **Origin rule** (the tool's config check, the Helm
-record and all four site constructors, driven by one shared list, `tool/testdata/origins.json`,
+record and all four site constructors, driven by one shared list, `src/testdata/origins.json`,
 also the `origins` of the conformance vectors): `https://host[:port]` and nothing after;
 `host` = lower-case DNS labels of 1–63 characters (`[a-z0-9]`, `-` inside), at most 253
 characters in all, the last label starting with a letter — so **IP literals are refused**
@@ -222,7 +222,7 @@ an unavailable or timed-out dependency has a `Retry-After` header.
   an import. The same id/type from two imports is accepted only if byte-identical (diamond).
 - Every identifier the generators declare is modelled per language and scope (package /
   module / namespace / library; each struct, class, record, enum; Dart constructor
-  parameters) in `tool/symbols.go`. Two equal identifiers in one scope are an error (L230),
+  parameters) in `src/symbols.go`. Two equal identifiers in one scope are an error (L230),
   e.g. Go `NewFoo` from problem `foo` and type `NewFoo` from `new_foo`, or an optional
   `a` (setter `WithA`) next to a field `withA`. Keywords, generated members and
   standard-library type names the generated code relies on (dart:core, TS globals, C#

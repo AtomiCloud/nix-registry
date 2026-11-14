@@ -364,6 +364,12 @@ func cmdGenerate(args []string, verify bool) int {
 	// guarded by safeToRemove. Stale entries that cannot be removed stay listed, so verify
 	// keeps failing until a person deals with them.
 	mpath := manifestPath(*cfgPath)
+	// readManifest opens the file: refuse a FIFO, a device or a symlink there first, so a
+	// hostile manifest path cannot hang or exhaust memory before guardWrites runs.
+	if err := guardPath(cfg.Path("."), mpath); err != nil {
+		fmt.Fprintln(os.Stderr, "refusing to read "+mpath+": "+err.Error())
+		return 2
+	}
 	previous, err := readManifest(mpath)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -618,6 +624,7 @@ func generatedSource(head string) string {
 func guardWrites(cfg *Config, files []plannedFile, inputs []string) []string {
 	var bad []string
 	byFold := map[string]string{}
+outer:
 	for _, f := range files {
 		if err := guardPath(cfg.Path("."), f.path); err != nil {
 			bad = append(bad, "refusing to write "+f.path+": "+err.Error())
@@ -627,6 +634,12 @@ func guardWrites(cfg *Config, files []plannedFile, inputs []string) []string {
 		if prev, ok := byFold[key]; ok {
 			bad = append(bad, fmt.Sprintf("refusing to write %s: %s is the same file (two outputs, or the same name in another case)", f.path, prev))
 			continue
+		}
+		for k, other := range byFold {
+			if strings.HasPrefix(key, k+string(filepath.Separator)) || strings.HasPrefix(k, key+string(filepath.Separator)) {
+				bad = append(bad, fmt.Sprintf("refusing to write %s: it and %s are nested (one would be a directory of the other)", f.path, other))
+				continue outer
+			}
 		}
 		byFold[key] = f.path
 		if isInput(f.path, inputs) {

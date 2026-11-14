@@ -66,7 +66,7 @@ func writeFieldSchema(b *strings.Builder, m *Module, f *Field) {
 	if f.Deprecated != "" {
 		b.WriteString(`"deprecated":true,`)
 	}
-	writeTypeSchemaBody(b, m, f.Type)
+	writeTypeSchemaBody(b, m, f.Type, f.Description != "")
 	if f.Example != nil {
 		b.WriteString(`,"examples":[`)
 		switch f.Example.Tag {
@@ -87,7 +87,9 @@ func writeFieldSchema(b *strings.Builder, m *Module, f *Field) {
 	b.WriteByte('}')
 }
 
-func writeTypeSchemaBody(b *strings.Builder, m *Module, t FieldType) {
+// described is true when the enclosing object already carries a description (the field's, which wins
+// over a referenced type's): a second "description" key would be a duplicate YAML mapping key.
+func writeTypeSchemaBody(b *strings.Builder, m *Module, t FieldType, described bool) {
 	switch t.Kind {
 	case KString:
 		b.WriteString(`"type":"string"`)
@@ -107,14 +109,14 @@ func writeTypeSchemaBody(b *strings.Builder, m *Module, t FieldType) {
 		b.WriteString(`"type":"string","format":"date-time"`)
 	case KArray:
 		b.WriteString(`"type":"array","items":{`)
-		writeTypeSchemaBody(b, m, *t.Items)
+		writeTypeSchemaBody(b, m, *t.Items, false)
 		b.WriteByte('}')
 	case KRef:
 		nt := m.TypeByName(t.Ref)
 		b.WriteString(`"title":`)
 		writeJSONString(b, nt.Name)
 		b.WriteByte(',')
-		if nt.Description != "" {
+		if nt.Description != "" && !described {
 			b.WriteString(`"description":`)
 			writeJSONString(b, nt.Description)
 			b.WriteByte(',')

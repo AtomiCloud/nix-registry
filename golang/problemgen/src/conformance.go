@@ -166,6 +166,9 @@ func Oracle(m *Module, cfg *Config, v *Vectors) ([]Expected, error) {
 		r, err := RenderVector(m, cfg, v.Portal, v.Landscape, p, c.Data, c.Instance)
 		e := Expected{Name: c.Name, Problem: c.Problem}
 		if err != nil {
+			if c.Golden != "" || c.GoldLog != "" {
+				return nil, fmt.Errorf("case %s: the oracle refuses a case that has a hand-written golden: %v", c.Name, err)
+			}
 			e.Error = err.Error()
 		} else {
 			e.OK, e.Wire, e.Log = true, r.Wire, r.Log
@@ -290,7 +293,7 @@ func cmdConformance(args []string) int {
 		}
 		var mc *ModuleConfig
 		for i := range cfg.Modules {
-			if cfg.Path(cfg.Modules[i].Definition) == *def {
+			if absClean(cfg.Path(cfg.Modules[i].Definition)) == absClean(*def) {
 				mc = &cfg.Modules[i]
 			}
 		}
@@ -501,6 +504,9 @@ func cmdBatch(sub string, args []string) int {
 					_ = enc.Encode(map[string]string{"name": bm.Key + "/" + e.Name, "wire": e.Wire})
 				}
 			}
+			for _, f := range bm.V.Foreign {
+				_ = enc.Encode(map[string]string{"name": bm.Key + "/" + f.Name, "wire": f.Wire})
+			}
 		}
 		return 0
 	}
@@ -551,6 +557,16 @@ func cmdBatch(sub string, args []string) int {
 			case g.Rewire != e.Wire:
 				fmt.Printf("FAIL %s rewire:\n  want %s\n  got  %s\n", name, e.Wire, g.Rewire)
 				fail++
+			}
+		}
+		if sub == "batch-check-parse" {
+			for _, f := range bm.V.Foreign {
+				name := bm.Key + "/" + f.Name
+				total++
+				if g, ok := got[name]; !ok || g.Variant != f.Expect {
+					fmt.Printf("FAIL %s: variant %q, want %q (%s)\n", name, g.Variant, f.Expect, g.Error)
+					fail++
+				}
 			}
 		}
 	}
