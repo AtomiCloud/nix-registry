@@ -119,12 +119,12 @@ func TestFuzzDefinitionsGenerate(t *testing.T) {
 					fail("%s output is empty", l)
 				}
 			}
-			_ = RenderRecordYAML(k.Module, cfg, "lapras", "x.yaml")
-			_ = RenderRecordYAML(k.Module, cfg, "", "x.yaml")
+			_ = RenderRecordYAML(k.Module, cfg, "lapras", "https://errors.atomi.cloud", "x.yaml")
+			_ = RenderRecordYAML(k.Module, cfg, "", "", "x.yaml")
 			_ = RenderCatalogJSON(k.Module, cfg)
 			// Every vector renders (the data is valid by construction).
 			vf := filepath.Join(t.TempDir(), "v.json")
-			if err := os.WriteFile(vf, []byte(fzVectors(seed, k.Candidate, k.Module, "lapras")), 0o644); err != nil {
+			if err := os.WriteFile(vf, []byte(fzVectors(seed, k.Candidate, k.Module, "https://errors.atomi.cloud", "lapras")), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			v, err := LoadVectors(vf)
@@ -161,7 +161,7 @@ func TestFuzzDeterministic(t *testing.T) {
 	a, _ := FuzzRun(42, 3, 5000, nil)
 	b, _ := FuzzRun(42, 3, 5000, nil)
 	for i := range a {
-		if a[i].YAML != b[i].YAML || fzVectors(42, a[i].Candidate, a[i].Module, "x") != fzVectors(42, b[i].Candidate, b[i].Module, "x") {
+		if a[i].YAML != b[i].YAML || fzVectors(42, a[i].Candidate, a[i].Module, "https://x", "x") != fzVectors(42, b[i].Candidate, b[i].Module, "https://x", "x") {
 			t.Fatalf("seed 42 definition %d differs between runs", i)
 		}
 	}

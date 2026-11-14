@@ -11,7 +11,8 @@ import (
 )
 
 // Config is problemgen.yaml: where the definitions are and what to generate. It is the
-// only place that knows platform, service and portal at generation time.
+// only place that knows platform and service at generation time. The error portal is a
+// run-time value (errorPortal.url); the optional portal here is only the record's default.
 type Config struct {
 	APIVersion string         `yaml:"apiVersion"`
 	Kind       string         `yaml:"kind"`
@@ -71,7 +72,7 @@ type FileOut struct {
 
 var (
 	dnsLabel = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`) // RFC 1123 label, at most 63
-	portalRe = regexp.MustCompile(`^https://[a-z0-9.-]+(:[0-9]+)?$`)
+	portalRe = regexp.MustCompile(portalOriginRe)
 )
 
 // LoadConfig reads and checks problemgen.yaml.
@@ -93,8 +94,8 @@ func LoadConfig(path string) (*Config, error) {
 	if !dnsLabel.MatchString(c.Platform) || !dnsLabel.MatchString(c.Service) {
 		return nil, fmt.Errorf("%s: platform and service must be DNS labels (a-z, 0-9, -; at most 63 characters)", path)
 	}
-	if !portalRe.MatchString(c.Portal) {
-		return nil, fmt.Errorf("%s: portal must be https://host[:port] with no path", path)
+	if c.Portal != "" && !portalRe.MatchString(c.Portal) {
+		return nil, fmt.Errorf("%s: portal (optional) must be https://host[:port] with no path", path)
 	}
 	if len(c.Modules) == 0 {
 		return nil, fmt.Errorf("%s: modules is empty: list every definition (an empty list would verify nothing)", path)

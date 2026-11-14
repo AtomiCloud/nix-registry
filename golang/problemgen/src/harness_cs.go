@@ -107,11 +107,11 @@ func emitCSHarness(m *Module, c *Config, o Outputs, v *Vectors) string {
 	w("using System.Diagnostics;\nusing System.Text;\nusing System.Text.Json;")
 	w("using %s;\nusing __Rt = %s;", o.CSharp.Namespace, o.CSharp.Runtime)
 	w("internal static class Program {")
-	w(" const string Landscape = %s;", csString(v.Landscape))
+	w(" static readonly __Rt.Site HarnessSite = __Rt.Site.Create(%s, %s);", csString(v.Portal), csString(v.Landscape))
 	b.WriteString(`
  static void Print(object row) => Console.WriteLine(JsonSerializer.Serialize(row));
  static void Emit(string name, Problem p) {
-  try { Print(new {name,ok=true,wire=__Rt.ProblemHttp.Marshal(p,Landscape),log=p.LogLine()}); }
+  try { Print(new {name,ok=true,wire=__Rt.ProblemHttp.Marshal(p,HarnessSite),log=p.LogLine()}); }
   catch(Exception e) { Print(new {name,ok=false,error=e.Message}); }
  }
  static void Parse(string file) {
@@ -121,16 +121,16 @@ func emitCSHarness(m *Module, c *Config, o Outputs, v *Vectors) string {
    var p=Problem.Parse(doc.RootElement.GetProperty("wire").GetString()!);
    if(p is null) { Print(new {name,ok=false,variant="not-problem",error="not RFC9457"}); continue; }
    if(p is Unknown u) { Print(new {name,ok=false,variant="unknown",error=u.Reason}); continue; }
-   try { Print(new {name,ok=true,variant=p.Meta.Id,rewire=__Rt.ProblemHttp.Marshal(p,Landscape)}); }
+   try { Print(new {name,ok=true,variant=p.Meta.Id,rewire=__Rt.ProblemHttp.Marshal(p,HarnessSite)}); }
    catch(Exception e) { Print(new {name,ok=false,variant=p.Meta.Id,error=e.Message}); }
   }
  }
  static void Bench(string name, Func<Problem> create) {
   const int n=1000000;
-  for(int i=0;i<n/10;i++) _=__Rt.ProblemHttp.Marshal(create(),Landscape);
+  for(int i=0;i<n/10;i++) _=__Rt.ProblemHttp.Marshal(create(),HarnessSite);
   var start=Stopwatch.GetTimestamp();
   long total=0;
-  for(int i=0;i<n;i++) total+=Encoding.UTF8.GetByteCount(__Rt.ProblemHttp.Marshal(create(),Landscape));
+  for(int i=0;i<n;i++) total+=Encoding.UTF8.GetByteCount(__Rt.ProblemHttp.Marshal(create(),HarnessSite));
   var ns=Stopwatch.GetElapsedTime(start).TotalNanoseconds/n;
   Print(new {lang="cs",@case=name,n,nsPerOp=ns,bytes=total/n});
  }
@@ -194,12 +194,12 @@ func emitCSBatch(cfg *Config, mods []BatchModule) string {
 	w("internal static class __FuzzProgram {")
 	b.WriteString(`
  static void Print(object row) => global::System.Console.WriteLine(global::System.Text.Json.JsonSerializer.Serialize(row));
- static void Emit(string name, string landscape, global::System.Func<__Rt.ProblemValue> mk) {
-  try { var p = mk(); Print(new {name,ok=true,wire=__Rt.ProblemHttp.Marshal(p,landscape),log=p.LogLine()}); }
+ static void Emit(string name, __Rt.Site site, global::System.Func<__Rt.ProblemValue> mk) {
+  try { var p = mk(); Print(new {name,ok=true,wire=__Rt.ProblemHttp.Marshal(p,site),log=p.LogLine()}); }
   catch(global::System.Exception e) { Print(new {name,ok=false,error=e.Message}); }
  }
- static void Reemit(string name, string landscape, __Rt.ProblemValue p, string id) {
-  try { Print(new {name,ok=true,variant=id,rewire=__Rt.ProblemHttp.Marshal(p,landscape)}); }
+ static void Reemit(string name, __Rt.Site site, __Rt.ProblemValue p, string id) {
+  try { Print(new {name,ok=true,variant=id,rewire=__Rt.ProblemHttp.Marshal(p,site)}); }
   catch(global::System.Exception e) { Print(new {name,ok=false,variant=id,error=e.Message}); }
  }
  static void Parse(string file) {
@@ -216,7 +216,7 @@ func emitCSBatch(cfg *Config, mods []BatchModule) string {
 		w("     var p=%sProblem.Parse(wire);", ns)
 		w("     if(p is null) { Print(new {name,ok=false,variant=\"not-problem\",error=\"not RFC9457\"}); break; }")
 		w("     if(p is %sUnknown u) { Print(new {name,ok=false,variant=\"unknown\",error=u.Reason}); break; }", ns)
-		w("     Reemit(name, %s, p, p.Meta.Id); break;", csString(bm.V.Landscape))
+		w("     Reemit(name, __Rt.Site.Create(%s, %s), p, p.Meta.Id); break;", csString(bm.V.Portal), csString(bm.V.Landscape))
 		w("    }")
 	}
 	w("   }")
@@ -227,7 +227,7 @@ func emitCSBatch(cfg *Config, mods []BatchModule) string {
 	for _, bm := range mods {
 		ns := "global::" + bm.Out.CSharp.Namespace + "."
 		for _, c := range bm.V.Cases {
-			w("  Emit(%s, %s, () => %s);", csString(bm.Key+"/"+c.Name), csString(bm.V.Landscape), csCaseQ(bm.M, ns, c))
+			w("  Emit(%s, __Rt.Site.Create(%s, %s), () => %s);", csString(bm.Key+"/"+c.Name), csString(bm.V.Portal), csString(bm.V.Landscape), csCaseQ(bm.M, ns, c))
 		}
 	}
 	w(" }")

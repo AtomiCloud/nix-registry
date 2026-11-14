@@ -326,7 +326,7 @@ func planOutputs(cfg *Config) ([]plannedFile, []Diag) {
 		}
 		if mc.Outputs.Record != nil {
 			p := cfg.Path(mc.Outputs.Record.File)
-			out = append(out, plannedFile{p, RenderRecordYAML(m, cfg, "", src(p)), def})
+			out = append(out, plannedFile{p, RenderRecordYAML(m, cfg, "", "", src(p)), def})
 		}
 		if mc.Outputs.Catalog != nil {
 			out = append(out, plannedFile{cfg.Path(mc.Outputs.Catalog.File), RenderCatalogJSON(m, cfg), def})

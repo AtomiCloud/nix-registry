@@ -79,6 +79,20 @@ grep -q 'regexMatch "^\[a-z0-9\]' "$rec" && grep -q '{{ fail ' "$rec" && ok "rec
 grep -Eq '^    - id: "[a-z_0-9]+"$' "$rec" && ! grep -Eq '^ *(id|platform|service|module|version|namespace): [^"]' "$rec" &&
   ok "record strings quoted" || bad "record has an unquoted string"
 
+# The error portal is a run-time value (errorPortal.url): generated code carries none; the
+# record reads .Values.errorPortal.url, with the optional config portal as its default.
+! grep -rqi 'portal' "$work/fx/out/go" "$work/fx/out/ts" "$work/fx/out/cs" "$work/fx/out/dart" &&
+  ok "generated code carries no portal" || bad "generated code bakes a portal"
+grep -qF '.Values.errorPortal | default dict' "$rec" && grep -qF 'default "https://errors.atomi.cloud" $errorPortal.url' "$rec" &&
+  grep -qF 'errorPortal.url must be an https origin' "$rec" && ok "record reads errorPortal.url (config portal as default)" || bad "record portal input"
+(cd "$work/fx" && cp problemgen.yaml cfg.bak && grep -v '^portal:' cfg.bak >problemgen.yaml && "$PG" generate >/dev/null &&
+  "$PG" verify >/dev/null && grep -qF 'required "problemgen: .Values.errorPortal.url is required"' out/record/conf.v1.yaml &&
+  mv cfg.bak problemgen.yaml && "$PG" generate >/dev/null) &&
+  ok "config without portal: record requires errorPortal.url" || bad "config portal not optional"
+for id in internal_error dependency_failed route_not_found method_not_allowed payload_too_large unsupported_media_type; do
+  grep -qF "\"id\":\"$id\"" "$work/fx/out/catalog/conf.v1.json" && ok "builtin generic $id" || bad "builtin generic $id missing"
+done
+
 # The manifest (<config>.outputs) lists what this config generated: dropping an output makes
 # verify report the stale file and generate remove it; a hand-made file is never claimed.
 (cd "$work/fx" && "$PG" generate >/dev/null && [ -s problemgen.yaml.outputs ] &&

@@ -118,7 +118,7 @@ func (g *csGen) file(src string) string {
 	}
 	g.p("public sealed record Unknown(__Rt.Envelope Envelope, string Reason) : Problem {")
 	g.p(" private protected override void __Closed() {}")
-	g.p(" public override __Rt.Meta Meta => new(\"\",Envelope.Title,Envelope.Status,false,\"\",\"\",\"\",\"\",\"\");")
+	g.p(" public override __Rt.Meta Meta => new(\"\",Envelope.Title,Envelope.Status,false,\"\",\"\",\"\",\"\");")
 	g.p(" public override string Detail() => Envelope.Detail;")
 	g.p(" public override string LogLine() => __Rt.Text.Log(\"unknown problem \" + Envelope.Type + \": \" + Reason);")
 	g.p(" public override bool WriteData(__Rt.Writer w) => false;\n}")
@@ -188,7 +188,7 @@ func (g *csGen) record(n string, fs []*Field, p *Problem) {
 	}
 	g.p(" }")
 	if p != nil {
-		g.p(" private static readonly __Rt.Meta metadata = new(%s,%s,%d,%v,%s,%s,%s,%s,%s);", csString(p.ID), csString(p.Title), p.Status, p.Recoverable, csString(g.c.Platform), csString(g.c.Service), csString(g.m.Def.Module), csString(g.m.Def.Version), csString(g.c.Portal))
+		g.p(" private static readonly __Rt.Meta metadata = new(%s,%s,%d,%v,%s,%s,%s,%s);", csString(p.ID), csString(p.Title), p.Status, p.Recoverable, csString(g.c.Platform), csString(g.c.Service), csString(g.m.Def.Module), csString(g.m.Def.Version))
 		g.p(" public override __Rt.Meta Meta => metadata;")
 		if p.RetryAfter != "" {
 			g.p(" public override long? RetryAfterSeconds => %s;", Pascal(p.RetryAfter))

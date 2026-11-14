@@ -98,7 +98,7 @@ func TestRecordPreservesUnicode(t *testing.T) {
 	var doc struct {
 		Spec struct{ Problems []map[string]any } `yaml:"spec"`
 	}
-	if err := yaml.Unmarshal([]byte(RenderRecordYAML(m, testCfg, "lapras", "")), &doc); err != nil {
+	if err := yaml.Unmarshal([]byte(RenderRecordYAML(m, testCfg, "lapras", "https://errors.atomi.cloud", "")), &doc); err != nil {
 		t.Fatal(err)
 	}
 	if got := doc.Spec.Problems[0]["title"]; got != m.Problems[0].Title {
@@ -106,7 +106,7 @@ func TestRecordPreservesUnicode(t *testing.T) {
 	}
 	// Backstop: bypass lint and render a title with NEL / U+2028 directly.
 	m.Problems[0].Title = "one\u0085two three"
-	rec := RenderRecordYAML(m, testCfg, "lapras", "")
+	rec := RenderRecordYAML(m, testCfg, "lapras", "https://errors.atomi.cloud", "")
 	if strings.ContainsRune(rec, 0x85) || strings.ContainsRune(rec, 0x2028) {
 		t.Fatalf("record carries a raw line-break character")
 	}

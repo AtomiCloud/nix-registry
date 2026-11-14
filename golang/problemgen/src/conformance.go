@@ -13,6 +13,7 @@ import (
 
 // Vectors is the shared conformance input (conformance/vectors.json).
 type Vectors struct {
+	Portal    string // the run-time errorPortal.url the harness builds its site with
 	Landscape string
 	Cases     []VCase
 	Foreign   []VForeign
@@ -48,6 +49,12 @@ func LoadVectors(path string) (*Vectors, error) {
 	v := &Vectors{}
 	if l, ok := root.Get("landscape"); ok {
 		v.Landscape = l.GoString()
+	}
+	if p, ok := root.Get("portal"); ok {
+		v.Portal = p.GoString()
+	}
+	if !portalRe.MatchString(v.Portal) {
+		return nil, fmt.Errorf("%s: portal %q is not an https origin (https://host[:port], no path)", path, v.Portal)
 	}
 	if !ValidLandscape(v.Landscape) {
 		return nil, fmt.Errorf("%s: landscape %q is not a DNS label (a-z, 0-9, -; at most 63 characters)", path, v.Landscape)
@@ -119,7 +126,7 @@ func Oracle(m *Module, cfg *Config, v *Vectors) ([]Expected, error) {
 		if p == nil {
 			return nil, fmt.Errorf("case %s: no problem %q", c.Name, c.Problem)
 		}
-		r, err := RenderVector(m, cfg, v.Landscape, p, c.Data, c.Instance)
+		r, err := RenderVector(m, cfg, v.Portal, v.Landscape, p, c.Data, c.Instance)
 		e := Expected{Name: c.Name, Problem: c.Problem}
 		if err != nil {
 			e.Error = err.Error()

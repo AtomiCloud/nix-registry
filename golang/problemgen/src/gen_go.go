@@ -455,8 +455,8 @@ func (g *goGen) problem(p *Problem) {
 	g.p("\treceived *rt.Received")
 	g.p("}")
 	g.p("")
-	g.p("var meta%s = &rt.Meta{ID: %q, Title: %s, Status: %d, Recoverable: %v, Platform: %q, Service: %q, Module: %q, Version: %q, Portal: %q}",
-		n, p.ID, strconv.Quote(p.Title), p.Status, p.Recoverable, g.cfg.Platform, g.cfg.Service, g.m.Def.Module, g.m.Def.Version, g.cfg.Portal)
+	g.p("var meta%s = &rt.Meta{ID: %q, Title: %s, Status: %d, Recoverable: %v, Platform: %q, Service: %q, Module: %q, Version: %q}",
+		n, p.ID, strconv.Quote(p.Title), p.Status, p.Recoverable, g.cfg.Platform, g.cfg.Service, g.m.Def.Module, g.m.Def.Version)
 	g.p("")
 	g.constructor(n, p.Data, "meta"+n, true)
 	g.accessors(n, p.Data)

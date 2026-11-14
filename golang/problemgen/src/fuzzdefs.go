@@ -59,10 +59,11 @@ receivedType retryAfterSeconds detail logLine writeData __Read __Write Meta Inst
 ReceivedDetail __Closed metadata _meta hasData _decode _received wire values index name built
 Values decode write Wire Envelope Reason Writer Decode Text ProblemHttp ProblemValue Address
 Fields NotProblem Logger TypeURI Marshal Unmarshal mustTime landscape emit bench line enc out
+Site site HarnessSite mustSite NewSite Portal portal Create Reemit reemit
 message main Program Print Emit Bench Main Landscape gen conftest item it raw data err ok result
 obj key fields status title problem issues id entityType reason path code ValidationIssue
 validationIssue validation_error entity_not_found conflict unauthenticated unauthorized
-invalid_json EqualityContract PrintMembers Clone Equals GetHashCode ToString Deconstruct GetType
+invalid_json internal_error dependency_failed route_not_found method_not_allowed payload_too_large unsupported_media_type dependency method allowed limitBytes contentType supported retryInSeconds failure reference EqualityContract PrintMembers Clone Equals GetHashCode ToString Deconstruct GetType
 MemberwiseClone ReferenceEquals Finalize hashCode runtimeType toString noSuchMethod toJson
 fromJson copyWith props readFrom writeTo encode decodeValue decodeList writeValue writeField
 isEnum String Number Boolean Date`)
@@ -1241,7 +1242,7 @@ func (g *fz) object(m *Module, fields []*Field) string {
 }
 
 // vectors renders one case per problem of the resolved module.
-func fzVectors(seed uint64, i int, m *Module, landscape string) string {
+func fzVectors(seed uint64, i int, m *Module, portal, landscape string) string {
 	g := &fz{r: rand.New(rand.NewPCG(seed^0x9e3779b97f4a7c15, uint64(i)))}
 	var cases []string
 	for _, p := range m.Problems {
@@ -1254,7 +1255,7 @@ func fzVectors(seed uint64, i int, m *Module, landscape string) string {
 		}
 		cases = append(cases, c+"}")
 	}
-	return "{\"landscape\":" + jsonStr(landscape) + ",\"cases\":[\n" + strings.Join(cases, ",\n") + "\n]}\n"
+	return "{\"portal\":" + jsonStr(portal) + ",\"landscape\":" + jsonStr(landscape) + ",\"cases\":[\n" + strings.Join(cases, ",\n") + "\n]}\n"
 }
 
 // ---- YAML rendering ----
@@ -1469,7 +1470,10 @@ func fzBatchConfig(r *rand.Rand, keys []string) string {
 	b.WriteString("apiVersion: problems.atomi.cloud/v1\nkind: GeneratorConfig\n")
 	fmt.Fprintf(&b, "platform: %s\n", fzYAMLQuote(pick([]string{"nitroso", "123", "yes", "on", "a", "x--y", "0", strings.Repeat("p", 63)})))
 	fmt.Fprintf(&b, "service: %s\n", fzYAMLQuote(pick([]string{"zinc", "007", "no", "off", "b", "null", "true", "s-1"})))
-	fmt.Fprintf(&b, "portal: %s\n", pick([]string{"https://errors.atomi.cloud", "https://errors.example.com:8443", "https://x"}))
+	// The config portal is optional (it no longer reaches generated code): "" leaves it out.
+	if p := pick([]string{"https://errors.atomi.cloud", "https://errors.example.com:8443", ""}); p != "" {
+		fmt.Fprintf(&b, "portal: %s\n", p)
+	}
 	b.WriteString("modules:\n")
 	for _, k := range keys {
 		fmt.Fprintf(&b, "  - definition: defs/%s.problems.yaml\n    outputs:\n", k)
@@ -1565,6 +1569,8 @@ func cmdRandomDefs(args []string) int {
 			return 2
 		}
 		landscape := []string{"lapras", "123", "on", "a", "x-1", strings.Repeat("l", 63)}[br.IntN(6)]
+		// The run-time site's portal, derived without a new draw so seeds keep their definitions.
+		portal := []string{"https://errors.atomi.cloud", "https://errors.example.com:8443", "https://x"}[len(landscape)%3]
 		var keys []string
 		for k := start; k < end; k++ {
 			key := fmt.Sprintf("f%04d", k)
@@ -1575,7 +1581,7 @@ func cmdRandomDefs(args []string) int {
 				fmt.Fprintln(os.Stderr, err)
 				return 2
 			}
-			vec := fzVectors(*seed, kept[k].Candidate, kept[k].Module, landscape)
+			vec := fzVectors(*seed, kept[k].Candidate, kept[k].Module, portal, landscape)
 			if err := os.WriteFile(filepath.Join(dir, "defs", key+".vectors.json"), []byte(vec), 0o644); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				return 2

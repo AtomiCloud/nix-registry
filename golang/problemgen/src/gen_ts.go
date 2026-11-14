@@ -416,8 +416,8 @@ func (g *tsGen) problem(p *Problem) {
 	g.doc("", fmt.Sprintf("%s: %s (%d). %s", strconv.Quote(p.ID), p.Title, p.Status, p.Description),
 		"detail: "+p.DetailSrc, tsDeprecated(p.Deprecated))
 	g.p("export class %s implements rt.ProblemValue {", n)
-	g.p("  static readonly meta: rt.Meta = Object.freeze({ id: %s, title: %s, status: %d, recoverable: %v, platform: %s, service: %s, module: %s, version: %s, portal: %s });",
-		tsQuote(p.ID), tsQuote(p.Title), p.Status, p.Recoverable, tsQuote(cn.Platform), tsQuote(cn.Service), tsQuote(g.m.Def.Module), tsQuote(g.m.Def.Version), tsQuote(cn.Portal))
+	g.p("  static readonly meta: rt.Meta = Object.freeze({ id: %s, title: %s, status: %d, recoverable: %v, platform: %s, service: %s, module: %s, version: %s });",
+		tsQuote(p.ID), tsQuote(p.Title), p.Status, p.Recoverable, tsQuote(cn.Platform), tsQuote(cn.Service), tsQuote(g.m.Def.Module), tsQuote(g.m.Def.Version))
 	g.p("  readonly kind = %s as const;", tsQuote(p.ID))
 	for _, f := range p.Data {
 		if f.Private {
@@ -548,7 +548,7 @@ func (g *tsGen) unknown() {
 	g.p("    const a = e.address;")
 	g.p("    return {")
 	g.p("      id: a?.id ?? \"\", title: e.title, status: e.status, recoverable: false,")
-	g.p("      platform: a?.platform ?? \"\", service: a?.service ?? \"\", module: a?.module ?? \"\", version: a?.version ?? \"\", portal: \"\",")
+	g.p("      platform: a?.platform ?? \"\", service: a?.service ?? \"\", module: a?.module ?? \"\", version: a?.version ?? \"\",")
 	g.p("    };")
 	g.p("  }")
 	g.p("")

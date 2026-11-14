@@ -312,11 +312,11 @@ func Lint(m *Module) []Diag {
 	// and a backstop for L240: the rendered record body must not open a template action,
 	// whatever model path put the text there.
 	if len(ds) == 0 && m.Def.Kind == "ProblemSet" {
-		cfg := &Config{Platform: "p", Service: "s", Portal: "https://errors.example.com"}
-		rec := RenderRecordYAML(m, cfg, "x", "")
+		cfg := &Config{Platform: "p", Service: "s"}
+		rec := RenderRecordYAML(m, cfg, "x", "https://errors.example.com", "")
 		// Only {{ opens a Helm action; nested JSON objects legitimately end in }}.
 		if strings.Contains(rec, "{{") {
-			add("L240", Pos{File: m.Def.File, Line: 1, Col: 1}, "the rendered Problem record contains {{ outside the landscape expression")
+			add("L240", Pos{File: m.Def.File, Line: 1, Col: 1}, "the rendered Problem record contains {{ outside the landscape and portal expressions")
 		}
 		if len(rec) > recordBudget {
 			add("L241", Pos{File: m.Def.File, Line: 1, Col: 1}, "the Problem record is %d bytes; the budget is %d (etcd limit 1.5 MiB). Split the module", len(rec), recordBudget)

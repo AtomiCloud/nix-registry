@@ -37,10 +37,10 @@ the serialiser, the parser, and the closed set the seam maps into.
 |---|---|---|
 | `problems/<module>.<version>.problems.yaml` (`kind: ProblemSet`) | (module, version) of a service | the problems of that module version |
 | `<name>.problems.yaml` (`kind: ProblemLibrary`) | shared set | definitions imported by sets (`builtin:generic/v1` ships inside the tool) |
-| `problemgen.yaml` (`kind: GeneratorConfig`) | repository | platform, service, portal, and output paths per module |
+| `problemgen.yaml` (`kind: GeneratorConfig`) | repository | platform, service, output paths per module, optional `portal` (record default only) |
 
 The definition is language-neutral and landscape-neutral. Only `problemgen.yaml` knows
-platform/service/portal; only the running service knows the landscape (§7).
+platform/service; only the running service knows the error portal origin and the landscape (§7).
 
 ## 3. Definition format
 
@@ -50,7 +50,7 @@ kind: ProblemSet
 module: notes            # DNS label; the {module} segment of the type address
 version: v1              # ^v[0-9]+$; a new version is a NEW FILE (old one stays while served)
 imports:
-  - builtin:generic/v1                       # all six baseline problems (lib-contracts §2.2)
+  - builtin:generic/v1                       # all twelve generic problems (§10)
   # - { from: ./shared.problems.yaml, only: [rate_limited] }
 types:                   # named enums and objects (nested objects/enums must be named)
   NoteState:
@@ -161,12 +161,20 @@ validated at run time (lint validates examples).
 
 | Segment | Known at | Source |
 |---|---|---|
-| portal, platform, service | generation | `problemgen.yaml` (baked into generated code and record) |
+| platform, service | generation | `problemgen.yaml` (baked into generated code and record) |
 | module, version, id | generation | the definition |
-| landscape | **run time** | service config, passed to the serialiser / HTTP mapper |
+| portal, landscape | **run time** | service config: `errorPortal.url` (an https origin, no path) and the landscape |
 
-The address is built in exactly one place per language (the runtime's `TypeURI`), from the
-generated `Meta` + the landscape. The record uses the same `problemgen.yaml` values, so the
+At start-up each service builds a **site** from `errorPortal.url` and its landscape — Go
+`rt.NewSite`, TS `rt.Site.of`, C# `Site.Create`, Dart `rt.Site(...)` — which refuses a
+missing or malformed value (portal `^https://[a-z0-9.-]+(:[0-9]+)?$`, landscape a DNS label),
+so the service stops before it serves anything. The portal is an **origin only**: with a path
+(`https://host/errors`) every address gains a segment, and every parser (all four check
+`/docs/` as the first path segment and exactly 7 segments) reads every received problem as
+`Unknown`. The serialiser and HTTP mapper take the site;
+a value not built that way is refused. Generated code carries no portal. The address is built
+in exactly one place per language (the runtime's `TypeURI(meta, site)`). The record takes the
+portal from the same Helm value the pod reads (`.Values.errorPortal.url`, §13), so the
 service and the record agree by construction. A service whose runtime config names a
 different platform/service than the generated constants should fail at start-up (a one-line
 assertion the template wires; see REPORT, open items).
@@ -185,12 +193,20 @@ assertion the template wires; see REPORT, open items).
 
 `retryAfter: <field>` names a required public `integer` field (seconds) (L220) on a
 recoverable problem (L221). The HTTP mapper sets `Retry-After` from it; the field also stays
-in `data`.
+in `data`. The generic `dependency_failed` (503) carries `retryInSeconds`, so every 503 from
+an unavailable or timed-out dependency has a `Retry-After` header.
 
 ## 10. Imports and clashes
 
 - `imports` lists `builtin:<name>` (shipped in the tool; `builtin:generic/v1` = the §2.2
-  baseline) or relative paths to `ProblemLibrary` files. Libraries are flat (no imports).
+  baseline — `validation_error`, `entity_not_found`, `conflict`, `unauthenticated`,
+  `unauthorized`, `invalid_json` — plus the six of errors-and-problems §4:
+  `dependency_failed` (503, recoverable; public `retryInSeconds` → `Retry-After`; private
+  `dependency`, `failure`), `internal_error` (500; public `reference` = the trace id;
+  private `reason`), `route_not_found` (404; `method`, `path`), `method_not_allowed` (405;
+  `method`, `path`, `allowed[]`; the API layer also sets `Allow`), `payload_too_large` (413;
+  `limitBytes`), `unsupported_media_type` (415; `contentType`, `supported[]`)) or relative
+  paths to `ProblemLibrary` files. Libraries are flat (no imports).
   `only:` picks problems (L103 if missing) and imports exactly the named types those
   problems reach, transitively; without `only:` every problem and type is imported.
 - Imported problems become problems **of the importing module and version** (their address
@@ -259,9 +275,13 @@ the format (they would be a second, unenforced naming scheme).
   same definition cannot be told apart; that is a configuration error.)
 - **Problem record** (`atomi.cloud/v1alpha1 Problem`, one per module × version, error-portal
   row shape): `metadata.name = {service}.{module}.{landscape}.{version}`, `spec.problems[]`
-  = `{id, type, title, status, recoverable, schema}`. The only Helm input is the landscape:
-  `required`, then `fail` unless it is a DNS label (`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`);
-  everything else is literal, and every string field is a YAML double-quoted scalar (so
+  = `{id, type, title, status, recoverable, schema}`. The Helm inputs are the landscape
+  (`required`, then `fail` unless it is a DNS label, `^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
+  and `.Values.errorPortal.url` — the error portal origin the pod reads at start-up; `fail`
+  unless it is an https origin. When `problemgen.yaml` sets the optional `portal`, that is the
+  default for an unset value; otherwise the value is `required` (the CRD requires every
+  problem's `type` URI). The catalog never carried a portal (it is landscape-free). Everything
+  else is literal, and every string field is a YAML double-quoted scalar (so
   `123`, `yes`, `on` stay strings). Lint refuses `{{`/`}}` in any record-bound text —
   titles, descriptions, public fields and every named type they reach (descriptions, nested
   fields, examples, enum values) — and checks the rendered record for `{{` (L240); records
@@ -303,19 +323,19 @@ Per module: a **closed set** (`Problem` sealed interface / union / abstract reco
 class) containing one type per problem **plus `Unknown`**; per problem a constructor whose
 required fields are required parameters (wrong type or missing field = compile error, except
 Go's zero-value struct literal, see REPORT); optional fields settable; `instance` and `cause`
-settable; `meta` (id, title, status, recoverable, platform, service, module, version,
-portal); `detail()` and `logLine()`; data writer; `Parse`. Nothing extends an
+settable; `meta` (id, title, status, recoverable, platform, service, module, version); `detail()` and `logLine()`; data writer; `Parse`. Nothing extends an
 exception/error type; nothing in the generated file throws a Problem.
 
 ## 17. Runtime contract (what each problems library must provide)
 
 1. `Meta` type and the problem interface/base the generated code implements.
-2. The single `TypeURI(meta, landscape)` builder.
+2. The `Site` value (errorPortal.url + landscape, checked once at start-up) and the single
+   `TypeURI(meta, site)` builder.
 3. The canonical JSON writer (§6): strings, integer range check, int64 strings, ES number
    formatting, date-time formatting, U+FFFD replacement.
 4. Template helpers: log-escape, detail sanitise, number/date-time formatting.
 5. Envelope parser + address parser + typed decode helpers; `Unknown` support.
-6. HTTP mapper: `(problem, landscape) → status, headers (Content-Type, Retry-After), body`
+6. HTTP mapper: `(problem, site) → status, headers (Content-Type, Retry-After), body`
    + a log hook `(problem, logLine, cause)`; plain-500 fallback when serialisation refuses.
 
 ## 18. Consumers without HTTP (queue workers)

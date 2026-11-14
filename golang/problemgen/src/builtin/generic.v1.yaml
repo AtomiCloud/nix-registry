@@ -1,5 +1,8 @@
-# The portable generic catalog (concepts/lib-contracts.md §2.2), written ONCE for all four
-# languages. Import it with `imports: [builtin:generic/v1]` (or pick with `only:`).
+# The portable generic catalog (concepts/lib-contracts.md §2.2, plus the six generics the
+# owner and the layer proof asked for: internal_error, dependency_failed, route_not_found,
+# method_not_allowed, payload_too_large, unsupported_media_type),
+# written ONCE for all four languages. Import it with `imports: [builtin:generic/v1]`
+# (or pick with `only:`).
 # The imported problems are addressed under the importing module and version.
 apiVersion: problems.atomi.cloud/v1
 kind: ProblemLibrary
@@ -58,3 +61,70 @@ problems:
     log: 'invalid JSON body: {reason}'
     data:
       reason: { type: string, private: true, description: 'The parser message. Logged, never sent.' }
+  # The six below are lib-contracts §2.2 / errors-and-problems §4 (corpus PR 76, 77).
+  dependency_failed:
+    title: Dependency Failed
+    status: 503
+    recoverable: true
+    detail: 'A service this request depends on is unavailable. Try again in {retryInSeconds} seconds.'
+    log: 'dependency {dependency} failed: {failure}'
+    retryAfter: retryInSeconds
+    data:
+      retryInSeconds: { type: integer, example: 5, description: 'When to retry; also sent as the Retry-After header.' }
+      dependency:
+        type: string
+        private: true
+        description: 'Which dependency failed (postgres, a queue, another service). Logged, never sent.'
+      failure: { type: string, private: true, description: 'How it failed (unavailable, timeout). Logged, never sent.' }
+  internal_error:
+    title: Internal Error
+    status: 500
+    recoverable: false
+    detail: 'An unexpected error occurred (reference {reference}).'
+    description: 'A real bug, an unexpected exception or an unrecognised dependency error. Attach the error as the cause (logged, never sent).'
+    log: 'internal error: {reason}'
+    data:
+      reference:
+        type: string
+        example: 4bf92f3577b34da6a3ce929d0e0e4736
+        description: 'The trace id, to quote to support.'
+      reason: { type: string, private: true, description: 'What went wrong. Logged, never sent.' }
+  route_not_found:
+    title: Route Not Found
+    status: 404
+    recoverable: false
+    detail: 'No route matches {method} {path}.'
+    data:
+      method: { type: string, example: GET, description: 'The request method.' }
+      path: { type: string, example: /v1/notes/42, description: 'The request path, without the query string.' }
+  method_not_allowed:
+    title: Method Not Allowed
+    status: 405
+    recoverable: false
+    detail: 'Method {method} is not allowed for {path}; {allowed|count} method(s) are.'
+    description: 'The API layer also sets the Allow header from allowed (RFC 9110 section 15.5.6).'
+    data:
+      method: { type: string, example: DELETE, description: 'The request method.' }
+      path: { type: string, example: /v1/notes/42, description: 'The request path, without the query string.' }
+      allowed:
+        type: array
+        items: { type: string }
+        description: 'The methods this route accepts.'
+  payload_too_large:
+    title: Payload Too Large
+    status: 413
+    recoverable: false
+    detail: 'The request body is larger than the {limitBytes}-byte limit.'
+    data:
+      limitBytes: { type: integer, example: 1048576, description: 'The largest accepted request body, in bytes.' }
+  unsupported_media_type:
+    title: Unsupported Media Type
+    status: 415
+    recoverable: false
+    detail: 'Content type {contentType} is not supported; {supported|count} type(s) are.'
+    data:
+      contentType: { type: string, example: text/plain, description: 'The Content-Type the request sent.' }
+      supported:
+        type: array
+        items: { type: string }
+        description: 'The media types this route accepts.'

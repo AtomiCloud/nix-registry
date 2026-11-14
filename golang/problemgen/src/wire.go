@@ -211,7 +211,8 @@ type Rendered struct {
 
 // RenderVector renders wire JSON and log line for a problem with the given input data
 // (a JV object). Errors mean "every language must refuse this input".
-func RenderVector(m *Module, cfg *Config, landscape string, p *Problem, data *JV, instance string) (Rendered, error) {
+// portal and landscape are the run-time site (errorPortal.url and the landscape).
+func RenderVector(m *Module, cfg *Config, portal, landscape string, p *Problem, data *JV, instance string) (Rendered, error) {
 	vals := map[string]*JV{}
 	if data != nil {
 		if data.Kind != 'o' {
@@ -232,7 +233,7 @@ func RenderVector(m *Module, cfg *Config, landscape string, p *Problem, data *JV
 	}
 	var b strings.Builder
 	b.WriteString(`{"type":`)
-	writeJSONString(&b, TypeURI(cfg.Portal, landscape, cfg.Platform, cfg.Service, m.Def.Module, m.Def.Version, p.ID))
+	writeJSONString(&b, TypeURI(portal, landscape, cfg.Platform, cfg.Service, m.Def.Module, m.Def.Version, p.ID))
 	b.WriteString(`,"title":`)
 	writeJSONString(&b, p.Title)
 	b.WriteString(`,"status":`)

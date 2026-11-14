@@ -112,7 +112,9 @@ func emitGoHarness(m *Module, cfg *Config, o Outputs, v *Vectors) string {
 	w("")
 	w("var _ = math.NaN")
 	w("")
-	w("const landscape = %q", v.Landscape)
+	w("var site = mustSite(%q, %q)", v.Portal, v.Landscape)
+	w("")
+	goMustSite(w)
 	w("")
 	w("func mustTime(s string) time.Time {")
 	w("\tt, err := time.Parse(time.RFC3339Nano, s)")
@@ -135,7 +137,7 @@ func emitGoHarness(m *Module, cfg *Config, o Outputs, v *Vectors) string {
 	w("var enc = json.NewEncoder(os.Stdout)")
 	w("")
 	w("func emit(name string, p %s.Problem) {", pkg)
-	w("\tb, err := rt.Marshal(p, landscape)")
+	w("\tb, err := rt.Marshal(p, site)")
 	w("\tif err != nil {")
 	w("\t\t_ = enc.Encode(line{Name: name, Error: err.Error()})")
 	w("\t\treturn")
@@ -164,7 +166,7 @@ func emitGoHarness(m *Module, cfg *Config, o Outputs, v *Vectors) string {
 	w("\t\t\t_ = enc.Encode(line{Name: in.Name, Variant: \"unknown\", Error: u.Reason})")
 	w("\t\t\tcontinue")
 	w("\t\t}")
-	w("\t\tb, err := rt.Marshal(p, landscape)")
+	w("\t\tb, err := rt.Marshal(p, site)")
 	w("\t\tl := line{Name: in.Name, OK: err == nil, Variant: p.ProblemMeta().ID, Rewire: string(b)}")
 	w("\t\tif err != nil {")
 	w("\t\t\tl.Error = err.Error()")
@@ -186,12 +188,12 @@ func emitGoHarness(m *Module, cfg *Config, o Outputs, v *Vectors) string {
 	}
 	w("\t} {")
 	w("\t\tfor i := 0; i < n/10; i++ { // warm-up")
-	w("\t\t\t_, _ = rt.Marshal(c.mk(), landscape)")
+	w("\t\t\t_, _ = rt.Marshal(c.mk(), site)")
 	w("\t\t}")
 	w("\t\tstart := time.Now()")
 	w("\t\ttotal := 0")
 	w("\t\tfor i := 0; i < n; i++ {")
-	w("\t\t\tb, _ := rt.Marshal(c.mk(), landscape)")
+	w("\t\t\tb, _ := rt.Marshal(c.mk(), site)")
 	w("\t\t\ttotal += len(b)")
 	w("\t\t}")
 	w("\t\tel := time.Since(start)")
@@ -280,8 +282,10 @@ func emitGoBatch(cfg *Config, mods []BatchModule) string {
 	w("")
 	w("var enc = json.NewEncoder(os.Stdout)")
 	w("")
-	w("func emit(name, landscape string, p rt.Problem) {")
-	w("\tb, err := rt.Marshal(p, landscape)")
+	goMustSite(w)
+	w("")
+	w("func emit(name string, site rt.Site, p rt.Problem) {")
+	w("\tb, err := rt.Marshal(p, site)")
 	w("\tif err != nil {")
 	w("\t\t_ = enc.Encode(line{Name: name, Error: err.Error()})")
 	w("\t\treturn")
@@ -289,8 +293,8 @@ func emitGoBatch(cfg *Config, mods []BatchModule) string {
 	w("\t_ = enc.Encode(line{Name: name, OK: true, Wire: string(b), Log: p.LogLine()})")
 	w("}")
 	w("")
-	w("func reemit(name, landscape string, p rt.Problem) {")
-	w("\tb, err := rt.Marshal(p, landscape)")
+	w("func reemit(name string, site rt.Site, p rt.Problem) {")
+	w("\tb, err := rt.Marshal(p, site)")
 	w("\tl := line{Name: name, OK: err == nil, Variant: p.ProblemMeta().ID, Rewire: string(b)}")
 	w("\tif err != nil {")
 	w("\t\tl.Error = err.Error()")
@@ -311,7 +315,7 @@ func emitGoBatch(cfg *Config, mods []BatchModule) string {
 		w("\t\t\t_ = enc.Encode(line{Name: name, Variant: \"unknown\", Error: u.Reason})")
 		w("\t\t\treturn")
 		w("\t\t}")
-		w("\t\treemit(name, %q, p)", bm.V.Landscape)
+		w("\t\treemit(name, mustSite(%q, %q), p)", bm.V.Portal, bm.V.Landscape)
 		w("\t},")
 	}
 	w("}")
@@ -343,9 +347,20 @@ func emitGoBatch(cfg *Config, mods []BatchModule) string {
 	w("\t}")
 	for _, bm := range mods {
 		for _, c := range bm.V.Cases {
-			w("\temit(%q, %q, %s)", bm.Key+"/"+c.Name, bm.V.Landscape, goCaseExpr(bm.M, bm.Out.Go.Package, c))
+			w("\temit(%q, mustSite(%q, %q), %s)", bm.Key+"/"+c.Name, bm.V.Portal, bm.V.Landscape, goCaseExpr(bm.M, bm.Out.Go.Package, c))
 		}
 	}
 	w("}")
 	return b.String()
+}
+
+// goMustSite writes the harness helper that builds the run-time site (portal + landscape).
+func goMustSite(w func(string, ...any)) {
+	w("func mustSite(portal, landscape string) rt.Site {")
+	w("\ts, err := rt.NewSite(portal, landscape)")
+	w("\tif err != nil {")
+	w("\t\tpanic(err)")
+	w("\t}")
+	w("\treturn s")
+	w("}")
 }

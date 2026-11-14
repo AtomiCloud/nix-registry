@@ -123,7 +123,7 @@ func TestRecordQuotesStrings(t *testing.T) {
 		t.Fatal(ds)
 	}
 	cfg := &Config{Platform: "123", Service: "007", Portal: "https://errors.atomi.cloud"}
-	rec := RenderRecordYAML(m, cfg, "no", "")
+	rec := RenderRecordYAML(m, cfg, "no", "https://errors.atomi.cloud", "")
 	var doc struct {
 		Metadata map[string]any `yaml:"metadata"`
 		Spec     struct {
@@ -150,7 +150,7 @@ func TestRecordQuotesStrings(t *testing.T) {
 			t.Errorf("id not quoted: %s", line)
 		}
 	}
-	helm := RenderRecordYAML(m, cfg, "", "")
+	helm := RenderRecordYAML(m, cfg, "", "", "")
 	if !strings.Contains(helm, `regexMatch "`+landscapeRe+`" $landscape`) || !strings.Contains(helm, "fail ") {
 		t.Errorf("helm form does not validate the landscape:\n%s", helm)
 	}
