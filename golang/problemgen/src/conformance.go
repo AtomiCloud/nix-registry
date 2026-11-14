@@ -17,6 +17,26 @@ type Vectors struct {
 	Landscape string
 	Cases     []VCase
 	Foreign   []VForeign
+	// Origins every language's site constructor must accept (and then round-trip a problem
+	// addressed under it) or refuse. The tool checks the list against its own rule at load.
+	Origins struct{ Accepted, Refused []string }
+}
+
+// originName names the conformance case for the i-th accepted/refused origin.
+func originName(kind string, i int) string { return fmt.Sprintf("origin-%s-%02d", kind, i) }
+
+// originBase is the case the origin checks emit: the first case that renders.
+func originBase(m *Module, cfg *Config, v *Vectors) (VCase, *Problem, bool) {
+	for _, c := range v.Cases {
+		for _, p := range m.Problems {
+			if p.ID == c.Problem {
+				if _, err := RenderVector(m, cfg, v.Portal, v.Landscape, p, c.Data, c.Instance); err == nil {
+					return c, p, true
+				}
+			}
+		}
+	}
+	return VCase{}, nil, false
 }
 
 // VCase builds one problem with typed inputs.
@@ -53,8 +73,25 @@ func LoadVectors(path string) (*Vectors, error) {
 	if p, ok := root.Get("portal"); ok {
 		v.Portal = p.GoString()
 	}
-	if !portalRe.MatchString(v.Portal) {
-		return nil, fmt.Errorf("%s: portal %q is not an https origin (https://host[:port], no path)", path, v.Portal)
+	if o, ok := root.Get("origins"); ok {
+		for _, k := range []struct {
+			key  string
+			dst  *[]string
+			want bool
+		}{{"accepted", &v.Origins.Accepted, true}, {"refused", &v.Origins.Refused, false}} {
+			if list, ok := o.Get(k.key); ok {
+				for _, x := range list.Arr {
+					s := x.GoString()
+					if validPortal(s) != k.want {
+						return nil, fmt.Errorf("%s: origins.%s lists %q, but the tool's rule says accepted=%v", path, k.key, s, !k.want)
+					}
+					*k.dst = append(*k.dst, s)
+				}
+			}
+		}
+	}
+	if !validPortal(v.Portal) {
+		return nil, fmt.Errorf("%s: portal %q %s", path, v.Portal, portalMsg)
 	}
 	if !ValidLandscape(v.Landscape) {
 		return nil, fmt.Errorf("%s: landscape %q is not a DNS label (a-z, 0-9, -; at most 63 characters)", path, v.Landscape)
@@ -140,6 +177,22 @@ func Oracle(m *Module, cfg *Config, v *Vectors) ([]Expected, error) {
 			}
 		}
 		out = append(out, e)
+	}
+	if len(v.Origins.Accepted)+len(v.Origins.Refused) > 0 {
+		c, p, ok := originBase(m, cfg, v)
+		if !ok {
+			return nil, fmt.Errorf("origins: no case renders")
+		}
+		for i, o := range v.Origins.Accepted {
+			r, err := RenderVector(m, cfg, o, v.Landscape, p, c.Data, c.Instance)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, Expected{Name: originName("ok", i), Problem: p.ID, OK: true, Wire: r.Wire, Log: r.Log})
+		}
+		for i := range v.Origins.Refused {
+			out = append(out, Expected{Name: originName("refused", i), Problem: p.ID, Error: "the site constructor must refuse this origin"})
+		}
 	}
 	return out, nil
 }

@@ -110,6 +110,10 @@ func emitCSHarness(m *Module, c *Config, o Outputs, v *Vectors) string {
 	w(" static readonly __Rt.Site HarnessSite = __Rt.Site.Create(%s, %s);", csString(v.Portal), csString(v.Landscape))
 	b.WriteString(`
  static void Print(object row) => Console.WriteLine(JsonSerializer.Serialize(row));
+ static void EmitAt(string name, string portal, string landscape, global::System.Func<Problem> mk) {
+  try { var s = __Rt.Site.Create(portal, landscape); var p = mk(); Print(new {name,ok=true,wire=__Rt.ProblemHttp.Marshal(p,s),log=p.LogLine()}); }
+  catch(Exception e) { Print(new {name,ok=false,error=e.Message}); }
+ }
  static void Emit(string name, Problem p) {
   try { Print(new {name,ok=true,wire=__Rt.ProblemHttp.Marshal(p,HarnessSite),log=p.LogLine()}); }
   catch(Exception e) { Print(new {name,ok=false,error=e.Message}); }
@@ -146,6 +150,14 @@ func emitCSHarness(m *Module, c *Config, o Outputs, v *Vectors) string {
 	w("   return;\n  }")
 	for _, c := range v.Cases {
 		w("  Emit(%s, %s);", csString(c.Name), csCase(m, c))
+	}
+	if bc, _, ok := originBase(m, c, v); ok {
+		for i, o := range v.Origins.Accepted {
+			w("  EmitAt(%s, %s, %s, () => %s);", csString(originName("ok", i)), csString(o), csString(v.Landscape), csCase(m, bc))
+		}
+		for i, o := range v.Origins.Refused {
+			w("  EmitAt(%s, %s, %s, () => %s);", csString(originName("refused", i)), csString(o), csString(v.Landscape), csCase(m, bc))
+		}
 	}
 	w(" }\n}")
 	return b.String()

@@ -94,8 +94,8 @@ func LoadConfig(path string) (*Config, error) {
 	if !dnsLabel.MatchString(c.Platform) || !dnsLabel.MatchString(c.Service) {
 		return nil, fmt.Errorf("%s: platform and service must be DNS labels (a-z, 0-9, -; at most 63 characters)", path)
 	}
-	if c.Portal != "" && !portalRe.MatchString(c.Portal) {
-		return nil, fmt.Errorf("%s: portal (optional) must be https://host[:port] with no path", path)
+	if c.Portal != "" && !validPortal(c.Portal) {
+		return nil, fmt.Errorf("%s: portal (optional) %s", path, portalMsg)
 	}
 	if len(c.Modules) == 0 {
 		return nil, fmt.Errorf("%s: modules is empty: list every definition (an empty list would verify nothing)", path)

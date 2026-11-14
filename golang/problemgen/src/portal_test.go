@@ -4,6 +4,7 @@ package main
 // errorPortal.url at start. Generated code carries no portal; the config's portal is optional.
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,7 +57,7 @@ func TestRecordPortalFromValues(t *testing.T) {
 	if len(ds) > 0 {
 		t.Fatal(ds)
 	}
-	check := `{{- if not (regexMatch "` + portalOriginRe + `" $portal) }}{{ fail "problemgen: .Values.errorPortal.url must be an https origin`
+	check := `{{- if or (not (regexMatch "` + portalOriginRe + `" $portal)) (gt (len $portalHost) 253) (gt (atoi $portalPort) 65535) }}{{ fail "problemgen: .Values.errorPortal.url must be an https origin`
 	typ := `type: "{{ $portal }}/docs/{{ $landscape }}/nitroso/zinc/m/v1/p"`
 	without := RenderRecordYAML(m, &Config{Platform: "nitroso", Service: "zinc"}, "", "", "")
 	if !strings.Contains(without, `required "problemgen: .Values.errorPortal.url is required" $errorPortal.url`) || !strings.Contains(without, check) || !strings.Contains(without, typ) {
@@ -69,5 +70,31 @@ func TestRecordPortalFromValues(t *testing.T) {
 	lit := RenderRecordYAML(m, &Config{Platform: "nitroso", Service: "zinc"}, "lapras", "https://e.example", "")
 	if !strings.Contains(lit, `type: "https://e.example/docs/lapras/nitroso/zinc/m/v1/p"`) || strings.Contains(lit, "{{") {
 		t.Errorf("literal record:\n%s", lit)
+	}
+}
+
+// testdata/origins.json is the one list of accepted and refused error portal origins; the
+// runtimes' tests and conformance/vectors.json use the same file.
+func TestPortalOriginList(t *testing.T) {
+	b, err := os.ReadFile("testdata/origins.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var list struct{ Accepted, Refused []string }
+	if err := json.Unmarshal(b, &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Accepted) == 0 || len(list.Refused) == 0 {
+		t.Fatal("empty list")
+	}
+	for _, o := range list.Accepted {
+		if !validPortal(o) {
+			t.Errorf("refused %q", o)
+		}
+	}
+	for _, o := range list.Refused {
+		if validPortal(o) {
+			t.Errorf("accepted %q", o)
+		}
 	}
 }

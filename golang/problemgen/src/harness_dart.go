@@ -162,6 +162,19 @@ func emitDartHarness(m *Module, cfg *Config, o Outputs, v *Vectors) string {
 	w("")
 	w("void out(Map<String, Object?> m) => stdout.writeln(jsonEncode(m));")
 	w("")
+	// Only with origins: an unused helper fails dart analyze.
+	if len(v.Origins.Accepted)+len(v.Origins.Refused) > 0 {
+		w("void emitAt(String name, String portal, String landscape, g.Problem Function() mk) {")
+		w("  try {")
+		w("    final s = rt.Site(portal, landscape);")
+		w("    final p = mk();")
+		w("    out({'name': name, 'ok': true, 'wire': rt.marshal(p, s), 'log': p.logLine()});")
+		w("  } on ArgumentError catch (e) {")
+		w("    out({'name': name, 'ok': false, 'error': e.toString()});")
+		w("  }")
+		w("}")
+		w("")
+	}
 	w("void emit(String name, g.Problem p) {")
 	w("  try {")
 	w("    final wire = rt.marshal(p, site);")
@@ -230,6 +243,14 @@ func emitDartHarness(m *Module, cfg *Config, o Outputs, v *Vectors) string {
 	w("  }")
 	for _, c := range v.Cases {
 		w("  emit(%s, %s);", dartStr(c.Name), dartCaseExpr(m, c))
+	}
+	if c, _, ok := originBase(m, cfg, v); ok {
+		for i, o := range v.Origins.Accepted {
+			w("  emitAt(%s, %s, %s, () => %s);", dartStr(originName("ok", i)), dartStr(o), dartStr(v.Landscape), dartCaseExpr(m, c))
+		}
+		for i, o := range v.Origins.Refused {
+			w("  emitAt(%s, %s, %s, () => %s);", dartStr(originName("refused", i)), dartStr(o), dartStr(v.Landscape), dartCaseExpr(m, c))
+		}
 	}
 	w("}")
 	return b.String()

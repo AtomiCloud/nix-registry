@@ -167,8 +167,15 @@ validated at run time (lint validates examples).
 
 At start-up each service builds a **site** from `errorPortal.url` and its landscape — Go
 `rt.NewSite`, TS `rt.Site.of`, C# `Site.Create`, Dart `rt.Site(...)` — which refuses a
-missing or malformed value (portal `^https://[a-z0-9.-]+(:[0-9]+)?$`, landscape a DNS label),
-so the service stops before it serves anything. The portal is an **origin only**: with a path
+missing or malformed value (landscape a DNS label; portal by the origin rule below), so the
+service stops before it serves anything. **Origin rule** (the tool's config check, the Helm
+record and all four site constructors, driven by one shared list, `tool/testdata/origins.json`,
+also the `origins` of the conformance vectors): `https://host[:port]` and nothing after;
+`host` = lower-case DNS labels of 1–63 characters (`[a-z0-9]`, `-` inside), at most 253
+characters in all, the last label starting with a letter — so **IP literals are refused**
+(IPv4 cannot match, IPv6 brackets are not allowed; the portal is a public DNS name); `port` =
+1–65535, no leading zero. Every accepted origin must also round-trip: a problem addressed
+under it parses back typed in all four languages (conformance `origin-ok-*`). The portal is an **origin only**: with a path
 (`https://host/errors`) every address gains a segment, and every parser (all four check
 `/docs/` as the first path segment and exactly 7 segments) reads every received problem as
 `Unknown`. The serialiser and HTTP mapper take the site;
@@ -269,8 +276,19 @@ the format (they would be a second, unenforced naming scheme).
   directory or a directory the config writes to now; no component is a symlink; the content
   still has the recorded sha256; its header's source is one of this config's definitions.
   Catalogs carry no header, so they are never deleted. A stale file that is not deleted stays
-  in the manifest, and verify keeps failing until a person removes it. `generate` refuses to
-  overwrite a file whose header names another existing definition. An empty `modules` list
+  in the manifest, and verify keeps failing until a person removes it. **Write guard**:
+  before anything is written or deleted, every path `generate` would write (each output and
+  the manifest) is checked, and any refusal stops the run (exit 2) with nothing changed: no
+  symlink in any component below the deepest directory the path shares with the config
+  directory (symlinks above it are how the checkout is reached), an existing parent must be a
+  directory and an existing file a regular file; no two outputs may name the same file, also
+  case-insensitively; no output may be a definition, an imported library or the config (by
+  path, case-insensitively, or by file identity, which also catches a hard link); and no
+  existing file whose header names another existing definition is overwritten (the header is
+  resolved against the file's real directory). Stale deletion uses the same symlink guard.
+  Files are written to a temporary file and renamed into place, so a hard link elsewhere
+  keeps its old content and no reader sees a half-written file. Not covered: a race with
+  another process changing the tree during the run. An empty `modules` list
   and a module with no outputs are refused. (Two configs generating the same file from the
   same definition cannot be told apart; that is a configuration error.)
 - **Problem record** (`atomi.cloud/v1alpha1 Problem`, one per module × version, error-portal

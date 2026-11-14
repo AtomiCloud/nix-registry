@@ -89,6 +89,35 @@ grep -qF '.Values.errorPortal | default dict' "$rec" && grep -qF 'default "https
   "$PG" verify >/dev/null && grep -qF 'required "problemgen: .Values.errorPortal.url is required"' out/record/conf.v1.yaml &&
   mv cfg.bak problemgen.yaml && "$PG" generate >/dev/null) &&
   ok "config without portal: record requires errorPortal.url" || bad "config portal not optional"
+# Review 4: generate never writes through a symlink (output file, output directory, manifest):
+# it refuses before writing anything, and the unrelated target keeps its content.
+for kind in file dir manifest; do
+  (
+    cd "$work/fx" && "$PG" generate >/dev/null && printf 'handwritten\n' >"$work/victim.txt" && cp -r out out.bak &&
+      case "$kind" in
+      file) rm out/ts/conf.v1.problems.gen.ts && ln -s "$work/victim.txt" out/ts/conf.v1.problems.gen.ts ;;
+      dir) rm -r out/ts && mkdir "$work/victimdir" && cp "$work/victim.txt" "$work/victimdir/conf.v1.problems.gen.ts" && ln -s "$work/victimdir" out/ts ;;
+      manifest) mv problemgen.yaml.outputs outputs.bak && ln -s "$work/victim.txt" problemgen.yaml.outputs ;;
+      esac
+    set +e
+    "$PG" generate >gen.log 2>&1
+    rc=$?
+    set -e
+    [ "$rc" -eq 2 ] && grep -q 'symlink' gen.log && grep -qx 'handwritten' "$work/victim.txt" &&
+      { [ "$kind" != dir ] || grep -qx 'handwritten' "$work/victimdir/conf.v1.problems.gen.ts"; }
+    ok_=$?
+    rm -rf out "$work/victimdir" && mv out.bak out
+    [ "$kind" != manifest ] || { rm problemgen.yaml.outputs && mv outputs.bak problemgen.yaml.outputs; }
+    exit $ok_
+  ) && ok "generate refuses a symlinked $kind and writes nothing" || bad "generate wrote through a symlinked $kind"
+done
+# The error portal origin rule (tool/testdata/origins.json is the shared list).
+for p in 'https://..' 'https://errors.example.org:99999' 'https://1.2.3.4' 'https://errors.example.org:0'; do
+  sed "s|^portal: .*|portal: \"$p\"|" "$work/fx/problemgen.yaml" >"$work/fx/badportal.yaml"
+  out=$("$PG" verify -c "$work/fx/badportal.yaml" 2>&1 || true)
+  grep -q 'must be an https origin' <<<"$out" && ok "config refuses portal $p" || bad "config accepted portal $p: $out"
+done
+rm -f "$work/fx/badportal.yaml"
 for id in internal_error dependency_failed route_not_found method_not_allowed payload_too_large unsupported_media_type; do
   grep -qF "\"id\":\"$id\"" "$work/fx/out/catalog/conf.v1.json" && ok "builtin generic $id" || bad "builtin generic $id missing"
 done

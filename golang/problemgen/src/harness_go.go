@@ -136,6 +136,21 @@ func emitGoHarness(m *Module, cfg *Config, o Outputs, v *Vectors) string {
 	w("")
 	w("var enc = json.NewEncoder(os.Stdout)")
 	w("")
+	w("// emitAt builds its own site, as a service does at start-up from errorPortal.url.")
+	w("func emitAt(name, portal, landscape string, p %s.Problem) {", pkg)
+	w("\ts, err := rt.NewSite(portal, landscape)")
+	w("\tif err != nil {")
+	w("\t\t_ = enc.Encode(line{Name: name, Error: err.Error()})")
+	w("\t\treturn")
+	w("\t}")
+	w("\tb, err := rt.Marshal(p, s)")
+	w("\tif err != nil {")
+	w("\t\t_ = enc.Encode(line{Name: name, Error: err.Error()})")
+	w("\t\treturn")
+	w("\t}")
+	w("\t_ = enc.Encode(line{Name: name, OK: true, Wire: string(b), Log: p.LogLine()})")
+	w("}")
+	w("")
 	w("func emit(name string, p %s.Problem) {", pkg)
 	w("\tb, err := rt.Marshal(p, site)")
 	w("\tif err != nil {")
@@ -213,6 +228,14 @@ func emitGoHarness(m *Module, cfg *Config, o Outputs, v *Vectors) string {
 	w("\t}")
 	for _, c := range v.Cases {
 		w("\temit(%q, %s)", c.Name, goCaseExpr(m, pkg, c))
+	}
+	if c, _, ok := originBase(m, cfg, v); ok {
+		for i, o := range v.Origins.Accepted {
+			w("\temitAt(%q, %q, %q, %s)", originName("ok", i), o, v.Landscape, goCaseExpr(m, pkg, c))
+		}
+		for i, o := range v.Origins.Refused {
+			w("\temitAt(%q, %q, %q, %s)", originName("refused", i), o, v.Landscape, goCaseExpr(m, pkg, c))
+		}
 	}
 	w("}")
 	return b.String()

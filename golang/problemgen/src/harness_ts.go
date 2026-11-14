@@ -124,6 +124,19 @@ func emitTSHarness(m *Module, cfg *Config, o Outputs, v *Vectors) string {
 	w("};")
 	w("const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));")
 	w("")
+	// Only with origins: an unused helper fails the strict TS build.
+	if len(v.Origins.Accepted)+len(v.Origins.Refused) > 0 {
+		w("function emitAt(name: string, portal: string, landscape: string, mk: () => gen.Problem): void {")
+		w("  try {")
+		w("    const s = rt.Site.of(portal, landscape);")
+		w("    const p = mk();")
+		w("    line({ name, ok: true, wire: rt.marshal(p, s), log: p.logLine() });")
+		w("  } catch (e) {")
+		w("    line({ name, ok: false, error: message(e) });")
+		w("  }")
+		w("}")
+		w("")
+	}
 	w("function emit(name: string, mk: () => gen.Problem): void {")
 	w("  try {")
 	w("    const p = mk();")
@@ -181,6 +194,14 @@ func emitTSHarness(m *Module, cfg *Config, o Outputs, v *Vectors) string {
 	w("} else {")
 	for _, c := range v.Cases {
 		w("  emit(%s, () => %s);", tsQuote(c.Name), tsCaseExpr(m, "gen", c))
+	}
+	if c, _, ok := originBase(m, cfg, v); ok {
+		for i, o := range v.Origins.Accepted {
+			w("  emitAt(%s, %s, %s, () => %s);", tsQuote(originName("ok", i)), tsQuote(o), tsQuote(v.Landscape), tsCaseExpr(m, "gen", c))
+		}
+		for i, o := range v.Origins.Refused {
+			w("  emitAt(%s, %s, %s, () => %s);", tsQuote(originName("refused", i)), tsQuote(o), tsQuote(v.Landscape), tsCaseExpr(m, "gen", c))
+		}
 	}
 	w("}")
 	w("process.stdout.write(out.join(\"\"));")

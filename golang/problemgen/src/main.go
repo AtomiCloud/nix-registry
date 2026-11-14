@@ -6,8 +6,10 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -292,9 +294,9 @@ type plannedFile struct {
 	def     string // absolute definition path the file is generated from ("" for the manifest)
 }
 
-func planOutputs(cfg *Config) ([]plannedFile, []Diag) {
-	var out []plannedFile
-	var all []Diag
+// planOutputs renders every configured output. inputs lists the files generation reads (the
+// definitions and their imported libraries), which no output may replace.
+func planOutputs(cfg *Config) (out []plannedFile, inputs []string, all []Diag) {
 	for _, mc := range cfg.Modules {
 		defPath := cfg.Path(mc.Definition)
 		m, ds := LoadModule(defPath)
@@ -303,6 +305,12 @@ func planOutputs(cfg *Config) ([]plannedFile, []Diag) {
 			continue
 		}
 		def := absClean(defPath)
+		inputs = append(inputs, def)
+		for _, imp := range m.Def.Imports {
+			if !strings.HasPrefix(imp.From, "builtin:") {
+				inputs = append(inputs, absClean(filepath.Join(filepath.Dir(defPath), imp.From)))
+			}
+		}
 		// The header's source is relative to the generated file, so it names exactly one
 		// definition wherever the config lives (ownership checks rely on it).
 		src := func(out string) string {
@@ -332,7 +340,7 @@ func planOutputs(cfg *Config) ([]plannedFile, []Diag) {
 			out = append(out, plannedFile{cfg.Path(mc.Outputs.Catalog.File), RenderCatalogJSON(m, cfg), def})
 		}
 	}
-	return out, all
+	return out, inputs, all
 }
 
 func cmdGenerate(args []string, verify bool) int {
@@ -346,7 +354,7 @@ func cmdGenerate(args []string, verify bool) int {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
 	}
-	files, ds := planOutputs(cfg)
+	files, inputs, ds := planOutputs(cfg)
 	if len(ds) > 0 {
 		printDiags(ds)
 		return 1
@@ -365,13 +373,18 @@ func cmdGenerate(args []string, verify bool) int {
 	defs := map[string]bool{}
 	var writeDirs []string
 	for _, f := range files {
-		if seen[f.path] {
-			fmt.Fprintf(os.Stderr, "two outputs write %s\n", f.path)
-			return 2
-		}
 		seen[f.path] = true
 		defs[f.def] = true
 		writeDirs = append(writeDirs, filepath.Dir(f.path))
+	}
+	// One guard for every path generate may write (outputs and the manifest), checked before
+	// anything is written or deleted: refused paths stop the run with nothing changed.
+	inputs = append(inputs, absClean(*cfgPath))
+	if bad := guardWrites(cfg, append(append([]plannedFile{}, files...), plannedFile{path: mpath}), inputs); len(bad) > 0 {
+		for _, b := range bad {
+			fmt.Fprintln(os.Stderr, b)
+		}
+		return 2
 	}
 	drift := 0
 	var kept []manifestEntry
@@ -389,7 +402,7 @@ func cmdGenerate(args []string, verify bool) int {
 			drift++
 			continue
 		}
-		if why := safeToRemove(cfg, e, writeDirs, defs); why != "" {
+		if why := safeToRemove(cfg, e, writeDirs, defs, inputs); why != "" {
 			fmt.Fprintf(os.Stderr, "not removing %s: %s; delete it by hand (it stays listed in %s until then)\n", p, why, mpath)
 			kept = append(kept, e)
 			drift++
@@ -411,15 +424,7 @@ func cmdGenerate(args []string, verify bool) int {
 			}
 			continue
 		}
-		if owner := foreignOwner(f); owner != "" {
-			fmt.Fprintf(os.Stderr, "refusing to overwrite %s: it was generated from %s, not %s\n", f.path, owner, f.def)
-			return 2
-		}
-		if err := os.MkdirAll(filepath.Dir(f.path), 0o755); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			return 2
-		}
-		if err := os.WriteFile(f.path, []byte(f.content), 0o644); err != nil {
+		if err := writeReplace(f.path, []byte(f.content)); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			return 2
 		}
@@ -518,7 +523,7 @@ func readManifest(path string) ([]manifestEntry, error) {
 // equals the lexical one); (3) the content is exactly what this config wrote (sha256);
 // (4) it carries the problemgen header whose source (relative to the file) is one of this
 // config's definitions. Catalogs have no header, so ownership cannot be proven: never removed.
-func safeToRemove(cfg *Config, e manifestEntry, writeDirs []string, defs map[string]bool) string {
+func safeToRemove(cfg *Config, e manifestEntry, writeDirs []string, defs map[string]bool, inputs []string) string {
 	rel := filepath.FromSlash(e.rel)
 	if rel == "" || filepath.IsAbs(rel) {
 		return "the manifest entry is not a relative path"
@@ -535,14 +540,11 @@ func safeToRemove(cfg *Config, e manifestEntry, writeDirs []string, defs map[str
 	if !contained {
 		return "it is outside the config directory and the directories this config writes to"
 	}
-	realCfg, err := filepath.EvalSymlinks(absClean(cfg.Path(".")))
-	if err != nil {
+	if err := guardPath(cfg.Path("."), p); err != nil {
 		return err.Error()
 	}
-	r, _ := filepath.Rel(absClean(cfg.Path(".")), p)
-	realP, err := filepath.EvalSymlinks(p)
-	if err != nil || realP != filepath.Join(realCfg, r) {
-		return "its path goes through a symlink"
+	if isInput(p, inputs) {
+		return "it is a definition or the config"
 	}
 	if filepath.Ext(p) == ".json" {
 		return "a catalog carries no ownership header"
@@ -567,6 +569,9 @@ func safeToRemove(cfg *Config, e manifestEntry, writeDirs []string, defs map[str
 
 // foreignOwner returns the definition an existing generated file names in its header when
 // that definition exists and is not the one f is generated from: another config's output.
+// Both sides are compared as real paths: the header is resolved against the file's real
+// directory (guardWrites has already refused a symlinked file or directory below the config's
+// tree, so the file read here is the file that would be replaced).
 func foreignOwner(f plannedFile) string {
 	if f.def == "" {
 		return ""
@@ -579,8 +584,8 @@ func foreignOwner(f plannedFile) string {
 	if src == "" {
 		return ""
 	}
-	owner := absClean(filepath.Join(filepath.Dir(f.path), filepath.FromSlash(src)))
-	if owner == f.def {
+	owner := realPath(filepath.Join(realPath(filepath.Dir(f.path)), filepath.FromSlash(src)))
+	if owner == realPath(f.def) {
 		return ""
 	}
 	if st, err := os.Stat(owner); err != nil || st.IsDir() {
@@ -603,6 +608,127 @@ func generatedSource(head string) string {
 		}
 	}
 	return ""
+}
+
+// guardWrites checks, before anything is written or deleted, every path generate would write:
+// no symlink and no non-regular file on the way (guardPath), no two outputs naming the same
+// file (also case-insensitively, as on macOS and Windows), no output that is a definition, an
+// imported library or the config (also through a hard link: os.SameFile), and no file
+// generated from another existing definition (foreignOwner).
+func guardWrites(cfg *Config, files []plannedFile, inputs []string) []string {
+	var bad []string
+	byFold := map[string]string{}
+	for _, f := range files {
+		if err := guardPath(cfg.Path("."), f.path); err != nil {
+			bad = append(bad, "refusing to write "+f.path+": "+err.Error())
+			continue
+		}
+		key := strings.ToLower(absClean(f.path))
+		if prev, ok := byFold[key]; ok {
+			bad = append(bad, fmt.Sprintf("refusing to write %s: %s is the same file (two outputs, or the same name in another case)", f.path, prev))
+			continue
+		}
+		byFold[key] = f.path
+		if isInput(f.path, inputs) {
+			bad = append(bad, "refusing to write "+f.path+": it is a definition, an imported library or the config")
+			continue
+		}
+		if owner := foreignOwner(f); owner != "" {
+			bad = append(bad, fmt.Sprintf("refusing to overwrite %s: it was generated from %s, not %s", f.path, owner, f.def))
+		}
+	}
+	return bad
+}
+
+// guardPath refuses a path generate would write or delete when it could reach a file the
+// config does not own: a symlink in any component below the deepest directory the path shares
+// with the config directory (symlinks above it are how the checkout is reached), an existing
+// parent that is not a directory, or an existing file that is not a regular file. Components
+// that do not exist yet are created by generate itself.
+func guardPath(cfgDir, p string) error {
+	p = absClean(p)
+	anc := absClean(cfgDir)
+	for anc != filepath.Dir(anc) && !(p == anc || strings.HasPrefix(p, anc+string(filepath.Separator))) {
+		anc = filepath.Dir(anc)
+	}
+	rel, err := filepath.Rel(anc, p)
+	if err != nil {
+		return err
+	}
+	parts := strings.Split(rel, string(filepath.Separator))
+	cur := anc
+	for i, part := range parts {
+		cur = filepath.Join(cur, part)
+		st, err := os.Lstat(cur)
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		switch {
+		case st.Mode()&os.ModeSymlink != 0:
+			return fmt.Errorf("%s is a symlink (generate never writes or deletes through one)", cur)
+		case i < len(parts)-1 && !st.IsDir():
+			return fmt.Errorf("%s is not a directory", cur)
+		case i == len(parts)-1 && !st.Mode().IsRegular():
+			return fmt.Errorf("%s is not a regular file", cur)
+		}
+	}
+	return nil
+}
+
+// isInput reports whether p is one of the input files: the same path (also case-insensitively)
+// or the same file (a hard link, or a case-insensitive filesystem's other spelling).
+func isInput(p string, inputs []string) bool {
+	pst, perr := os.Stat(p)
+	for _, in := range inputs {
+		if strings.EqualFold(absClean(p), absClean(in)) {
+			return true
+		}
+		if perr == nil {
+			if ist, err := os.Stat(in); err == nil && os.SameFile(pst, ist) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// writeReplace writes content to a new file next to path and renames it into place, so the
+// directory entry is replaced: a hard link elsewhere to the old file keeps its content, and a
+// reader never sees a half-written file.
+func writeReplace(path string, content []byte) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".problemgen-*")
+	if err != nil {
+		return err
+	}
+	_, werr := tmp.Write(content)
+	cerr := tmp.Close()
+	if werr == nil {
+		werr = cerr
+	}
+	if werr == nil {
+		werr = os.Chmod(tmp.Name(), 0o644)
+	}
+	if werr == nil {
+		werr = os.Rename(tmp.Name(), path)
+	}
+	if werr != nil {
+		_ = os.Remove(tmp.Name())
+	}
+	return werr
+}
+
+// realPath resolves symlinks where it can (a missing file resolves to its cleaned path).
+func realPath(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return absClean(r)
+	}
+	return absClean(p)
 }
 
 func absClean(p string) string {

@@ -145,9 +145,35 @@ func yamlQuote(s string) string {
 // literal landscape. Kept in step with dnsLabel in config.go.
 const landscapeRe = `^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`
 
-// portalOriginRe is an error portal origin: https, lower-case host, optional port, no path.
-// Every runtime's site check uses the same pattern.
-const portalOriginRe = `^https://[a-z0-9.-]+(:[0-9]+)?$`
+// portalOriginRe is the shape of an error portal origin: https://host[:port] with nothing after.
+// host: lower-case DNS labels of 1-63 characters ([a-z0-9], inner '-'), dot-separated, the last
+// label starting with a letter (so an IPv4 literal is refused; IPv6 literals cannot match). port:
+// 1-5 digits, no leading zero. validPortal adds the two checks a regex cannot make cheaply: host
+// at most 253 characters and port at most 65535. Every runtime's site check, the Helm record and
+// this tool apply the same rule; conformance/vectors.json "origins" lists accepted and refused
+// values every language is driven with. [.] avoids a backslash, so the same text works as a
+// Helm template string.
+const portalOriginRe = `^https://(([a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?)[.])*[a-z]([-a-z0-9]{0,61}[a-z0-9])?(:[1-9][0-9]{0,4})?$`
+
+// portalMsg is the refusal text (tool, record, runtimes).
+const portalMsg = "must be an https origin: https://host[:port], host = lower-case DNS labels (1-63 characters, at most 253 in all, the last starting with a letter; no IP literal), port 1-65535, nothing after"
+
+// validPortal reports whether s is an error portal origin (portalOriginRe, host <= 253, port <= 65535).
+func validPortal(s string) bool {
+	if !portalRe.MatchString(s) {
+		return false
+	}
+	hostPort := strings.TrimPrefix(s, "https://")
+	host, port, hasPort := strings.Cut(hostPort, ":")
+	if len(host) > 253 {
+		return false
+	}
+	if hasPort {
+		n, err := strconv.Atoi(port)
+		return err == nil && n >= 1 && n <= 65535
+	}
+	return true
+}
 
 // RenderRecordYAML renders the Problem CR for one module. landscape == "" renders the Helm
 // form: the inputs are .Values.landscape (required, a DNS label) and .Values.errorPortal.url
@@ -175,7 +201,8 @@ func RenderRecordYAML(m *Module, cfg *Config, landscape, portal, source string) 
 		} else {
 			b.WriteString(`{{- $portal := toString (required "problemgen: .Values.errorPortal.url is required" $errorPortal.url) }}` + "\n")
 		}
-		b.WriteString(`{{- if not (regexMatch "` + portalOriginRe + `" $portal) }}{{ fail "problemgen: .Values.errorPortal.url must be an https origin (https://host[:port], no path)" }}{{ end }}` + "\n")
+		b.WriteString(`{{- $portalHost := regexReplaceAll "^https://([^:]*).*$" $portal "${1}" }}{{- $portalPort := regexReplaceAll "^https://[^:]*:?" $portal "" }}` + "\n")
+		b.WriteString(`{{- if or (not (regexMatch "` + portalOriginRe + `" $portal)) (gt (len $portalHost) 253) (gt (atoi $portalPort) 65535) }}{{ fail "problemgen: .Values.errorPortal.url ` + portalMsg + `" }}{{ end }}` + "\n")
 		o = "{{ $portal }}"
 	}
 	q := yamlQuote
