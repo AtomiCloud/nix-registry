@@ -1,0 +1,14 @@
+# expect: L213
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+types:
+  O: { fields: { a: { type: string } } }
+problems:
+  p:
+    title: P
+    status: 400
+    recoverable: true
+    detail: '{o}'
+    data: { o: { type: O } }

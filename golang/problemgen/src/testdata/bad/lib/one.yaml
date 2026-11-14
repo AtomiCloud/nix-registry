@@ -1,0 +1,7 @@
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemLibrary
+name: one
+types:
+  A: { enum: [x] }
+problems:
+  shared: { title: Shared, status: 400, recoverable: true, detail: d }

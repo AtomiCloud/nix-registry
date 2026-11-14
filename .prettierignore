@@ -12,3 +12,7 @@
 # exactly what was published. The right answer is to leave the published bytes
 # alone, not to re-record the digest after a formatter has touched them.
 bunWrapper/resolver-smoke/vendor/nix.mjs
+
+# problemgen test inputs: some are deliberately malformed; bytes must not change
+golang/problemgen/src/testdata/
+golang/problemgen/tests/fixture/

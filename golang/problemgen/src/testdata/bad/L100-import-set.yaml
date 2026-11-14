@@ -1,0 +1,7 @@
+# expect: L100
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+imports: [./lib/set.yaml]
+problems: {}

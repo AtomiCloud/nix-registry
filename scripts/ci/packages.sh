@@ -65,6 +65,8 @@ REGISTRY_PACKAGES=(
   dlint
   chart-checks
   chart-checks-tests
+  problemgen
+  problemgen-tests
   coderabbit
   ccc
   md-mermaid-lint

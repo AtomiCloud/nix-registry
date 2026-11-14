@@ -1,0 +1,23 @@
+# found by the generative compile test: enums named like object members / helper methods (C# CS0119 before qualification)
+# fuzz repro (seed 1 batch-006 f0155, batch-009 f0249). Lint: clean. C# (dotnet build):
+#   Gen/f.g.cs: error CS0119: 'object.GetType()' is a method, which is not valid in the given context
+# Inside `internal static class __GetTypeWire`, `GetType.Aa` binds to the inherited
+# object.GetType() method, not the enum. The helper's own methods do the same: enums named
+# Write and Read fail with CS0119 '__WriteWire.Write(Write)' / '__ReadWire.Read(JsonElement)'
+# (seed 1 f0085). All seven System.Object members fail as enum names too:
+# Equals, Finalize, GetHashCode, GetType, MemberwiseClone, ReferenceEquals, ToString.
+# (The same names as object types compile.)
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+types:
+  GetType: { enum: [aa, bb] }
+problems:
+  p:
+    title: P
+    status: 400
+    recoverable: true
+    detail: d
+    data:
+      x: { type: GetType }

@@ -1,0 +1,21 @@
+# expect: L231
+# fuzz repro (seed 1, trial batch f0010). Lint: clean. C# (dotnet build):
+#   Gen/f.g.cs(13,22): error CS0542: 'PrintMembers': member names cannot be the same as their enclosing type
+# The same for named types EqualityContract, Equals, GetHashCode, ToString (members every C#
+# record synthesises; csRecordMembers in symbols.go). Probably also problem ids print_members etc.
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+types:
+  PrintMembers:
+    fields:
+      a: { type: string }
+problems:
+  p:
+    title: P
+    status: 400
+    recoverable: true
+    detail: d
+    data:
+      x: { type: PrintMembers }

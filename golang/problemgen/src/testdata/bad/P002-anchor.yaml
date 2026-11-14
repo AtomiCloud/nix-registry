@@ -1,0 +1,14 @@
+# expect: P002
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+types:
+  A: &x { enum: [a] }
+  B: *x
+problems:
+  p:
+    title: P
+    status: 400
+    recoverable: true
+    detail: d

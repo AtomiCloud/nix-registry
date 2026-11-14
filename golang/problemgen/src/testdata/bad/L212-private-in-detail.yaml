@@ -1,0 +1,12 @@
+# expect: L212
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+problems:
+  p:
+    title: P
+    status: 400
+    recoverable: true
+    detail: 'secret is {s}'
+    data: { s: { type: string, private: true } }

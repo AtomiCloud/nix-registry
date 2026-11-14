@@ -1,0 +1,15 @@
+# a public optional field plus every private shape still lints and generates
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+problems:
+  p:
+    title: P
+    status: 400
+    recoverable: true
+    detail: d
+    log: '{secret|default:none} {count}'
+    data:
+      secret: { type: string, private: true, optional: true, description: SECRET-DESCRIPTION, deprecated: SECRET-DEPRECATION }
+      count: { type: integer, private: true }

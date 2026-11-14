@@ -1,0 +1,5 @@
+# expect: P006
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+problems: {}

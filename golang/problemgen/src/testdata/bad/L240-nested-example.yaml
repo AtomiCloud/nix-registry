@@ -1,0 +1,11 @@
+# expect: L240
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+types:
+  Nested:
+    fields:
+      message: { type: string, example: 'x }} y' }
+problems:
+  p: { title: P, status: 400, recoverable: true, detail: d, data: { n: { type: Nested } } }

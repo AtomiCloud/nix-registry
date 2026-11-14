@@ -1,0 +1,22 @@
+# expect: L231
+# fuzz repro (seed 1 batch-005 f0146). Lint: clean. C# (dotnet build):
+#   Gen/f.g.cs: error CS0542: 'Detail': member names cannot be the same as their enclosing type
+# Problem `detail` becomes record Detail, which declares Detail(). Same for problem ids
+# log_line, write_data (own generated members) and equals, to_string, get_hash_code,
+# print_members, equality_contract (record-synthesised members); named types Equals,
+# ToString, GetHashCode, PrintMembers, EqualityContract fail the same way
+# (see cs-type-named-record-member.yaml). meta is already refused; instance, cause,
+# received_type, received_detail, retry_after_seconds, deconstruct, get_type, metadata,
+# closed compile.
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+problems:
+  detail:
+    title: P
+    status: 400
+    recoverable: true
+    detail: d
+    data:
+      x: { type: string }

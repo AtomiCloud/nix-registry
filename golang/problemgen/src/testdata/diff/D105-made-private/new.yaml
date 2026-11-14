@@ -1,0 +1,22 @@
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+types:
+  Level: { enum: [a, b] }
+  Box:
+    fields:
+      w: { type: integer }
+problems:
+  p:
+    title: P
+    status: 429
+    recoverable: true
+    retryAfter: wait
+    detail: "wait {wait}"
+    log: "{name}"
+    data:
+      wait: { type: integer }
+      name: { type: string, private: true }
+      level: { type: Level }
+      box: { type: Box }

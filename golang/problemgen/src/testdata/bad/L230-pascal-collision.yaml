@@ -1,0 +1,8 @@
+# expect: L230
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+problems:
+  a_1: { title: A, status: 400, recoverable: true, detail: d }
+  a1: { title: B, status: 400, recoverable: true, detail: d }

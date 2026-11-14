@@ -1,0 +1,8 @@
+# expect: L102
+apiVersion: problems.atomi.cloud/v1
+kind: ProblemSet
+module: m
+version: v1
+imports: [builtin:generic/v1]
+problems:
+  conflict: { title: Mine, status: 409, recoverable: true, detail: d }
