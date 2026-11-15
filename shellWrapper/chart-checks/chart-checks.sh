@@ -584,14 +584,20 @@ cmd_render() { # chart
   out="${CFG_DIR}/$(chart_cfg renderDir)"
   [ -n "$(chart_cfg renderDir)" ] || out="${CFG_DIR}/infra/rendered"
   out="${out}/${base}"
-  # `render` deletes the *.yaml files of its output directory: it must never be the chart itself.
-  mkdir -p "${out}"
-  local real_out real_chart
-  real_out="$(cd "${out}" && pwd -P)"
+  # `render` deletes the *.yaml files of its output directory: it must stay inside the repository
+  # (symlinks resolved, nothing created before the check) and must never be the chart itself.
+  local real_out real_chart real_cfg
+  real_out="$(realpath -m "${out}")"
   real_chart="$(cd "${chart}" && pwd -P)"
+  real_cfg="$(cd "${CFG_DIR}" && pwd -P)"
+  case "${real_out}/" in
+  "${real_cfg}/"*) ;;
+  *) die 3 "${CONFIG}: chart.renderDir resolves to ${real_out}, outside the repository ${real_cfg}; refusing to render there" ;;
+  esac
   case "${real_out}/" in
   "${real_chart}/"*) die 3 "${CONFIG}: chart.renderDir resolves to ${real_out}, inside the chart ${real_chart}; refusing to render over the chart's own files" ;;
   esac
+  mkdir -p "${out}"
   if [ -e "${chart}/values.default.yaml" ]; then
     die 1 "${chart}/values.default.yaml: 'default' is the stack of values.yaml alone, so no overlay may be named default"
   fi

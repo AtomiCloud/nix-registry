@@ -492,6 +492,17 @@ run "${D}" render chart
 expect "a renderDir that resolves to the chart itself is refused" 3 "inside the chart"
 if [ -f "${D}/chart/Chart.yaml" ] && [ -f "${D}/chart/values.yaml" ]; then ok "...and the chart's own files are untouched"; else bad "render deleted the chart's files"; fi
 
+D="$(chart_repo chart-symlink)"
+mkdir -p "${ROOT}/outside"
+printf 'keep: me\n' >"${ROOT}/outside/chart-old.yaml"
+mkdir -p "${ROOT}/outside/chart"
+printf 'keep: me\n' >"${ROOT}/outside/chart/keep.yaml"
+ln -s "${ROOT}/outside" "${D}/linked"
+yq -i '.chart.renderDir = "linked"' "${D}/chart-checks.yaml"
+run "${D}" render chart
+expect "a renderDir that is a symlink out of the repository is refused" 3 "outside the repository"
+if [ -f "${ROOT}/outside/chart/keep.yaml" ] && [ -f "${ROOT}/outside/chart-old.yaml" ]; then ok "...and the outside directory's yaml files are untouched"; else bad "render deleted files outside the repository"; fi
+
 D="$(chart_repo chart-defaultoverlay)"
 printf 'labelPrefix: other.example\n' >"${D}/chart/values.default.yaml"
 run "${D}" render chart
