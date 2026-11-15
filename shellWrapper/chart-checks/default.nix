@@ -2,7 +2,7 @@
 
 let
   # Version of the chart-checks tool
-  version = "0.2.0";
+  version = "0.3.0";
 
   # Every binary the script calls. Nothing is assumed to be on the consumer's PATH.
   #

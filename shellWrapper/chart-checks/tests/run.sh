@@ -413,7 +413,8 @@ run "${D}" check-chart chart
 expect "bad values for the policy chart are red" 1 "service-label" "refused"
 yq -i '.policies[0].values.labelPrefix = "fx.example"' "${D}/chart-checks.yaml"
 run "${D}" check-chart chart
-expect "...and a literal prefix cannot follow the stacks: the prod stack is red" 1 "== stack prod =="
+expect "...and a literal prefix cannot follow the stacks: the prod stack is red" 1 "== stack prod ==" "stack prod: check: exit 1"
+if grep -qF "stack default: check" <<<"${OUT}"; then bad "the default stack was listed as failed"; else ok "...and only the prod stack is listed as failed"; fi
 
 D="$(chart_repo chart-emptypath)"
 yq -i '.policies[0].chartValues.labelPrefix = ".nope"' "${D}/chart-checks.yaml"
@@ -433,8 +434,53 @@ sed -i 's/^version: .*/version: 0.1/' "${D}/chart/Chart.yaml"
 run "${D}" lint chart
 expect "lint refuses a chart helm lint rejects" 1 "ERROR" "helm lint refused"
 run "${D}" check-chart chart
-expect "check-chart stops at helm lint" 1 "helm lint refused"
-if grep -q '== stack' <<<"${OUT}"; then bad "check-chart went on to the stacks after a lint error"; else ok "check-chart does not reach the stacks after a lint error"; fi
+expect "check-chart reports a helm lint error and still checks every stack" 1 "helm lint refused" "== stack default ==" "== stack prod ==" "   - lint: exit 1"
+
+# every failure in one run: two different failures on two stacks
+two_failures() { # name
+  local d
+  d="$(chart_repo "$1")"
+  cat >"${d}/chart/templates/default-only.yaml" <<'EOF2'
+{{- if eq .Values.labelPrefix "fx.example" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: default-only
+spec:
+  bogusField: true
+  ports:
+    - port: 80
+{{- end }}
+EOF2
+  printf '%s' "${d}"
+}
+D="$(two_failures chart-two)"
+yq -i 'del(.policies[0].chartValues) | .policies[0].values.labelPrefix = "fx.example"' "${D}/chart-checks.yaml"
+run "${D}" check-chart chart
+expect "a schema failure on one stack and a policy failure on another are both reported" 1 \
+  "bogusField" "service-label" "check-chart failed (2):" "   - stack default: check: exit 1" "   - stack prod: check: exit 1"
+
+D="$(two_failures chart-render)"
+printf '{{- if eq .Values.labelPrefix "prod.example" }}{{ fail "the prod stack cannot render" }}{{- end }}\n' >"${D}/chart/templates/prod-fails.yaml"
+run "${D}" check-chart chart
+expect "a render failure on one stack and a check failure on another are both reported" 1 \
+  "the prod stack cannot render" "bogusField" "== stack default ==" \
+  "   - stack prod: render (check skipped): exit 1" "   - stack default: check: exit 1"
+if grep -qF "== stack prod ==" <<<"${OUT}"; then bad "a stack that did not render was checked"; else ok "...and the stack that did not render is not checked"; fi
+if [ ! -e "${D}/infra/rendered/chart/prod.yaml" ] && [ -s "${D}/infra/rendered/chart/default.yaml" ]; then ok "...and a failed render leaves no file behind"; else bad "a failed render left a file, or the good stack was not written"; fi
+run "${D}" render chart
+expect "render renders every stack it can and exits 1" 1 "the prod stack cannot render" "render failed for at least one stack"
+if [ -s "${D}/infra/rendered/chart/default.yaml" ]; then ok "...and still writes the stacks that render"; else bad "render dropped the good stack"; fi
+
+# the exit code is the first failing step's: lint (1) runs before install (4)
+D="$(chart_repo chart-install)"
+sed -i 's/^version: .*/version: 0.1/' "${D}/chart/Chart.yaml"
+yq -i '.crds = [{"name": "gone", "url": "file:///nonexistent/crds.yaml", "sha256": "'"$(printf '0%.0s' $(seq 1 64))"'"}]' "${D}/chart-checks.yaml"
+run "${D}" check-chart chart
+expect "a lint error and an install failure are both reported, with the first step's exit code" 1 \
+  "   - lint: exit 1" "   - install (every check skipped): exit 4"
+if grep -qF "== stack" <<<"${OUT}"; then bad "stacks were checked without an install"; else ok "...and no stack is checked without an install"; fi
+if compgen -G "${D}/.chart-checks.stage.*" >/dev/null; then bad "the failed install left a stage directory"; else ok "...and the failed install leaves no stage directory"; fi
 
 D="$(chart_repo chart-usage)"
 run "${D}" check-chart

@@ -8,7 +8,7 @@ chart-checks install [-c chart-checks.yaml]            fetch + verify into .char
 chart-checks check   [-c chart-checks.yaml] [--chart <dir> [--stack <name>]] <file>...  validate rendered manifests offline
 chart-checks render      [-c chart-checks.yaml] [--release <name>] <chart>   chart + every values.<name>.yaml -> rendered files
 chart-checks lint        <chart>                                              helm lint
-chart-checks check-chart [-c chart-checks.yaml] [--release <name>] <chart>    all of the above, in order
+chart-checks check-chart [-c chart-checks.yaml] [--release <name>] <chart>    all of the above; reports every failure
 chart-checks --version | --help
 ```
 
@@ -25,6 +25,8 @@ it every `charts/*` instance); `charts/vap-policies` runs it on itself with `pat
 | 3    | `chart-checks.yaml` refused: unknown key, missing pin, `temporary` without a `reason`, ... |
 | 4    | install failed: fetch error, sha256 or commit mismatch, an entry that yields no CRD        |
 | 5    | tool error: a policy chart did not render or holds no `ValidatingAdmissionPolicy`          |
+
+`check-chart` runs every step and exits with the first failing step's code (see below).
 
 ## `install`
 
@@ -123,10 +125,27 @@ A **values stack** is one render of the chart: `default` is `values.yaml` alone,
 
 | Command                          | What it does                                                                                                                                                                                                                                                                                   |
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `render [--release n] <chart>`   | Deletes `<renderDir>/<chart dir name>/*.yaml`, then writes `default.yaml` and one `<stack>.yaml` per overlay (`helm template <release> <chart>`, overlays with `--values values.yaml --values values.<name>.yaml`). `renderDir` is next to the config (default `infra/rendered`). Exit 1 if helm fails or an overlay is named `default` (the reserved stack of `values.yaml` alone); exit 3 if the output directory is inside the chart. |
+| `render [--release n] <chart>`   | Deletes `<renderDir>/<chart dir name>/*.yaml`, then writes `default.yaml` and one `<stack>.yaml` per overlay (`helm template <release> <chart>`, overlays with `--values values.yaml --values values.<name>.yaml`). `renderDir` is next to the config (default `infra/rendered`). Every stack is rendered; a stack helm cannot render leaves no file and makes the exit 1. Exit 1 too if an overlay is named `default` (the reserved stack of `values.yaml` alone); exit 3 if the output directory is inside the chart. |
 | `lint <chart>`                   | `helm lint`. Exit 1 on a lint error.                                                                                                                                                                                                                                                           |
 | `check --chart <dir> [--stack s] <file>...` | `check` as above, with the policy charts' `chartValues` read from that chart's stack values (`--stack` defaults to `default`).                                                                                                                                                      |
-| `check-chart [--release n] <chart>` | `render`, `lint`, `install`, then for every rendered stack: `check` (policy charts get that stack's values). Stops at the first refusal; prints `Helm render checks passed` on success. Exit codes are those of the step that failed.            |
+| `check-chart [--release n] <chart>` | Renders every stack, then `lint`, `install`, and `check` for every rendered stack (policy charts get that stack's values). See below.            |
+
+**`check-chart` reports every failure.** Every step runs, whatever failed before it: each stack's
+render, `helm lint`, `install`, and each rendered stack's `check` (both stages). Only two things skip
+work: a stack that did not render is not checked, and a failed `install` skips every `check`. The
+run ends with one line per failed step, then exits with the **first failing step's exit code**, in the
+order the steps run (renders, lint, install, checks):
+
+```text
+❌ chart-checks: check-chart failed (3):
+   - stack prod: render (check skipped): exit 1
+   - lint: exit 1
+   - stack default: check: exit 1
+```
+
+On success it prints `Helm render checks passed` and exits 0. A refused `chart-checks.yaml`, a
+`renderDir` outside the repository or inside the chart, and an overlay named `default` stop it at
+once, before any step.
 
 **Labels.** `chart-checks` has no label rule of its own: labels are checked by the policy
 charts, such as a `require-lpsm-labels` VAP that matches workloads. Objects no policy matches are
@@ -194,9 +213,14 @@ entries need no install and see local edits at once; a policy chart with no VAP 
 Chart commands: `render` writes `default.yaml` and one file per overlay (stale files dropped, `--release`
 honoured); `check-chart` passes a good chart, and an object missing a label that no policy asks for
 passes; each planted failure is red: bad `values` for the policy chart (and a literal prefix that cannot
-follow the stacks), a `helm lint` error (`check-chart` stops there), an empty `chartValues` path;
+follow the stacks), a `helm lint` error (`check-chart` still checks every stack), an empty `chartValues` path;
 `labels` is not a command and `chart.labels` / `chart.labelPrefix` are unknown keys; config refusals
 and usage errors.
+
+`check-chart` reports every failure in one run: a schema failure on one stack and a policy failure on
+another; a render failure on one stack (not checked, no file left) and a check failure on another
+(`render` alone also renders the good stacks and exits 1); a lint error and an install failure,
+exiting with lint's 1 and checking no stack.
 
 ```bash
 nix build .#chart-checks-tests -L
