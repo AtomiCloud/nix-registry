@@ -363,7 +363,7 @@ EOF
 run "${D}" check "${M}/good.yaml"
 expect "bindings alone are not a policy set (no vacuous pass)" 5 "rendered no ValidatingAdmissionPolicy"
 
-printf '\n== chart commands: render, lint, labels, check-chart ==\n'
+printf '\n== chart commands: render, lint, check-chart ==\n'
 # A repository with an application chart, a policy chart whose VAP depends on its labelPrefix
 # value, and a chart-checks.yaml that feeds the stack's prefix to it through chartValues.
 chart_repo() { # name
@@ -376,7 +376,6 @@ chart_repo() { # name
 kubernetes: "1.30"
 chart:
   release: fx
-  labelPrefix: .labelPrefix
 policies:
   - name: prefix
     path: prefix-policy
@@ -398,7 +397,7 @@ run "${D}" render chart --release other
 if [ ! -e "${D}/infra/rendered/chart/stale.yaml" ] && grep -q "name: 'other-config'" "${D}/infra/rendered/chart/default.yaml"; then ok "render drops stale files and --release overrides the config"; else bad "render kept a stale file or ignored --release"; fi
 
 run "${D}" check-chart chart
-expect "check-chart passes a good chart (both stacks, test hook exempt)" 0 "== stack default ==" "== stack prod ==" "Helm render checks passed"
+expect "check-chart passes a good chart (both stacks)" 0 "== stack default ==" "== stack prod ==" "Helm render checks passed"
 
 run "${D}" check --chart chart --stack prod infra/rendered/chart/prod.yaml
 expect "check --chart --stack gives the policy chart that stack's prefix" 0 "passed"
@@ -421,27 +420,12 @@ yq -i '.policies[0].chartValues.labelPrefix = ".nope"' "${D}/chart-checks.yaml"
 run "${D}" check-chart chart
 expect "a chartValues path that is empty in the chart is a tool error" 5 "chartValues.labelPrefix" "is empty"
 
-# planted failure: a first-party object without one of the labels
+# labels are the policy charts' job: chart-checks holds no label rule of its own, so a
+# ConfigMap without the module label passes when no policy asks for it
 D="$(chart_repo chart-nolabel)"
 sed -i 's/^moduleLabel: .*/moduleLabel: other/' "${D}/chart/values.yaml"
 run "${D}" check-chart chart
-expect "a first-party object without a label is red" 1 "first-party objects without all fx.example/ labels" "configmap.yaml (ConfigMap fx-config)"
-run "${D}" labels chart infra/rendered/chart/default.yaml
-expect "labels runs on its own" 1 "first-party objects without all fx.example/ labels"
-
-D="$(chart_repo chart-customlabels)"
-yq -i '.chart.labels = ["landscape", "platform", "service", "module", "team"]' "${D}/chart-checks.yaml"
-run "${D}" check-chart chart
-expect "chart.labels is the configured list" 1 "without all fx.example/ labels" "team"
-
-# the label rule covers the chart's OWN templates only: an object from a subchart is not checked
-D="$(chart_repo chart-subchart)"
-mkdir -p "${D}/chart/charts/sub/templates"
-printf 'apiVersion: v2\nname: sub\nversion: 0.1.0\n' >"${D}/chart/charts/sub/Chart.yaml"
-printf 'dependencies:\n  - name: sub\n    version: 0.1.0\n' >>"${D}/chart/Chart.yaml"
-printf 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: sub-config\n  labels:\n    fx.example/service: sub\n    prod.example/service: sub\ndata:\n  a: b\n' >"${D}/chart/charts/sub/templates/cm.yaml"
-run "${D}" check-chart chart
-expect "an object from a subchart is not held to the first-party label rule" 0 "Helm render checks passed"
+expect "an object missing a label no policy asks for passes" 0 "Helm render checks passed"
 
 # planted failure: helm lint (a two-part chart version: helm template renders it, lint refuses it)
 D="$(chart_repo chart-lint)"
@@ -458,14 +442,9 @@ expect "check-chart needs a chart" 2 "takes exactly one chart directory"
 run "${D}" render nope
 expect "render of a missing chart is a usage error" 2 "not a chart directory"
 run "${D}" labels chart
-expect "labels needs rendered files" 2 "at least one rendered file"
+expect "labels is not a command" 2 "unknown command: labels"
 run "${D}" check --stack prod infra/rendered/chart/prod.yaml
 expect "--stack needs --chart" 2 "--stack needs --chart"
-sed -i '/^  labelPrefix:/d' "${D}/chart-checks.yaml"
-run "${D}" check-chart chart
-expect "without chart.labelPrefix the label check is off (chartValues still resolve)" 0 "Helm render checks passed"
-run "${D}" labels chart infra/rendered/chart/default.yaml
-expect "labels without chart.labelPrefix in the config is refused" 3 "needs chart.labelPrefix"
 
 # review fixes: a stack never inherits a previous stack's objects; render never overwrites the chart
 D="$(chart_repo chart-leak)"
@@ -508,15 +487,6 @@ printf 'labelPrefix: other.example\n' >"${D}/chart/values.default.yaml"
 run "${D}" render chart
 expect "an overlay named default is refused" 1 "no overlay may be named default"
 
-# fail closed: a label helper (awk/yq/jq) that fails must never read as "no label missing".
-# The tool puts its own binaries first on PATH, so a stub cannot shadow them; a rendered file
-# the helper cannot parse makes the pipeline fail instead.
-D="$(chart_repo chart-failclosed)"
-run "${D}" render chart
-printf 'apiVersion: v1\nkind: ConfigMap\nmetadata: [unclosed\n' >"${D}/infra/rendered/chart/default.yaml"
-run "${D}" labels chart infra/rendered/chart/default.yaml
-expect "labels fails closed when its helper fails" 5 "label check helper"
-
 printf '\n== chart config refusals (exit 3) ==\n'
 D="$(chart_repo chart-refuse)"
 yq -i '.chart.bogus = 1' "${D}/chart-checks.yaml"
@@ -531,9 +501,9 @@ yq -i '.policies[0].chartValues.labelPrefix = 3' "${D}/chart-checks.yaml"
 run "${D}" render chart
 expect "chartValues must map to yq paths" 3 "chartValues must map"
 D="$(chart_repo chart-refuse4)"
-yq -i '.chart.labels = ["a"] | del(.chart.labelPrefix)' "${D}/chart-checks.yaml"
+yq -i '.chart.labels = ["a"] | .chart.labelPrefix = ".labelPrefix"' "${D}/chart-checks.yaml"
 run "${D}" render chart
-expect "chart.labels without chart.labelPrefix is refused" 3 "labels needs labelPrefix"
+expect "chart.labels and chart.labelPrefix are unknown keys" 3 "chart: unknown key labelPrefix" "chart: unknown key labels"
 D="$(chart_repo chart-refuse5)"
 yq -i '.chart.renderDir = "../out"' "${D}/chart-checks.yaml"
 run "${D}" render chart

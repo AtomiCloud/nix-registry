@@ -6,7 +6,6 @@
 #   chart-checks check   [-c chart-checks.yaml] <file>...
 #   chart-checks render      [-c chart-checks.yaml] [--release <name>] <chart>
 #   chart-checks lint        <chart>
-#   chart-checks labels      [-c chart-checks.yaml] <chart> <rendered file>...
 #   chart-checks check-chart [-c chart-checks.yaml] [--release <name>] <chart>
 #
 # The nix wrapper prepends `set -euo pipefail`, `CHART_CHECKS_VERSION=...` and a PATH that
@@ -58,8 +57,7 @@ Usage:
   chart-checks check   [-c chart-checks.yaml] --chart <dir> [--stack <name>] <file>...
   chart-checks render      [-c chart-checks.yaml] [--release <name>] <chart>   chart + every values.<name>.yaml -> rendered files
   chart-checks lint        <chart>                                              helm lint
-  chart-checks labels      [-c chart-checks.yaml] <chart> <rendered file>...    first-party label check
-  chart-checks check-chart [-c chart-checks.yaml] [--release <name>] <chart>    render, lint, install, check + labels per stack
+  chart-checks check-chart [-c chart-checks.yaml] [--release <name>] <chart>    render, lint, install, check per stack
   chart-checks --version | --help
 
 install  Fetches every entry of chart-checks.yaml into .chart-checks/ (next to the config)
@@ -73,11 +71,8 @@ check    Reads only .chart-checks/ (and `path` entries); runs `install` first wh
 
 render    Writes <renderDir>/<chart>/default.yaml (values.yaml) and one <stack>.yaml per values.<stack>.yaml
          overlay (rendered on top of values.yaml); renderDir defaults to infra/rendered, next to the config.
-labels   Every object of the chart's OWN templates (not its subcharts) carries every label of
-         chart.labels (default landscape, platform, service, module) under the prefix read from the
-         stack's values with the yq path chart.labelPrefix. Helm test hooks are exempt.
 check-chart  Everything above in order: render, helm lint, install, then for every rendered stack
-         `check` (policy charts get that stack's chartValues) and `labels`; stops at the first refusal.
+         `check` (policy charts get that stack's chartValues); stops at the first refusal.
 
 Exit codes: 0 ok, 1 manifest refused, 2 usage, 3 config refused, 4 install failed, 5 tool error.
 EOF
@@ -153,14 +148,9 @@ def chart_errors:
   if .chart == null then []
   elif (.chart | type) != "object" then ["chart: must be a mapping"]
   else
-    (.chart | (keys - ["release","renderDir","labelPrefix","labels"]) | map("chart: unknown key \(.)"))
+    (.chart | (keys - ["release","renderDir"]) | map("chart: unknown key \(.)"))
     + (if (.chart.release // "x") | type != "string" or . == "" then ["chart: release must be a non-empty string"] else [] end)
     + (if (.chart.renderDir // "x") | type != "string" or . == "" or startswith("/") or test("(^|/)\\.\\.(/|$)") then ["chart: renderDir must be a relative path that stays inside the repository"] else [] end)
-    + (if (.chart.labelPrefix // "x") | type != "string" or . == "" then ["chart: labelPrefix must be a yq path in the chart values, such as .labelPrefix"] else [] end)
-    + (if .chart.labels == null then []
-       elif (.chart.labels | type) != "array" or (.chart.labels | length) == 0 or (.chart.labels | any(type != "string" or . == ""))
-       then ["chart: labels must be a non-empty list of label names"] else [] end)
-    + (if .chart.labels != null and .chart.labelPrefix == null then ["chart: labels needs labelPrefix (the label check is driven by it)"] else [] end)
   end;
 (
   if type != "object" then ["top level must be a mapping"] else
@@ -513,7 +503,7 @@ cmd_check() {
 
 # ----------------------------------------------------------------- chart ----
 # The commands below render a Helm chart and check it the way a consumer repository does:
-# `render` + `lint` + `install` + `check` per values stack + the first-party label check.
+# `render` + `lint` + `install` + `check` per values stack.
 
 CHART_DIR=""   # --chart: the chart whose stack values feed `chartValues`
 CHART_STACK="" # --stack: which values stack of that chart (default / <name> of values.<name>.yaml)
@@ -538,19 +528,6 @@ stack_values_file() { # chart stack -> path
     yq ea 'select(fi == 0) * select(fi == 1)' "${chart}/values.yaml" "${overlay}" >"${out}"
   fi
   printf '%s' "${out}"
-}
-
-# The label prefix of one stack, read with the yq path of `chart.labelPrefix`.
-stack_prefix() { # chart stack
-  local f path v
-  path="$(chart_cfg labelPrefix)"
-  f="$(stack_values_file "$1" "$2")"
-  v="$(yq -r "${path}" "${f}" 2>/dev/null || true)"
-  if [ -z "${v}" ] || [ "${v}" = "null" ]; then
-    printf '❌ chart-checks: %s/values.yaml has no labelPrefix (chart.labelPrefix: %s, stack %s)\n' "$1" "${path}" "$2" >&2
-    return 1
-  fi
-  printf '%s' "${v}"
 }
 
 # The values handed to one policy chart's `helm template` as JSON: its literal `values`, with
@@ -619,43 +596,8 @@ cmd_lint() { # chart
   helm lint "$1" || die 1 "helm lint refused ${1}"
 }
 
-# labels <chart> <rendered file>...: every object from the chart's OWN templates (not its
-# subcharts), of any kind, carries every configured label under the stack's prefix. Helm test
-# hooks are exempt. Helm marks each document with "# Source: <chart>/templates/..." (own) or
-# "# Source: <chart>/charts/<sub>/..." (subchart); it is turned into a key the filter selects on.
-cmd_labels() { # chart files...
-  local chart="$1" file stack prefix name missing labels
-  shift
-  need_chart_dir "${chart}"
-  load_config
-  [ -n "$(chart_cfg labelPrefix)" ] || die 3 "${CONFIG}: the label check needs chart.labelPrefix (a yq path in the chart values)"
-  name="$(chart_name "${chart}")"
-  labels="$(jq -c '.chart.labels // ["landscape","platform","service","module"]' <<<"${CFG_JSON}")"
-  for file in "$@"; do
-    [ -f "${file}" ] || die 2 "not a file: ${file}"
-    stack="$(basename "${file}" .yaml)"
-    prefix="$(stack_prefix "${chart}" "${stack}")" || return 1
-    missing="$(
-      awk '/^# Source: /{ sub(/^# Source: /, ""); printf "__source: \"%s\"\n", $0; next } { print }' "${file}" |
-        yq ea -o=json -I=0 '.' - |
-        jq -r --arg prefix "${prefix}" --arg own "${name}/templates/" --argjson labels "${labels}" '
-          select(type == "object" and .kind != null and ((.__source // "") | startswith($own)))
-          | select(((.metadata.annotations // {})["helm.sh/hook"] // "" | split(",") | map(gsub("^\\s+|\\s+$"; ""))
-              | any(. == "test" or . == "test-success" or . == "test-failure")) | not)
-          | select((.metadata.labels // {}) as $l | $labels | map($prefix + "/" + .) | any(. as $k | $l | has($k) | not))
-          | .__source + " (" + .kind + " " + (.metadata.name // "?") + ")"'
-    )" || die 5 "the label check helper (awk, yq or jq) failed on ${file}; refusing to pass unchecked"
-    if [ -n "${missing}" ]; then
-      printf '❌ %s: first-party objects without all %s/ labels (%s):\n' "${file}" "${prefix}" "$(jq -r 'join(", ")' <<<"${labels}")" >&2
-      while IFS= read -r line; do printf '   - %s\n' "${line}" >&2; done <<<"${missing}"
-      return 1
-    fi
-  done
-  say "✅ chart-checks: first-party labels present in $# file(s)"
-}
-
 # check-chart <chart>: render, helm lint, install, then per rendered stack `check` (the policy
-# charts get that stack's chartValues) and the first-party label check; stops at the first refusal.
+# charts get that stack's chartValues); stops at the first refusal.
 cmd_check_chart() { # chart
   local chart="$1" f stack
   need_chart_dir "${chart}"
@@ -669,9 +611,6 @@ cmd_check_chart() { # chart
     stack="$(basename "${f}" .yaml)"
     say "== stack ${stack} =="
     CHART_DIR="${chart}" CHART_STACK="${stack}" cmd_check "${f}" || return $?
-    if [ -n "$(chart_cfg labelPrefix)" ]; then
-      cmd_labels "${chart}" "${f}"
-    fi
   done
   say "✅ Helm render checks passed"
 }
@@ -693,7 +632,7 @@ main() {
     printf 'chart-checks %s\n' "${CHART_CHECKS_VERSION}"
     exit 0
     ;;
-  install | check | render | lint | labels | check-chart)
+  install | check | render | lint | check-chart)
     cmd="$1"
     shift
     ;;
@@ -759,10 +698,6 @@ main() {
     lint) cmd_lint "${files[0]}" ;;
     check-chart) cmd_check_chart "${files[0]}" ;;
     esac
-    ;;
-  labels)
-    [ "${#files[@]}" -ge 2 ] || die 2 "labels takes a chart directory and at least one rendered file"
-    cmd_labels "${files[@]}"
     ;;
   esac
 }
