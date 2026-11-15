@@ -28,7 +28,7 @@ CONFIG="chart-checks.yaml"
 STAMP_TAG="chart-checks-stamp-v1"
 # Embedded in kubectl-validate: the only Kubernetes versions whose core schemas it carries.
 # Any other version makes it download the OpenAPI spec from GitHub, which `check` must never do.
-K8S_VERSIONS_RE='^1\.(2[3-9]|30)$'
+K8S_VERSIONS_RE='^1\.(2[3-9]|3[0-5])$'
 
 CC_TMP=""
 STAGE=""
@@ -183,7 +183,7 @@ load_config() {
   fi
   K8S="$(jq -r '.kubernetes' <<<"${CFG_JSON}")"
   if ! [[ ${K8S} =~ ${K8S_VERSIONS_RE} ]]; then
-    die 3 "kubernetes \"${K8S}\" is not supported: the offline core schemas cover 1.23 to 1.30 only (anything newer would make the validator download them)"
+    die 3 "kubernetes \"${K8S}\" is not supported: the offline core schemas cover 1.23 to 1.35 only (anything newer would make the validator download them)"
   fi
   STAMP="${STAMP_TAG} $(jq -S -c . <<<"${CFG_JSON}" | sha256sum | cut -d' ' -f1)"
 }

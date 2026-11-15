@@ -69,7 +69,7 @@ invocation reports everything.
 ## `chart-checks.yaml`
 
 ```yaml
-kubernetes: '1.30' # core schemas for offline validation; 1.23 to 1.30 only (see Step 0)
+kubernetes: '1.35' # core schemas for offline validation; 1.23 to 1.35 only (see below)
 policies: # charts rendered with `helm template`; only their VAPs are used
   - name: vanadium
     oci: oci://ghcr.io/example/vanadium
@@ -177,23 +177,18 @@ policies:
 - Unknown `chart` keys, a non-mapping `values`, a `chartValues` that is not name -> path and a
   `renderDir` outside the repository are refused (exit 3).
 
-## Step 0: `kubectl-validate` or `kubeconform` + a converter?
+## Schemas: `kubectl-validate`
 
-Decided on a fixture: **`kubectl-validate`** (nixpkgs 0.0.4); no CRD converter was written.
+`check` validates with the registry's own `kubectl-validate` build (`golang/kubectl-validate`,
+also exposed as `packages.kubectl-validate`), pinned to a commit of its `main` branch: the last
+release, v0.0.4, embeds core schemas only up to Kubernetes 1.30.
 
-Measured, with every source gone and inside a nix build sandbox (no network):
-
-- Core kinds validate against schemas **embedded for Kubernetes 1.23 to 1.30**. Any other
-  `--version` makes it download the OpenAPI spec from `api.github.com`, which `check` must never
-  do, so the tool refuses `kubernetes:` outside 1.23 to 1.30 (exit 3).
-- `--local-crds <dir>` makes installed CRDs validate with no converter: the real Gateway API
-  `v1.2.1` `standard-install.yaml` (5 CRDs) and External Secrets `v0.10.7` `bundle.yaml` (15 CRDs),
-  both ways round (a good HTTPRoute / ExternalSecret passes, an unknown field is refused).
+- Core kinds validate against the schemas **embedded for Kubernetes 1.23 to 1.35** (the
+  `builtins/1.23` to `builtins/1.35` directories of the pinned build). Any other `--version`
+  makes it download the OpenAPI spec from GitHub, which `check` must never do, so
+  `kubernetes:` outside 1.23 to 1.35 is refused (exit 3).
+- `--local-crds <dir>` validates the installed CRDs with no converter.
 - Unknown fields are refused on core kinds and on CRD kinds, by default.
-
-So the offline core-schema requirement is met by the validator carrying them, not by a pinned
-bundle. The ceiling is Kubernetes 1.30; a newer core version would need a pinned schema bundle
-passed with `--local-schemas`, which this version does not do.
 
 ## Tests
 
@@ -207,7 +202,7 @@ Arms: good fixture passes (core kinds, ExternalSecret, HTTPRoute, a JSON-schema 
 image red (kyverno); unknown field on a core kind, a CRD kind and the JSON-schema kind red; a VAP
 binding inside the policy chart ignored; sha256 mismatch refused; unknown commit refused; missing
 pin refused; `temporary` without a `reason` refused; unknown key refused; unsupported Kubernetes
-version refused; changed list re-installs; stale stamp makes `check` install first; `path`
+version refused (1.36) and the newest embedded one (1.35) validated offline; changed list re-installs; stale stamp makes `check` install first; `path`
 entries need no install and see local edits at once; a policy chart with no VAP refused.
 
 Chart commands: `render` writes `default.yaml` and one file per overlay (stale files dropped, `--release`
@@ -230,5 +225,5 @@ nix build .#chart-checks-tests -L
 
 `writeShellApplication`-style, shellcheck-checked at build time, with every binary in
 `runtimeInputs` (nothing is assumed on the caller's `PATH`): `bash`, `coreutils`, `curl`,
-`findutils`, `git`, `gnugrep`, `gnutar`, `gzip`, `jq`, `kubectl-validate`, `kubernetes-helm`
+`findutils`, `git`, `gnugrep`, `gnutar`, `gzip`, `jq`, `kubectl-validate` (the pinned build above), `kubernetes-helm`
 (`helm`), `kyverno`, `yq-go`. A consumer's dev shell therefore needs only `chart-checks`.

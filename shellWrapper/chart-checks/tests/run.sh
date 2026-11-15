@@ -230,9 +230,9 @@ run "${D}" install
 expect "temporary without a reason is refused" 3 "temporary entries need a reason"
 
 write_config "${D}"
-sed -i 's/^kubernetes: .*/kubernetes: "1.31"/' "${D}/chart-checks.yaml"
+sed -i 's/^kubernetes: .*/kubernetes: "1.36"/' "${D}/chart-checks.yaml"
 run "${D}" install
-expect "a Kubernetes version with no embedded schemas is refused" 3 "not supported"
+expect "a Kubernetes version above the embedded schemas is refused" 3 "not supported" "1.23 to 1.35 only"
 
 write_config "${D}"
 sed -i 's/^    version: v1$/    version: v1\n    sha265: typo/' "${D}/chart-checks.yaml"
@@ -289,6 +289,12 @@ expect "a JSON-schema kind with no spec is red (root required carried over)" 1 "
 
 run "${D}" check "${M}/good.yaml" "${M}/bad-latest-image.yaml"
 expect "several files: one bad file is red" 1 "no-latest-tag"
+
+sed -i 's/^kubernetes: .*/kubernetes: "1.35"/' "${D}/chart-checks.yaml"
+run "${D}" check "${M}/good.yaml"
+expect "kubernetes 1.35 validates from the embedded schemas (no network in the nix build)" 0 "Kubernetes 1.35 core" "1 file(s) passed"
+run "${D}" check "${M}/bad-core-unknown-field.yaml"
+expect "kubernetes 1.35: an unknown field on a core kind is red" 1 "unknown field" "bogusField"
 
 printf '\n== VAP bindings are ignored ==\n'
 # The fixture chart carries a ValidatingAdmissionPolicyBinding naming a policy that does not

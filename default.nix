@@ -11,6 +11,7 @@ let
   shell = (import ./shellWrapper/default.nix {
     inherit nixpkgs trivialBuilders;
     inherit (dotnetSdk) dotnetPackage;
+    inherit (golang) kubectl-validate;
   });
 
   # Python
@@ -29,6 +30,7 @@ let
     ccc = import ./golang/ccc/default.nix { inherit nixpkgs; };
     dashboard-linter = import ./golang/dashboard-linter/default.nix { inherit nixpkgs; };
     gorelease = import ./golang/gorelease/default.nix { inherit nixpkgs go; };
+    kubectl-validate = import ./golang/kubectl-validate/default.nix { inherit nixpkgs go; };
     # Definition-first RFC 9457 problems: lint/diff problems.yaml, generate Go/TS/C#/Dart + the
     # Problem record. See golang/problemgen/default.nix.
     problemgen = import ./golang/problemgen/default.nix { inherit nixpkgs go; };
