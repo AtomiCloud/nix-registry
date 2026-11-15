@@ -124,7 +124,7 @@ A **values stack** is one render of the chart: `default` is `values.yaml` alone,
 
 | Command                          | What it does                                                                                                                                                                                                                                                                                   |
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `render [--release n] <chart>`   | Deletes `<renderDir>/<chart dir name>/*.yaml`, then writes `default.yaml` and one `<stack>.yaml` per overlay (`helm template <release> <chart>`, overlays with `--values values.yaml --values values.<name>.yaml`). `renderDir` is next to the config (default `infra/rendered`). Exit 1 if helm fails. |
+| `render [--release n] <chart>`   | Deletes `<renderDir>/<chart dir name>/*.yaml`, then writes `default.yaml` and one `<stack>.yaml` per overlay (`helm template <release> <chart>`, overlays with `--values values.yaml --values values.<name>.yaml`). `renderDir` is next to the config (default `infra/rendered`). Exit 1 if helm fails or an overlay is named `default` (the reserved stack of `values.yaml` alone); exit 3 if the output directory is inside the chart. |
 | `lint <chart>`                   | `helm lint`. Exit 1 on a lint error.                                                                                                                                                                                                                                                           |
 | `labels <chart> <file>...`       | The first-party label check (below), for rendered files named `<stack>.yaml`. Needs `chart.labelPrefix`. Exit 1 on a missing label.                                                                                                                                                             |
 | `check --chart <dir> [--stack s] <file>...` | `check` as above, with the policy charts' `chartValues` read from that chart's stack values (`--stack` defaults to `default`).                                                                                                                                                      |
@@ -143,7 +143,7 @@ A stack whose values give no prefix is refused (`has no labelPrefix`, exit 1).
 ```yaml
 chart: # optional; every key is optional
   release: diene-workspace # helm release name for `render`; default the chart's own name; --release overrides
-  renderDir: infra/rendered # relative to the config; default infra/rendered; may not leave the repository
+  renderDir: infra/rendered # relative to the config; default infra/rendered; may not leave the repository and may not resolve into the chart
   labelPrefix: .labelPrefix # yq path to the label prefix in a stack's values; turns the label check on
   labels: [landscape, platform, service, module] # default; needs labelPrefix
 policies:

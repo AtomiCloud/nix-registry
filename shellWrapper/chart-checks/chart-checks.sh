@@ -444,7 +444,10 @@ cmd_check() {
     cmd_install
   fi
 
-  local work="${CC_TMP}/check" e name
+  local work e name
+  # A fresh workspace per call: check-chart runs one `check` per stack, and a leftover object of a
+  # previous stack must never be evaluated with this stack's policy values.
+  work="$(mktemp -d "${CC_TMP}/check.XXXXXX")"
   mkdir -p "${work}/crds" "${work}/vaps"
   cp "${CC_DIR}"/crds/*.yaml "${work}/crds/" 2>/dev/null || true
   # `path` entries are read in place, so a local edit is seen without re-installing.
@@ -581,7 +584,17 @@ cmd_render() { # chart
   out="${CFG_DIR}/$(chart_cfg renderDir)"
   [ -n "$(chart_cfg renderDir)" ] || out="${CFG_DIR}/infra/rendered"
   out="${out}/${base}"
+  # `render` deletes the *.yaml files of its output directory: it must never be the chart itself.
   mkdir -p "${out}"
+  local real_out real_chart
+  real_out="$(cd "${out}" && pwd -P)"
+  real_chart="$(cd "${chart}" && pwd -P)"
+  case "${real_out}/" in
+  "${real_chart}/"*) die 3 "${CONFIG}: chart.renderDir resolves to ${real_out}, inside the chart ${real_chart}; refusing to render over the chart's own files" ;;
+  esac
+  if [ -e "${chart}/values.default.yaml" ]; then
+    die 1 "${chart}/values.default.yaml: 'default' is the stack of values.yaml alone, so no overlay may be named default"
+  fi
   find "${out}" -maxdepth 1 -name '*.yaml' -delete
   helm template "${release}" "${chart}" >"${out}/default.yaml" || die 1 "helm template failed for ${chart}"
   for overlay in "${chart}"/values.*.yaml; do

@@ -467,6 +467,36 @@ expect "without chart.labelPrefix the label check is off (chartValues still reso
 run "${D}" labels chart infra/rendered/chart/default.yaml
 expect "labels without chart.labelPrefix in the config is refused" 3 "needs chart.labelPrefix"
 
+# review fixes: a stack never inherits a previous stack's objects; render never overwrites the chart
+D="$(chart_repo chart-leak)"
+rm "${D}/chart/templates/test-hook.yaml"
+cat >"${D}/chart/templates/extra.yaml" <<'EOF'
+{{- if eq .Values.labelPrefix "fx.example" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: extra
+  labels:
+    fx.example/landscape: lab
+    fx.example/platform: fx
+    fx.example/service: extra
+    fx.example/module: main
+{{- end }}
+EOF
+run "${D}" check-chart chart
+expect "an object only the default stack renders is never judged with the prod stack's policy values" 0 "Helm render checks passed"
+
+D="$(chart_repo chart-overlap)"
+yq -i '.chart.renderDir = "."' "${D}/chart-checks.yaml"
+run "${D}" render chart
+expect "a renderDir that resolves to the chart itself is refused" 3 "inside the chart"
+if [ -f "${D}/chart/Chart.yaml" ] && [ -f "${D}/chart/values.yaml" ]; then ok "...and the chart's own files are untouched"; else bad "render deleted the chart's files"; fi
+
+D="$(chart_repo chart-defaultoverlay)"
+printf 'labelPrefix: other.example\n' >"${D}/chart/values.default.yaml"
+run "${D}" render chart
+expect "an overlay named default is refused" 1 "no overlay may be named default"
+
 printf '\n== chart config refusals (exit 3) ==\n'
 D="$(chart_repo chart-refuse)"
 yq -i '.chart.bogus = 1' "${D}/chart-checks.yaml"
