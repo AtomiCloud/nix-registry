@@ -1,11 +1,15 @@
 # chart-checks
 
 Fetch pinned policy and schema inputs, then validate rendered Kubernetes manifests **offline**.
-One binary, two commands, one config file at the consumer repository root.
+One binary, one config file at the consumer repository root.
 
 ```text
 chart-checks install [-c chart-checks.yaml]            fetch + verify into .chart-checks/
-chart-checks check   [-c chart-checks.yaml] <file>...  validate rendered manifests offline
+chart-checks check   [-c chart-checks.yaml] [--chart <dir> [--stack <name>]] <file>...  validate rendered manifests offline
+chart-checks render      [-c chart-checks.yaml] [--release <name>] <chart>   chart + every values.<name>.yaml -> rendered files
+chart-checks lint        <chart>                                              helm lint
+chart-checks labels      [-c chart-checks.yaml] <chart> <rendered file>...    first-party label check
+chart-checks check-chart [-c chart-checks.yaml] [--release <name>] <chart>    all of the above, in order
 chart-checks --version | --help
 ```
 
@@ -108,6 +112,60 @@ spec schema, turns `const` into a one-value `enum` and drops `additionalProperti
 CRD structural schema forbids it next to `properties`; unknown fields are refused regardless).
 A root `required: ["spec"]` is carried over, so an object with no `spec` is refused too.
 
+## Chart commands: `render`, `lint`, `labels`, `check-chart`
+
+For a repository that keeps a Helm chart and wants the whole gate in one line (a pre-commit hook
+or a Taskfile entry): `chart-checks check-chart infra/root_chart`. `<chart>` is a chart
+directory (it holds `Chart.yaml`); the commands read `chart-checks.yaml` for the `chart:` section
+and the policies.
+
+A **values stack** is one render of the chart: `default` is `values.yaml` alone, and every
+`values.<name>.yaml` overlay is the stack `<name>`, rendered on top of `values.yaml`.
+
+| Command                          | What it does                                                                                                                                                                                                                                                                                   |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `render [--release n] <chart>`   | Deletes `<renderDir>/<chart dir name>/*.yaml`, then writes `default.yaml` and one `<stack>.yaml` per overlay (`helm template <release> <chart>`, overlays with `--values values.yaml --values values.<name>.yaml`). `renderDir` is next to the config (default `infra/rendered`). Exit 1 if helm fails or an overlay is named `default` (the reserved stack of `values.yaml` alone); exit 3 if the output directory is inside the chart. |
+| `lint <chart>`                   | `helm lint`. Exit 1 on a lint error.                                                                                                                                                                                                                                                           |
+| `labels <chart> <file>...`       | The first-party label check (below), for rendered files named `<stack>.yaml`. Needs `chart.labelPrefix`. Exit 1 on a missing label.                                                                                                                                                             |
+| `check --chart <dir> [--stack s] <file>...` | `check` as above, with the policy charts' `chartValues` read from that chart's stack values (`--stack` defaults to `default`).                                                                                                                                                      |
+| `check-chart [--release n] <chart>` | `render`, `lint`, `install`, then for every rendered stack: `check` (policy charts get that stack's values) and, when `chart.labelPrefix` is set, `labels`. Stops at the first refusal; prints `Helm render checks passed` on success. Exit codes are those of the step that failed.            |
+
+**First-party labels.** Every object that comes from the chart's **own** templates (helm marks
+each document `# Source: <chart>/templates/...`; subcharts are `# Source: <chart>/charts/...` and are
+not checked), of any kind, must carry every label of `chart.labels` under the stack's prefix:
+`<prefix>/<label>`. Helm test hooks (`helm.sh/hook: test`, `test-success`, `test-failure`) are
+exempt. A violation prints
+`first-party objects without all <prefix>/ labels (<labels>):` and one line per object; exit 1.
+A stack whose values give no prefix is refused (`has no labelPrefix`, exit 1).
+
+### The `chart` section and per-policy values
+
+```yaml
+chart: # optional; every key is optional
+  release: diene-workspace # helm release name for `render`; default the chart's own name; --release overrides
+  renderDir: infra/rendered # relative to the config; default infra/rendered; may not leave the repository and may not resolve into the chart
+  labelPrefix: .labelPrefix # yq path to the label prefix in a stack's values; turns the label check on
+  labels: [landscape, platform, service, module] # default; needs labelPrefix
+policies:
+  - name: cluster-policies
+    git: https://github.com/example/cluster-policies
+    commit: '<40 hex>'
+    subpath: chart
+    values: # passed to this policy chart's `helm template` as a values file
+      someSwitch: true
+    chartValues: # policy value name -> yq path in the chart's stack values
+      labelPrefix: .labelPrefix
+```
+
+- `values` (a mapping) and `chartValues` (name -> yq path) exist on `policies` entries only. They
+  reach the policy chart as one values file on `helm template`; the fetched or `path` policy chart
+  is never copied or edited. `chartValues` wins over `values` for the same name.
+- `chartValues` is resolved against the stack being checked: its path is read from `values.yaml`
+  merged with that stack's overlay. A path that is empty there is a tool error (exit 5). Using it
+  with plain `check` (no `--chart`) is a usage error (exit 2).
+- Unknown `chart` keys, a non-mapping `values`, a `chartValues` that is not name -> path, a
+  `labels` list without `labelPrefix`, and a `renderDir` outside the repository are refused (exit 3).
+
 ## Step 0: `kubectl-validate` or `kubeconform` + a converter?
 
 Decided on a fixture: **`kubectl-validate`** (nixpkgs 0.0.4); no CRD converter was written.
@@ -140,6 +198,12 @@ binding inside the policy chart ignored; sha256 mismatch refused; unknown commit
 pin refused; `temporary` without a `reason` refused; unknown key refused; unsupported Kubernetes
 version refused; changed list re-installs; stale stamp makes `check` install first; `path`
 entries need no install and see local edits at once; a policy chart with no VAP refused.
+
+Chart commands: `render` writes `default.yaml` and one file per overlay (stale files dropped, `--release`
+honoured); `check-chart` passes a good chart (test hook exempt, a subchart object not held to the label
+rule) and each planted failure is red: bad `values` for the policy chart (and a literal prefix that cannot
+follow the stacks), a missing label (also a custom `labels` list), a `helm lint` error (`check-chart`
+stops there), an empty `chartValues` path; config refusals and usage errors for the new keys and commands.
 
 ```bash
 nix build .#chart-checks-tests -L

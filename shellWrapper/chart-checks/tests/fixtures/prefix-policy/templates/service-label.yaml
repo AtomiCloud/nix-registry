@@ -1,0 +1,15 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: service-label
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ['']
+        apiVersions: ['v1']
+        operations: ['CREATE', 'UPDATE']
+        resources: ['configmaps']
+  validations:
+    - expression: "has(object.metadata.labels) && '{{ .Values.labelPrefix }}/service' in object.metadata.labels"
+      message: 'configmaps need the {{ .Values.labelPrefix }}/service label'

@@ -1,0 +1,4 @@
+apiVersion: v2
+name: prefix-policy
+description: Policy chart fixture whose rule depends on its labelPrefix value
+version: 0.1.0
