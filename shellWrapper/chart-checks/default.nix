@@ -15,6 +15,7 @@ let
     curl
     findutils
     git
+    gawk
     gnugrep
     gnutar
     gzip

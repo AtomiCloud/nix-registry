@@ -638,7 +638,7 @@ cmd_labels() { # chart files...
               | any(. == "test" or . == "test-success" or . == "test-failure")) | not)
           | select((.metadata.labels // {}) as $l | $labels | map($prefix + "/" + .) | any(. as $k | $l | has($k) | not))
           | .__source + " (" + .kind + " " + (.metadata.name // "?") + ")"'
-    )"
+    )" || die 5 "the label check helper (awk, yq or jq) failed on ${file}; refusing to pass unchecked"
     if [ -n "${missing}" ]; then
       printf '❌ %s: first-party objects without all %s/ labels (%s):\n' "${file}" "${prefix}" "$(jq -r 'join(", ")' <<<"${labels}")" >&2
       while IFS= read -r line; do printf '   - %s\n' "${line}" >&2; done <<<"${missing}"
@@ -664,7 +664,7 @@ cmd_check_chart() { # chart
     say "== stack ${stack} =="
     CHART_DIR="${chart}" CHART_STACK="${stack}" cmd_check "${f}" || return $?
     if [ -n "$(chart_cfg labelPrefix)" ]; then
-      cmd_labels "${chart}" "${f}" || return $?
+      cmd_labels "${chart}" "${f}"
     fi
   done
   say "✅ Helm render checks passed"

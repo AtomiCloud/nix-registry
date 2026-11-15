@@ -497,6 +497,15 @@ printf 'labelPrefix: other.example\n' >"${D}/chart/values.default.yaml"
 run "${D}" render chart
 expect "an overlay named default is refused" 1 "no overlay may be named default"
 
+# fail closed: a label helper (awk/yq/jq) that fails must never read as "no label missing".
+# The tool puts its own binaries first on PATH, so a stub cannot shadow them; a rendered file
+# the helper cannot parse makes the pipeline fail instead.
+D="$(chart_repo chart-failclosed)"
+run "${D}" render chart
+printf 'apiVersion: v1\nkind: ConfigMap\nmetadata: [unclosed\n' >"${D}/infra/rendered/chart/default.yaml"
+run "${D}" labels chart infra/rendered/chart/default.yaml
+expect "labels fails closed when its helper fails" 5 "label check helper"
+
 printf '\n== chart config refusals (exit 3) ==\n'
 D="$(chart_repo chart-refuse)"
 yq -i '.chart.bogus = 1' "${D}/chart-checks.yaml"
