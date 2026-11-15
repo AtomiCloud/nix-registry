@@ -1,3 +1,17 @@
+## [5.15.0](https://github.com/AtomiCloud/nix-registry/compare/v5.14.0...v5.15.0) (2026-11-15)
+
+
+### 🐛 Bug Fixes 🐛
+
+* fail closed when the label check helper fails ([0e6b07d](https://github.com/AtomiCloud/nix-registry/commit/0e6b07dddfe37ae19351f7cc60e257fa1033fa5c))
+* isolate each check workspace and guard render output ([f9f52b6](https://github.com/AtomiCloud/nix-registry/commit/f9f52b669a3b55bdf07933b21476a5167b49515e))
+* keep render output inside the repository ([b88dadd](https://github.com/AtomiCloud/nix-registry/commit/b88daddcf4c99a88e57aa8759225aa88b92947f2))
+
+
+### ⬆️ Packages Updated ⬆️
+
+* chart-checks gains chart commands and per-policy values ([4518c46](https://github.com/AtomiCloud/nix-registry/commit/4518c4681e61fd88883c63ef04e2956c9bc23cda))
+
 ## [5.14.0](https://github.com/AtomiCloud/nix-registry/compare/v5.13.0...v5.14.0) (2026-11-14)
 
 
