@@ -1,4 +1,4 @@
-{ nixpkgs, helmlint }:
+{ nixpkgs, helmlint, chart-checks }:
 let pkgs = nixpkgs; in
 let hl = helmlint.override { helmPackage = pkgs.kubernetes-helm; }; in
 
@@ -12,6 +12,7 @@ pkgs.runCommand "infralint"
     pkgs.tfsec
     pkgs.tflint
     hl
+    chart-checks
 
     pkgs.kubeconform
     pkgs.kyverno
@@ -26,6 +27,7 @@ pkgs.runCommand "infralint"
   ln -s ${pkgs.tfsec}/bin/* $out/bin/
   ln -s ${pkgs.tflint}/bin/* $out/bin/
   ln -s ${hl}/bin/* $out/bin/
+  ln -s ${chart-checks}/bin/* $out/bin/
 
   ln -s ${pkgs.kubeconform}/bin/* $out/bin/
   ln -s ${pkgs.kyverno}/bin/* $out/bin/

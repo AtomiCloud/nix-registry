@@ -46,7 +46,7 @@ sets for the axes it keeps: a `wo-docker` node takes `infrautils-core` +
 | `infralint` | union of the three rows below | — |
 | `infralint-core` | `kubeconform`, `kyverno`, `terraform-docs`, `tflint`, `tfsec`, `tfsec-checkgen`, `tfsec-docs` | — |
 | `infralint-docker` | `hadolint`, `skopeo` | `wo-docker` |
-| `infralint-helm` | `helm-docs`, `helmlint` | `wo-helm` |
+| `infralint-helm` | `chart-checks`, `helm-docs`, `helmlint` | `wo-helm` |
 
 ¹ Linux only — nixpkgs builds `pkgs.docker` client-only off Linux.
 
