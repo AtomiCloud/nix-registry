@@ -1,0 +1,4 @@
+apiVersion: v2
+name: fx-app
+description: Application chart fixture for the chart-checks chart tests
+version: 0.1.0

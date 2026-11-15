@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: '{{ .Release.Name }}-config'
+  labels:
+    '{{ .Values.labelPrefix }}/landscape': lab
+    '{{ .Values.labelPrefix }}/platform': fx
+    '{{ .Values.labelPrefix }}/service': app
+    '{{ .Values.labelPrefix }}/{{ .Values.moduleLabel }}': main
+data:
+  key: value
