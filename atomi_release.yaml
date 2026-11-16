@@ -22,6 +22,15 @@ specialScopes:
     release: false
 
 plugins:
+  # obs is AGPL-3.0: build its Corresponding Source (its source plus every vendored Go module)
+  # into dist/ so the GitHub plugin below can attach it. It runs FIRST: a prepare step that
+  # fails after @semantic-release/git has pushed the release commit would leave main with the
+  # commit but no tag and no GitHub release.
+  - module: '@semantic-release/exec'
+    version: 6.0.3
+    config:
+      prepareCmd: scripts/ci/obs-source.sh dist
+
   # Generate Changelog
   - module: '@semantic-release/changelog'
     version: 6.0.3
@@ -44,13 +53,6 @@ plugins:
       customTags:
         - 'v${major}'
         - 'v${major}.${minor}'
-
-  # obs is AGPL-3.0: build its Corresponding Source (its source plus every vendored Go module)
-  # into dist/ before the release is published, so the GitHub plugin below can attach it.
-  - module: '@semantic-release/exec'
-    version: 6.0.3
-    config:
-      prepareCmd: scripts/ci/obs-source.sh dist
 
   # Github Release
   - module: '@semantic-release/github'
