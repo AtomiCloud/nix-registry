@@ -22,6 +22,15 @@ specialScopes:
     release: false
 
 plugins:
+  # obs is AGPL-3.0: build its Corresponding Source (its source plus every vendored Go module)
+  # into dist/ so the GitHub plugin below can attach it. It runs FIRST: a prepare step that
+  # fails after @semantic-release/git has pushed the release commit would leave main with the
+  # commit but no tag and no GitHub release.
+  - module: '@semantic-release/exec'
+    version: 6.0.3
+    config:
+      prepareCmd: scripts/ci/obs-source.sh dist
+
   # Generate Changelog
   - module: '@semantic-release/changelog'
     version: 6.0.3
@@ -48,6 +57,9 @@ plugins:
   # Github Release
   - module: '@semantic-release/github'
     version: 10.3.5
+    config:
+      assets:
+        - dist/obs-*-source.tar.gz
 
 # Angular Conventional Commit Example: https://github.com/angular/angular/blob/22b96b9/CONTRIBUTING.md#-commit-message-guidelines
 types:

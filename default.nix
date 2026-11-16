@@ -1,4 +1,4 @@
-{ nixpkgs, nixpkgs-2605, nixpkgs-dotnet, nixpkgs-unstable, fenix }:
+{ nixpkgs, nixpkgs-2605, nixpkgs-dotnet, nixpkgs-go127, nixpkgs-unstable, fenix }:
 let trivialBuilders = import ./trivial.nix { inherit nixpkgs; }; in
 let
   # Node.js 22 CLI packages, built the official nixpkgs way via buildNpmPackage.
@@ -21,6 +21,9 @@ let
     mmoney-cli = import ./python/mmoney-cli/default.nix { inherit nixpkgs; };
   };
 
+  # Go 1.27.4 for obs only (not exported); the registry `go` stays 1.26.10.
+  obsGo = import ./golang/obs/go.nix { inherit nixpkgs-go127; };
+
   # Go
   golang = rec {
     # The registry guarantees the Go version, so a template can keep a plain entry
@@ -36,6 +39,13 @@ let
     problemgen = import ./golang/problemgen/default.nix { inherit nixpkgs go; };
     # Offline end-to-end test of problemgen: a build, so no network by construction.
     problemgen-tests = problemgen.passthru.tests;
+    # obs: observability query checks (MetricsQL + LogsQL, embedded VictoriaMetrics + VictoriaLogs).
+    # Built with its own Go 1.27.4 (golang/obs/go.nix); the exported `go` above stays 1.26.10.
+    obs = import ./golang/obs/default.nix { inherit nixpkgs; go = obsGo; };
+    # Offline end-to-end test of obs: a build, so no network by construction.
+    obs-tests = obs.passthru.tests;
+    # The AGPL-3.0 Corresponding Source of obs (src + vendored modules), attached to each release.
+    obs-source = obs.passthru.source;
   };
 
   # dotnet

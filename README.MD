@@ -21,6 +21,7 @@ AtomiCloud's Nix Registry for custom built packages.
 - releaser
 - helm-schema
 - problemgen (definition-first RFC 9457 problems: lint and diff `problems.yaml`, generate Go/TypeScript/C#/Dart code and the Problem record; see `golang/problemgen/default.nix`)
+- obs (observability checks with no running stack: `obs query --static` / `--live` parse and run every alert and dashboard query with the embedded VictoriaMetrics and VictoriaLogs engines; AGPL-3.0, built with its own Go 1.27.4; see `golang/obs/README.md`)
 - chart-checks (fetch pinned policy/CRD inputs, then validate rendered manifests offline; see `shellWrapper/chart-checks/README.md`)
 - dotnetPackage (the .NET SDK the registry's .NET tooling is built against, pinned
   to the patch the fleet's .NET nodes name in their `global.json`)

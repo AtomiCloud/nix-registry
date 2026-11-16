@@ -1,0 +1,5 @@
+mode: static
+exit: 1
+contains: alerts/failed/critical.yaml rule failed-critical query A
+contains: [logsql-alert-needs-event]
+contains: "durian.cloud/event"

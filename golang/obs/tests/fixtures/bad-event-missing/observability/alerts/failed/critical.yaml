@@ -1,0 +1,24 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata:
+  name: payments-checkout-failed-critical
+spec:
+  folderRef: payments-checkout-folder
+  interval: 1m
+  rules:
+    - uid: failed-critical
+      title: failed critical
+      condition: A
+      for: 5m
+      noDataState: OK
+      execErrState: Error
+      data:
+        - refId: A
+          relativeTimeRange: { from: 300, to: 0 }
+          datasourceUid: primordial-logs
+          model:
+            expr: '_time:5m {durian.cloud.service="checkout"} severity_text:ERROR | stats count() errors'
+            queryType: stats
+
+      labels: { severity: critical }
+      annotations: { summary: 'failed critical' }

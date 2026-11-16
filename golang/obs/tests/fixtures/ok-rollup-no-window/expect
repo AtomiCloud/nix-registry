@@ -1,0 +1,5 @@
+mode: both
+exit: 0
+contains: alerts/charges/warning.yaml rule charges-warning query A
+contains: [rollup-no-window]
+contains: 1 warnings

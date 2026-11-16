@@ -1,0 +1,5 @@
+mode: live
+exit: 1
+contains: alerts/charges/critical.yaml rule charges-critical query A
+contains: [no-rows]
+contains: not in the seed: metric checkout_chargez_total

@@ -251,6 +251,22 @@
         "type": "github"
       }
     },
+    "nixpkgs-go127": {
+      "locked": {
+        "lastModified": 1794537146,
+        "narHash": "sha256-Wpz/7x/YWnDIBu7yj6ixe8j6fIMsidd9Y+o1PqPF3iM=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "d5cc6833999746cffdfe0598f7bc801a57b887a9",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "d5cc6833999746cffdfe0598f7bc801a57b887a9",
+        "type": "github"
+      }
+    },
     "nixpkgs-stable": {
       "locked": {
         "lastModified": 1780902259,
@@ -374,6 +390,7 @@
         "flake-utils": "flake-utils",
         "nixpkgs-2605": "nixpkgs-2605",
         "nixpkgs-dotnet": "nixpkgs-dotnet",
+        "nixpkgs-go127": "nixpkgs-go127",
         "nixpkgs-unstable": "nixpkgs-unstable",
         "pre-commit-hooks": "pre-commit-hooks",
         "treefmt-nix": "treefmt-nix",

@@ -1,0 +1,6 @@
+mode: static
+exit: 1
+contains: alerts/failed/critical.yaml rule failed-critical query A
+contains: dashboards/logs.json panel 7 "Checkout logs" target A
+contains: [loki-datasource]
+contains: datasource "loki"

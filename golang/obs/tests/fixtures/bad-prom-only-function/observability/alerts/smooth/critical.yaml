@@ -1,0 +1,24 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata:
+  name: payments-checkout-smooth-critical
+spec:
+  folderRef: payments-checkout-folder
+  interval: 1m
+  rules:
+    - uid: smooth-critical
+      title: smooth critical
+      condition: A
+      for: 5m
+      noDataState: OK
+      execErrState: Error
+      data:
+        - refId: A
+          relativeTimeRange: { from: 300, to: 0 }
+          datasourceUid: primordial-metrics
+          model:
+            expr: 'double_exponential_smoothing(sum(rate(checkout_charges_total[5m]))[30m:1m], 0.5, 0.5) > 1'
+            instant: true
+
+      labels: { severity: critical }
+      annotations: { summary: 'smooth critical' }

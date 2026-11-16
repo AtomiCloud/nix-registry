@@ -1,0 +1,3 @@
+# The contract file's schema is read from obs 0.2. In obs 0.1 its presence only switches
+# on the rule that a LogsQL alert names a contract event (the event field filter).
+service: checkout
