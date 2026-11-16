@@ -9,3 +9,4 @@ tmp
 .kagent/
 .garden
 node_modules/
+dist/
