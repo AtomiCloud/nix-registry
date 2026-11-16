@@ -1,15 +1,15 @@
-{ trivialBuilders, nixpkgs }:
+{ trivialBuilders, nixpkgs, kubectl-validate }:
 
 let
   # Version of the chart-checks tool
-  version = "0.2.0";
+  version = "0.3.0";
 
   # Every binary the script calls. Nothing is assumed to be on the consumer's PATH.
   #
-  # Step 0 of the goal picked `kubectl-validate` over `kubeconform` + a CRD -> JSON-schema
-  # converter: it validates core kinds (schemas embedded for Kubernetes 1.23 to 1.30), the
-  # installed CRDs (`--local-crds`) and unknown fields, with no network. See README.md.
-  runtimeInputs = with nixpkgs; [
+  # kubectl-validate is the registry's pinned build (golang/kubectl-validate): it embeds the core
+  # schemas of Kubernetes 1.23 to 1.35, so `check` validates core kinds, the installed CRDs
+  # (`--local-crds`) and unknown fields with no network. See README.md.
+  runtimeInputs = [ kubectl-validate ] ++ (with nixpkgs; [
     bash
     coreutils
     curl
@@ -20,11 +20,10 @@ let
     gnutar
     gzip
     jq
-    kubectl-validate
     kubernetes-helm
     kyverno
     yq-go
-  ];
+  ]);
 
   chart-checks = trivialBuilders.writeShellApplication {
     name = "chart-checks";

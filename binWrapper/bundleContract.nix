@@ -38,7 +38,7 @@ let
       "tfsec-docs"
     ];
     infralint-docker = [ "hadolint" "skopeo" ];
-    infralint-helm = [ "helm-docs" "helmlint" ];
+    infralint-helm = [ "chart-checks" "helm-docs" "helmlint" ];
   };
 
   # Full bundles: kept as they always were, and asserted to be exactly the union

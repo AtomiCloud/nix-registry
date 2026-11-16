@@ -31,7 +31,7 @@ Packages are organized by language/type in directories:
   `dotnet --version`.
 - `node/22/`: Node.js 22 packages (uses nixpkgs `buildNpmPackage`)
 - `python/`: Python packages (aws-export-credentials)
-- `golang/`: Go packages (nix-share, ccc, dashboard-linter, gorelease, problemgen — problemgen is built from in-tree source)
+- `golang/`: Go packages (nix-share, ccc, dashboard-linter, gorelease, kubectl-validate, problemgen — problemgen is built from in-tree source; kubectl-validate from a pinned upstream main commit)
 - `rust/`: Rust packages (toml-cli)
 - `nuget/`: .NET packages
 

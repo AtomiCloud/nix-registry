@@ -230,9 +230,9 @@ run "${D}" install
 expect "temporary without a reason is refused" 3 "temporary entries need a reason"
 
 write_config "${D}"
-sed -i 's/^kubernetes: .*/kubernetes: "1.31"/' "${D}/chart-checks.yaml"
+sed -i 's/^kubernetes: .*/kubernetes: "1.36"/' "${D}/chart-checks.yaml"
 run "${D}" install
-expect "a Kubernetes version with no embedded schemas is refused" 3 "not supported"
+expect "a Kubernetes version above the embedded schemas is refused" 3 "not supported" "1.23 to 1.35 only"
 
 write_config "${D}"
 sed -i 's/^    version: v1$/    version: v1\n    sha265: typo/' "${D}/chart-checks.yaml"
@@ -289,6 +289,12 @@ expect "a JSON-schema kind with no spec is red (root required carried over)" 1 "
 
 run "${D}" check "${M}/good.yaml" "${M}/bad-latest-image.yaml"
 expect "several files: one bad file is red" 1 "no-latest-tag"
+
+sed -i 's/^kubernetes: .*/kubernetes: "1.35"/' "${D}/chart-checks.yaml"
+run "${D}" check "${M}/good.yaml"
+expect "kubernetes 1.35 validates from the embedded schemas (no network in the nix build)" 0 "Kubernetes 1.35 core" "1 file(s) passed"
+run "${D}" check "${M}/bad-core-unknown-field.yaml"
+expect "kubernetes 1.35: an unknown field on a core kind is red" 1 "unknown field" "bogusField"
 
 printf '\n== VAP bindings are ignored ==\n'
 # The fixture chart carries a ValidatingAdmissionPolicyBinding naming a policy that does not
@@ -363,7 +369,7 @@ EOF
 run "${D}" check "${M}/good.yaml"
 expect "bindings alone are not a policy set (no vacuous pass)" 5 "rendered no ValidatingAdmissionPolicy"
 
-printf '\n== chart commands: render, lint, labels, check-chart ==\n'
+printf '\n== chart commands: render, lint, check-chart ==\n'
 # A repository with an application chart, a policy chart whose VAP depends on its labelPrefix
 # value, and a chart-checks.yaml that feeds the stack's prefix to it through chartValues.
 chart_repo() { # name
@@ -376,7 +382,6 @@ chart_repo() { # name
 kubernetes: "1.30"
 chart:
   release: fx
-  labelPrefix: .labelPrefix
 policies:
   - name: prefix
     path: prefix-policy
@@ -398,7 +403,7 @@ run "${D}" render chart --release other
 if [ ! -e "${D}/infra/rendered/chart/stale.yaml" ] && grep -q "name: 'other-config'" "${D}/infra/rendered/chart/default.yaml"; then ok "render drops stale files and --release overrides the config"; else bad "render kept a stale file or ignored --release"; fi
 
 run "${D}" check-chart chart
-expect "check-chart passes a good chart (both stacks, test hook exempt)" 0 "== stack default ==" "== stack prod ==" "Helm render checks passed"
+expect "check-chart passes a good chart (both stacks)" 0 "== stack default ==" "== stack prod ==" "Helm render checks passed"
 
 run "${D}" check --chart chart --stack prod infra/rendered/chart/prod.yaml
 expect "check --chart --stack gives the policy chart that stack's prefix" 0 "passed"
@@ -414,34 +419,20 @@ run "${D}" check-chart chart
 expect "bad values for the policy chart are red" 1 "service-label" "refused"
 yq -i '.policies[0].values.labelPrefix = "fx.example"' "${D}/chart-checks.yaml"
 run "${D}" check-chart chart
-expect "...and a literal prefix cannot follow the stacks: the prod stack is red" 1 "== stack prod =="
+expect "...and a literal prefix cannot follow the stacks: the prod stack is red" 1 "== stack prod ==" "stack prod: check: exit 1"
+if grep -qF "stack default: check" <<<"${OUT}"; then bad "the default stack was listed as failed"; else ok "...and only the prod stack is listed as failed"; fi
 
 D="$(chart_repo chart-emptypath)"
 yq -i '.policies[0].chartValues.labelPrefix = ".nope"' "${D}/chart-checks.yaml"
 run "${D}" check-chart chart
 expect "a chartValues path that is empty in the chart is a tool error" 5 "chartValues.labelPrefix" "is empty"
 
-# planted failure: a first-party object without one of the labels
+# labels are the policy charts' job: chart-checks holds no label rule of its own, so a
+# ConfigMap without the module label passes when no policy asks for it
 D="$(chart_repo chart-nolabel)"
 sed -i 's/^moduleLabel: .*/moduleLabel: other/' "${D}/chart/values.yaml"
 run "${D}" check-chart chart
-expect "a first-party object without a label is red" 1 "first-party objects without all fx.example/ labels" "configmap.yaml (ConfigMap fx-config)"
-run "${D}" labels chart infra/rendered/chart/default.yaml
-expect "labels runs on its own" 1 "first-party objects without all fx.example/ labels"
-
-D="$(chart_repo chart-customlabels)"
-yq -i '.chart.labels = ["landscape", "platform", "service", "module", "team"]' "${D}/chart-checks.yaml"
-run "${D}" check-chart chart
-expect "chart.labels is the configured list" 1 "without all fx.example/ labels" "team"
-
-# the label rule covers the chart's OWN templates only: an object from a subchart is not checked
-D="$(chart_repo chart-subchart)"
-mkdir -p "${D}/chart/charts/sub/templates"
-printf 'apiVersion: v2\nname: sub\nversion: 0.1.0\n' >"${D}/chart/charts/sub/Chart.yaml"
-printf 'dependencies:\n  - name: sub\n    version: 0.1.0\n' >>"${D}/chart/Chart.yaml"
-printf 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: sub-config\n  labels:\n    fx.example/service: sub\n    prod.example/service: sub\ndata:\n  a: b\n' >"${D}/chart/charts/sub/templates/cm.yaml"
-run "${D}" check-chart chart
-expect "an object from a subchart is not held to the first-party label rule" 0 "Helm render checks passed"
+expect "an object missing a label no policy asks for passes" 0 "Helm render checks passed"
 
 # planted failure: helm lint (a two-part chart version: helm template renders it, lint refuses it)
 D="$(chart_repo chart-lint)"
@@ -449,8 +440,53 @@ sed -i 's/^version: .*/version: 0.1/' "${D}/chart/Chart.yaml"
 run "${D}" lint chart
 expect "lint refuses a chart helm lint rejects" 1 "ERROR" "helm lint refused"
 run "${D}" check-chart chart
-expect "check-chart stops at helm lint" 1 "helm lint refused"
-if grep -q '== stack' <<<"${OUT}"; then bad "check-chart went on to the stacks after a lint error"; else ok "check-chart does not reach the stacks after a lint error"; fi
+expect "check-chart reports a helm lint error and still checks every stack" 1 "helm lint refused" "== stack default ==" "== stack prod ==" "   - lint: exit 1"
+
+# every failure in one run: two different failures on two stacks
+two_failures() { # name
+  local d
+  d="$(chart_repo "$1")"
+  cat >"${d}/chart/templates/default-only.yaml" <<'EOF2'
+{{- if eq .Values.labelPrefix "fx.example" }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: default-only
+spec:
+  bogusField: true
+  ports:
+    - port: 80
+{{- end }}
+EOF2
+  printf '%s' "${d}"
+}
+D="$(two_failures chart-two)"
+yq -i 'del(.policies[0].chartValues) | .policies[0].values.labelPrefix = "fx.example"' "${D}/chart-checks.yaml"
+run "${D}" check-chart chart
+expect "a schema failure on one stack and a policy failure on another are both reported" 1 \
+  "bogusField" "service-label" "check-chart failed (2):" "   - stack default: check: exit 1" "   - stack prod: check: exit 1"
+
+D="$(two_failures chart-render)"
+printf '{{- if eq .Values.labelPrefix "prod.example" }}{{ fail "the prod stack cannot render" }}{{- end }}\n' >"${D}/chart/templates/prod-fails.yaml"
+run "${D}" check-chart chart
+expect "a render failure on one stack and a check failure on another are both reported" 1 \
+  "the prod stack cannot render" "bogusField" "== stack default ==" \
+  "   - stack prod: render (check skipped): exit 1" "   - stack default: check: exit 1"
+if grep -qF "== stack prod ==" <<<"${OUT}"; then bad "a stack that did not render was checked"; else ok "...and the stack that did not render is not checked"; fi
+if [ ! -e "${D}/infra/rendered/chart/prod.yaml" ] && [ -s "${D}/infra/rendered/chart/default.yaml" ]; then ok "...and a failed render leaves no file behind"; else bad "a failed render left a file, or the good stack was not written"; fi
+run "${D}" render chart
+expect "render renders every stack it can and exits 1" 1 "the prod stack cannot render" "render failed for at least one stack"
+if [ -s "${D}/infra/rendered/chart/default.yaml" ]; then ok "...and still writes the stacks that render"; else bad "render dropped the good stack"; fi
+
+# the exit code is the first failing step's: lint (1) runs before install (4)
+D="$(chart_repo chart-install)"
+sed -i 's/^version: .*/version: 0.1/' "${D}/chart/Chart.yaml"
+yq -i '.crds = [{"name": "gone", "url": "file:///nonexistent/crds.yaml", "sha256": "'"$(printf '0%.0s' $(seq 1 64))"'"}]' "${D}/chart-checks.yaml"
+run "${D}" check-chart chart
+expect "a lint error and an install failure are both reported, with the first step's exit code" 1 \
+  "   - lint: exit 1" "   - install (every check skipped): exit 4"
+if grep -qF "== stack" <<<"${OUT}"; then bad "stacks were checked without an install"; else ok "...and no stack is checked without an install"; fi
+if compgen -G "${D}/.chart-checks.stage.*" >/dev/null; then bad "the failed install left a stage directory"; else ok "...and the failed install leaves no stage directory"; fi
 
 D="$(chart_repo chart-usage)"
 run "${D}" check-chart
@@ -458,14 +494,9 @@ expect "check-chart needs a chart" 2 "takes exactly one chart directory"
 run "${D}" render nope
 expect "render of a missing chart is a usage error" 2 "not a chart directory"
 run "${D}" labels chart
-expect "labels needs rendered files" 2 "at least one rendered file"
+expect "labels is not a command" 2 "unknown command: labels"
 run "${D}" check --stack prod infra/rendered/chart/prod.yaml
 expect "--stack needs --chart" 2 "--stack needs --chart"
-sed -i '/^  labelPrefix:/d' "${D}/chart-checks.yaml"
-run "${D}" check-chart chart
-expect "without chart.labelPrefix the label check is off (chartValues still resolve)" 0 "Helm render checks passed"
-run "${D}" labels chart infra/rendered/chart/default.yaml
-expect "labels without chart.labelPrefix in the config is refused" 3 "needs chart.labelPrefix"
 
 # review fixes: a stack never inherits a previous stack's objects; render never overwrites the chart
 D="$(chart_repo chart-leak)"
@@ -508,15 +539,6 @@ printf 'labelPrefix: other.example\n' >"${D}/chart/values.default.yaml"
 run "${D}" render chart
 expect "an overlay named default is refused" 1 "no overlay may be named default"
 
-# fail closed: a label helper (awk/yq/jq) that fails must never read as "no label missing".
-# The tool puts its own binaries first on PATH, so a stub cannot shadow them; a rendered file
-# the helper cannot parse makes the pipeline fail instead.
-D="$(chart_repo chart-failclosed)"
-run "${D}" render chart
-printf 'apiVersion: v1\nkind: ConfigMap\nmetadata: [unclosed\n' >"${D}/infra/rendered/chart/default.yaml"
-run "${D}" labels chart infra/rendered/chart/default.yaml
-expect "labels fails closed when its helper fails" 5 "label check helper"
-
 printf '\n== chart config refusals (exit 3) ==\n'
 D="$(chart_repo chart-refuse)"
 yq -i '.chart.bogus = 1' "${D}/chart-checks.yaml"
@@ -531,9 +553,9 @@ yq -i '.policies[0].chartValues.labelPrefix = 3' "${D}/chart-checks.yaml"
 run "${D}" render chart
 expect "chartValues must map to yq paths" 3 "chartValues must map"
 D="$(chart_repo chart-refuse4)"
-yq -i '.chart.labels = ["a"] | del(.chart.labelPrefix)' "${D}/chart-checks.yaml"
+yq -i '.chart.labels = ["a"] | .chart.labelPrefix = ".labelPrefix"' "${D}/chart-checks.yaml"
 run "${D}" render chart
-expect "chart.labels without chart.labelPrefix is refused" 3 "labels needs labelPrefix"
+expect "chart.labels and chart.labelPrefix are unknown keys" 3 "chart: unknown key labelPrefix" "chart: unknown key labels"
 D="$(chart_repo chart-refuse5)"
 yq -i '.chart.renderDir = "../out"' "${D}/chart-checks.yaml"
 run "${D}" render chart

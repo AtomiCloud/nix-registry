@@ -11,6 +11,7 @@ let
   shell = (import ./shellWrapper/default.nix {
     inherit nixpkgs trivialBuilders;
     inherit (dotnetSdk) dotnetPackage;
+    inherit (golang) kubectl-validate;
   });
 
   # Python
@@ -29,6 +30,7 @@ let
     ccc = import ./golang/ccc/default.nix { inherit nixpkgs; };
     dashboard-linter = import ./golang/dashboard-linter/default.nix { inherit nixpkgs; };
     gorelease = import ./golang/gorelease/default.nix { inherit nixpkgs go; };
+    kubectl-validate = import ./golang/kubectl-validate/default.nix { inherit nixpkgs go; };
     # Definition-first RFC 9457 problems: lint/diff problems.yaml, generate Go/TS/C#/Dart + the
     # Problem record. See golang/problemgen/default.nix.
     problemgen = import ./golang/problemgen/default.nix { inherit nixpkgs go; };
@@ -45,7 +47,7 @@ let
     cyanprint = import ./binWrapper/cyanprint.nix { inherit nixpkgs; };
     atomiutils = import ./binWrapper/atomiutils.nix { inherit nixpkgs; };
     infrautils = import ./binWrapper/infrautils.nix { inherit nixpkgs gardenio mirrord; };
-    infralint = import ./binWrapper/infralint.nix { inherit nixpkgs; helmlint = shell.helmlint; };
+    infralint = import ./binWrapper/infralint.nix { inherit nixpkgs; inherit (shell) helmlint chart-checks; };
 
     # Axis-pure slices of the two aggregates above, so a node can declare a
     # toolchain without the tools it strips. The full bundles stay untouched for
@@ -55,7 +57,7 @@ let
     infrautils-k8s = import ./binWrapper/infrautils-k8s.nix { inherit nixpkgs; };
     infralint-core = import ./binWrapper/infralint-core.nix { inherit nixpkgs; };
     infralint-docker = import ./binWrapper/infralint-docker.nix { inherit nixpkgs; };
-    infralint-helm = import ./binWrapper/infralint-helm.nix { inherit nixpkgs; helmlint = shell.helmlint; };
+    infralint-helm = import ./binWrapper/infralint-helm.nix { inherit nixpkgs; inherit (shell) helmlint chart-checks; };
 
     # The closed PATH a fleet node's validator hooks run under. Hoisted out of
     # nix/pre-commit.nix on the nodes that all carried the same buildEnv.

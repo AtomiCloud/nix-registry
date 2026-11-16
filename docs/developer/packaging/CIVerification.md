@@ -41,6 +41,7 @@ The following packages are verified in CI with their respective commands:
 | helmlint                    | `helmlint --version`               | Helm linting wrapper                                                          |
 | helm-schema                 | `helm-schema --version`            | helm schema plugin wrapper; ships `bin/helm-schema`, execs `helm schema`      |
 | dlint                       | `dlint --version`                  | Repo-agnostic repository linters                                              |
+| kubectl-validate            | `kubectl-validate --help`          | Pinned upstream main build; no --version flag; chart-checks validates with it |
 | attic                       | `attic --version`                  | Attic binary cache client                                                     |
 | cliproxyapi                 | `cli-proxy-api --help`             | Only has --help, no --version                                                 |
 | aws-export-credentials      | `aws-export-credentials --version` | AWS credential exporter                                                       |

@@ -6,7 +6,6 @@
 #   chart-checks check   [-c chart-checks.yaml] <file>...
 #   chart-checks render      [-c chart-checks.yaml] [--release <name>] <chart>
 #   chart-checks lint        <chart>
-#   chart-checks labels      [-c chart-checks.yaml] <chart> <rendered file>...
 #   chart-checks check-chart [-c chart-checks.yaml] [--release <name>] <chart>
 #
 # The nix wrapper prepends `set -euo pipefail`, `CHART_CHECKS_VERSION=...` and a PATH that
@@ -29,7 +28,7 @@ CONFIG="chart-checks.yaml"
 STAMP_TAG="chart-checks-stamp-v1"
 # Embedded in kubectl-validate: the only Kubernetes versions whose core schemas it carries.
 # Any other version makes it download the OpenAPI spec from GitHub, which `check` must never do.
-K8S_VERSIONS_RE='^1\.(2[3-9]|30)$'
+K8S_VERSIONS_RE='^1\.(2[3-9]|3[0-5])$'
 
 CC_TMP=""
 STAGE=""
@@ -58,8 +57,7 @@ Usage:
   chart-checks check   [-c chart-checks.yaml] --chart <dir> [--stack <name>] <file>...
   chart-checks render      [-c chart-checks.yaml] [--release <name>] <chart>   chart + every values.<name>.yaml -> rendered files
   chart-checks lint        <chart>                                              helm lint
-  chart-checks labels      [-c chart-checks.yaml] <chart> <rendered file>...    first-party label check
-  chart-checks check-chart [-c chart-checks.yaml] [--release <name>] <chart>    render, lint, install, check + labels per stack
+  chart-checks check-chart [-c chart-checks.yaml] [--release <name>] <chart>    render, lint, install, check per stack
   chart-checks --version | --help
 
 install  Fetches every entry of chart-checks.yaml into .chart-checks/ (next to the config)
@@ -73,11 +71,9 @@ check    Reads only .chart-checks/ (and `path` entries); runs `install` first wh
 
 render    Writes <renderDir>/<chart>/default.yaml (values.yaml) and one <stack>.yaml per values.<stack>.yaml
          overlay (rendered on top of values.yaml); renderDir defaults to infra/rendered, next to the config.
-labels   Every object of the chart's OWN templates (not its subcharts) carries every label of
-         chart.labels (default landscape, platform, service, module) under the prefix read from the
-         stack's values with the yq path chart.labelPrefix. Helm test hooks are exempt.
-check-chart  Everything above in order: render, helm lint, install, then for every rendered stack
-         `check` (policy charts get that stack's chartValues) and `labels`; stops at the first refusal.
+check-chart  Everything above: render every stack, helm lint, install, then `check` every rendered stack
+         (policy charts get that stack's chartValues). Every step runs and every failure is listed at
+         the end; a stack that did not render is not checked. Exits with the first failing step's code.
 
 Exit codes: 0 ok, 1 manifest refused, 2 usage, 3 config refused, 4 install failed, 5 tool error.
 EOF
@@ -153,14 +149,9 @@ def chart_errors:
   if .chart == null then []
   elif (.chart | type) != "object" then ["chart: must be a mapping"]
   else
-    (.chart | (keys - ["release","renderDir","labelPrefix","labels"]) | map("chart: unknown key \(.)"))
+    (.chart | (keys - ["release","renderDir"]) | map("chart: unknown key \(.)"))
     + (if (.chart.release // "x") | type != "string" or . == "" then ["chart: release must be a non-empty string"] else [] end)
     + (if (.chart.renderDir // "x") | type != "string" or . == "" or startswith("/") or test("(^|/)\\.\\.(/|$)") then ["chart: renderDir must be a relative path that stays inside the repository"] else [] end)
-    + (if (.chart.labelPrefix // "x") | type != "string" or . == "" then ["chart: labelPrefix must be a yq path in the chart values, such as .labelPrefix"] else [] end)
-    + (if .chart.labels == null then []
-       elif (.chart.labels | type) != "array" or (.chart.labels | length) == 0 or (.chart.labels | any(type != "string" or . == ""))
-       then ["chart: labels must be a non-empty list of label names"] else [] end)
-    + (if .chart.labels != null and .chart.labelPrefix == null then ["chart: labels needs labelPrefix (the label check is driven by it)"] else [] end)
   end;
 (
   if type != "object" then ["top level must be a mapping"] else
@@ -192,7 +183,7 @@ load_config() {
   fi
   K8S="$(jq -r '.kubernetes' <<<"${CFG_JSON}")"
   if ! [[ ${K8S} =~ ${K8S_VERSIONS_RE} ]]; then
-    die 3 "kubernetes \"${K8S}\" is not supported: the offline core schemas cover 1.23 to 1.30 only (anything newer would make the validator download them)"
+    die 3 "kubernetes \"${K8S}\" is not supported: the offline core schemas cover 1.23 to 1.35 only (anything newer would make the validator download them)"
   fi
   STAMP="${STAMP_TAG} $(jq -S -c . <<<"${CFG_JSON}" | sha256sum | cut -d' ' -f1)"
 }
@@ -513,7 +504,7 @@ cmd_check() {
 
 # ----------------------------------------------------------------- chart ----
 # The commands below render a Helm chart and check it the way a consumer repository does:
-# `render` + `lint` + `install` + `check` per values stack + the first-party label check.
+# `render` + `lint` + `install` + `check` per values stack.
 
 CHART_DIR=""   # --chart: the chart whose stack values feed `chartValues`
 CHART_STACK="" # --stack: which values stack of that chart (default / <name> of values.<name>.yaml)
@@ -540,19 +531,6 @@ stack_values_file() { # chart stack -> path
   printf '%s' "${out}"
 }
 
-# The label prefix of one stack, read with the yq path of `chart.labelPrefix`.
-stack_prefix() { # chart stack
-  local f path v
-  path="$(chart_cfg labelPrefix)"
-  f="$(stack_values_file "$1" "$2")"
-  v="$(yq -r "${path}" "${f}" 2>/dev/null || true)"
-  if [ -z "${v}" ] || [ "${v}" = "null" ]; then
-    printf '❌ chart-checks: %s/values.yaml has no labelPrefix (chart.labelPrefix: %s, stack %s)\n' "$1" "${path}" "$2" >&2
-    return 1
-  fi
-  printf '%s' "${v}"
-}
-
 # The values handed to one policy chart's `helm template` as JSON: its literal `values`, with
 # each `chartValues` entry (policy value name -> yq path) read from the chart's stack values.
 policy_values_json() { # entry
@@ -573,14 +551,16 @@ policy_values_json() { # entry
   printf '%s' "${out}"
 }
 
-# render <chart>: chart (values.yaml) and each values.<name>.yaml overlay -> <renderDir>/<chart>/<stack>.yaml
-cmd_render() { # chart
-  local chart="$1" release out stack overlay base
+RENDER_RELEASE=""
+
+# Checks where `render` writes for <chart> and empties it: sets RENDERED_DIR and RENDER_RELEASE.
+render_prepare() { # chart
+  local chart="$1" out base
   need_chart_dir "${chart}"
   load_config
   base="$(basename "${chart}")"
-  release="${RELEASE_FLAG:-$(chart_cfg release)}"
-  [ -n "${release}" ] || release="$(chart_name "${chart}")"
+  RENDER_RELEASE="${RELEASE_FLAG:-$(chart_cfg release)}"
+  [ -n "${RENDER_RELEASE}" ] || RENDER_RELEASE="$(chart_name "${chart}")"
   out="${CFG_DIR}/$(chart_cfg renderDir)"
   [ -n "$(chart_cfg renderDir)" ] || out="${CFG_DIR}/infra/rendered"
   out="${out}/${base}"
@@ -602,16 +582,40 @@ cmd_render() { # chart
     die 1 "${chart}/values.default.yaml: 'default' is the stack of values.yaml alone, so no overlay may be named default"
   fi
   find "${out}" -maxdepth 1 -name '*.yaml' -delete
-  helm template "${release}" "${chart}" >"${out}/default.yaml" || die 1 "helm template failed for ${chart}"
-  for overlay in "${chart}"/values.*.yaml; do
+  RENDERED_DIR="${out}"
+}
+
+# The stacks of <chart>: default, then one per values.<name>.yaml overlay.
+chart_stacks() { # chart
+  local overlay stack
+  printf 'default\n'
+  for overlay in "$1"/values.*.yaml; do
     [ -e "${overlay}" ] || continue
     stack="$(basename "${overlay}" .yaml)"
-    stack="${stack#values.}"
-    helm template "${release}" "${chart}" --values "${chart}/values.yaml" --values "${overlay}" >"${out}/${stack}.yaml" ||
-      die 1 "helm template failed for ${chart} with ${overlay}"
+    printf '%s\n' "${stack#values.}"
   done
-  RENDERED_DIR="${out}"
-  say "✅ Rendered ${chart} into ${out}"
+}
+
+# Renders one stack into <RENDERED_DIR>/<stack>.yaml; a failed render leaves no file behind.
+render_stack() { # chart stack
+  local chart="$1" stack="$2" args=()
+  if [ "${stack}" != "default" ]; then args=(--values "${chart}/values.yaml" --values "${chart}/values.${stack}.yaml"); fi
+  if helm template "${RENDER_RELEASE}" "${chart}" "${args[@]}" >"${RENDERED_DIR}/${stack}.yaml"; then return 0; fi
+  rm -f "${RENDERED_DIR}/${stack}.yaml"
+  printf '❌ chart-checks: helm template failed for %s (stack %s)\n' "${chart}" "${stack}" >&2
+  return 1
+}
+
+# render <chart>: chart (values.yaml) and each values.<name>.yaml overlay -> <renderDir>/<chart>/<stack>.yaml
+cmd_render() { # chart
+  local chart="$1" stack stacks=() rc=0
+  render_prepare "${chart}"
+  mapfile -t stacks < <(chart_stacks "${chart}")
+  for stack in "${stacks[@]}"; do
+    render_stack "${chart}" "${stack}" || rc=1
+  done
+  [ "${rc}" -eq 0 ] || die 1 "render failed for at least one stack of ${chart}"
+  say "✅ Rendered ${chart} into ${RENDERED_DIR}"
 }
 
 cmd_lint() { # chart
@@ -619,60 +623,60 @@ cmd_lint() { # chart
   helm lint "$1" || die 1 "helm lint refused ${1}"
 }
 
-# labels <chart> <rendered file>...: every object from the chart's OWN templates (not its
-# subcharts), of any kind, carries every configured label under the stack's prefix. Helm test
-# hooks are exempt. Helm marks each document with "# Source: <chart>/templates/..." (own) or
-# "# Source: <chart>/charts/<sub>/..." (subchart); it is turned into a key the filter selects on.
-cmd_labels() { # chart files...
-  local chart="$1" file stack prefix name missing labels
-  shift
-  need_chart_dir "${chart}"
-  load_config
-  [ -n "$(chart_cfg labelPrefix)" ] || die 3 "${CONFIG}: the label check needs chart.labelPrefix (a yq path in the chart values)"
-  name="$(chart_name "${chart}")"
-  labels="$(jq -c '.chart.labels // ["landscape","platform","service","module"]' <<<"${CFG_JSON}")"
-  for file in "$@"; do
-    [ -f "${file}" ] || die 2 "not a file: ${file}"
-    stack="$(basename "${file}" .yaml)"
-    prefix="$(stack_prefix "${chart}" "${stack}")" || return 1
-    missing="$(
-      awk '/^# Source: /{ sub(/^# Source: /, ""); printf "__source: \"%s\"\n", $0; next } { print }' "${file}" |
-        yq ea -o=json -I=0 '.' - |
-        jq -r --arg prefix "${prefix}" --arg own "${name}/templates/" --argjson labels "${labels}" '
-          select(type == "object" and .kind != null and ((.__source // "") | startswith($own)))
-          | select(((.metadata.annotations // {})["helm.sh/hook"] // "" | split(",") | map(gsub("^\\s+|\\s+$"; ""))
-              | any(. == "test" or . == "test-success" or . == "test-failure")) | not)
-          | select((.metadata.labels // {}) as $l | $labels | map($prefix + "/" + .) | any(. as $k | $l | has($k) | not))
-          | .__source + " (" + .kind + " " + (.metadata.name // "?") + ")"'
-    )" || die 5 "the label check helper (awk, yq or jq) failed on ${file}; refusing to pass unchecked"
-    if [ -n "${missing}" ]; then
-      printf '❌ %s: first-party objects without all %s/ labels (%s):\n' "${file}" "${prefix}" "$(jq -r 'join(", ")' <<<"${labels}")" >&2
-      while IFS= read -r line; do printf '   - %s\n' "${line}" >&2; done <<<"${missing}"
-      return 1
-    fi
-  done
-  say "✅ chart-checks: first-party labels present in $# file(s)"
+check_stack() { # chart stack file
+  CHART_DIR="$1"
+  CHART_STACK="$2"
+  cmd_check "$3"
 }
 
-# check-chart <chart>: render, helm lint, install, then per rendered stack `check` (the policy
-# charts get that stack's chartValues) and the first-party label check; stops at the first refusal.
+STEP_RC=0
+FIRST_RC=0
+FAILURES=()
+
+# Runs one check-chart step in a subshell, so a refusal ends that step and not the run, and records
+# a failure. Never call it as a condition: `set -e` would be off inside the step.
+step() { # label command...
+  local label="$1"
+  shift
+  set +e
+  (
+    set -e
+    trap 'if [ -n "${STAGE}" ]; then rm -rf "${STAGE}"; fi' EXIT
+    "$@"
+  )
+  STEP_RC=$?
+  set -e
+  if [ "${STEP_RC}" -ne 0 ]; then
+    FAILURES+=("${label}: exit ${STEP_RC}")
+    if [ "${FIRST_RC}" -eq 0 ]; then FIRST_RC="${STEP_RC}"; fi
+  fi
+}
+
+# check-chart <chart>: render every stack, helm lint, install, then `check` every rendered stack (the
+# policy charts get that stack's chartValues). Every step runs; a stack that did not render is not
+# checked. The failures are listed at the end and the exit code is the first failing step's.
 cmd_check_chart() { # chart
-  local chart="$1" f stack
-  need_chart_dir "${chart}"
-  cmd_render "${chart}"
-  cmd_lint "${chart}"
-  local files=()
-  mapfile -t files < <(find "${RENDERED_DIR}" -maxdepth 1 -name '*.yaml' | LC_ALL=C sort)
-  [ "${#files[@]}" -gt 0 ] || die 1 "no rendered YAML in ${RENDERED_DIR}"
-  cmd_install
-  for f in "${files[@]}"; do
-    stack="$(basename "${f}" .yaml)"
-    say "== stack ${stack} =="
-    CHART_DIR="${chart}" CHART_STACK="${stack}" cmd_check "${f}" || return $?
-    if [ -n "$(chart_cfg labelPrefix)" ]; then
-      cmd_labels "${chart}" "${f}"
-    fi
+  local chart="$1" stack stacks=() rendered=() installed
+  render_prepare "${chart}"
+  mapfile -t stacks < <(chart_stacks "${chart}")
+  for stack in "${stacks[@]}"; do
+    step "stack ${stack}: render (check skipped)" render_stack "${chart}" "${stack}"
+    if [ "${STEP_RC}" -eq 0 ]; then rendered+=("${stack}"); fi
   done
+  step "lint" cmd_lint "${chart}"
+  step "install (every check skipped)" cmd_install
+  installed="${STEP_RC}"
+  if [ "${installed}" -eq 0 ]; then
+    for stack in "${rendered[@]}"; do
+      say "== stack ${stack} =="
+      step "stack ${stack}: check" check_stack "${chart}" "${stack}" "${RENDERED_DIR}/${stack}.yaml"
+    done
+  fi
+  if [ "${#FAILURES[@]}" -gt 0 ]; then
+    printf '❌ chart-checks: check-chart failed (%d):\n' "${#FAILURES[@]}" >&2
+    printf '   - %s\n' "${FAILURES[@]}" >&2
+    exit "${FIRST_RC}"
+  fi
   say "✅ Helm render checks passed"
 }
 
@@ -693,7 +697,7 @@ main() {
     printf 'chart-checks %s\n' "${CHART_CHECKS_VERSION}"
     exit 0
     ;;
-  install | check | render | lint | labels | check-chart)
+  install | check | render | lint | check-chart)
     cmd="$1"
     shift
     ;;
@@ -759,10 +763,6 @@ main() {
     lint) cmd_lint "${files[0]}" ;;
     check-chart) cmd_check_chart "${files[0]}" ;;
     esac
-    ;;
-  labels)
-    [ "${#files[@]}" -ge 2 ] || die 2 "labels takes a chart directory and at least one rendered file"
-    cmd_labels "${files[@]}"
     ;;
   esac
 }

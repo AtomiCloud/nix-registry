@@ -57,6 +57,7 @@ nix shell --max-jobs 1 --cores 2 nixpkgs#bash \
   attic --version &&
   cli-proxy-api --help &&
   dashboard-linter --help &&
+  kubectl-validate --help >/dev/null &&
   nsc version &&
   app-store-connect --version &&
   mmoney --version &&

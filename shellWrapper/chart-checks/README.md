@@ -8,8 +8,7 @@ chart-checks install [-c chart-checks.yaml]            fetch + verify into .char
 chart-checks check   [-c chart-checks.yaml] [--chart <dir> [--stack <name>]] <file>...  validate rendered manifests offline
 chart-checks render      [-c chart-checks.yaml] [--release <name>] <chart>   chart + every values.<name>.yaml -> rendered files
 chart-checks lint        <chart>                                              helm lint
-chart-checks labels      [-c chart-checks.yaml] <chart> <rendered file>...    first-party label check
-chart-checks check-chart [-c chart-checks.yaml] [--release <name>] <chart>    all of the above, in order
+chart-checks check-chart [-c chart-checks.yaml] [--release <name>] <chart>    all of the above; reports every failure
 chart-checks --version | --help
 ```
 
@@ -26,6 +25,8 @@ it every `charts/*` instance); `charts/vap-policies` runs it on itself with `pat
 | 3    | `chart-checks.yaml` refused: unknown key, missing pin, `temporary` without a `reason`, ... |
 | 4    | install failed: fetch error, sha256 or commit mismatch, an entry that yields no CRD        |
 | 5    | tool error: a policy chart did not render or holds no `ValidatingAdmissionPolicy`          |
+
+`check-chart` runs every step and exits with the first failing step's code (see below).
 
 ## `install`
 
@@ -68,7 +69,7 @@ invocation reports everything.
 ## `chart-checks.yaml`
 
 ```yaml
-kubernetes: '1.30' # core schemas for offline validation; 1.23 to 1.30 only (see Step 0)
+kubernetes: '1.35' # core schemas for offline validation; 1.23 to 1.35 only (see below)
 policies: # charts rendered with `helm template`; only their VAPs are used
   - name: vanadium
     oci: oci://ghcr.io/example/vanadium
@@ -112,7 +113,7 @@ spec schema, turns `const` into a one-value `enum` and drops `additionalProperti
 CRD structural schema forbids it next to `properties`; unknown fields are refused regardless).
 A root `required: ["spec"]` is carried over, so an object with no `spec` is refused too.
 
-## Chart commands: `render`, `lint`, `labels`, `check-chart`
+## Chart commands: `render`, `lint`, `check-chart`
 
 For a repository that keeps a Helm chart and wants the whole gate in one line (a pre-commit hook
 or a Taskfile entry): `chart-checks check-chart infra/root_chart`. `<chart>` is a chart
@@ -124,19 +125,31 @@ A **values stack** is one render of the chart: `default` is `values.yaml` alone,
 
 | Command                          | What it does                                                                                                                                                                                                                                                                                   |
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `render [--release n] <chart>`   | Deletes `<renderDir>/<chart dir name>/*.yaml`, then writes `default.yaml` and one `<stack>.yaml` per overlay (`helm template <release> <chart>`, overlays with `--values values.yaml --values values.<name>.yaml`). `renderDir` is next to the config (default `infra/rendered`). Exit 1 if helm fails or an overlay is named `default` (the reserved stack of `values.yaml` alone); exit 3 if the output directory is inside the chart. |
+| `render [--release n] <chart>`   | Deletes `<renderDir>/<chart dir name>/*.yaml`, then writes `default.yaml` and one `<stack>.yaml` per overlay (`helm template <release> <chart>`, overlays with `--values values.yaml --values values.<name>.yaml`). `renderDir` is next to the config (default `infra/rendered`). Every stack is rendered; a stack helm cannot render leaves no file and makes the exit 1. Exit 1 too if an overlay is named `default` (the reserved stack of `values.yaml` alone); exit 3 if the output directory is inside the chart. |
 | `lint <chart>`                   | `helm lint`. Exit 1 on a lint error.                                                                                                                                                                                                                                                           |
-| `labels <chart> <file>...`       | The first-party label check (below), for rendered files named `<stack>.yaml`. Needs `chart.labelPrefix`. Exit 1 on a missing label.                                                                                                                                                             |
 | `check --chart <dir> [--stack s] <file>...` | `check` as above, with the policy charts' `chartValues` read from that chart's stack values (`--stack` defaults to `default`).                                                                                                                                                      |
-| `check-chart [--release n] <chart>` | `render`, `lint`, `install`, then for every rendered stack: `check` (policy charts get that stack's values) and, when `chart.labelPrefix` is set, `labels`. Stops at the first refusal; prints `Helm render checks passed` on success. Exit codes are those of the step that failed.            |
+| `check-chart [--release n] <chart>` | Renders every stack, then `lint`, `install`, and `check` for every rendered stack (policy charts get that stack's values). See below.            |
 
-**First-party labels.** Every object that comes from the chart's **own** templates (helm marks
-each document `# Source: <chart>/templates/...`; subcharts are `# Source: <chart>/charts/...` and are
-not checked), of any kind, must carry every label of `chart.labels` under the stack's prefix:
-`<prefix>/<label>`. Helm test hooks (`helm.sh/hook: test`, `test-success`, `test-failure`) are
-exempt. A violation prints
-`first-party objects without all <prefix>/ labels (<labels>):` and one line per object; exit 1.
-A stack whose values give no prefix is refused (`has no labelPrefix`, exit 1).
+**`check-chart` reports every failure.** Every step runs, whatever failed before it: each stack's
+render, `helm lint`, `install`, and each rendered stack's `check` (both stages). Only two things skip
+work: a stack that did not render is not checked, and a failed `install` skips every `check`. The
+run ends with one line per failed step, then exits with the **first failing step's exit code**, in the
+order the steps run (renders, lint, install, checks):
+
+```text
+❌ chart-checks: check-chart failed (3):
+   - stack prod: render (check skipped): exit 1
+   - lint: exit 1
+   - stack default: check: exit 1
+```
+
+On success it prints `Helm render checks passed` and exits 0. A refused `chart-checks.yaml`, a
+`renderDir` outside the repository or inside the chart, and an overlay named `default` stop it at
+once, before any step.
+
+**Labels.** `chart-checks` has no label rule of its own: labels are checked by the policy
+charts, such as a `require-lpsm-labels` VAP that matches workloads. Objects no policy matches are
+not held to any label.
 
 ### The `chart` section and per-policy values
 
@@ -144,8 +157,6 @@ A stack whose values give no prefix is refused (`has no labelPrefix`, exit 1).
 chart: # optional; every key is optional
   release: diene-workspace # helm release name for `render`; default the chart's own name; --release overrides
   renderDir: infra/rendered # relative to the config; default infra/rendered; may not leave the repository and may not resolve into the chart
-  labelPrefix: .labelPrefix # yq path to the label prefix in a stack's values; turns the label check on
-  labels: [landscape, platform, service, module] # default; needs labelPrefix
 policies:
   - name: cluster-policies
     git: https://github.com/example/cluster-policies
@@ -163,26 +174,21 @@ policies:
 - `chartValues` is resolved against the stack being checked: its path is read from `values.yaml`
   merged with that stack's overlay. A path that is empty there is a tool error (exit 5). Using it
   with plain `check` (no `--chart`) is a usage error (exit 2).
-- Unknown `chart` keys, a non-mapping `values`, a `chartValues` that is not name -> path, a
-  `labels` list without `labelPrefix`, and a `renderDir` outside the repository are refused (exit 3).
+- Unknown `chart` keys, a non-mapping `values`, a `chartValues` that is not name -> path and a
+  `renderDir` outside the repository are refused (exit 3).
 
-## Step 0: `kubectl-validate` or `kubeconform` + a converter?
+## Schemas: `kubectl-validate`
 
-Decided on a fixture: **`kubectl-validate`** (nixpkgs 0.0.4); no CRD converter was written.
+`check` validates with the registry's own `kubectl-validate` build (`golang/kubectl-validate`,
+also exposed as `packages.kubectl-validate`), pinned to a commit of its `main` branch: the last
+release, v0.0.4, embeds core schemas only up to Kubernetes 1.30.
 
-Measured, with every source gone and inside a nix build sandbox (no network):
-
-- Core kinds validate against schemas **embedded for Kubernetes 1.23 to 1.30**. Any other
-  `--version` makes it download the OpenAPI spec from `api.github.com`, which `check` must never
-  do, so the tool refuses `kubernetes:` outside 1.23 to 1.30 (exit 3).
-- `--local-crds <dir>` makes installed CRDs validate with no converter: the real Gateway API
-  `v1.2.1` `standard-install.yaml` (5 CRDs) and External Secrets `v0.10.7` `bundle.yaml` (15 CRDs),
-  both ways round (a good HTTPRoute / ExternalSecret passes, an unknown field is refused).
+- Core kinds validate against the schemas **embedded for Kubernetes 1.23 to 1.35** (the
+  `builtins/1.23` to `builtins/1.35` directories of the pinned build). Any other `--version`
+  makes it download the OpenAPI spec from GitHub, which `check` must never do, so
+  `kubernetes:` outside 1.23 to 1.35 is refused (exit 3).
+- `--local-crds <dir>` validates the installed CRDs with no converter.
 - Unknown fields are refused on core kinds and on CRD kinds, by default.
-
-So the offline core-schema requirement is met by the validator carrying them, not by a pinned
-bundle. The ceiling is Kubernetes 1.30; a newer core version would need a pinned schema bundle
-passed with `--local-schemas`, which this version does not do.
 
 ## Tests
 
@@ -196,14 +202,20 @@ Arms: good fixture passes (core kinds, ExternalSecret, HTTPRoute, a JSON-schema 
 image red (kyverno); unknown field on a core kind, a CRD kind and the JSON-schema kind red; a VAP
 binding inside the policy chart ignored; sha256 mismatch refused; unknown commit refused; missing
 pin refused; `temporary` without a `reason` refused; unknown key refused; unsupported Kubernetes
-version refused; changed list re-installs; stale stamp makes `check` install first; `path`
+version refused (1.36) and the newest embedded one (1.35) validated offline; changed list re-installs; stale stamp makes `check` install first; `path`
 entries need no install and see local edits at once; a policy chart with no VAP refused.
 
 Chart commands: `render` writes `default.yaml` and one file per overlay (stale files dropped, `--release`
-honoured); `check-chart` passes a good chart (test hook exempt, a subchart object not held to the label
-rule) and each planted failure is red: bad `values` for the policy chart (and a literal prefix that cannot
-follow the stacks), a missing label (also a custom `labels` list), a `helm lint` error (`check-chart`
-stops there), an empty `chartValues` path; config refusals and usage errors for the new keys and commands.
+honoured); `check-chart` passes a good chart, and an object missing a label that no policy asks for
+passes; each planted failure is red: bad `values` for the policy chart (and a literal prefix that cannot
+follow the stacks), a `helm lint` error (`check-chart` still checks every stack), an empty `chartValues` path;
+`labels` is not a command and `chart.labels` / `chart.labelPrefix` are unknown keys; config refusals
+and usage errors.
+
+`check-chart` reports every failure in one run: a schema failure on one stack and a policy failure on
+another; a render failure on one stack (not checked, no file left) and a check failure on another
+(`render` alone also renders the good stacks and exits 1); a lint error and an install failure,
+exiting with lint's 1 and checking no stack.
 
 ```bash
 nix build .#chart-checks-tests -L
@@ -213,5 +225,5 @@ nix build .#chart-checks-tests -L
 
 `writeShellApplication`-style, shellcheck-checked at build time, with every binary in
 `runtimeInputs` (nothing is assumed on the caller's `PATH`): `bash`, `coreutils`, `curl`,
-`findutils`, `git`, `gnugrep`, `gnutar`, `gzip`, `jq`, `kubectl-validate`, `kubernetes-helm`
+`findutils`, `git`, `gnugrep`, `gnutar`, `gzip`, `jq`, `kubectl-validate` (the pinned build above), `kubernetes-helm`
 (`helm`), `kyverno`, `yq-go`. A consumer's dev shell therefore needs only `chart-checks`.

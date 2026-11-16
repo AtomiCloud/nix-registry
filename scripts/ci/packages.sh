@@ -74,6 +74,7 @@ REGISTRY_PACKAGES=(
   inspect
   pagerduty_cli
   dashboard-linter
+  kubectl-validate
   nsc
   obsidian_headless
   releaser

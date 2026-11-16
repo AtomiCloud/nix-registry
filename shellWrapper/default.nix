@@ -1,11 +1,11 @@
-{ nixpkgs, trivialBuilders, dotnetPackage }:
+{ nixpkgs, trivialBuilders, dotnetPackage, kubectl-validate }:
 with nixpkgs;
 with (import ./pls/default.nix { inherit trivialBuilders nixpkgs; });
 rec {
   inherit pls please;
   deadcode = import ./deadcode/default.nix { inherit trivialBuilders nixpkgs; };
   dlint = import ./dlint/default.nix { inherit trivialBuilders nixpkgs; };
-  chart-checks = import ./chart-checks/default.nix { inherit trivialBuilders nixpkgs; };
+  chart-checks = import ./chart-checks/default.nix { inherit trivialBuilders nixpkgs kubectl-validate; };
   # Offline test run of chart-checks: a build, so it has no network by construction.
   chart-checks-tests = chart-checks.passthru.tests;
   go-validator = import ./go-validator/default.nix { inherit trivialBuilders nixpkgs; };
