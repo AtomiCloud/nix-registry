@@ -1,4 +1,5 @@
-mode: static
+mode: both
 exit: 1
 contains: alerts/broken/critical.yaml rule broken-critical query A
 contains: [metricsql-syntax]
+absent: [query-run]

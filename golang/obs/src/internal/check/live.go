@@ -293,6 +293,9 @@ func (l *liveRun) panel(q *files.Query) {
 func (l *liveRun) runPanel(q *files.Query, res vars.Result, start, end time.Time) (bool, error) {
 	switch q.Kind {
 	case files.Metrics:
+		if _, err := metricsql.Parse(res.Expr); err != nil {
+			return true, nil // the static check reports it
+		}
 		step := time.Duration(res.StepMs) * time.Millisecond
 		if step <= 0 {
 			step = 15 * time.Second
