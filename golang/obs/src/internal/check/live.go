@@ -17,11 +17,20 @@ import (
 
 const maxValuesPerVar = 8
 
-// Live runs `obs query --live`: the seed is made, loaded into the embedded
-// VictoriaMetrics and VictoriaLogs, and every alert and dashboard query runs on it
-// and must return rows.
-func Live(set *files.Set, o Options) (*Report, error) {
-	r := newReport()
+// metricsEngine and logsEngine are what a live run needs from the embedded engines;
+// the parity test (parity_test.go, tag `parity`) wraps them to compare with real stores.
+type metricsEngine interface {
+	Instant(q string, t time.Time) ([]vm.Series, error)
+	Range(q string, start, end time.Time, step time.Duration) ([]vm.Series, error)
+}
+
+type logsEngine interface {
+	Stats(qs string, start, end time.Time, withoutTrailingFilters bool) ([]vl.Result, error)
+	Rows(qs string, start, end time.Time) ([]vl.Result, error)
+}
+
+// makeData reads the seed and makes its data on a time line that ends in the past.
+func makeData(o Options) (*seed.Dataset, error) {
 	seedPath := o.SeedPath
 	if seedPath == "" {
 		seedPath = o.Dir + "/seed.yaml"
@@ -37,13 +46,17 @@ func Live(set *files.Set, o Options) (*Report, error) {
 	} else if end := base.Add(sd.Duration()); end.After(time.Now()) {
 		return nil, fmt.Errorf("--base %d: the seed's time line ends %s in the future; stores drop future data", o.Base, time.Until(end).Round(time.Second))
 	}
-	ds, err := seed.Build(sd, base)
+	return seed.Build(sd, base)
+}
+
+// Live runs `obs query --live`: the seed is made, loaded into the embedded
+// VictoriaMetrics and VictoriaLogs, and every alert and dashboard query runs on it
+// and must return rows.
+func Live(set *files.Set, o Options) (*Report, error) {
+	ds, err := makeData(o)
 	if err != nil {
 		return nil, err
 	}
-	lv := &liveRun{r: r, o: o, ds: ds, end: ds.End}
-	defer lv.close()
-
 	needVM, needVL := false, false
 	for _, q := range set.Queries {
 		if q.Problem != "" {
@@ -52,20 +65,34 @@ func Live(set *files.Set, o Options) (*Report, error) {
 		needVM = needVM || q.Kind == files.Metrics
 		needVL = needVL || q.Kind == files.Logs
 	}
+	var m metricsEngine
+	var l logsEngine
 	if needVM {
-		if lv.vm, err = vm.New(ds); err != nil {
+		e, err := vm.New(ds)
+		if err != nil {
 			return nil, err
 		}
+		defer e.Close()
+		m = e
 	}
 	if needVL {
-		if lv.vl, err = vl.New(ds); err != nil {
+		e, err := vl.New(ds)
+		if err != nil {
 			return nil, err
 		}
+		defer e.Close()
+		l = e
 	}
+	return runLive(set, o, ds, m, l), nil
+}
+
+// runLive runs every query of set on the given engines.
+func runLive(set *files.Set, o Options, ds *seed.Dataset, m metricsEngine, l logsEngine) *Report {
+	r := newReport()
+	lv := &liveRun{r: r, o: o, ds: ds, end: ds.End, vm: m, vl: l}
 	lv.logFields = logFieldSet(ds)
 	lv.metricNames = toSet(ds.MetricNames())
 	lv.labelNames = labelNameSet(ds)
-
 	for i := range set.Queries {
 		q := &set.Queries[i]
 		if q.Problem != "" || (q.Kind != files.Metrics && q.Kind != files.Logs) {
@@ -78,7 +105,7 @@ func Live(set *files.Set, o Options) (*Report, error) {
 			lv.panel(q)
 		}
 	}
-	return r, nil
+	return r
 }
 
 type liveRun struct {
@@ -86,20 +113,11 @@ type liveRun struct {
 	o           Options
 	ds          *seed.Dataset
 	end         time.Time
-	vm          *vm.Engine
-	vl          *vl.Engine
+	vm          metricsEngine
+	vl          logsEngine
 	logFields   map[string]bool
 	metricNames map[string]bool
 	labelNames  map[string]bool
-}
-
-func (l *liveRun) close() {
-	if l.vm != nil {
-		l.vm.Close()
-	}
-	if l.vl != nil {
-		l.vl.Close()
-	}
 }
 
 func toSet(a []string) map[string]bool {

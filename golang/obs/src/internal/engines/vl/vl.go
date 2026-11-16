@@ -169,3 +169,14 @@ func (r Result) Float() (float64, bool) {
 	v, err := strconv.ParseFloat(r.Value, 64)
 	return v, err == nil
 }
+
+// WithoutTrailingFilters returns qs as VictoriaLogs prints it with the `filter` pipes
+// after the last `stats` pipe removed (a threshold), the way Stats does for the live check.
+func WithoutTrailingFilters(qs string, at time.Time) (string, error) {
+	q, err := Parse(qs, at)
+	if err != nil {
+		return "", err
+	}
+	out, _ := q.q.ObsWithoutTrailingFilters()
+	return out.String(), nil
+}

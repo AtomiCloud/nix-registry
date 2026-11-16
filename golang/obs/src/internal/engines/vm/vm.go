@@ -29,6 +29,8 @@ type Engine struct{ dir string }
 type Series struct {
 	Labels []seed.Label
 	Points int
+	// Values holds the non-NaN values, in time order.
+	Values []float64
 }
 
 // New starts the storage and loads every series of ds.
@@ -127,14 +129,14 @@ func (e *Engine) exec(q string, start, end time.Time, step time.Duration, instan
 		for _, t := range r.MetricName.Tags {
 			lbls = append(lbls, seed.Label{Name: string(t.Key), Value: string(t.Value)})
 		}
-		n := 0
+		var vals []float64
 		for i := range r.Timestamps {
 			if !math.IsNaN(r.Values[i]) {
-				n++
+				vals = append(vals, r.Values[i])
 			}
 		}
-		if n > 0 {
-			out = append(out, Series{Labels: lbls, Points: n})
+		if len(vals) > 0 {
+			out = append(out, Series{Labels: lbls, Points: len(vals), Values: vals})
 		}
 	}
 	return out, nil

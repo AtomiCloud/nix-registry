@@ -228,6 +228,25 @@ not touched. obs builds with `golang/obs/go.nix`: Go 1.27.4 from the narrow `nix
     (`severity` for `severity_text`), `bad-dashboard-label`; `ok-rollup-no-window` is green with a warning.
     Each fixture's `expect` file lists what its output must contain.
 
+## Parity with the real stores (local run)
+
+`src/internal/check/parity_test.go` (build tag `parity`, so it never runs in the nix build) loads every fixture's seed into
+**real** VictoriaMetrics v1.156.0 and VictoriaLogs v1.54.0 containers and runs every query a live run executes on both
+the embedded engines and the containers (instant and range queries through `/api/v1/query` and `/query_range`, stats
+queries through `/select/logsql/stats_query` with `start`, `end` and `time` as the datasource sends them, log queries
+through `/select/logsql/query`). Results must be equal: same series, same values, same row counts.
+
+```text
+docker run -d --name obs-parity-vm -p 127.0.0.1::8428 victoriametrics/victoria-metrics:v1.156.0 \
+    -retentionPeriod=10y -search.latencyOffset=0s -search.disableCache
+docker run -d --name obs-parity-vl -p 127.0.0.1::9428 victoriametrics/victoria-logs:v1.54.0 -retentionPeriod=10y
+OBS_PARITY_VM=http://127.0.0.1:<port> OBS_PARITY_VL=http://127.0.0.1:<port> \
+    go test -tags parity -run Parity -v ./internal/check      # in golang/obs/src
+```
+
+Use fresh containers for every run (VictoriaLogs keeps duplicate rows). The nightly parity job (a later release)
+replaces this by hand run.
+
 ## Not tested yet
 
 - Variable filling for LogsQL panels against the Grafana VictoriaLogs datasource (it reuses the Prometheus macros).
