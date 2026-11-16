@@ -1,3 +1,21 @@
+## [6.1.0](https://github.com/AtomiCloud/nix-registry/compare/v6.0.0...v6.1.0) (2026-11-16)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **obs:** fill $__auto_interval_<var>, name an unset datasource variable ([9f0a227](https://github.com/AtomiCloud/nix-registry/commit/9f0a227ba340d499bd773c1a36c6567c74bf3d49))
+* **obs:** report a panel query that does not parse once ([24c82cd](https://github.com/AtomiCloud/nix-registry/commit/24c82cda777604fd9229b500d1cf692aea9702ac))
+
+
+### ✨ New Packages ✨
+
+* **obs:** add the observability query check ([eda3d81](https://github.com/AtomiCloud/nix-registry/commit/eda3d812944ff055809a60cd4258a69558a67926))
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **obs:** add the local parity run against real stores ([bb3f03e](https://github.com/AtomiCloud/nix-registry/commit/bb3f03ecb9b17d7371e63634e9db09763915d105))
+
 ## [6.0.0](https://github.com/AtomiCloud/nix-registry/compare/v5.15.0...v6.0.0) (2026-11-16)
 
 
