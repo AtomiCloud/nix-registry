@@ -109,6 +109,9 @@ func Fill(c Case) Result {
 		ri = rateInterval(queryInterval, req)
 	}
 	e := fillTemplate(c.Expr, c.Vars)
+	// $__auto_interval_<name>: the interval an `interval` variable with the Auto option computes;
+	// for a panel it is the panel step.
+	e = autoInterval.ReplaceAllString(e, gtime.FormatInterval(step))
 	rep := []struct{ a, b string }{
 		{"$__interval_ms", strconv.FormatInt(int64(step/time.Millisecond), 10)},
 		{"$__interval", gtime.FormatInterval(step)},
@@ -131,6 +134,9 @@ func Fill(c Case) Result {
 	}
 	return Result{Expr: e, StepMs: step.Milliseconds()}
 }
+
+// autoInterval matches Grafan's `$__auto_interval_<variable>` and `${__auto_interval_<variable>}`.
+var autoInterval = regexp.MustCompile(`\$\{__auto_interval_\w+\}|\$__auto_interval_\w+`)
 
 var tplVar = regexp.MustCompile(`\$\{(\w+)(?::(\w+))?\}|\$(\w+)|\[\[(\w+)\]\]`)
 

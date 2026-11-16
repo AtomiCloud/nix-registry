@@ -138,3 +138,17 @@ func TestClassify(t *testing.T) {
 		}
 	}
 }
+
+// A datasource written as a template variable that the dashboard never defines is named as such.
+func TestDashboardUndefinedDatasourceVariable(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "dashboards/d.json", `{"title": "T", "panels": [
+	  {"id": 1, "type": "stat", "title": "a", "datasource": "$datasource", "targets": [{"refId": "A", "expr": "up"}]}]}`)
+	s, err := Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Queries) != 1 || !strings.Contains(s.Queries[0].Problem, `"$datasource" is a template variable`) {
+		t.Fatalf("queries: %+v", s.Queries)
+	}
+}

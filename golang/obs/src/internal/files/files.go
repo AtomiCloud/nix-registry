@@ -358,6 +358,9 @@ func (s *Set) readDashboard(rel string, b []byte) {
 				qu.Kind = kind
 				if err != nil {
 					qu.Problem = err.Error()
+					if dsType == "" && strings.HasPrefix(dsUID, "$") {
+						qu.Problem = fmt.Sprintf("datasource %q is a template variable, but templating.list has no datasource variable of that name; define it (type datasource) or name the datasource", dsUID)
+					}
 				}
 				if kind == Other && err == nil {
 					continue
