@@ -1,3 +1,27 @@
+## [6.0.0](https://github.com/AtomiCloud/nix-registry/compare/v5.15.0...v6.0.0) (2026-11-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* `chart-checks labels` is gone, and a chart-checks.yaml
+that sets `chart.labels` or `chart.labelPrefix` is now refused as an
+unknown key (exit 3).
+
+### ✨ New Packages ✨
+
+* kubectl-validate from a pinned main commit (Kubernetes 1.35) ([8443b6d](https://github.com/AtomiCloud/nix-registry/commit/8443b6d62d455282f800020d598d6ded2238184d))
+
+
+### ⬆️ Packages Updated ⬆️
+
+* chart-checks check-chart reports every failure ([ab45427](https://github.com/AtomiCloud/nix-registry/commit/ab454275f6c1acf0de959c098d3b076b3b542316))
+* infralint and infralint-helm carry chart-checks ([7d9b995](https://github.com/AtomiCloud/nix-registry/commit/7d9b9958569f2d6f3881f3e86487892ac4dd3b1a))
+
+
+### ❌ Removed Packages ❌
+
+* chart-checks drops its own every-kind labels step ([c1b90f3](https://github.com/AtomiCloud/nix-registry/commit/c1b90f304b07dc9972f1087394ddba3cb4b1cca9))
+
 ## [5.15.0](https://github.com/AtomiCloud/nix-registry/compare/v5.14.0...v5.15.0) (2026-11-15)
 
 
