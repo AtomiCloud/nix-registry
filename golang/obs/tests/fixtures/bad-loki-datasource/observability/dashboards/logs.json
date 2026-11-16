@@ -1,0 +1,12 @@
+{
+  "title": "Logs",
+  "panels": [
+    {
+      "id": 7,
+      "type": "logs",
+      "title": "Checkout logs",
+      "datasource": { "type": "loki", "uid": "loki" },
+      "targets": [{ "refId": "A", "expr": "{service_name=\"checkout\"}" }]
+    }
+  ]
+}

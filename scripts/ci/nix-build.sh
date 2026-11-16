@@ -46,6 +46,7 @@ nix shell --max-jobs 1 --cores 2 nixpkgs#bash \
   dlint --version &&
   chart-checks --version &&
   problemgen --version &&
+  obs version &&
   coderabbit --version &&
   ccc --version &&
   md-mermaid-lint --version &&

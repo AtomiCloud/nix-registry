@@ -1,0 +1,5 @@
+mode: static
+exit: 1
+contains: alerts/smooth/critical.yaml rule smooth-critical query A
+contains: [metricsql-unsupported-function]
+contains: "double_exponential_smoothing"

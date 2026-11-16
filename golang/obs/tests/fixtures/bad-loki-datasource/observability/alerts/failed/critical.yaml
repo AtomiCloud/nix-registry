@@ -1,0 +1,24 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata:
+  name: payments-checkout-failed-critical
+spec:
+  folderRef: payments-checkout-folder
+  interval: 1m
+  rules:
+    - uid: failed-critical
+      title: failed critical
+      condition: A
+      for: 5m
+      noDataState: OK
+      execErrState: Error
+      data:
+        - refId: A
+          relativeTimeRange: { from: 300, to: 0 }
+          datasourceUid: loki
+          model:
+            expr: 'sum(count_over_time({service_name="checkout"} | json [5m]))'
+            queryType: range
+            datasource: { type: loki, uid: loki }
+      labels: { severity: critical }
+      annotations: { summary: 'failed critical' }

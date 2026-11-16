@@ -1,0 +1,23 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata:
+  name: payments-checkout-latency-critical
+spec:
+  folderRef: payments-checkout-folder
+  interval: 1m
+  rules:
+    - uid: latency-critical
+      title: 🚨 Charge p95 very slow
+      condition: A
+      for: 5m
+      noDataState: OK
+      execErrState: Error
+      data:
+        - refId: A
+          relativeTimeRange: { from: 600, to: 0 }
+          datasourceUid: primordial-metrics
+          model:
+            expr: 'histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{http_route="/charge"}[5m]))) > 0.8'
+            instant: true
+      labels: { severity: critical }
+      annotations: { summary: '🚨 Charge p95 very slow' }

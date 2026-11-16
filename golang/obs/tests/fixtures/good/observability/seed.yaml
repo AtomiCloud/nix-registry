@@ -1,0 +1,36 @@
+length: 4h
+random_seed: 42
+resource:
+  durian.cloud.landscape: pichu
+  durian.cloud.platform: payments
+  durian.cloud.service: checkout
+  durian.cloud.module: api
+traffic: { requests: 3/s, shape: daily_wave }
+metrics:
+  checkout.charges:
+    type: counter
+    series:
+      - { where: { payment.provider: stripe, outcome: success }, share: 0.60 }
+      - { where: { payment.provider: stripe, outcome: declined }, share: 0.05 }
+      - { where: { payment.provider: stripe, outcome: error }, share: 0.01 }
+      - { where: { payment.provider: adyen, outcome: success }, share: 0.30 }
+      - { where: { payment.provider: adyen, outcome: declined }, share: 0.03 }
+      - { where: { payment.provider: adyen, outcome: error }, share: 0.01 }
+  http.server.request.duration:
+    type: histogram
+    unit: s
+    buckets: [0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5]
+    latency: { median: 0.08, sigma: 0.5 }
+    series:
+      - { where: { http.route: /charge, http.response.status_code: '200' }, share: 0.97 }
+      - { where: { http.route: /charge, http.response.status_code: '502' }, share: 0.01 }
+      - { where: { http.route: /refund, http.response.status_code: '200' }, share: 0.02 }
+logs:
+  - { event: checkout.charge.succeeded, level: info, from: { metric: checkout.charges, where: { outcome: success } } }
+  - { event: checkout.charge.declined, level: warn, from: { metric: checkout.charges, where: { outcome: declined } } }
+  - {
+      event: checkout.charge.failed,
+      level: error,
+      line: charge failed,
+      from: { metric: checkout.charges, where: { outcome: error } },
+    }

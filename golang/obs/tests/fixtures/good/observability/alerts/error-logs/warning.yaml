@@ -1,0 +1,23 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata:
+  name: payments-checkout-error-logs-warning
+spec:
+  folderRef: payments-checkout-folder
+  interval: 1m
+  rules:
+    - uid: error-logs-warning
+      title: ⚠️ Error logs
+      condition: A
+      for: 5m
+      noDataState: OK
+      execErrState: Error
+      data:
+        - refId: A
+          relativeTimeRange: { from: 300, to: 0 }
+          datasourceUid: primordial-logs
+          model:
+            expr: '_time:5m {durian.cloud.service="checkout"} severity_text:ERROR "durian.cloud/event":in("checkout.charge.failed") | stats count() errors'
+            queryType: stats
+      labels: { severity: warning }
+      annotations: { summary: '⚠️ Error logs' }

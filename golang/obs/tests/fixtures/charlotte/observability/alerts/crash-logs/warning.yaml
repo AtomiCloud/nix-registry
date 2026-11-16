@@ -1,0 +1,30 @@
+# Primordial's crash-logs alert (apps/box/observability/alerts/crash-logs/warning.yaml),
+# copied and written as the GrafanaAlertRuleGroup CR the chart renders from it.
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata:
+  name: primordial-box-crash-logs-warning
+spec:
+  folderRef: primordial-box-folder
+  interval: 1m
+  rules:
+    - uid: crash-logs-warning
+      title: ⚠️ Crash logs (panic / fatal)
+      condition: A
+      for: 5m
+      noDataState: OK
+      execErrState: Error
+      data:
+        - refId: A
+          relativeTimeRange: { from: 600, to: 0 }
+          datasourceUid: primordial-logs
+          model:
+            expr: '_time:10m {cluster="primordial",service!~"logs|traces"} ~`(?i)(panic:|fatal error:|panicked|segmentation fault)` | stats by (service) count() hits'
+            queryType: stats
+      labels:
+        severity: warning
+        platform: box
+      annotations:
+        summary: 'A service logged a panic / fatal / segfault in the last 10m.'
+        description: 'A crash pattern appeared in the logs. Open the Logs dashboard filtered to the service and read around the line for the stack trace.'
+        runbook_url: https://github.com/AtomiCloud/primordial/blob/main/apps/box/observability/alerts/crash-logs/runbook.md

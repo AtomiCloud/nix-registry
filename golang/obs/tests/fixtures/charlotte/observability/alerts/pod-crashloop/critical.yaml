@@ -1,0 +1,29 @@
+# Primordial's pod-crashloop alert (apps/box/observability/alerts/pod-crashloop/critical.yaml),
+# copied and written as the GrafanaAlertRuleGroup CR the chart renders from it.
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata:
+  name: primordial-box-pod-crashloop-critical
+spec:
+  folderRef: primordial-box-folder
+  interval: 1m
+  rules:
+    - uid: pod-crashloop-critical
+      title: 🚨 Pod restarting repeatedly
+      condition: A
+      for: 5m
+      noDataState: OK
+      execErrState: Error
+      data:
+        - refId: A
+          relativeTimeRange: { from: 600, to: 0 }
+          datasourceUid: primordial-metrics
+          model:
+            expr: 'max by (namespace, pod) (increase(kube_pod_container_status_restarts_total{cluster="primordial"}[15m])) > 10'
+            instant: true
+      labels:
+        severity: critical
+        platform: box
+      annotations:
+        summary: 'A container restarted more than 10 times in 15m (crash-loop).'
+        description: 'A container is crash-looping and effectively down. Inspect logs --previous urgently.'

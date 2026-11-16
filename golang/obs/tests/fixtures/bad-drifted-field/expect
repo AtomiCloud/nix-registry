@@ -1,0 +1,6 @@
+mode: live
+exit: 1
+contains: alerts/failed/critical.yaml rule failed-critical query A
+contains: [no-rows]
+contains: not in the seed: log field severity
+absent: log field severity_text

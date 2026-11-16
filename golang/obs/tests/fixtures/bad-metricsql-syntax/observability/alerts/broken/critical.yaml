@@ -1,0 +1,24 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata:
+  name: payments-checkout-broken-critical
+spec:
+  folderRef: payments-checkout-folder
+  interval: 1m
+  rules:
+    - uid: broken-critical
+      title: broken critical
+      condition: A
+      for: 5m
+      noDataState: OK
+      execErrState: Error
+      data:
+        - refId: A
+          relativeTimeRange: { from: 300, to: 0 }
+          datasourceUid: primordial-metrics
+          model:
+            expr: 'sum(rate(checkout_charges_total[5m])'
+            instant: true
+
+      labels: { severity: critical }
+      annotations: { summary: 'broken critical' }

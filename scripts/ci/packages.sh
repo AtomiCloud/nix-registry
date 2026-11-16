@@ -67,6 +67,9 @@ REGISTRY_PACKAGES=(
   chart-checks-tests
   problemgen
   problemgen-tests
+  obs
+  obs-tests
+  obs-source
   coderabbit
   ccc
   md-mermaid-lint
