@@ -11,6 +11,7 @@ import (
 
 	"github.com/AtomiCloud/obs/internal/check"
 	"github.com/AtomiCloud/obs/internal/files"
+	"github.com/AtomiCloud/obs/internal/sandbox"
 )
 
 // version is set by the nix build (-X main.version=...).
@@ -27,6 +28,9 @@ const usage = `obs: the observability check tool
 usage:
   obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
   obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names]
+  obs sandbox up|down|status [--dir observability] [--project name] [--port-base n]
+  obs scrape --target <url> [--label name=value] [--interval 15s] [--once]
+  obs look [--base origin/main] [--all] [--json]
   obs links [--dir observability] [--seed seed.yaml] [--base unix]
   obs version
   obs store move <store> --config move.yaml [--dry-run] [--rollback]
@@ -47,6 +51,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "version", "--version", "-version":
 		printVersion(stdout)
 		return 0
+	case "scrape":
+		return runScrape(args[1:], stdout, stderr)
+	case "sandbox":
+		return runSandbox(args[1:], stdout, stderr)
+	case "look":
+		return runLook(args[1:], stdout, stderr)
 	case "links":
 		return runLinks(args[1:], stdout, stderr)
 	case "query":
@@ -70,6 +80,9 @@ func printVersion(w io.Writer) {
 	fmt.Fprintln(w, "engine Tempo 3.1.1 (commit 9db7df79d2af, TraceQL)")
 	fmt.Fprintf(w, "engine VictoriaMetrics %s (MetricsQL)\n", pinVictoriaMetrics)
 	fmt.Fprintf(w, "engine VictoriaLogs %s (LogsQL)\n", pinVictoriaLogs)
+	for _, l := range sandbox.PinLines() {
+		fmt.Fprintln(w, l)
+	}
 	fmt.Fprintln(w, "licence AGPL-3.0-only; source: https://github.com/AtomiCloud/nix-registry/tree/main/golang/obs (each release also attaches a source and vendored-modules tarball)")
 	if bi, ok := debug.ReadBuildInfo(); ok {
 		fmt.Fprintf(w, "go %s\n", bi.GoVersion)

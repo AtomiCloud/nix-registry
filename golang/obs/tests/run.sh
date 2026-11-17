@@ -145,6 +145,10 @@ if [ -n "${OUT:-}" ]; then
 fi
 
 bash "$here/store-symbols-sizing.sh" "$OBS" && ok "store/symbols/size fixtures" || bad "store/symbols/size fixtures"
+
+# shellcheck source=/dev/null
+. "$here/sandbox.sh"
+
 bash "$here/links.sh" "$OBS" "${OUT:-}"
 echo "obs tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
