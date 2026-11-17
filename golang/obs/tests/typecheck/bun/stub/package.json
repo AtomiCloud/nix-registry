@@ -1,0 +1,6 @@
+{
+  "name": "@atomicloud/diene.interfaces",
+  "version": "0.0.0-stub",
+  "types": "index.d.ts",
+  "type": "module"
+}

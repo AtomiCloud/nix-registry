@@ -7,256 +7,9 @@
 
 using System;
 using System.Collections.Generic;
-using System.Globalization;
+using AtomiCloud.Diene.Interfaces;
 
 namespace Pay.Signals;
-
-// ---- shared base types ----
-
-/// <summary>A label value that has a wire form. Valid is false for default(...) of a bounded number or date.</summary>
-public interface IDurianSignalWire
-{
-    string Wire { get; }
-
-    bool Valid { get; }
-}
-
-/// <summary>Implemented by the generated labels and attributes records only.</summary>
-public interface IDurianSignalLabels
-{
-}
-
-/// <summary>Implemented by the level markers only.</summary>
-public interface IDurianSignalLevel
-{
-    static abstract string Level { get; }
-}
-
-/// <summary>The range of a bounded number or time bucket.</summary>
-public interface IDurianSignalIntSpec
-{
-    static abstract string Name { get; }
-
-    static abstract int Min { get; }
-
-    static abstract int Max { get; }
-
-    static abstract string Unit { get; }
-}
-
-/// <summary>The window of a calendar date label.</summary>
-public interface IDurianSignalDateSpec
-{
-    static abstract string Name { get; }
-
-    static abstract int WindowDays { get; }
-}
-
-/// <summary>The wire name of a labels or attributes property.</summary>
-[AttributeUsage(AttributeTargets.Property)]
-public sealed class DurianSignalLabelAttribute : Attribute
-{
-    public DurianSignalLabelAttribute(string name)
-    {
-        Name = name;
-    }
-
-    public string Name { get; }
-}
-
-/// <summary>The result of making a bounded number: a value, or the reason it was refused.</summary>
-public abstract record DurianSignalResult<T>
-{
-    private DurianSignalResult()
-    {
-    }
-
-    public sealed record Ok(T Value) : DurianSignalResult<T>;
-
-    public sealed record Err(string Error) : DurianSignalResult<T>;
-}
-
-/// <summary>A bounded number or time bucket. Of and AtTime are the only ways to make a valid one.</summary>
-public readonly struct DurianSignalInt<TSpec> : IDurianSignalWire
-    where TSpec : IDurianSignalIntSpec
-{
-    private readonly int _value;
-    private readonly bool _valid;
-
-    private DurianSignalInt(int value)
-    {
-        _value = value;
-        _valid = true;
-    }
-
-    public bool Valid => _valid;
-
-    public int Value => _value;
-
-    public string Wire => _valid ? _value.ToString(CultureInfo.InvariantCulture) : string.Empty;
-
-    public static DurianSignalResult<DurianSignalInt<TSpec>> Of(int n) =>
-        n < TSpec.Min || n > TSpec.Max
-            ? new DurianSignalResult<DurianSignalInt<TSpec>>.Err(
-                $"{TSpec.Name}: {n} is outside {TSpec.Min}..{TSpec.Max}")
-            : new DurianSignalResult<DurianSignalInt<TSpec>>.Ok(new DurianSignalInt<TSpec>(n));
-
-    public static DurianSignalResult<DurianSignalInt<TSpec>> AtTime(DateTimeOffset t) =>
-        TSpec.Unit switch
-        {
-            "hour_of_day" => Of(t.Hour),
-            "weekday" => Of((int)t.DayOfWeek),
-            _ => new DurianSignalResult<DurianSignalInt<TSpec>>.Err(
-                $"{TSpec.Name}: unit '{TSpec.Unit}' is not a time bucket"),
-        };
-
-    public override string ToString() => Wire;
-}
-
-/// <summary>A calendar date label (UTC, yyyy-MM-dd). Of is the only way to make a valid one.</summary>
-public readonly struct DurianSignalDate<TSpec> : IDurianSignalWire
-    where TSpec : IDurianSignalDateSpec
-{
-    private readonly string? _wire;
-
-    private DurianSignalDate(string wire)
-    {
-        _wire = wire;
-    }
-
-    public bool Valid => _wire is not null;
-
-    public string Wire => _wire ?? string.Empty;
-
-    public static DurianSignalDate<TSpec> Of(DateOnly date) =>
-        new(date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
-
-    public static DurianSignalDate<TSpec> Of(DateTimeOffset t) => Of(DateOnly.FromDateTime(t.UtcDateTime));
-
-    public override string ToString() => Wire;
-}
-
-/// <summary>A log event: a name carrier whose type includes its level. Only this assembly can make one.</summary>
-public sealed class DurianSignalEvent<TLevel>
-    where TLevel : IDurianSignalLevel
-{
-    internal DurianSignalEvent(string name)
-    {
-        Name = name;
-    }
-
-    /// <summary>The event name (the value of the durian.cloud/event field).</summary>
-    public string Name { get; }
-
-    /// <summary>The level the type fixes.</summary>
-    public string Level => TLevel.Level;
-}
-
-/// <summary>A counter name carrier; TLabels is its labels record.</summary>
-public sealed class DurianSignalCounter<TLabels>
-    where TLabels : IDurianSignalLabels
-{
-    internal DurianSignalCounter(string name)
-    {
-        Name = name;
-    }
-
-    public string Name { get; }
-}
-
-/// <summary>A histogram name carrier.</summary>
-public sealed class DurianSignalHistogram<TLabels>
-    where TLabels : IDurianSignalLabels
-{
-    internal DurianSignalHistogram(string name)
-    {
-        Name = name;
-    }
-
-    public string Name { get; }
-}
-
-/// <summary>A gauge name carrier.</summary>
-public sealed class DurianSignalGauge<TLabels>
-    where TLabels : IDurianSignalLabels
-{
-    internal DurianSignalGauge(string name)
-    {
-        Name = name;
-    }
-
-    public string Name { get; }
-}
-
-/// <summary>A span name carrier; TAttributes is its attributes record.</summary>
-public sealed class DurianSignalSpan<TAttributes>
-    where TAttributes : IDurianSignalLabels
-{
-    internal DurianSignalSpan(string name, string kind)
-    {
-        Name = name;
-        Kind = kind;
-    }
-
-    public string Name { get; }
-
-    /// <summary>The span kind: internal, client, server, producer or consumer.</summary>
-    public string Kind { get; }
-}
-
-/// <summary>One row of SignalTables.Metrics.</summary>
-/// <param name="Kind">counter, histogram or gauge.</param>
-/// <param name="Unit">The stored name suffix (seconds, bytes), or empty.</param>
-/// <param name="Budget">The most series the metric may store per landscape (0: none stated).</param>
-/// <param name="AcrossPods">sum, avg, max or last; empty for counters, histograms and per-pod gauges.</param>
-/// <param name="PerPod">True for a gauge that keeps its pod keys.</param>
-/// <param name="Keys">The allowed label keys, in contract order.</param>
-public sealed record DurianSignalMetricInfo(
-    string Kind,
-    string Unit,
-    int Budget,
-    string AcrossPods,
-    bool PerPod,
-    IReadOnlyList<string> Keys);
-
-/// <summary>One row of SignalTables.Spans.</summary>
-public sealed record DurianSignalSpanInfo(string Kind, IReadOnlyList<string> Keys);
-
-/// <summary>The level marker of trace events.</summary>
-public readonly struct DurianSignalLevelTrace : IDurianSignalLevel
-{
-    public static string Level => "trace";
-}
-
-/// <summary>The level marker of debug events.</summary>
-public readonly struct DurianSignalLevelDebug : IDurianSignalLevel
-{
-    public static string Level => "debug";
-}
-
-/// <summary>The level marker of info events.</summary>
-public readonly struct DurianSignalLevelInfo : IDurianSignalLevel
-{
-    public static string Level => "info";
-}
-
-/// <summary>The level marker of warn events.</summary>
-public readonly struct DurianSignalLevelWarn : IDurianSignalLevel
-{
-    public static string Level => "warn";
-}
-
-/// <summary>The level marker of error events.</summary>
-public readonly struct DurianSignalLevelError : IDurianSignalLevel
-{
-    public static string Level => "error";
-}
-
-/// <summary>The level marker of fatal events.</summary>
-public readonly struct DurianSignalLevelFatal : IDurianSignalLevel
-{
-    public static string Level => "fatal";
-}
 
 // ---- label value types ----
 
@@ -292,9 +45,9 @@ public readonly struct VeryLongBoundedNumberTypeNameForWrappingSpec : IDurianSig
 {
     public static string Name => "very_long_bounded_number_type_name_for_wrapping";
 
-    public static int Min => -5;
+    public static long Min => -5;
 
-    public static int Max => 99;
+    public static long Max => 99;
 
     public static string Unit => "";
 }
@@ -304,9 +57,9 @@ public readonly struct HourSpec : IDurianSignalIntSpec
 {
     public static string Name => "hour";
 
-    public static int Min => 0;
+    public static long Min => 0;
 
-    public static int Max => 23;
+    public static long Max => 23;
 
     public static string Unit => "hour_of_day";
 }
@@ -316,7 +69,7 @@ public readonly struct VeryLongCalendarDateTypeNameToWrapTheLineSpec : IDurianSi
 {
     public static string Name => "very_long_calendar_date_type_name_to_wrap_the_line";
 
-    public static int WindowDays => 365;
+    public static long WindowDays => 365;
 }
 
 // note is a free value (a string): log fields and span attributes only.
@@ -327,14 +80,14 @@ public readonly struct VeryLongCalendarDateTypeNameToWrapTheLineSpec : IDurianSi
 public sealed record PaymentsProviderSettlementBatchReconciliationDurationLabels(
     [property: DurianSignalLabel("region")] Region Region,
     [property: DurianSignalLabel("default")] Region Default,
-    [property: DurianSignalLabel("very_long_bounded_number_type_name_for_wrapping")] DurianSignalInt<VeryLongBoundedNumberTypeNameForWrappingSpec> VeryLongBoundedNumberTypeNameForWrapping,
-    [property: DurianSignalLabel("k8s.zone")] DurianSignalInt<HourSpec> K8sZone
+    [property: DurianSignalLabel("very_long_bounded_number_type_name_for_wrapping")] Int<VeryLongBoundedNumberTypeNameForWrappingSpec> VeryLongBoundedNumberTypeNameForWrapping,
+    [property: DurianSignalLabel("k8s.zone")] Int<HourSpec> K8sZone
 ) : IDurianSignalLabels;
 
 /// <summary>The labels of payments.provider.settlement.batch.reconciliation.late.</summary>
 public sealed record PaymentsProviderSettlementBatchReconciliationLateLabels(
     [property: DurianSignalLabel("very_long_calendar_date_type_name_to_wrap_the_line")] DurianSignalDate<VeryLongCalendarDateTypeNameToWrapTheLineSpec> VeryLongCalendarDateTypeNameToWrapTheLine,
-    [property: DurianSignalLabel("hour")] DurianSignalInt<HourSpec> Hour
+    [property: DurianSignalLabel("hour")] Int<HourSpec> Hour
 ) : IDurianSignalLabels;
 
 /// <summary>The labels of payments.idle.</summary>
@@ -344,7 +97,7 @@ public sealed record PaymentsIdleLabels : IDurianSignalLabels;
 public sealed record PaymentsProviderSettlementBatchReconciliationAttributes(
     [property: DurianSignalLabel("note")] string Note,
     [property: DurianSignalLabel("default")] Region Default,
-    [property: DurianSignalLabel("hour")] DurianSignalInt<HourSpec> Hour
+    [property: DurianSignalLabel("hour")] Int<HourSpec> Hour
 ) : IDurianSignalLabels;
 
 // ---- name carriers ----
@@ -360,9 +113,9 @@ public static class Names
 /// <summary>The log events of the contract; each carrier's type fixes its level.</summary>
 public static class Events
 {
-    public static readonly DurianSignalEvent<DurianSignalLevelFatal> Class = new("payments.class.started");
-    public static readonly DurianSignalEvent<DurianSignalLevelTrace> New = new("payments.new");
-    public static readonly DurianSignalEvent<DurianSignalLevelError> VeryLongEventKeyNameThatNeedsWrappingInTheGeneratedCode = new("payments.provider.settlement.batch.reconciliation.failed");
+    public static readonly Event<FatalLevel> Class = new("payments.class.started");
+    public static readonly Event<TraceLevel> New = new("payments.new");
+    public static readonly Event<ErrorLevel> VeryLongEventKeyNameThatNeedsWrappingInTheGeneratedCode = new("payments.provider.settlement.batch.reconciliation.failed");
 }
 
 /// <summary>The spans of the contract.</summary>

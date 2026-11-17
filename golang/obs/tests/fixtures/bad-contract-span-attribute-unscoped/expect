@@ -1,0 +1,5 @@
+mode: static
+exit: 1
+contains: dashboards/traces.json
+contains: [traceql-attribute]
+contains: nmae

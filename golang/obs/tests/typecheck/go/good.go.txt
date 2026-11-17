@@ -4,24 +4,46 @@ import (
 	"fmt"
 	"time"
 
+	"context"
 	"example.com/app/signals"
+	obs "github.com/ProtoDurian/diene.go-interfaces/obs"
 )
 
 func main() {
-	shard, err := signals.NewShard(3)
+	shard, err := obs.NewInt[signals.ShardSpec](3)
 	if err != nil {
 		panic(err)
 	}
-	if _, err := signals.NewShard(16); err == nil {
+	if _, err := obs.NewInt[signals.ShardSpec](16); err == nil {
 		panic("16 accepted")
 	}
-	l := signals.CheckoutChargesLabels{Provider: signals.ProviderStripe, Outcome: signals.OutcomeOk, Shard: shard, Hour: signals.HourAt(time.Now())}
-	var _ signals.DurianSignalCounter[signals.CheckoutChargesLabels] = signals.CheckoutCharges
-	var _ signals.DurianSignalHistogram[signals.CheckoutChargeDurationLabels] = signals.CheckoutChargeDuration
-	var _ signals.DurianSignalEvent[signals.DurianSignalLevelError] = signals.ChargeFailed
-	zero, _ := signals.NewShard(0)
+	hour, err := obs.AtTime[signals.HourSpec](time.Now())
+	if err != nil {
+		panic(err)
+	}
+	l := signals.CheckoutChargesLabels{Provider: signals.ProviderStripe, Outcome: signals.OutcomeOk, Shard: shard, Hour: hour}
+	var _ obs.DurianSignalCounter[signals.CheckoutChargesLabels] = signals.CheckoutCharges
+	var _ obs.DurianSignalHistogram[signals.CheckoutChargeDurationLabels] = signals.CheckoutChargeDuration
+	var _ obs.Event[obs.ErrorLevel] = signals.ChargeFailed
+	zero, _ := obs.NewInt[signals.ShardSpec](0)
 	if !zero.Valid() || (signals.Shard{}).Valid() || (signals.Provider{}).Valid() || !signals.ProviderStripe.Valid() {
 		panic("a valid 0 must differ from an unset value")
+	}
+	if err := obs.Add(context.Background(), signals.CheckoutCharges, l); err != nil {
+		panic(err)
+	}
+	if err := obs.Error(context.Background(), signals.ChargeFailed); err != nil {
+		panic(err)
+	}
+	bad := l
+	bad.Shard = signals.Shard{}
+	if obs.Add(context.Background(), signals.CheckoutCharges, bad) == nil {
+		panic("unset bounded accepted")
+	}
+	bad = l
+	bad.Provider = signals.Provider{}
+	if obs.Add(context.Background(), signals.CheckoutCharges, bad) == nil {
+		panic("zero enum accepted")
 	}
 	fmt.Println(l.Provider, signals.ChargeFailed.Name(), signals.ChargeFailed.Level(), signals.MetricTable["checkout.charges"].Keys)
 }

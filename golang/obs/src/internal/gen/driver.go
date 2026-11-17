@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -69,7 +71,7 @@ func Plan(c *contract.Contract, obsDir string, langs []string) ([]Output, error)
 		if len(want) > 0 && !want[t.Lang] {
 			continue
 		}
-		fs, err := Generate(t.Lang, c, Options{Package: t.Package, Namespace: t.Module})
+		fs, err := Generate(t.Lang, c, Options{Package: t.Package, Namespace: t.Module, Interfaces: t.Interfaces})
 		if err != nil {
 			return nil, err
 		}
@@ -146,7 +148,9 @@ func Write(root string, outs []Output) error {
 // Check regenerates into a temp dir and diffs it with the files under root. It returns one
 // problem per file that is missing, hand-edited, or stale (the header's contract hash is not
 // the contract's). Empty means every committed file equals a fresh generate.
-func Check(root string, outs []Output, c *contract.Contract) ([]string, error) {
+// Optional langs restricts orphan detection too, including removed targets whose
+// language no longer appears in the current contract's target list.
+func Check(root string, outs []Output, c *contract.Contract, langs ...string) ([]string, error) {
 	tmp, err := os.MkdirTemp("", "obs-gen-check-*")
 	if err != nil {
 		return nil, err
@@ -156,7 +160,9 @@ func Check(root string, outs []Output, c *contract.Contract) ([]string, error) {
 		return nil, err
 	}
 	var probs []string
+	planned := make(map[string]bool, len(outs))
 	for _, o := range outs {
+		planned[filepath.Clean(filepath.FromSlash(o.Path))] = true
 		fresh, err := os.ReadFile(filepath.Join(tmp, filepath.FromSlash(o.Path)))
 		if err != nil {
 			return nil, err
@@ -182,6 +188,67 @@ func Check(root string, outs []Output, c *contract.Contract) ([]string, error) {
 				ShortHash(c.Hash), firstDiff(have, fresh)))
 		}
 	}
+	// Scan for obs-owned files too: a removed target is absent from both the plan and
+	// the current target list. Looking only in current targets misses its old directory.
+	// Do not follow symlinks, dependency trees, git internals, or build caches.
+	selected := map[string]bool{}
+	for _, lang := range langs {
+		selected[lang] = true
+	}
+	all := len(langs) == 0
+	contractPath := ContractPath(c)
+	extensions := map[string]string{".go": "go", ".cs": "dotnet", ".dart": "dart", ".ts": "bun"}
+	err = filepath.WalkDir(root, func(p string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if p != root {
+				switch entry.Name() {
+				case ".git", ".direnv", "node_modules", "vendor", ".dart_tool", ".obs-cache":
+					return filepath.SkipDir
+				}
+			}
+			return nil
+		}
+		if !entry.Type().IsRegular() {
+			return nil
+		}
+		rel, err := filepath.Rel(root, p)
+		if err != nil {
+			return err
+		}
+		if planned[rel] {
+			return nil
+		}
+		if !all {
+			lang := extensions[filepath.Ext(p)]
+			if !selected[lang] {
+				return nil
+			}
+		}
+		file, err := os.Open(p)
+		if err != nil {
+			return err
+		}
+		head, err := io.ReadAll(io.LimitReader(file, 600))
+		closeErr := file.Close()
+		if err != nil {
+			return err
+		}
+		if closeErr != nil {
+			return closeErr
+		}
+		line := strings.SplitN(string(head), "\n", 2)[0]
+		if (line == "// "+Marker || line == "# "+Marker) && ContractOf(head) == contractPath {
+			probs = append(probs, Problem(filepath.ToSlash(rel), "[gen-orphan] generated file is not in the current output plan; remove it or restore its target"))
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(probs)
 	return probs, nil
 }
 

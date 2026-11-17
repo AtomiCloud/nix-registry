@@ -311,8 +311,8 @@ func (q *Query) ObsWithoutTrailingFilters() (qOut *Query, dropped int) {
 
 // ObsFieldFilter is one filter on a single field, as ObsFieldFilters reports it.
 type ObsFieldFilter struct {
-	Op       string   // "exact" (`:=`), "in" (`in(...)`), "regexp" (`:~`) or "other"
-	Values   []string // exact: the one value; in: its values
+	Op       string   // "exact" (`:=`), "phrase" (`:"x"`), "prefix" (`:x*` or `:=x*`), "in" (`in(...)`), "regexp" (`:~`) or "other"
+	Values   []string // exact and phrase: the one value; prefix: the prefix; in: its values
 	Pattern  string   // regexp: the pattern
 	Negated  bool     // under an odd number of `not` / `-`
 	UnderOr  bool     // inside an `or` that has other branches
@@ -359,6 +359,12 @@ func (q *Query) ObsFieldFilters(field string) []ObsFieldFilter {
 				ff.Op, ff.Values = "exact", []string{x.value}
 			case *filterIn:
 				ff.Op, ff.Values = "in", append([]string(nil), x.values.values...)
+			case *filterPhrase:
+				ff.Op, ff.Values = "phrase", []string{x.phrase}
+			case *filterPrefix:
+				ff.Op, ff.Values = "prefix", []string{x.prefix}
+			case *filterExactPrefix:
+				ff.Op, ff.Values = "prefix", []string{x.prefix}
 			case *filterRegexp:
 				ff.Op, ff.Pattern = "regexp", x.re.String()
 			}

@@ -11,6 +11,8 @@ DART=dart
 [ "${1:-}" = "--dart" ] && DART="$2"
 here="$(cd "$(dirname "$0")/.." && pwd)"
 g="$here/typecheck/dart"
+# shellcheck disable=SC1091 # helper is relative to this fixture tree
+source "$here/typecheck/stubs.bash"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 export HOME="$work/home" DART_SUPPRESS_ANALYTICS=true
@@ -24,6 +26,7 @@ for repo in good stress; do
   cp "$here/fixtures/gen/$repo/gen/dart/lib/src/signals/signals.g.dart" "$d/lib/src/signals/"
   printf 'name: %s\npublish_to: none\nenvironment:\n  sdk: ^3.7.0\n' "$pkg" >"$d/pubspec.yaml"
   printf 'analyzer:\n  language:\n    strict-casts: true\n    strict-inference: true\n    strict-raw-types: true\n' >"$d/analysis_options.yaml"
+  obs_setup_stub dart "$d"
   (cd "$d" && "$DART" pub get --offline >/dev/null 2>&1)
   if out=$(cd "$d" && "$DART" analyze 2>&1) && grep -q 'No issues found' <<<"$out"; then
     echo "PASS $repo: signals.g.dart analyzes clean (strict casts, inference, raw types)"

@@ -11,6 +11,8 @@ DOTNET=dotnet
 [ "${1:-}" = "--dotnet" ] && DOTNET="$2"
 here="$(cd "$(dirname "$0")/.." && pwd)"
 g="$here/typecheck/dotnet"
+# shellcheck disable=SC1091 # helper is relative to this fixture tree
+source "$here/typecheck/stubs.bash"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 export HOME="$work/home" DOTNET_CLI_HOME="$work/home" DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 \
@@ -34,6 +36,7 @@ for repo in good stress; do
   </PropertyGroup>
 </Project>
 XML
+  obs_setup_stub dotnet "$d/Signals"
   if out=$(build "$d/Signals/Signals.csproj") && grep -q 'Build succeeded' <<<"$out"; then
     echo "PASS $repo: Signals.g.cs compiles (warnings as errors, all analyzers)"
   else

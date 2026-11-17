@@ -22,6 +22,7 @@ func TestGoldenStress(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	c.File = "observability/contract.yaml" // standalone fixture's logical repository root
 	fs, err := gen.Generate("dotnet", c, gen.Options{Namespace: "Pay.Signals"})
 	if err != nil {
 		t.Fatal(err)
@@ -52,7 +53,7 @@ func TestGoldenStress(t *testing.T) {
 		"public static readonly Region Region_ = new(\"region\");", // a member may not take its type's name
 		`new("it's")`,
 		`new("a$b")`,
-		`[property: DurianSignalLabel("k8s.zone")] DurianSignalInt<HourSpec> K8sZone`,
+		`[property: DurianSignalLabel("k8s.zone")] Int<HourSpec> K8sZone`,
 		"namespace Pay.Signals;",
 	} {
 		if !strings.Contains(src, want) {
@@ -197,7 +198,7 @@ spans: { spans: { attributes: { spans_attributes: t } } }
 	for _, want := range []string{
 		"public sealed record MLabels(", "MLabels_",
 		"public static readonly DurianSignalCounter<NamesLabels> Names_ =",
-		"public static readonly DurianSignalEvent<DurianSignalLevelInfo> Events_ =",
+		"public static readonly Event<InfoLevel> Events_ =",
 		"public static readonly DurianSignalSpan<SpansAttributes> Spans_ =",
 		"SpansAttributes_",
 	} {
@@ -219,13 +220,13 @@ service: s
 types: { shard: { kind: int, min: -2147483649, max: 2147483648 } }
 metrics: { m: { kind: counter, budget: 5000000000, labels: { shard: shard } } }
 `)
-	for _, want := range []string{"static abstract long Min", "public static long Max => 2147483648;", "private readonly long _value;", "DurianSignalResult<DurianSignalInt<TSpec>> Of(long n)", "    long Budget,"} {
+	for _, want := range []string{"public static long Min => -2147483649;", "public static long Max => 2147483648;", "Int<ShardSpec>", "5000000000"} {
 		if !strings.Contains(wide, want) {
 			t.Errorf("wide contract: generated C# lacks %q", want)
 		}
 	}
 	narrow := render(t, "service: s\ntypes: { shard: { kind: int, min: 0, max: 15 } }\n")
-	if strings.Contains(narrow, "long") || !strings.Contains(narrow, "public static int Max => 15;") {
-		t.Error("an Int32 contract must keep int")
+	if !strings.Contains(narrow, "public static long Max => 15;") || strings.Contains(narrow, "readonly struct Int<") {
+		t.Error("all bounds must implement the shared Int64 spec ABI")
 	}
 }

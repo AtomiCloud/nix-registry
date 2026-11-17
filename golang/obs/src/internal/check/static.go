@@ -190,6 +190,9 @@ func staticLogs(r *Report, q *files.Query, o Options, eventOn bool, c *contract.
 				if strings.Contains(msg, "matches no contract event") {
 					id = "contract-event-regexp-no-match"
 				}
+				if strings.HasPrefix(msg, "event prefix ") && strings.Contains(msg, "matches no contract event") {
+					id = "contract-undeclared-event"
+				}
 				r.add(Fail, q.File, q.Where, id, "%v", err)
 			} else {
 				r.add(Note, q.File, q.Where, "event-rule", "events=%v", a.Events)

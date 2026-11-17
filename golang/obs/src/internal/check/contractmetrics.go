@@ -34,6 +34,28 @@ func rawValue(v string) string {
 			return u
 		}
 	}
+	if len(v) >= 2 && v[0] == '\'' {
+		// single-quoted: the same escapes as double-quoted, plus \'
+		inner := strings.ReplaceAll(v[1:len(v)-1], "\\'", "'")
+		var b strings.Builder
+		for i := 0; i < len(inner); i++ {
+			if inner[i] == '\\' && i+1 < len(inner) {
+				b.WriteByte(inner[i])
+				i++
+				b.WriteByte(inner[i])
+				continue
+			}
+			if inner[i] == '"' {
+				b.WriteString("\\\"")
+				continue
+			}
+			b.WriteByte(inner[i])
+		}
+		if u, err := strconv.Unquote("\"" + b.String() + "\""); err == nil {
+			return u
+		}
+		return inner
+	}
 	if len(v) >= 2 {
 		return v[1 : len(v)-1]
 	}
@@ -392,7 +414,11 @@ func (mc *metricChecker) valueCheck(matched []contract.StoredMetric, metric stri
 	var ts []contract.Type
 	for _, sm := range matched {
 		if sm.Platform {
-			return
+			// a platform metric that carries the label takes any value; one that does not is not selected by it
+			if sm.Labels[contract.Norm(lf.Label)] {
+				return
+			}
+			continue
 		}
 		t, ok := mc.c.LabelType(sm.Metric, contract.Norm(lf.Label))
 		if !ok {

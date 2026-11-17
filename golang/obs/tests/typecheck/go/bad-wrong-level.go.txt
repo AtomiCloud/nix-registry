@@ -1,7 +1,10 @@
 package main
 
-import "example.com/app/signals"
+import (
+	"example.com/app/signals"
+	obs "github.com/ProtoDurian/diene.go-interfaces/obs"
+)
 
-var _ signals.DurianSignalEvent[signals.DurianSignalLevelInfo] = signals.ChargeFailed
+var _ obs.Event[obs.InfoLevel] = signals.ChargeFailed
 
 func main() {}

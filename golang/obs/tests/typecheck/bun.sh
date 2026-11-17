@@ -10,11 +10,14 @@ TSC=tsc
 [ "${1:-}" = "--tsc" ] && TSC="$2"
 here="$(cd "$(dirname "$0")/.." && pwd)"
 g="$here/typecheck/bun"
+# shellcheck disable=SC1091 # helper is relative to this fixture tree
+source "$here/typecheck/stubs.bash"
 fx="$here/fixtures/gen/good/gen/bun/src/signals"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 cp "$fx/signals.ts" "$work/signals.ts"
 cp "$g"/*.ts "$work/"
+obs_setup_stub bun "$work"
 cd "$work"
 flags=(--noEmit --strict --noUncheckedIndexedAccess --exactOptionalPropertyTypes --target es2022 --module esnext --moduleResolution bundler --skipLibCheck)
 fail=0

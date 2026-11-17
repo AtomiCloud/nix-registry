@@ -1,0 +1,6 @@
+mode: static
+exit: 1
+contains: dashboards/traces.json
+contains: [traceql-attribute]
+contains: provder
+absent: undeclared attribute resource.k8s.pod.name

@@ -8,12 +8,15 @@ GO=go
 [ "${1:-}" = "--go" ] && GO="$2"
 here="$(cd "$(dirname "$0")/.." && pwd)"
 g="$here/typecheck/go"
+# shellcheck disable=SC1091 # helper is relative to this fixture tree
+source "$here/typecheck/stubs.bash"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 export HOME="$work" GOCACHE="$work/cache" GOPATH="$work/gopath" GOFLAGS=-mod=mod GOTOOLCHAIN=local GOPROXY=off CGO_ENABLED=0
 mkdir -p "$work/signals"
 cp "$here/fixtures/gen/good/gen/go/signals/signals.go" "$work/signals/"
 printf 'module example.com/app\n\ngo 1.24\n' >"$work/go.mod"
+obs_setup_stub go "$work"
 cd "$work"
 fail=0
 cp -f "$g/good.go.txt" main.go
