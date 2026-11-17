@@ -517,19 +517,18 @@ inherits an explicit baseline root when the flag is omitted and refuses a differ
 root (exit 2). A single unanchored source file cannot establish the checkout boundary: obs prints
 a note naming the inferred path and suggesting `--source-root`, without failing the run.
 Declaration line and column are retained only to disambiguate repeated name+file declarations;
-matching first reserves declarations with the same exact line and column on both sides, then
-pairs the remaining counted declarations in source order (line, then column). A unique pair
-matches regardless of its location. Different
+matching uses exact line and column only when the entire group's location set is unchanged.
+Otherwise, it pairs counted declarations in source order (line, then column). A single
+declaration on each side matches regardless of location, including across the three baseline runs.
+Different
 declaration counts are an error when a member is ≥ 3% in either the baseline or the current
 profile, naming the function/file and both counts and suggesting a rename or baseline `--update`.
 Only members with ≥ 1.5% own CPU share in that profile count toward the group; smaller members
 may be unsampled without changing identity. Members from 1.5% to 3% remain below the row cutoff,
 but their count and source locations are retained for disambiguation. Smaller members' locations
-are also retained for exact pairing, so crossing the 1.5% threshold cannot displace a hot match.
-All-cold baseline
-groups retain their counts too, so a newly hot duplicate cannot fall back to a note. Reordering
-same-name, same-file function bodies without changing the group count is a known limit of
-source-order pairing.
+are also retained, so crossing the 1.5% threshold with unchanged locations cannot displace a hot
+match. All-cold baseline groups retain their counts too, so a newly hot duplicate cannot fall
+back to a note.
 Chrome's zero-based
 `lineNumber` and `columnNumber` become one-based; speedscope `line` and `col` are kept, and pprof
 uses `Function.StartLine` rather than instruction lines. This includes separate same-line functions
@@ -537,6 +536,14 @@ in a minified bundle. Baseline format is version 6: regenerate earlier preview b
 three profiles with `--own` and `--update`. **Closures** (never rows): Go `.funcN`,
 `.gowrap`, `-fm`; JS `(anonymous)` and empty names; Dart `<anonymous closure>`; .NET `<>c__`, `>b__`,
 `lambda_method`.
+
+**Known limits for same-name, same-file duplicates:**
+
+- Swapping function bodies while retaining their locations cannot be distinguished from changing
+  those declarations' CPU shares.
+- A simultaneous source shift and threshold crossing can change the counted members' source
+  order. Profiles alone do not establish the bodies' identities in that case; rename declarations
+  or inspect and update the baseline.
 
 **Baseline** = median of exactly 3 runs → `e2e/profile-baseline/<service>.<scenario>.json` (about 1 KB;
 no times, sorted rows, shares rounded to 6 places, so two runs give byte-identical files). Rows:

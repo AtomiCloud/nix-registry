@@ -141,14 +141,27 @@ func ambiguousDuplicate(k functionKey, baseline, now int) string {
 	return fmt.Sprintf("ambiguous duplicate %s in %s: %d in baseline, %d now; rename or baseline --update", k.name, k.file, baseline, now)
 }
 
-// pairDeclarations reserves exact locations first, even if their share crossed
-// the count threshold. Unmatched qualifying members then pair in source order.
+// pairDeclarations uses exact locations only when the whole location set is
+// unchanged. Otherwise qualifying members pair in source order, so a shifted
+// member cannot steal another declaration's old location.
 // now is sorted by line and column by groupedFunctions.
 func pairDeclarations(base []Declaration, now []FuncRow) map[int]int {
+	if len(base) == 1 && len(now) == 1 {
+		return map[int]int{0: 0}
+	}
+	stable := len(base) == len(now)
+	if stable {
+		for i, b := range base {
+			if b.Line != now[i].Line || b.Column != now[i].Column {
+				stable = false
+				break
+			}
+		}
+	}
 	paired, used := map[int]int{}, map[int]bool{}
 	for bi, b := range base {
 		for ni, n := range now {
-			if !used[ni] && b.Line == n.Line && b.Column == n.Column {
+			if stable && !used[ni] && b.Line == n.Line && b.Column == n.Column {
 				paired[bi], used[ni] = ni, true
 				break
 			}

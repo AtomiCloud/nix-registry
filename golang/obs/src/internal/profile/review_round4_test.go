@@ -40,3 +40,19 @@ func TestReviewCompensatingThresholdCrossing(t *testing.T) {
 		t.Fatalf("unchanged locations must retain the hot row and catch +50%%:\n%s", out.String())
 	}
 }
+
+func TestUniqueDeclarationMedianIgnoresLocationAndFirstRunCutoff(t *testing.T) {
+	runs := []*Summary{
+		duplicateSummary(declared(10, .01)),
+		duplicateSummary(declared(20, .2)),
+		duplicateSummary(declared(30, .2)),
+	}
+	b, err := BuildBaseline("s", "n", "", []string{"render"}, runs)
+	if err != nil || len(b.Functions) != 1 || b.Functions[0].Share != .2 {
+		t.Fatalf("unique moved declaration must retain 20%% median: baseline=%+v err=%v", b, err)
+	}
+	rows, _ := Compare(b, duplicateSummary(declared(40, .3)), nil)
+	if len(rows) != 1 || !rows[0].Failed() || !near(rows[0].Change, .5, 1e-9) {
+		t.Fatalf("unique moved declaration +50%% must fail: %+v", rows)
+	}
+}
