@@ -3,11 +3,13 @@
 package check
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -106,10 +108,11 @@ func alertProject(t *testing.T, length, interval string, rules []map[string]any)
 	return dir
 }
 
-func obsAlertSteps(t *testing.T, binary, dir string, base int64) []parityAlertRun {
+func obsAlertSteps(t *testing.T, binary, dir string, base int64, extra ...string) []parityAlertRun {
 	t.Helper()
 	stepfile := filepath.Join(t.TempDir(), "steps.json")
-	cmd := exec.Command(binary, "alerts", "--dir", dir, "--base", strconv.FormatInt(base, 10), "--steps", stepfile)
+	args := []string{"alerts", "--dir", dir, "--base", strconv.FormatInt(base, 10), "--steps", stepfile}
+	cmd := exec.Command(binary, append(args, extra...)...)
 	output, err := cmd.CombinedOutput()
 	// A firing baseline intentionally violates the app's quiet-baseline expectation;
 	// the parity verdict comes from every e/v/s below, not the CLI's app verdict.
@@ -140,7 +143,8 @@ func TestParityAlertEval(t *testing.T) {
 		{"uid": "parity-math", "title": "parity math", "condition": "C", "for": "1m", "data": instantAlertData("vector(time() % 240)", "$A > 120")},
 		{"uid": "parity-normal", "title": "parity normal", "condition": "C", "for": "0s", "data": instantAlertData("vector(1)", "$A > 2")},
 	}
-	logData := instantAlertData(`"durian.cloud/event":="parity.failed" | stats by (outcome) count() n`, "$A > 1")
+	event := "parity.failed." + strconv.FormatInt(time.Now().UnixNano(), 10)
+	logData := instantAlertData(`"durian.cloud/event":=`+strconv.Quote(event)+` | stats by (outcome) count() n`, "$A > 1")
 	logQuery := logData[0].(map[string]any)
 	logQuery["datasourceUid"] = "parity-logs"
 	model := logQuery["model"].(map[string]any)
@@ -150,6 +154,14 @@ func TestParityAlertEval(t *testing.T) {
 	delete(model, "range")
 	rules = append(rules, map[string]any{"uid": "parity-log-alert", "title": "parity log alert", "condition": "C", "for": "1m", "data": logData})
 	dir := alertProject(t, "8m", "1m", rules)
+	seedFile := filepath.Join(dir, "seed.yaml")
+	seedBody, err := os.ReadFile(seedFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(seedFile, []byte(strings.ReplaceAll(string(seedBody), "parity.failed", event)), 0644); err != nil {
+		t.Fatal(err)
+	}
 	base := time.Now().UTC().Truncate(time.Minute).Add(-66 * time.Hour).Unix()
 	ds, err := makeData(Options{Dir: dir, Base: base})
 	if err != nil {
@@ -280,10 +292,14 @@ func TestParityAlertHistory(t *testing.T) {
 	on := created.Add(35 * time.Second).Unix()
 	off := created.Add(75 * time.Second).Unix()
 	rule := map[string]any{"uid": "parity-live", "title": "parity live", "condition": "C", "for": "20s", "keep_firing_for": "20s", "noDataState": "NoData", "execErrState": "Error", "folderUID": folder, "ruleGroup": "parity", "data": instantAlertData(fmt.Sprintf("vector((time() >= bool %d) * (time() < bool %d))", on, off), "$A > 0")}
+	metric := "obs_parity_recorded_" + strconv.FormatInt(created.Unix(), 10)
+	record := map[string]any{"uid": "parity-record", "title": "parity recording", "condition": "A", "folderUID": folder, "ruleGroup": "parity", "data": instantAlertData("vector(7)", "$A")[0:1], "record": map[string]string{"metric": metric, "from": "A", "target_datasource_uid": "parity-metrics"}}
 	grafanaRequest(t, http.MethodPost, "/api/folders", map[string]string{"uid": folder, "title": folder})
-	grafanaRequest(t, http.MethodPut, "/api/v1/provisioning/folder/"+folder+"/rule-groups/parity", map[string]any{"title": "parity", "folderUid": folder, "interval": 10, "rules": []any{rule}})
+	grafanaRequest(t, http.MethodPut, "/api/v1/provisioning/folder/"+folder+"/rule-groups/parity", map[string]any{"title": "parity", "folderUid": folder, "interval": 10, "rules": []any{rule, record}})
 	defer grafanaRequest(t, http.MethodDelete, "/api/v1/provisioning/alert-rules/parity-live", nil)
+	defer grafanaRequest(t, http.MethodDelete, "/api/v1/provisioning/alert-rules/parity-record", nil)
 	var first int64
+	var firstRecord int64
 	deadline := created.Add(120 * time.Second)
 	for time.Now().Before(deadline) {
 		var result struct {
@@ -299,15 +315,20 @@ func TestParityAlertHistory(t *testing.T) {
 		}
 		for _, group := range result.Data.Groups {
 			for _, r := range group.Rules {
-				if r.Name != "parity live" {
+				if r.Name != "parity live" && r.Name != "parity recording" {
 					continue
 				}
 				if r.Health == "error" || r.LastError != "" {
 					t.Fatalf("live rule health %s: %s", r.Health, r.LastError)
 				}
 				at, err := time.Parse(time.RFC3339Nano, r.LastEvaluation)
-				if err == nil && at.After(created) && first == 0 {
-					first = at.Unix() / 10 * 10
+				if err == nil && at.After(created) {
+					if r.Name == "parity live" && first == 0 {
+						first = at.Unix() / 10 * 10
+					}
+					if r.Name == "parity recording" && firstRecord == 0 {
+						firstRecord = at.Unix() / 10 * 10
+					}
 				}
 			}
 		}
@@ -318,8 +339,9 @@ func TestParityAlertHistory(t *testing.T) {
 	}
 	last := time.Now().UTC().Unix()/10*10 - 10
 	length := time.Duration(last-first) * time.Second
-	dir := alertProject(t, length.String(), "10s", []map[string]any{rule})
-	runs := obsAlertSteps(t, binary, dir, first)
+	dir := alertProject(t, length.String(), "10s", []map[string]any{rule, record})
+	recordedFile := filepath.Join(t.TempDir(), "recorded.json")
+	runs := obsAlertSteps(t, binary, dir, first, "--recorded", recordedFile)
 	var annotations []struct {
 		AlertName, PrevState, NewState string
 		Time                           int64
@@ -351,4 +373,66 @@ func TestParityAlertHistory(t *testing.T) {
 		t.Fatalf("alerts/parity/warning.yaml rule parity-live state history: obs %v, Grafana %v (annotations %s)", ours, real, body)
 	}
 	t.Logf("MEASURED %d real Grafana scheduler transitions equal obs, including pending and keep_firing_for", len(real))
+	compareRecorded(t, recordedFile, metric, (max(first, firstRecord)+10)*1000, last*1000)
+}
+
+func compareRecorded(t *testing.T, file, metric string, first, last int64) {
+	t.Helper()
+	type series struct {
+		Labels     map[string]string `json:"labels"`
+		Metric     map[string]string `json:"metric"`
+		Timestamps []int64           `json:"timestamps"`
+		Values     []float64         `json:"values"`
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ours []series
+	if err := json.Unmarshal(b, &ours); err != nil {
+		t.Fatal(err)
+	}
+	parityEvidence(t, "obs-recorded", json.RawMessage(b))
+	params := url.Values{"match[]": {metric}, "start": {strconv.FormatInt(first/1000, 10)}, "end": {strconv.FormatInt(last/1000, 10)}}
+	response := get(t, os.Getenv("OBS_PARITY_VM")+"/api/v1/export?"+params.Encode())
+	var real []series
+	scanner := bufio.NewScanner(bytes.NewReader(response))
+	for scanner.Scan() {
+		var row series
+		if err := json.Unmarshal(scanner.Bytes(), &row); err != nil {
+			t.Fatal(err)
+		}
+		real = append(real, row)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	parityEvidence(t, "grafana-recorded", real)
+	points := func(rows []series) map[string][]float64 {
+		out := map[string][]float64{}
+		for _, row := range rows {
+			labels := row.Labels
+			if labels == nil {
+				labels = row.Metric
+			}
+			if labels["__name__"] != metric {
+				continue
+			}
+			key, _ := json.Marshal(labels)
+			for i, at := range row.Timestamps {
+				if at >= first && at <= last {
+					out[string(key)+"@"+strconv.FormatInt(at, 10)] = []float64{row.Values[i]}
+				}
+			}
+		}
+		return out
+	}
+	got, want := points(ours), points(real)
+	if len(want) < 5 {
+		t.Fatalf("Grafana recording rule %s wrote too few points: %v", metric, want)
+	}
+	if err := compareNumbers(got, want); err != nil {
+		t.Fatalf("alerts/parity/warning.yaml recording rule %s: %v", metric, err)
+	}
+	t.Logf("MEASURED %d live Grafana recording-rule points equal obs at 1e-11 relative", len(want))
 }

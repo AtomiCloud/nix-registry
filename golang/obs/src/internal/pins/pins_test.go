@@ -38,3 +38,17 @@ func TestPinsAreComplete(t *testing.T) {
 		}
 	}
 }
+
+func TestGrafanaPortProvenance(t *testing.T) {
+	b, err := os.ReadFile("../alerts/gfexpr/PROVENANCE.md")
+	if os.IsNotExist(err) {
+		t.Skip("Grafana alert port has not landed")
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := All()["Grafana"]
+	if !strings.Contains(string(b), p.Version) || !strings.Contains(string(b), p.Commit) {
+		t.Fatalf("alerts/gfexpr/PROVENANCE.md differs from Grafana source pin %s (%s)", p.Version, p.Commit)
+	}
+}

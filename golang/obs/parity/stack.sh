@@ -59,6 +59,19 @@ YAML
 target: all
 server:
   http_listen_port: 3200
+query_frontend:
+  query_end_cutoff: 0s
+  search:
+    query_backend_after: 1h
+  metrics:
+    query_backend_after: 1h
+live_store:
+  wal:
+    path: /tmp/tempo/live-store
+    ingestion_time_range_slack: 1h
+  max_trace_idle: 1s
+  max_trace_live: 2s
+  max_block_duration: 1h
 distributor:
   receivers:
     otlp:
@@ -72,6 +85,7 @@ storage:
       path: /tmp/tempo/blocks
     wal:
       path: /tmp/tempo/wal
+      ingestion_time_range_slack: 1h
 YAML
   # Binding to loopback with dynamic ports avoids collisions on a shared box.
   docker run -d --name "$name-vm" --network "$name" --network-alias vm \
