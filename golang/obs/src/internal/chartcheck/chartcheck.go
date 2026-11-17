@@ -128,12 +128,21 @@ var ownImage = map[string][]string{
 	"victoria-logs-cluster":      {"vlstorage.image", "vlselect.image", "vlinsert.image"},
 }
 
+// isOwnImage reports whether rel is one of the chart's own image paths, or an `image` child of one:
+// a map at an own path that holds a nested `image` is a wrapper, and its nested image is the image,
+// so it is own too (at any depth) and is checked.
 func isOwnImage(chart string, rel []string) bool {
-	j := strings.Join(rel, ".")
-	for _, p := range ownImage[chart] {
-		if p == j {
-			return true
+	for len(rel) > 0 {
+		j := strings.Join(rel, ".")
+		for _, p := range ownImage[chart] {
+			if p == j {
+				return true
+			}
 		}
+		if rel[len(rel)-1] != "image" {
+			return false
+		}
+		rel = rel[:len(rel)-1]
 	}
 	return false
 }

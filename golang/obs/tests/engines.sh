@@ -78,6 +78,11 @@ run engines --check-chart "$fx/tempo-chart-tag-ok"
 expect 0 'tempo.tempo.tag' 'ok: 1 match(es)'
 run engines --check-chart "$fx/tempo-chart-tag-drift"
 expect 1 'values.yaml:3 tempo.tempo.tag' 'chart 3.1.0' 'Tempo 3.1.1'
+# The nested image of any own path is the image: a wrapper is skipped only because its child is checked.
+run engines --check-chart "$fx/cluster-extra-wrapper-ok"
+expect 0 'ok: 2 match(es)' 'vmselect.image.image.tag'
+run engines --check-chart "$fx/cluster-extra-wrapper"
+expect 1 'values.yaml:' 'victoria-metrics-cluster.vmselect.image.image.tag' 'chart v1.155.0' 'VictoriaMetrics v1.156.0'
 # A tempo.tempo wrapper with a nested image is not an unresolved image; the nested image is checked.
 run engines --check-chart "$fx/tempo-nested-image"
 expect 0 'tempo.tempo.image.tag' 'ok: 1 match(es)'

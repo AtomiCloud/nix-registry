@@ -564,3 +564,40 @@ func TestTempoWrapperWithANestedImageIsNotAnUnresolvedImage(t *testing.T) {
 		t.Fatalf("an own map with nothing in it still fails: %v %+v", err, res)
 	}
 }
+
+// ---- round 6: the nested image of an own path is own, so a wrapper is skipped only when its child is checked
+
+func TestNestedImageOfAnyOwnPathIsChecked(t *testing.T) {
+	dep := "  - name: victoria-metrics-cluster\n    version: 0.99.0\n"
+	vm := pins.All()["VictoriaMetrics"].Version
+	storage := "victoria-metrics-cluster:\n  vmstorage:\n    image:\n      tag: " + vm + "-cluster\n"
+	nested := func(tag string) string {
+		return storage + "  vmselect:\n    image:\n      image:\n        tag: " + tag + "\n"
+	}
+	res, err := Check(depChart(t, dep, nested("v1.155.0-cluster")), pins.All())
+	if err != nil || len(res.Findings) != 1 || res.Findings[0].Key != "victoria-metrics-cluster.vmselect.image.image.tag" || res.Findings[0].ChartValue != "v1.155.0-cluster" {
+		t.Fatalf("a drifted nested vmselect image must not be ignored: %v %+v", err, res)
+	}
+	// Control: the matching nested image.
+	if res, err = Check(depChart(t, dep, nested(vm+"-cluster")), pins.All()); err != nil || len(res.Findings) != 0 || len(res.Matches) != 2 {
+		t.Fatalf("matching nested image: %v %+v", err, res)
+	}
+	// Unresolved nested children still fail, naming the nested key.
+	for name, v := range map[string]string{"empty map": "{}", "empty string": `""`} {
+		res, err = Check(depChart(t, dep, storage+"  vmselect:\n    image:\n      image: "+v+"\n"), pins.All())
+		if err != nil || len(res.Findings) != 1 || res.Findings[0].Kind != KindMissing || res.Findings[0].Key != "victoria-metrics-cluster.vmselect.image.image" {
+			t.Fatalf("%s: %v %+v", name, err, res)
+		}
+	}
+	// Two levels of wrapper.
+	res, err = Check(depChart(t, dep, storage+"  vmselect:\n    image:\n      image:\n        image:\n          tag: v1.0.0\n"), pins.All())
+	if err != nil || len(res.Findings) != 1 || res.Findings[0].Key != "victoria-metrics-cluster.vmselect.image.image.image.tag" {
+		t.Fatalf("two wrapper levels: %v %+v", err, res)
+	}
+	// A nested image under a path that is not the engine's own stays ignored.
+	g := pins.All()["Grafana"].Version
+	res, err = Check(depChart(t, "  - name: grafana\n    version: 9.0.0\n", "grafana:\n  image:\n    tag: "+g+"\n  sidecar:\n    image:\n      image:\n        tag: 1.0.0\n"), pins.All())
+	if err != nil || len(res.Findings) != 0 {
+		t.Fatalf("sidecar nested image is not the engine: %v %+v", err, res)
+	}
+}
