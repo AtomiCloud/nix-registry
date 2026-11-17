@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"testing"
@@ -235,6 +236,20 @@ func TestParityComparator(t *testing.T) {
 	for _, bad := range []map[string][]float64{{"x": {100 + 1e-7}}, {"wrong-label": {100}}, {"x": {100, 100}}, {}} {
 		if err := compareNumbers(map[string][]float64{"x": {100}}, bad); err == nil {
 			t.Fatalf("planted bad series/value accepted: %v", bad)
+		}
+	}
+	for _, pair := range [][2]float64{
+		{100, math.Inf(1)}, {100, math.Inf(-1)}, {math.Inf(1), 100},
+		{math.Inf(-1), 100}, {math.Inf(1), math.Inf(-1)}, {math.Inf(-1), math.Inf(1)},
+		{100, math.NaN()}, {math.NaN(), 100}, {math.NaN(), math.NaN()},
+	} {
+		if err := compareNumbers(map[string][]float64{"x": {pair[0]}}, map[string][]float64{"x": {pair[1]}}); err == nil {
+			t.Errorf("planted nonfinite mismatch accepted: obs %v, Grafana %v", pair[0], pair[1])
+		}
+	}
+	for _, value := range []float64{0, math.Inf(1), math.Inf(-1)} {
+		if !near(value, value) {
+			t.Errorf("equal values rejected: %v", value)
 		}
 	}
 }

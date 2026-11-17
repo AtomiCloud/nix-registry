@@ -58,6 +58,9 @@ func near(a, b float64) bool {
 	if a == b {
 		return true
 	}
+	if math.IsNaN(a) || math.IsNaN(b) || math.IsInf(a, 0) || math.IsInf(b, 0) {
+		return false
+	}
 	return math.Abs(a-b) <= 1e-11*math.Max(math.Abs(a), math.Abs(b))
 }
 
