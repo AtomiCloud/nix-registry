@@ -1,0 +1,17 @@
+# A signal named like its own container or record: Names.Names, MLabels.MLabels, Events.Events, Spans.Spans.
+service: fuzz
+types: { t: { kind: enum, values: [x] } }
+metrics:
+  names: { kind: counter }
+  events: { kind: counter }
+  spans: { kind: counter }
+  m: { kind: counter, budget: 2, labels: { m_labels: t, m: t } }
+logs: { Events: { event: fuzz.events, level: info }, Names: { event: fuzz.names, level: info } }
+spans:
+  spans: { attributes: { spans_attributes: t, spans: t } }
+  names: { attributes: { names_attributes: t } }
+generate:
+  - { lang: go, out: gen/go }
+  - { lang: dotnet, out: gen/dotnet, namespace: Fuzz.Signals }
+  - { lang: dart, out: gen/dart, package: fuzz_signals }
+  - { lang: bun, out: gen/bun }

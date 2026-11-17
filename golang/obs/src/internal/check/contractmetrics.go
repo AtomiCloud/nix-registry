@@ -15,26 +15,68 @@ import (
 
 // valueMatcher finds `label op "value"` pairs in the unfilled query text. The label may be quoted
 // (`"payment.provider"`), the value may use any of the three quote styles.
-var valueMatcher = regexp.MustCompile("(\"(?:[^\"\\\\]|\\\\.)*\"|[A-Za-z_][A-Za-z0-9_.]*)\\s*(?:=~|!~|!=|=)\\s*(\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'|`[^`]*`)")
+var valueMatcher = regexp.MustCompile("(\"(?:[^\"\\\\]|\\\\.)*\"|[A-Za-z_][A-Za-z0-9_.]*)\\s*(=~|!~|!=|=)\\s*(\"(?:[^\"\\\\]|\\\\.)*\"|'(?:[^'\\\\]|\\\\.)*'|`[^`]*`)")
 
-// varLabels returns the labels whose matcher value holds a dashboard variable ($x, ${x}, [[x]]):
-// the viewer chooses the value, so it is not judged. Keys are the label names as the parser reports
-// them (a quoted name without its quotes).
-func varLabels(raw string) map[string]bool {
-	m := map[string]bool{}
-	for _, g := range valueMatcher.FindAllStringSubmatch(raw, -1) {
-		if !strings.Contains(g[2], "$") && !strings.Contains(g[2], "[[") {
-			continue
+// matcherVars remembers, per matcher, whether its raw text held a dashboard variable ($x, ${x}, [[x]]):
+// the viewer chooses that value, so it is not judged. A fixed matcher keeps its raw value, so a
+// variable on one selector never excuses a fixed typo on another (or on the same label elsewhere).
+type matcherVars struct {
+	vars  map[string]bool // label + op of every matcher that holds a variable
+	fixed map[string]bool // label + op + raw value of every matcher that does not
+}
+
+func matcherKey(label, op string) string { return label + "\x00" + op }
+
+// rawValue strips the quotes of a matcher value as the parser would see it.
+func rawValue(v string) string {
+	if strings.HasPrefix(v, "\"") {
+		if u, err := strconv.Unquote(v); err == nil {
+			return u
 		}
+	}
+	if len(v) >= 2 {
+		return v[1 : len(v)-1]
+	}
+	return v
+}
+
+// scanMatchers reads the matchers of the unfilled query text. Keys use the label as the parser
+// reports it (a quoted name without its quotes).
+func scanMatchers(raw string) matcherVars {
+	m := matcherVars{vars: map[string]bool{}, fixed: map[string]bool{}}
+	for _, g := range valueMatcher.FindAllStringSubmatch(raw, -1) {
 		name := g[1]
-		if strings.HasPrefix(name, `"`) {
+		if strings.HasPrefix(name, "\"") {
 			if u, err := strconv.Unquote(name); err == nil {
 				name = u
 			}
 		}
-		m[name] = true
+		if strings.Contains(g[3], "$") || strings.Contains(g[3], "[[") {
+			m.vars[matcherKey(name, g[2])] = true
+			continue
+		}
+		m.fixed[matcherKey(name, g[2])+"\x00"+rawValue(g[3])] = true
 	}
 	return m
+}
+
+func lfOp(lf metricsql.LabelFilter) string {
+	switch {
+	case lf.IsRegexp && lf.IsNegative:
+		return "!~"
+	case lf.IsRegexp:
+		return "=~"
+	case lf.IsNegative:
+		return "!="
+	}
+	return "="
+}
+
+// isVar reports whether this filter's value came from a dashboard variable: its operator and label
+// had a variable matcher, and no fixed matcher of the same label and operator spells this value.
+func (m matcherVars) isVar(lf metricsql.LabelFilter) bool {
+	k := matcherKey(lf.Label, lfOp(lf))
+	return m.vars[k] && !m.fixed[k+"\x00"+lf.Value]
 }
 
 // labelScope is what a subtree's output series may carry: the labels of the contract metrics it
@@ -63,19 +105,19 @@ func (s *labelScope) add(l string) {
 
 // metricChecker walks one query.
 type metricChecker struct {
-	r       *Report
-	q       *files.Query
-	c       *contract.Contract
-	skipVal map[string]bool
-	seen    map[string]bool // metric names already reported
-	names   []string        // every stored name a regex selector may match
+	r     *Report
+	q     *files.Query
+	c     *contract.Contract
+	mv    matcherVars
+	seen  map[string]bool // metric names already reported
+	names []string        // every stored name a regex selector may match
 }
 
 // contractMetrics checks the names a MetricsQL query reads against the contract: each metric
 // (exact or by regex), each label of each selector, each label a label function or a grouping
 // reads, and the value of an enum or bounded label.
 func contractMetrics(r *Report, q *files.Query, e metricsql.Expr, c *contract.Contract) {
-	mc := &metricChecker{r: r, q: q, c: c, skipVal: varLabels(q.Expr), seen: map[string]bool{}, names: storedNames(c)}
+	mc := &metricChecker{r: r, q: q, c: c, mv: scanMatchers(q.Expr), seen: map[string]bool{}, names: storedNames(c)}
 	mc.walk(e)
 }
 
@@ -188,7 +230,7 @@ func (mc *metricChecker) labelFunc(fe *metricsql.FuncExpr, sc *labelScope) {
 
 // scopeOf is walk without reporting twice: the labels the expression's output may carry.
 func (mc *metricChecker) scopeOf(e metricsql.Expr) labelScope {
-	quiet := &metricChecker{r: newReport(), q: mc.q, c: mc.c, skipVal: mc.skipVal, seen: map[string]bool{}, names: mc.names}
+	quiet := &metricChecker{r: newReport(), q: mc.q, c: mc.c, mv: mc.mv, seen: map[string]bool{}, names: mc.names}
 	return quiet.walk(e)
 }
 
@@ -229,7 +271,6 @@ func (mc *metricChecker) selector(me *metricsql.MetricExpr) labelScope {
 			}
 		}
 		var matched []contract.StoredMetric
-		single := false
 		switch {
 		case name != "":
 			sm, ok := mc.c.Lookup(name)
@@ -245,7 +286,7 @@ func (mc *metricChecker) selector(me *metricsql.MetricExpr) labelScope {
 				}
 				continue
 			}
-			matched, single = []contract.StoredMetric{sm}, true
+			matched = []contract.StoredMetric{sm}
 		case nameRe != "":
 			re, err := regexp.Compile("^(?:" + nameRe + ")$")
 			if err != nil {
@@ -297,8 +338,8 @@ func (mc *metricChecker) selector(me *metricsql.MetricExpr) labelScope {
 				}
 				continue
 			}
-			if single && !matched[0].Platform && !mc.skipVal[lf.Label] {
-				mc.valueCheck(matched[0].Metric, name, lf)
+			if len(matched) > 0 && !mc.mv.isVar(lf) {
+				mc.valueCheck(matched, firstName(name, nameRe), lf)
 			}
 		}
 	}
@@ -338,33 +379,56 @@ func literalAlt(re string) bool {
 	return re != "" && regexp.QuoteMeta(strings.ReplaceAll(re, "|", "")) == strings.ReplaceAll(re, "|", "")
 }
 
-// valueCheck judges the value of an enum, bounded-number or time-bucket label. An equality, or a
-// regex that is a plain `a|b` list, must name only allowed values; any other regex must match at
-// least one allowed value (VictoriaMetrics regexes are anchored).
-func (mc *metricChecker) valueCheck(m contract.Metric, metric string, lf metricsql.LabelFilter) {
-	t, ok := mc.c.LabelType(m, contract.Norm(lf.Label))
-	if !ok {
-		return
-	}
+// valueCheck judges the value of an enum, bounded-number or time-bucket label on the metrics a
+// selector reads (one for a name, any number for a name regex). A value is allowed when any of the
+// metrics that carry the label allows it; a metric that is not in the contract, or that carries the
+// label as a platform label, makes the value unjudged. An equality, or a regex that is a plain
+// `a|b` list, must name only allowed values; any other regex must match at least one allowed value
+// (VictoriaMetrics regexes are anchored).
+func (mc *metricChecker) valueCheck(matched []contract.StoredMetric, metric string, lf metricsql.LabelFilter) {
 	if lf.IsRegexp && lf.IsNegative {
 		return
 	}
-	allowed, finite := valueSet(t)
-	if !finite {
+	var ts []contract.Type
+	for _, sm := range matched {
+		if sm.Platform {
+			return
+		}
+		t, ok := mc.c.LabelType(sm.Metric, contract.Norm(lf.Label))
+		if !ok {
+			if sm.Labels[contract.Norm(lf.Label)] {
+				return // a platform label on a contract metric: any value
+			}
+			continue
+		}
+		if !boundedKind(t) {
+			return
+		}
+		ts = append(ts, t)
+	}
+	if len(ts) == 0 {
 		return
+	}
+	allows := func(v string) bool {
+		for _, t := range ts {
+			if typeAllows(t, v) {
+				return true
+			}
+		}
+		return false
 	}
 	bad := func(format string, a ...any) {
 		mc.r.add(Fail, mc.q.File, mc.q.Where, "contract-bad-enum-value", format, a...)
 	}
 	switch {
 	case !lf.IsRegexp:
-		if lf.Value != "" && !allowed[lf.Value] {
-			bad("label %q of metric %q has value %q, which is not allowed; allowed: %s%s", lf.Label, metric, lf.Value, describe(t), valueHint(lf.Value, t))
+		if lf.Value != "" && !allows(lf.Value) {
+			bad("label %q of metric %q has value %q, which is not allowed; allowed: %s%s", lf.Label, metric, lf.Value, describeAll(ts), valueHint(lf.Value, ts))
 		}
 	case literalAlt(lf.Value):
 		for _, v := range strings.Split(lf.Value, "|") {
-			if v != "" && !allowed[v] {
-				bad("label %q of metric %q has value %q, which is not allowed; allowed: %s%s", lf.Label, metric, v, describe(t), valueHint(v, t))
+			if v != "" && !allows(v) {
+				bad("label %q of metric %q has value %q, which is not allowed; allowed: %s%s", lf.Label, metric, v, describeAll(ts), valueHint(v, ts))
 			}
 		}
 	default:
@@ -372,13 +436,51 @@ func (mc *metricChecker) valueCheck(m contract.Metric, metric string, lf metrics
 		if err != nil {
 			return
 		}
-		for v := range allowed {
-			if re.MatchString(v) {
-				return
+		for _, t := range ts {
+			set, finite := valueSet(t)
+			if !finite {
+				return // too many values to list: a regex over them is not judged
+			}
+			for v := range set {
+				if re.MatchString(v) {
+					return
+				}
 			}
 		}
-		bad("label %q of metric %q: the regex %q matches no allowed value; allowed: %s", lf.Label, metric, lf.Value, describe(t))
+		bad("label %q of metric %q: the regex %q matches no allowed value; allowed: %s", lf.Label, metric, lf.Value, describeAll(ts))
 	}
+}
+
+func boundedKind(t contract.Type) bool {
+	switch t.Kind {
+	case contract.KindEnum:
+		return true
+	case contract.KindInt:
+		return t.Min != nil && t.Max != nil && *t.Min <= *t.Max
+	case contract.KindTime:
+		return true
+	}
+	return false
+}
+
+// typeAllows reports whether one literal value is a value of the type, without listing the type:
+// an int is compared with its bounds, so a domain of any size is judged.
+func typeAllows(t contract.Type, v string) bool {
+	switch t.Kind {
+	case contract.KindEnum:
+		return has(t.Values, v)
+	case contract.KindInt:
+		n, err := strconv.ParseInt(v, 10, 64)
+		return err == nil && strconv.FormatInt(n, 10) == v && n >= int64(*t.Min) && n <= int64(*t.Max)
+	case contract.KindTime:
+		hi := int64(23)
+		if t.Unit == contract.UnitWeekday {
+			hi = 6
+		}
+		n, err := strconv.ParseInt(v, 10, 64)
+		return err == nil && strconv.FormatInt(n, 10) == v && n >= 0 && n <= hi
+	}
+	return false
 }
 
 const maxValueSet = 100000
@@ -392,11 +494,13 @@ func valueSet(t contract.Type) (map[string]bool, bool) {
 			m[v] = true
 		}
 	case contract.KindInt:
-		if t.Size() > maxValueSet {
+		n := t.Size()
+		if n > maxValueSet {
 			return nil, false
 		}
-		for i := *t.Min; i <= *t.Max; i++ {
-			m[strconv.Itoa(i)] = true
+		// count up by index: a range that ends at MaxInt must not be walked with i <= max; i++
+		for k := 0; k < n; k++ {
+			m[strconv.FormatInt(int64(*t.Min)+int64(k), 10)] = true
 		}
 	case contract.KindTime:
 		hi := 23
@@ -410,6 +514,17 @@ func valueSet(t contract.Type) (map[string]bool, bool) {
 		return nil, false
 	}
 	return m, true
+}
+
+func describeAll(ts []contract.Type) string {
+	var out []string
+	for _, t := range ts {
+		d := describe(t)
+		if !has(out, d) {
+			out = append(out, d)
+		}
+	}
+	return strings.Join(out, " or ")
 }
 
 func describe(t contract.Type) string {
@@ -427,11 +542,14 @@ func describe(t contract.Type) string {
 	return ""
 }
 
-func valueHint(v string, t contract.Type) string {
-	if t.Kind != contract.KindEnum {
-		return ""
+func valueHint(v string, ts []contract.Type) string {
+	var all []string
+	for _, t := range ts {
+		if t.Kind == contract.KindEnum {
+			all = append(all, t.Values...)
+		}
 	}
-	if s := contract.Suggest(v, t.Values); s != "" {
+	if s := contract.Suggest(v, all); s != "" {
 		return fmt.Sprintf("; did you mean %q?", s)
 	}
 	return ""

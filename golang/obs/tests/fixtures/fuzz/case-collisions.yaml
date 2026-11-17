@@ -1,0 +1,14 @@
+# Labels, values and members that are different in the contract and equal after case conversion get refused, or compile.
+service: fuzz
+types:
+  t: { kind: enum, values: [Wire, All, Valid, valid, wire, to_string, ToString, equals, hash_code, get_type] }
+  u: { kind: enum, values: [a-b, a_b2, a.b3, A_B4] }
+metrics:
+  one: { kind: counter, budget: 1000, labels: { user_id: t, user_name: u } }
+  two: { kind: counter, budget: 1000, labels: { user.id: t, username: u } }
+spans: { s: { attributes: { a_b: t, a.b: u } } }
+generate:
+  - { lang: go, out: gen/go }
+  - { lang: dotnet, out: gen/dotnet, namespace: Fuzz.Signals }
+  - { lang: dart, out: gen/dart, package: fuzz_signals }
+  - { lang: bun, out: gen/bun }
