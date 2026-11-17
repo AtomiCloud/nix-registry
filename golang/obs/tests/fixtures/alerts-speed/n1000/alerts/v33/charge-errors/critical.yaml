@@ -1,0 +1,34 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata:
+  name: speed-checkout-v33-charge-errors-critical
+spec:
+  folderRef: speed-checkout-folder
+  interval: 1m
+  rules:
+    - uid: v33-charge-errors-critical
+      title: 'Charge errors high'
+      condition: C
+      for: 10m
+      noDataState: OK
+      execErrState: Error
+      data:
+        - refId: A
+          relativeTimeRange: { from: 180, to: 0 }
+          datasourceUid: speed-metrics
+          model:
+            datasource: { type: prometheus, uid: speed-metrics }
+            expr: 'sum(rate(checkout_charges_total{outcome="error"}[3m]))'
+            instant: true
+        - refId: B
+          relativeTimeRange: { from: 180, to: 0 }
+          datasourceUid: speed-logs
+          model:
+            datasource: { type: victoriametrics-logs-datasource, uid: speed-logs }
+            expr: '_time:3m {durian.cloud.service="checkout"} "durian.cloud/event":="checkout.charge.failed" | stats count() hits'
+            queryType: stats
+        - refId: C
+          datasourceUid: __expr__
+          model: { type: math, expression: '$A > 1 && $B > 6' }
+      labels: { severity: critical }
+      annotations: { summary: 'Charge errors high' }
