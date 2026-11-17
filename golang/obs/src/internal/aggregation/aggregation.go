@@ -71,6 +71,7 @@ func Generate(c *contract.Contract, header string) []byte {
 		fmt.Fprintf(&b, "  without: %s\n", withoutList)
 		b.WriteString("  outputs: [total]\n")
 		b.WriteString("  keep_metric_names: true\n")
+		b.WriteString("  flush_on_shutdown: true\n")
 	}
 	for _, g := range gaugeOutput {
 		names := gauges[g.How]
@@ -84,6 +85,7 @@ func Generate(c *contract.Contract, header string) []byte {
 		fmt.Fprintf(&b, "  without: %s\n", withoutList)
 		fmt.Fprintf(&b, "  outputs: [%s]\n", g.Output)
 		b.WriteString("  keep_metric_names: true\n")
+		b.WriteString("  flush_on_shutdown: true\n")
 	}
 	return []byte(b.String())
 }

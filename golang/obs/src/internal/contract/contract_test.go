@@ -212,3 +212,45 @@ metrics:
 		t.Fatalf("distinct metrics refused: %v", is)
 	}
 }
+
+// Opus 4 and GPT (c): a trace resource carries the pod keys; an unscoped attribute is a span OR a resource attribute.
+func TestHasSpanAttributeScopes(t *testing.T) {
+	c := parse(t, `
+service: s
+types: { t: { kind: enum, values: [x] } }
+spans: { a.b: { attributes: { provider: t } } }
+`)
+	for _, tc := range []struct {
+		scope, name string
+		want        bool
+	}{
+		{"resource", "k8s.pod.name", true},
+		{"resource", "k8s.pod.uid", true},
+		{"resource", "service.name", true},
+		{"resource", "provider", false},
+		{"span", "provider", true},
+		{"span", "service.name", false},
+		{"", "service.name", true},
+		{"", "provider", true},
+		{"", "k8s.pod.name", true},
+		{"", "nonsense", false},
+	} {
+		if got := c.HasSpanAttribute(tc.scope, tc.name); got != tc.want {
+			t.Errorf("HasSpanAttribute(%q, %q) = %v, want %v", tc.scope, tc.name, got, tc.want)
+		}
+	}
+}
+
+// Opus 2: a unit that does not change the stored name the way the OTLP path does is refused.
+func TestUnknownUnitRefused(t *testing.T) {
+	c := parse(t, "service: s\nmetrics: { lat: { kind: histogram, unit: milliseconds } }\n")
+	if !hasRule(c.Validate(), "metric-unit", "milliseconds") {
+		t.Fatalf("unit milliseconds passed: %v", c.Validate())
+	}
+	for _, u := range []string{"s", "seconds", "By", "bytes", ""} {
+		c := parse(t, "service: s\nmetrics: { lat: { kind: histogram, unit: '"+u+"' } }\n")
+		if hasRule(c.Validate(), "metric-unit", "") {
+			t.Errorf("unit %q refused", u)
+		}
+	}
+}

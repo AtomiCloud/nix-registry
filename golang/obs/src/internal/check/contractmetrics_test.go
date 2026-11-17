@@ -189,3 +189,15 @@ func TestSingletonMaxIntFinishes(t *testing.T) {
 		t.Fatalf("a wrong value on the singleton: %v", got)
 	}
 }
+
+// Round 3 (GPT verifier): an unrelated platform metric in a regex selection does not switch off value checks.
+func TestRegexWithPlatformMetricStillChecksValues(t *testing.T) {
+	wantRed(t, "", `{__name__=~"checkout_charges_total|http_server_request_duration_seconds_count", outcome="erorr"}`, "contract-bad-enum-value", "erorr")
+	wantGreen(t, "", `{__name__=~"checkout_charges_total|http_server_request_duration_seconds_count", outcome="error"}`)
+}
+
+// Round 3 (GPT verifier): an escaped single-quoted fixed matcher is a fixed matcher, not the variable's.
+func TestEscapedSingleQuotedFixedMatcher(t *testing.T) {
+	wantRed(t, `checkout_charges_total{outcome=~'$outcome'} + checkout_charges_total{outcome='er\'ror'}`,
+		`checkout_charges_total{outcome=~'x'} + checkout_charges_total{outcome='er\'ror'}`, "contract-bad-enum-value", "er'ror")
+}
