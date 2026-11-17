@@ -26,6 +26,7 @@ type fakeKube struct {
 	objs     map[string]map[string]any // qualified resource -> object
 	pods     map[string]map[string]any // pod name -> pod
 	owner    map[string]string         // pod name -> workload resource
+	rs       map[string]map[string]any // Deployment resource -> its ReplicaSet
 	calls    []string
 	notReady map[string]bool
 	// fail returns a planted error for a command line (before it takes effect).
@@ -36,7 +37,7 @@ type fakeKube struct {
 }
 
 func newFake(t *testing.T, fixtures ...string) *fakeKube {
-	f := &fakeKube{t: t, objs: map[string]map[string]any{}, pods: map[string]map[string]any{}, owner: map[string]string{}, notReady: map[string]bool{}}
+	f := &fakeKube{t: t, objs: map[string]map[string]any{}, pods: map[string]map[string]any{}, owner: map[string]string{}, rs: map[string]map[string]any{}, notReady: map[string]bool{}}
 	for _, body := range fixtures {
 		dec := yaml.NewDecoder(strings.NewReader(body))
 		for {
@@ -76,7 +77,10 @@ func workloadKind(res string) bool {
 	return strings.HasPrefix(res, "statefulset.apps/") || strings.HasPrefix(res, "deployment.apps/")
 }
 
-// reconcile re-creates the pods of a workload from its template (a rollout).
+// reconcile re-creates the pods of a workload from its template (a rollout), the way
+// the controllers do: StatefulSet pods <name>-<ordinal> (spec.ordinals.start honoured)
+// controlled by the StatefulSet; Deployment pods controlled by a ReplicaSet controlled by
+// the Deployment, whose revision annotation the controller bumps on every rollout.
 func (f *fakeKube) reconcile(res string) {
 	if !workloadKind(res) {
 		return
@@ -92,11 +96,33 @@ func (f *fakeKube) reconcile(res string) {
 		return
 	}
 	n, _ := intField(mapAt(m, "spec")["replicas"])
-	_, name, _ := strings.Cut(res, "/")
-	for i := 0; i < n; i++ {
+	start, _ := ordinalStart(m, res)
+	kind, name, _ := strings.Cut(res, "/")
+	ownerKind, ownerUID := "StatefulSet", mapAt(m, "metadata")["uid"]
+	if kind == "deployment.apps" {
+		meta := mapAt(m, "metadata")
+		ann, _ := meta["annotations"].(map[string]any)
+		if ann == nil {
+			ann = map[string]any{}
+			meta["annotations"] = ann
+		}
+		rev, _ := ann["deployment.kubernetes.io/revision"].(string)
+		next := 1
+		fmt.Sscan(rev, &next)
+		if rev != "" {
+			next++
+		}
+		ann["deployment.kubernetes.io/revision"] = fmt.Sprint(next)
+		labels, _ := deepCopy(mapAt(m, "spec", "template", "metadata")["labels"]).(map[string]any)
+		f.rs[res] = map[string]any{"kind": "ReplicaSet", "metadata": map[string]any{"name": name + "-rs", "uid": "uid-rs-" + name, "labels": labels,
+			"ownerReferences": []any{map[string]any{"kind": "Deployment", "name": name, "uid": ownerUID, "controller": true}}}}
+		ownerKind, ownerUID = "ReplicaSet", "uid-rs-"+name
+	}
+	for i := start; i < start+n; i++ {
 		labels, _ := deepCopy(mapAt(m, "spec", "template", "metadata")["labels"]).(map[string]any)
 		p := fmt.Sprintf("%s-%d", name, i)
-		f.pods[p] = map[string]any{"kind": "Pod", "metadata": map[string]any{"name": p, "labels": labels}}
+		f.pods[p] = map[string]any{"kind": "Pod", "metadata": map[string]any{"name": p, "uid": "uid-pod-" + p, "labels": labels,
+			"ownerReferences": []any{map[string]any{"kind": ownerKind, "name": name, "uid": ownerUID, "controller": true}}}}
 		f.owner[p] = res
 	}
 }
@@ -139,6 +165,34 @@ func (f *fakeKube) run(_ context.Context, args ...string) ([]byte, error) {
 		}
 	}
 	switch {
+	case len(args) >= 5 && args[0] == "get" && args[1] == "replicasets.apps" && args[2] == "-l":
+		var items []any
+		for _, res := range sortedKeys(f.rs) {
+			if matches(stringMap(mapAt(f.rs[res], "metadata")["labels"]), args[3]) {
+				items = append(items, f.rs[res])
+			}
+		}
+		return json.Marshal(map[string]any{"kind": "List", "items": items})
+	case args[0] == "patch" && len(args) == 5 && strings.HasPrefix(args[1], "pod/") && args[2] == "--type=json" && args[3] == "-p":
+		name := strings.TrimPrefix(args[1], "pod/")
+		live, ok := f.pods[name]
+		if !ok {
+			return nil, fmt.Errorf("NotFound %s", args[1])
+		}
+		if f.beforePatch != nil {
+			f.beforePatch(args[1])
+			live = f.pods[name]
+		}
+		var ops []op
+		if err := json.Unmarshal([]byte(args[4]), &ops); err != nil {
+			return nil, err
+		}
+		next, err := applyPatch(live, ops)
+		if err != nil {
+			return nil, fmt.Errorf("the server rejected the patch: %w", err)
+		}
+		f.pods[name] = next
+		return nil, nil
 	case len(args) >= 5 && args[0] == "get" && args[1] == "pods" && args[2] == "-l":
 		var items []any
 		for _, name := range sortedKeys(f.pods) {
@@ -504,11 +558,21 @@ func fakeFor(t *testing.T, store string) *fakeKube {
 	return newFake(t, clusterLive(store))
 }
 
-// snapshot copies the live state for before/after comparisons.
+// snapshot copies the live state for before/after comparisons, without the revision
+// number the Deployment controller (not obs) writes on every rollout.
 func (f *fakeKube) snapshot() map[string]map[string]any {
 	out := map[string]map[string]any{}
 	for k, v := range f.objs {
-		out[k] = withoutBookkeeping(v)
+		c := withoutBookkeeping(v)
+		if meta, _ := c["metadata"].(map[string]any); meta != nil {
+			if a, _ := meta["annotations"].(map[string]any); a != nil {
+				delete(a, "deployment.kubernetes.io/revision")
+				if len(a) == 0 {
+					delete(meta, "annotations")
+				}
+			}
+		}
+		out[k] = c
 	}
 	return out
 }

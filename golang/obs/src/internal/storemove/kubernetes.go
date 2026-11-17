@@ -81,6 +81,179 @@ func (k Kubernetes) patch(ctx context.Context, c Config, resource string, ops []
 	return k.call(ctx, c, "patch", qualified(resource), "--type=json", "-p", string(b))
 }
 
+// patchLive sends ops built from the read live, prefixed by sendPins(live): the API
+// server applies them only to exactly that object state.
+func (k Kubernetes) patchLive(ctx context.Context, c Config, resource string, live map[string]any, ops []op) error {
+	return k.patch(ctx, c, resource, append(sendPins(live), ops...))
+}
+
+// controllerRef is the kind and uid of an object's controlling owner reference.
+func controllerRef(m map[string]any) (string, string) {
+	refs, _ := mapAt(m, "metadata")["ownerReferences"].([]any)
+	for _, r := range refs {
+		rm, _ := r.(map[string]any)
+		if rm["controller"] == true {
+			kind, _ := rm["kind"].(string)
+			uid, _ := rm["uid"].(string)
+			return kind, uid
+		}
+	}
+	return "", ""
+}
+
+// ownedPods splits the pods a workload's selector matches into the ones its controller
+// owns by uid (StatefulSet: the pod's controller is the StatefulSet; Deployment: the
+// pod's controller is a ReplicaSet whose controller is the Deployment) and the names of
+// all others. A label selector alone never decides which pods obs changes.
+func (k Kubernetes) ownedPods(ctx context.Context, c Config, w string, live map[string]any) ([]map[string]any, []string, error) {
+	sel, err := selectorOf(live, w, c.RoleLabels)
+	if err != nil {
+		return nil, nil, err
+	}
+	uid, _ := lookup(live, "/metadata/uid")
+	u, _ := uid.(string)
+	if u == "" {
+		return nil, nil, fmt.Errorf("%s: live object without metadata.uid", w)
+	}
+	owners, podOwner := map[string]bool{u: true}, "StatefulSet"
+	if kind, _, _ := strings.Cut(canonicalResource(w), "/"); kind == "deployment" {
+		owners, podOwner = map[string]bool{}, "ReplicaSet"
+		b, err := k.command(ctx, c, "get", "replicasets.apps", "-l", selectorString(sel), "-o", "json")
+		if err != nil {
+			return nil, nil, err
+		}
+		var list struct {
+			Items []map[string]any `json:"items"`
+		}
+		if err = json.Unmarshal(b, &list); err != nil {
+			return nil, nil, fmt.Errorf("replicasets of %s: %w", w, err)
+		}
+		for _, rs := range list.Items {
+			if kind, owner := controllerRef(rs); kind == "Deployment" && owner == u {
+				if id, _ := lookup(rs, "/metadata/uid"); id != nil {
+					owners[fmt.Sprint(id)] = true
+				}
+			}
+		}
+	}
+	ps, err := k.pods(ctx, c, sel)
+	if err != nil {
+		return nil, nil, err
+	}
+	var owned []map[string]any
+	var foreign []string
+	for _, p := range ps {
+		name, _ := mapAt(p, "metadata")["name"].(string)
+		if kind, owner := controllerRef(p); kind == podOwner && owners[owner] {
+			owned = append(owned, p)
+		} else {
+			foreign = append(foreign, name)
+		}
+	}
+	return owned, foreign, nil
+}
+
+// labelPods sets the role labels of exactly the given pods, one JSON patch per pod named
+// by its name, pinning the pod's uid, its owner references and every old label value.
+func (k Kubernetes) labelPods(ctx context.Context, c Config, pods []map[string]any, roles []string, value string) error {
+	for _, p := range pods {
+		meta := mapAt(p, "metadata")
+		name, _ := meta["name"].(string)
+		ops := []op{{"test", "/metadata/uid", meta["uid"]}, {"test", "/metadata/ownerReferences", norm(meta["ownerReferences"])}}
+		pins := len(ops)
+		labels := stringMap(meta["labels"])
+		for _, role := range roles {
+			path := pointer("metadata", "labels", role)
+			if v, ok := labels[role]; ok {
+				if v != value {
+					ops = append(ops, op{"test", path, v}, op{"replace", path, value})
+				}
+			} else {
+				ops = append(ops, op{"add", path, value})
+			}
+		}
+		if len(ops) == pins {
+			continue
+		}
+		if err := k.patch(ctx, c, "pod/"+name, ops); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// stableRoutes checks every stable Service selector against the pods it must reach
+// before and after the flip: exactly one role label, with value true, and every other
+// term carried with the same value by the single's pod template AND by the pod template
+// of every scaled workload that receives that role. Anything else would leave the
+// Service empty after the flip (or select pods the move does not manage). obs never
+// changes the stable Services; this check is re-read at Route and right before the
+// single stops, because no patch to another object can pin a Service.
+func (k Kubernetes) stableRoutes(ctx context.Context, c Config, store string, single map[string]any, objs []object) error {
+	singleTpl := stringMap(mapAt(single, "spec", "template", "metadata")["labels"])
+	templates := map[string]map[string]string{}
+	for _, o := range objs {
+		templates[o.key()] = stringMap(mapAt(o.Raw, "spec", "template", "metadata")["labels"])
+	}
+	isRole := map[string]bool{}
+	for _, role := range c.RoleLabels {
+		isRole[role] = true
+	}
+	selected := map[string]bool{}
+	for _, name := range stableServices(store) {
+		svc, err := k.mustGet(ctx, c, "service/"+name)
+		if err != nil {
+			return fmt.Errorf("stable Service: %w", err)
+		}
+		sel := stringMap(mapAt(svc, "spec")["selector"])
+		var terms []string
+		for _, key := range sortedKeys(sel) {
+			if isRole[key] {
+				terms = append(terms, key)
+			}
+		}
+		if len(terms) != 1 || sel[terms[0]] != "true" {
+			return fmt.Errorf("stable Service %s selects %d of the role labels %v (%s), want exactly one with value true", name, len(terms), c.RoleLabels, selectorString(sel))
+		}
+		role := terms[0]
+		selected[role] = true
+		for _, key := range sortedKeys(sel) {
+			if key == role {
+				continue
+			}
+			if singleTpl[key] != sel[key] {
+				return fmt.Errorf("stable Service %s selector term %s=%s is not on the pod template of %s; the Service would not route to the single", name, key, sel[key], c.Single)
+			}
+			for _, w := range roleWorkloads(c) {
+				for _, r := range c.RoleWorkloads[w] {
+					if r == role && templates[w][key] != sel[key] {
+						return fmt.Errorf("stable Service %s selector term %s=%s is not on the pod template of %s, which receives %s; after the flip the Service would select none of its pods (a stable Service selects only the role and terms every serving pod carries)", name, key, sel[key], w, role)
+					}
+				}
+			}
+		}
+	}
+	for _, role := range c.RoleLabels {
+		if !selected[role] {
+			return fmt.Errorf("role label %s is selected by none of the stable Services %v", role, stableServices(store))
+		}
+	}
+	return nil
+}
+
+// stableRoutesNow re-reads the single, the manifest and the stable Services.
+func (k Kubernetes) stableRoutesNow(ctx context.Context, c Config, store string) error {
+	objs, err := validateScaledManifest(c, store)
+	if err != nil {
+		return err
+	}
+	single, err := k.mustGet(ctx, c, c.Single)
+	if err != nil {
+		return err
+	}
+	return k.stableRoutes(ctx, c, store, single, objs)
+}
+
 // workloadStatus is the controller-specific replica picture: Deployment and StatefulSet
 // report spec.replicas/status.readyReplicas, a DaemonSet (the concept 10.3 multi-node
 // Alloy form) reports desiredNumberScheduled/numberReady/updatedNumberScheduled.
@@ -177,7 +350,7 @@ func (k Kubernetes) change(ctx context.Context, c Config, resource string, build
 	if err != nil {
 		return fmt.Errorf("%s: %w", resource, err)
 	}
-	return k.patch(ctx, c, resource, full)
+	return k.patchLive(ctx, c, resource, live, full)
 }
 
 // undo applies the verified stored inverse of an object; false when it has none.
@@ -196,7 +369,7 @@ func (k Kubernetes) undo(ctx context.Context, c Config, resource string, build b
 	if stored == nil {
 		return false, nil
 	}
-	return true, k.patch(ctx, c, resource, stored)
+	return true, k.patchLive(ctx, c, resource, live, stored)
 }
 
 // verifyOrBuild is the read-only form of change: true when the object carries a
@@ -315,28 +488,9 @@ func (k Kubernetes) checkSingle(ctx context.Context, store string, c Config, rol
 			}
 		}
 	}
-	// The stable Services must select the role labels the flip changes.
-	selected := map[string]bool{}
-	for _, name := range stableServices(store) {
-		svc, err := k.mustGet(ctx, c, "service/"+name)
-		if err != nil {
-			return 0, fmt.Errorf("stable Service: %w", err)
-		}
-		sel := stringMap(mapAt(svc, "spec")["selector"])
-		n := 0
-		for _, role := range c.RoleLabels {
-			if sel[role] == "true" {
-				selected[role], n = true, n+1
-			}
-		}
-		if n != 1 {
-			return 0, fmt.Errorf("stable Service %s selects %d of the role labels %v with value true, want exactly one", name, n, c.RoleLabels)
-		}
-	}
-	for _, role := range c.RoleLabels {
-		if !selected[role] {
-			return 0, fmt.Errorf("role label %s is selected by none of the stable Services %v", role, stableServices(store))
-		}
+	// The stable Services must route by exactly the role labels the flip changes.
+	if err = k.stableRoutes(ctx, c, store, single, objs); err != nil {
+		return 0, err
 	}
 	if err = k.alloy(ctx, c); err != nil {
 		return 0, err
@@ -361,9 +515,12 @@ func (k Kubernetes) checkSingle(ctx context.Context, store string, c Config, rol
 			routed++
 		}
 	}
-	pods, err := k.pods(ctx, c, singleSel)
+	pods, foreign, err := k.ownedPods(ctx, c, c.Single, single)
 	if err != nil {
 		return 0, err
+	}
+	if len(foreign) > 0 {
+		return 0, fmt.Errorf("%s selector %s matches pods it does not own (%v); obs changes roles only of pods owned by uid, refusing", c.Single, selectorString(singleSel), foreign)
 	}
 	singleTrue, singleFalse := 0, 0
 	for _, p := range pods {
@@ -460,7 +617,7 @@ func (k Kubernetes) checkStorage(ctx context.Context, store string, c Config, ro
 // pods and template get their roles, all of them Ready, then the single's pods lose
 // theirs. Reverse: the single's pods get theirs back, then the scaled pods and templates
 // lose theirs.
-func (k Kubernetes) roles(ctx context.Context, c Config, reverse bool) error {
+func (k Kubernetes) roles(ctx context.Context, c Config, store string, reverse bool) error {
 	single, err := k.mustGet(ctx, c, c.Single)
 	if err != nil {
 		return err
@@ -483,12 +640,26 @@ func (k Kubernetes) roles(ctx context.Context, c Config, reverse bool) error {
 			return fmt.Errorf("%s and %s pod selectors may overlap; require distinct component labels", c.Single, w)
 		}
 	}
-	label := func(sel map[string]string, roles []string, value string) error {
-		argv := []string{"label", "pods", "-l", selectorString(sel), "--overwrite"}
-		for _, role := range roles {
-			argv = append(argv, role+"="+value)
+	// label changes the roles of exactly the pods w's controller owns (by uid), read
+	// now; a pod that merely matches the selector is refused, never relabelled.
+	label := func(w string, roles []string, value string) error {
+		live, err := k.mustGet(ctx, c, w)
+		if err != nil {
+			return err
 		}
-		return k.call(ctx, c, argv...)
+		if w != c.Single {
+			if meta := mapAt(live, "metadata"); stringMap(meta["labels"])[ownerLabel] == "" || stringMap(meta["annotations"])[digestAnnotation] == "" {
+				return fmt.Errorf("%s: not created by obs store move (no %s label and %s annotation); roles move only to workloads obs created", w, ownerLabel, digestAnnotation)
+			}
+		}
+		owned, foreign, err := k.ownedPods(ctx, c, w, live)
+		if err != nil {
+			return err
+		}
+		if len(foreign) > 0 {
+			return fmt.Errorf("%s selector matches pods it does not own (%v); refusing to route to a pod obs did not create", w, foreign)
+		}
+		return k.labelPods(ctx, c, owned, roles, value)
 	}
 	setTemplate := func(w string, assigned []string) error {
 		live, err := k.mustGet(ctx, c, w)
@@ -496,13 +667,16 @@ func (k Kubernetes) roles(ctx context.Context, c Config, reverse bool) error {
 			return err
 		}
 		if ops := templateRoles(live, c.RoleLabels, assigned); len(ops) > 0 {
-			return k.patch(ctx, c, w, ops)
+			return k.patchLive(ctx, c, w, live, ops)
 		}
 		return nil
 	}
+	if err = k.stableRoutesNow(ctx, c, store); err != nil {
+		return err
+	}
 	if !reverse {
 		for _, w := range workloads {
-			if err = label(selectors[w], c.RoleWorkloads[w], "true"); err != nil {
+			if err = label(w, c.RoleWorkloads[w], "true"); err != nil {
 				return err
 			}
 			if err = setTemplate(w, c.RoleWorkloads[w]); err != nil {
@@ -513,16 +687,16 @@ func (k Kubernetes) roles(ctx context.Context, c Config, reverse bool) error {
 			return err
 		}
 		// The single's template keeps its roles until the drain stops it in one patch.
-		return label(singleSel, c.RoleLabels, "false")
+		return label(c.Single, c.RoleLabels, "false")
 	}
-	if err = label(singleSel, c.RoleLabels, "true"); err != nil {
+	if err = label(c.Single, c.RoleLabels, "true"); err != nil {
 		return err
 	}
 	if err = k.ready(ctx, c, []string{c.Single}); err != nil {
 		return err
 	}
 	for _, w := range workloads {
-		if err = label(selectors[w], c.RoleWorkloads[w], "false"); err != nil {
+		if err = label(w, c.RoleWorkloads[w], "false"); err != nil {
 			return err
 		}
 		if err = setTemplate(w, nil); err != nil {
@@ -575,7 +749,7 @@ func (k Kubernetes) Execute(ctx context.Context, s Step, store string, c Config)
 		}
 		return k.ready(ctx, c, c.Scaled)
 	case Route:
-		return k.roles(ctx, c, false)
+		return k.roles(ctx, c, store, false)
 	case Reconnect, ReverseReconnect:
 		if err := k.alloy(ctx, c); err != nil {
 			return err
@@ -586,9 +760,24 @@ func (k Kubernetes) Execute(ctx context.Context, s Step, store string, c Config)
 		return k.ready(ctx, c, []string{c.Alloy})
 	case StopCompaction:
 		return k.compaction(ctx, c, false)
+	case ResumeReady:
+		ws := append([]string(nil), c.Scaled...)
+		if storage(store) {
+			ws = append(ws, c.Storage...)
+			for _, r := range c.Routers {
+				ws = append(ws, r.Workload)
+			}
+		}
+		return k.ready(ctx, c, ws)
 	case StopSingle:
+		if err := k.stableRoutesNow(ctx, c, store); err != nil {
+			return err
+		}
 		return k.change(ctx, c, c.Single, stopSingle(c))
 	case RetainMetastore:
+		if err := k.stableRoutesNow(ctx, c, store); err != nil {
+			return err
+		}
 		if err := k.change(ctx, c, c.Single, retainMetastore(c)); err != nil {
 			return err
 		}
@@ -609,7 +798,7 @@ func (k Kubernetes) Execute(ctx context.Context, s Step, store string, c Config)
 		}
 		return nil
 	case ReverseRoles:
-		return k.roles(ctx, c, true)
+		return k.roles(ctx, c, store, true)
 	case StorageRoute, RestoreRoute:
 		objs, err := validateScaledManifest(c, store)
 		if err != nil {

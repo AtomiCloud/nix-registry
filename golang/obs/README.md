@@ -374,42 +374,59 @@ reported state and re-run (it resumes) or roll back explicitly. There is no skip
   `obs.diene/store-move-digest` (a hash of that manifest object). Before creating, it reads live:
   every object must be absent (or carry exactly that label and digest: a re-run), every claim a
   StatefulSet's `volumeClaimTemplates` would bind (`<template>-<statefulset>-<ordinal>` for every
-  replica) must be absent, and no live pod may match a new workload's selector, so nothing existing
+  ordinal from `spec.ordinals.start`, default 0) must be absent, and no live pod may match a new workload's selector, so nothing existing
   is adopted.
 - **Existing objects** (the single, a separate Tempo compactor, the insert/select routers,
   vmstorage) are never described by hand. obs builds each change itself from the live object as a
-  JSON patch (`kubectl patch --type=json`) that starts with `test` operations pinning every old
-  value it relies on; the API server refuses the whole patch if the object changed since obs read
-  it. The inverse patch (also with `test` operations) is stored on the object in the annotation
-  `obs.diene/store-move-inverse`. The rollback replays it on a copy of the live object, rebuilds the
-  forward patch from the result and applies the stored inverse only when both match exactly, so a
-  hand-edited annotation, another config or a pinned value changed after the move is refused. It
-  undoes only obs's own change; other fields stay as they are.
+  JSON patch (`kubectl patch --type=json`). Every patch obs sends starts with `test` operations of
+  the object's uid, its whole `spec` and its annotations as obs read them, then of every old value
+  the change relies on; the API server refuses the whole patch if anything changed since obs read
+  it (an appended `-replicationFactor=1`, a duplicate `-storageNode`, a retention policy set where
+  none was). The inverse patch (also with `test` operations) is stored on the object in the
+  annotation `obs.diene/store-move-inverse`, and `obs.diene/store-move-origin` records a digest of
+  the uid and of the old value at every path the change writes. The rollback replays the inverse on
+  a copy of the live object, requires the restored values to match that digest, rebuilds the
+  forward patch from the result and applies the stored inverse only when everything matches
+  exactly, so a hand-edited inverse (for example the compactor's replicas 1 to 7), another config or
+  a pinned value changed after the move is refused. Both annotations live on the object itself: they
+  catch an edited inverse, not someone who rewrites both with the same access that could change the
+  workload directly. A single must run exactly one replica, so its restored count never depends on
+  them. It undoes only obs's own change; other fields stay as they are.
 
 | Store | Change obs makes to existing objects |
 |---|---|
 | Tempo | single: `spec.replicas` N to 0 and every template role `true` to `false`, in one patch, after the drain; compactor (if separate): replicas N to 0 |
 | Pyroscope | single: `-target=all` to `-target=metastore` (same spelling) and every template role to `false`; replicas, claims, raft id and all else untouched |
 | VictoriaLogs, VictoriaMetrics | each router: the one `-storageNode` flag gains the derived endpoints (same spelling, existing endpoints kept in order) |
-| VictoriaMetrics, `copies: 2` | vminsert also gains `-replicationFactor=2`; every listed existing vmstorage gains `-dedup.minScrapeInterval=1ms` at the front of its args (concept 10.5) |
+| VictoriaMetrics, `copies: 2` | vminsert also gains `-replicationFactor=2`; vmselect gains `-dedup.minScrapeInterval=1ms` (VictoriaMetrics v1.156.0 docs: required on vmselect when replication is enabled); every listed existing vmstorage gains `-dedup.minScrapeInterval=1ms` at the front of its args (concept 10.5) |
 
-Role labels on pods are set with `kubectl label pods` (make before break: new pods and templates
-get their roles and are Ready before the single's pods lose theirs). Alloy is rolled with
+Role labels change only on pods a workload's controller owns by uid (StatefulSet pods, or
+Deployment pods whose ReplicaSet the Deployment owns), one JSON patch per pod by name with `test`
+operations of its uid, owner references and old labels; a pod that merely matches the selector is
+refused, never relabelled, and only workloads obs created receive roles (make before break: new
+pods and templates get their roles and are Ready before the single's pods lose theirs). Alloy is rolled with
 `kubectl rollout restart`. Nothing else is changed: no app, Alloy config or stable Service.
 
 ### One check up front, then resume
 
 Before step 1 obs checks everything, static and live: the manifest allow-list, every object, claim
 and pod above, the stable Services (`tempo-distributor`/`tempo-query`,
-`pyroscope-write`/`pyroscope-query` must each select exactly one role label `true`), Alloy (at least
+`pyroscope-write`/`pyroscope-query` must each select exactly one role label `true`, and every
+other selector term must be on the single's pod template and on the pod template of every scaled
+workload that receives that role, so the Service routes to the scaled pods after the flip; obs
+never changes these Services and re-reads them at the role step and right before the single
+stops), Alloy (at least
 two replicas, or a DaemonSet on at least two nodes), and that every change obs will make to an
 existing object can be built from its live state now (so a Pyroscope single without exactly one
 `-target=all`, a single whose template lacks its roles, a live `persistentVolumeClaimRetentionPolicy`
-of `Delete`, or a malformed `-storageNode` fails before anything changes). The same check reads
+of `Delete`, a single with more than one replica, or a malformed `-storageNode` fails before anything
+changes). The same check reads
 which step the live state shows and starts there (printed as `already live; resuming`): created but
 not routed restarts at step 1 (creating only absent objects, then waiting), routed restarts at the
 Alloy roll, a stopped/converted single goes to verification. It never redoes a finished step and
-never touches the roles of pods that already serve. A state the move cannot produce (for example
+never touches the roles of pods that already serve. Before the first step a resumed run executes, it
+waits again for every scaled workload or new storage node (and the routers and storage workloads)
+to be Ready, because the skipped steps' readiness may no longer hold. A state the move cannot produce (for example
 the single's pods without roles while no scaled workload has them) is refused.
 
 ### Tempo and Pyroscope
@@ -495,12 +512,13 @@ query: 'sum(count_over_time(fixture_known_total[1m]))'
 ```
 
 New storage nodes are new StatefulSets. Their endpoints are derived, never typed:
-`<statefulset>-<i>.<serviceName>.<namespace>.svc.<cluster_domain>:<router port>` for every replica
-(`cluster_domain` defaults to `cluster.local`). `serviceName` must name a headless Service of the
+`<statefulset>-<i>.<serviceName>.<namespace>.svc.<cluster_domain>:<router port>` for every pod
+ordinal `i` from `spec.ordinals.start` (default 0) on (`cluster_domain` defaults to
+`cluster.local`). `serviceName` must name a headless Service of the
 same manifest that selects the pods, and every router port must be a `containerPort` of the pods.
 VictoriaLogs routers dial 9491. With `copies: 2` every new vmstorage container must carry exactly
-`-dedup.minScrapeInterval=1ms`; a live router with another `-replicationFactor` or a live vmstorage
-with another dedup value is refused, one that already has exactly the value is left alone (and the
+`-dedup.minScrapeInterval=1ms`; a live router with another `-replicationFactor`, a live vmselect or
+vmstorage with another dedup value is refused, one that already has exactly the value is left alone (and the
 rollback keeps it). obs extends only one well-formed `-storageNode` per router, read with Go flag
 syntax as the stores read it (`lib/envflag`): one or two leading dashes, `=` or the next argument as
 value, nothing read after `--` or a positional argument; a value after another flag without `=` is

@@ -232,7 +232,7 @@ func TestOpus5B2RollbackNeverStopsRunningSingle(t *testing.T) {
 	if err := move(t, f, "tempo", config(), true); err != nil {
 		t.Fatal(err)
 	}
-	if c := callsWith(f.calls, "statefulset.apps/single", "patch"); len(c) > 0 {
+	if c := callsWith(f.calls, "patch statefulset.apps/single "); len(c) > 0 {
 		t.Fatalf("rollback changed the running single: %v", c)
 	}
 	if _, ok := f.pods["single-0"]; !ok {
@@ -268,10 +268,8 @@ func TestOpus5B3RerunResumesWithoutTouchingServingPods(t *testing.T) {
 	if c := callsWith(f.calls, "create "); len(c) > 0 {
 		t.Fatalf("re-run created again: %v", c)
 	}
-	for _, c := range callsWith(f.calls, "label pods", "component=new") {
-		if strings.Contains(c, "=false") {
-			t.Fatalf("re-run cleared serving roles: %s", c)
-		}
+	if c := callsWith(f.calls, "patch pod/new-"); len(c) > 0 {
+		t.Fatalf("re-run touched serving pods' roles: %v", c)
 	}
 }
 
@@ -414,7 +412,7 @@ func TestPatchTestOpRefusesDriftDuringApply(t *testing.T) {
 		}
 	}
 	err := move(t, f, "tempo", config(), false)
-	if err == nil || !strings.Contains(err.Error(), "test /spec/replicas") {
+	if err == nil || !strings.Contains(err.Error(), "test /spec") {
 		t.Fatalf("drifted single patched: %v", err)
 	}
 	s := f.objs["statefulset.apps/single"]
@@ -622,7 +620,7 @@ func TestRerunAfterFailureAtEveryStep(t *testing.T) {
 		{"create", "create ", ""},
 		{"scaled not Ready", "rollout status statefulset.apps/new", ""},
 		{"scaled template patch", "patch statefulset.apps/new", ""},
-		{"single relabel", "label pods -l component=single", "2. flip role labels to scaled pods\n"},
+		{"single relabel", "patch pod/single-0 ", "2. flip role labels to scaled pods\n"},
 		{"Alloy roll", "rollout restart deployment.apps/alloy", "2. flip role labels to scaled pods (already live; resuming)"},
 		{"stop compaction", "exec ", "2. flip role labels to scaled pods (already live; resuming)"},
 		{"stop single", "patch statefulset.apps/single", "2. flip role labels to scaled pods (already live; resuming)"},

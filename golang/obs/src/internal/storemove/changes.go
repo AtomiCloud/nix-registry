@@ -19,6 +19,15 @@ func rolePath(role string) string {
 	return pointer("spec", "template", "metadata", "labels", role)
 }
 
+// singleReplicas refuses a single that does not run exactly one replica: the original
+// replica count obs restores is then fixed independently of anything stored.
+func singleReplicas(n int, what string) error {
+	if n != 1 {
+		return fmt.Errorf("%s: live replicas %d; a single-instance store runs exactly 1 (obs restores it to 1)", what, n)
+	}
+	return nil
+}
+
 // pinReplicas pins the live replica count and returns it.
 func pinReplicas(live map[string]any, what string) (int, []op, error) {
 	v, ok := mapAt(live, "spec")["replicas"]
@@ -67,8 +76,8 @@ func stopSingle(c Config) builder {
 		if err != nil {
 			return nil, err
 		}
-		if n < 1 {
-			return nil, fmt.Errorf("%s: live replicas %d; the drain stops a running single", what, n)
+		if err := singleReplicas(n, what); err != nil {
+			return nil, err
 		}
 		retain, err := pinRetain(live, what)
 		if err != nil {
@@ -93,8 +102,8 @@ func retainMetastore(c Config) builder {
 		if err != nil {
 			return nil, err
 		}
-		if n < 1 {
-			return nil, fmt.Errorf("%s: live replicas %d; the metastore keeps running", what, n)
+		if err := singleReplicas(n, what); err != nil {
+			return nil, err
 		}
 		retain, err := pinRetain(live, what)
 		if err != nil {
@@ -140,7 +149,12 @@ func scaleToZero(what string) builder {
 // addStorageNodes (VictoriaLogs/VictoriaMetrics insert/select): the one -storageNode flag
 // gains the derived endpoints of the new storage nodes (same spelling, every existing
 // endpoint kept in order). For VictoriaMetrics with two copies, vminsert also gains
-// -replicationFactor=2 (concept 10.5), unless the live router already has exactly 2.
+// -replicationFactor=2 (concept 10.5), unless the live router already has exactly 2, and
+// vmselect gains -dedup.minScrapeInterval=1ms: the pinned v1.156.0 docs require it on
+// vmselect whenever replication is enabled (docs/victoriametrics/Cluster-VictoriaMetrics.md
+// "Replication and data safety": "-dedup.minScrapeInterval=1ms command-line flag must be
+// passed to vmselect nodes when the replication is enabled"; vminsert -replicationFactor
+// help: "vmselect must run with -dedup.minScrapeInterval=1ms").
 func addStorageNodes(c Config, r Router, derived []string) builder {
 	return func(live map[string]any) ([]op, error) {
 		what := "router " + r.Workload
@@ -177,6 +191,19 @@ func addStorageNodes(c Config, r Router, derived []string) builder {
 			case len(rf) == 1 && rf[0].tok.value == "2":
 			default:
 				return nil, fmt.Errorf("%s: live -replicationFactor %v; two copies set exactly -replicationFactor=2", what, targetValues(rf))
+			}
+		}
+		if c.Copies == 2 && r.Role == "select" {
+			dd, err := findFlags(live, dedupName, "storageNode")
+			if err != nil {
+				return nil, fmt.Errorf("%s: %w", what, err)
+			}
+			switch {
+			case len(dd) == 0:
+				ops = append(ops, op{"add", h.site.path(h.tok.index), dedupExact})
+			case len(dd) == 1 && dd[0].tok.value == "1ms":
+			default:
+				return nil, fmt.Errorf("%s: live -%s %v; two copies need exactly 1ms on vmselect", what, dedupName, targetValues(dd))
 			}
 		}
 		return ops, nil

@@ -1,6 +1,8 @@
 package storemove
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -20,9 +22,75 @@ import (
 // rollback never trusts it blindly: it replays the stored inverse on a copy of the live
 // object, rebuilds the forward patch from the result and requires that this forward
 // patch reproduces the live object exactly and yields the same inverse (verifyInverse).
+//
+// A self-consistent forged inverse could still name another "original" value for a field
+// the forward change erases (replicas N -> 0 is many-to-one). So the forward patch also
+// stores originAnnotation, the digest of the object's uid and of the pre-move value at
+// every path the change writes, and the rollback requires the object its inverse
+// restores to have exactly that digest. Fields obs never changes stay free (an image bump
+// after the move does not block the rollback). The single's original replicas are in
+// addition independently fixed: a single runs exactly 1.
+//
+// Every patch obs sends (forward, inverse, template and pod roles) additionally tests the
+// whole live spec it was built from (sendPins), so ANY concurrent change of the object
+// between obs's read and the patch (an appended flag, a duplicate -storageNode, a
+// retention policy set where none was, a new container) makes the API server refuse it.
 
 // inverseAnnotation holds the JSON inverse of the change obs made to this object.
 const inverseAnnotation = "obs.diene/store-move-inverse"
+
+// originAnnotation holds originDigest of the object before obs changed it, so a
+// rollback restores exactly the values the change overwrote.
+const originAnnotation = "obs.diene/store-move-origin"
+
+// originDigest is the sha256 of the object's uid and, for every path the forward change
+// fwd writes, whether it existed before and its value then (the values the inverse must
+// restore). Same object, same change, same original values <=> same digest.
+func originDigest(orig map[string]any, fwd []op) string {
+	uid, _ := lookup(orig, "/metadata/uid")
+	type entry struct {
+		Path    string `json:"path"`
+		Present bool   `json:"present"`
+		Value   any    `json:"value"`
+	}
+	var cur any = deepCopy(orig)
+	var entries []entry
+	for _, o := range fwd {
+		if o.Op != "test" {
+			v, ok := lookup(cur, o.Path)
+			entries = append(entries, entry{o.Path, ok, norm(v)})
+		}
+		var err error
+		if cur, err = applyOp(cur, o); err != nil {
+			return "unappliable:" + err.Error()
+		}
+	}
+	b, _ := json.Marshal(struct {
+		UID     any     `json:"uid"`
+		Entries []entry `json:"entries"`
+	}{uid, entries})
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+// sendPins are the test operations obs prepends to every patch it sends: the object's
+// uid (the same object, not a re-created namesake), its whole spec and, when present, its
+// whole annotations. A patch built from a read therefore applies only to exactly that
+// read: any change in between (including a field added where none was, which a test of
+// the field itself cannot pin) is refused by the API server, all or nothing.
+func sendPins(live map[string]any) []op {
+	var ops []op
+	if uid, ok := lookup(live, "/metadata/uid"); ok {
+		ops = append(ops, op{"test", "/metadata/uid", uid})
+	}
+	if spec, ok := live["spec"]; ok {
+		ops = append(ops, op{"test", "/spec", norm(spec)})
+	}
+	if ann, ok := lookup(live, "/metadata/annotations"); ok {
+		ops = append(ops, op{"test", "/metadata/annotations", norm(ann)})
+	}
+	return ops
+}
 
 type op struct {
 	Op    string `json:"op"`
@@ -293,23 +361,30 @@ type builder func(live map[string]any) ([]op, error)
 // withInverse returns the full forward patch: the builder's operations plus the
 // annotation holding their inverse (whose own last step removes the annotation).
 func withInverse(live map[string]any, fwd []op) ([]op, []op, error) {
-	if _, ok := lookup(live, pointer("metadata", "annotations", inverseAnnotation)); ok {
-		return nil, nil, fmt.Errorf("already carries %s (a change by an earlier run is live)", inverseAnnotation)
+	for _, a := range []string{inverseAnnotation, originAnnotation} {
+		if _, ok := lookup(live, pointer("metadata", "annotations", a)); ok {
+			return nil, nil, fmt.Errorf("already carries %s (a change by an earlier run is live)", a)
+		}
 	}
 	inv, err := invert(live, fwd)
 	if err != nil {
 		return nil, nil, err
 	}
-	inv = append(inv, op{"remove", pointer("metadata", "annotations", inverseAnnotation), nil})
+	inv = append(inv,
+		op{"remove", pointer("metadata", "annotations", originAnnotation), nil},
+		op{"remove", pointer("metadata", "annotations", inverseAnnotation), nil})
 	b, err := json.Marshal(inv)
 	if err != nil {
 		return nil, nil, err
 	}
+	origin := originDigest(live, fwd)
 	full := append([]op{}, fwd...)
 	if _, ok := lookup(live, "/metadata/annotations"); ok {
-		full = append(full, op{"add", pointer("metadata", "annotations", inverseAnnotation), string(b)})
+		full = append(full,
+			op{"add", pointer("metadata", "annotations", inverseAnnotation), string(b)},
+			op{"add", pointer("metadata", "annotations", originAnnotation), origin})
 	} else {
-		full = append(full, op{"add", "/metadata/annotations", map[string]any{inverseAnnotation: string(b)}})
+		full = append(full, op{"add", "/metadata/annotations", map[string]any{inverseAnnotation: string(b), originAnnotation: origin}})
 	}
 	return full, inv, nil
 }
@@ -342,6 +417,10 @@ func verifyInverse(live map[string]any, stored []op, build builder) error {
 	fwd, err := build(orig)
 	if err != nil {
 		return fmt.Errorf("stored inverse restores a state the move never starts from: %w", err)
+	}
+	recorded, _ := lookup(live, pointer("metadata", "annotations", originAnnotation))
+	if got := originDigest(orig, fwd); recorded != got {
+		return fmt.Errorf("stored inverse restores values other than the ones obs recorded before the move (%s %s, restored values digest %s): hand-edited inverse or annotation, refusing", originAnnotation, brief(recorded), got)
 	}
 	full, inv, err := withInverse(orig, fwd)
 	if err != nil {

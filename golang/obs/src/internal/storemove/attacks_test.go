@@ -293,10 +293,10 @@ func TestPortedRolesPerComponent(t *testing.T) {
 	}
 	newTrue, singleFalse := -1, -1
 	for i, c := range f.calls {
-		if strings.HasPrefix(c, "label pods -l component=query") && strings.Contains(c, "=true") {
+		if strings.HasPrefix(c, "patch pod/query-0 ") && strings.Contains(c, `"value":"true"`) {
 			newTrue = i
 		}
-		if strings.HasPrefix(c, "label pods -l component=single") && strings.Contains(c, "=false") && singleFalse < 0 {
+		if strings.HasPrefix(c, "patch pod/single-0 ") && strings.Contains(c, `"value":"false"`) && singleFalse < 0 {
 			singleFalse = i
 		}
 	}

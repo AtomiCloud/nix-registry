@@ -30,6 +30,12 @@ const (
 	ReverseRoles     Step = "give the single's pods their roles, then clear scaled pod and template roles"
 	ReverseReconnect Step = "roll Alloy and require every scaled received counter flat"
 
+	// ResumeReady runs once before the first step of a resumed forward run: the steps it
+	// skips each ended in a readiness wait, so the live state they left must be Ready
+	// again now (scaled workloads or new storage nodes, plus the routers and storage
+	// workloads obs changed) before the run builds on it.
+	ResumeReady Step = "resuming: re-check that every new part is Ready"
+
 	// Cluster operations inside Drain/PyroTransition (Runner reads counters between them).
 	StopCompaction  Step = "stop compaction"
 	StopSingle      Step = "stop single"
@@ -379,6 +385,12 @@ func (r Runner) Run(ctx context.Context, store string, c Config, rollback, dry b
 		if i < start {
 			fmt.Fprintf(out, "%d. %s (already live; resuming)\n", i+1, s)
 			continue
+		}
+		if i == start && start > 0 && !rollback {
+			fmt.Fprintf(out, "   %s\n", ResumeReady)
+			if err = r.Cluster.Execute(ctx, ResumeReady, store, c); err != nil {
+				return fmt.Errorf("resume at step %d (%s): %w; nothing changed by this run", i+1, s, err)
+			}
 		}
 		fmt.Fprintf(out, "%d. %s\n", i+1, s)
 		switch s {

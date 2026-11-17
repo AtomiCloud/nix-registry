@@ -335,6 +335,13 @@ func validateScaledManifest(c Config, store string) ([]object, error) {
 			if r, ok := intField(mapAt(o.Raw, "spec")["replicas"]); !ok || r < 1 {
 				return nil, fmt.Errorf("%s: %s requires positive explicit replicas", file, key)
 			}
+			if o.Kind == "StatefulSet" {
+				if _, err := ordinalStart(o.Raw, file+": "+key); err != nil {
+					return nil, err
+				}
+			} else if _, ok := mapAt(o.Raw, "spec")["ordinals"]; ok {
+				return nil, fmt.Errorf("%s: %s: spec.ordinals exists only on a StatefulSet", file, key)
+			}
 			if err = validatePod(file, o, objs); err != nil {
 				return nil, err
 			}
@@ -368,20 +375,51 @@ func validateScaledManifest(c Config, store string) ([]object, error) {
 	return objs, nil
 }
 
+// ordinalStart is a StatefulSet's first pod ordinal: spec.ordinals.start (Kubernetes
+// "start ordinal": pods and claims are numbered start..start+replicas-1), 0 when unset.
+// Anything but a non-negative integer start, or another ordinals key, is refused.
+func ordinalStart(o map[string]any, what string) (int, error) {
+	spec := mapAt(o, "spec")
+	raw, ok := spec["ordinals"]
+	if !ok {
+		return 0, nil
+	}
+	ord, isMap := raw.(map[string]any)
+	if !isMap {
+		return 0, fmt.Errorf("%s: spec.ordinals must be an object", what)
+	}
+	for k := range ord {
+		if k != "start" {
+			return 0, fmt.Errorf("%s: spec.ordinals.%s is not a known field (only start)", what, k)
+		}
+	}
+	v, has := ord["start"]
+	if !has {
+		return 0, nil
+	}
+	n, isInt := intField(v)
+	if !isInt || n < 0 {
+		return 0, fmt.Errorf("%s: spec.ordinals.start %v must be a non-negative integer", what, v)
+	}
+	return n, nil
+}
+
 // claimNames are the PersistentVolumeClaims a StatefulSet binds: <template>-<name>-<i>
-// for every volumeClaimTemplate and replica index (Kubernetes StatefulSet naming). A
-// claim that already exists would be adopted, so all must be absent before create.
+// for every volumeClaimTemplate and every pod ordinal i in start..start+replicas-1
+// (Kubernetes StatefulSet naming, spec.ordinals.start honoured). A claim that already
+// exists would be adopted, so all must be absent before create.
 func claimNames(o object) []string {
 	if o.Kind != "StatefulSet" {
 		return nil
 	}
 	n, _ := intField(mapAt(o.Raw, "spec")["replicas"])
+	start, _ := ordinalStart(o.Raw, o.key()) // validated by validateScaledManifest
 	tpls, _ := mapAt(o.Raw, "spec")["volumeClaimTemplates"].([]any)
 	var out []string
 	for _, t := range tpls {
 		tm, _ := t.(map[string]any)
 		name, _ := mapAt(tm, "metadata")["name"].(string)
-		for i := 0; i < n; i++ {
+		for i := start; i < start+n; i++ {
 			out = append(out, fmt.Sprintf("%s-%s-%d", name, o.Name, i))
 		}
 	}
@@ -393,6 +431,7 @@ type storageNode struct {
 	obj      object
 	service  string
 	replicas int
+	start    int // spec.ordinals.start: the first pod is <name>-<start>
 }
 
 // storageNodes reads the new storage StatefulSets and checks what the endpoints are
@@ -462,17 +501,22 @@ func storageNodes(c Config, objs []object) ([]storageNode, error) {
 			}
 		}
 		n, _ := intField(spec["replicas"])
-		out = append(out, storageNode{*o, svc, n})
+		start, err := ordinalStart(o.Raw, file+": "+w)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, storageNode{*o, svc, n, start})
 	}
 	return out, nil
 }
 
 // endpoints are the derived -storageNode values for one router port: every pod of every
-// new storage StatefulSet by its stable DNS name. Nobody types them.
+// new storage StatefulSet by its stable DNS name (ordinals start..start+replicas-1).
+// Nobody types them.
 func endpoints(c Config, nodes []storageNode, port int) []string {
 	var out []string
 	for _, n := range nodes {
-		for i := 0; i < n.replicas; i++ {
+		for i := n.start; i < n.start+n.replicas; i++ {
 			out = append(out, fmt.Sprintf("%s-%d.%s.%s.svc.%s:%d", n.obj.Name, i, n.service, c.Namespace, c.ClusterDomain, port))
 		}
 	}
