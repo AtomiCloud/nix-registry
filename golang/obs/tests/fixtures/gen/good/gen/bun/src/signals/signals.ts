@@ -2,6 +2,8 @@
 // contract: observability/contract.yaml
 // contract-hash: sha256:9129ac662e5875890cc17bf5204b61c434716b9df86e6a05575befa205924c2d
 
+import { register as durianSignalRegister } from '@atomicloud/diene.interfaces';
+
 import type { Event as DurianSignalEvent } from '@atomicloud/diene.interfaces';
 
 import type { Bounded as DurianSignalBounded } from '@atomicloud/diene.interfaces';
@@ -156,3 +158,7 @@ export const spanTable = {
 export const CheckoutCharge = 'checkout.charge' as const;
 export const CheckoutProviderCall = 'checkout.provider.call' as const;
 export const CheckoutQueueConsume = 'checkout.queue.consume' as const;
+
+// Registers the tables with the port when this module loads, once per process. Any competing
+// registration, or a table that is not one of these, poisons the port until restart.
+durianSignalRegister({ metrics: metricTable, events: eventTable, spans: spanTable });

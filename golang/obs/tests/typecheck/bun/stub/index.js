@@ -1,19 +1,52 @@
 'use strict';
 // Runnable half of the stub (see index.d.ts). A refusal returns an Err and counts dropped.<reason>; it never throws.
-const counts = { unknown_event: 0, unknown_metric: 0, unknown_key: 0, unknown_value: 0 };
+const counts = { unknown_event: 0, unknown_metric: 0, unknown_key: 0, unknown_value: 0, register: 0, poisoned: 0 };
 const ok = value => ({ ok: true, value });
 const drop = (reason, error) => {
   counts[reason] += 1;
   return { ok: false, error: `dropped.${reason}: ${error}` };
 };
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
+
+// Tables are accepted once per process: the generated signals.ts registers them when it loads. A second
+// registration, or any table that is not the registered one, poisons the port: from then on every signal is
+// refused until restart. A forged table is never used silently.
+let registered = null;
+let poisoned = false;
+const poison = () => {
+  if (!poisoned) counts.register += 1;
+  poisoned = true;
+};
+const bind = (which, table) => {
+  if (registered === null || registered[which] !== table) poison();
+};
+const poisonedErr = what =>
+  drop(
+    'poisoned',
+    `${what}: the port is poisoned (a competing table was refused); every signal is refused until restart`,
+  );
+
 exports.dropped = reason => counts[reason];
+exports.register = tables => {
+  if (registered !== null) {
+    poison();
+    return {
+      ok: false,
+      error:
+        'dropped.register: the tables are already registered once in this process; the port is now poisoned and refuses every signal until restart',
+    };
+  }
+  registered = tables;
+  return ok(undefined);
+};
 exports.bounded = (spec, n) =>
   Number.isInteger(n) && n >= spec.min && n <= spec.max
     ? ok(n)
     : { ok: false, error: `${spec.name}: ${n} is outside ${spec.min}..${spec.max}` };
 exports.metrics = table => {
+  bind('metrics', table);
   const emit = kind => (name, labels) => {
+    if (poisoned) return poisonedErr(`metric "${String(name)}"`);
     if (!own(table, name))
       return drop('unknown_metric', `metric "${String(name)}" is not in the generated metric table`);
     const row = table[name];
@@ -38,7 +71,9 @@ exports.metrics = table => {
   return { counter: emit('counter'), histogram: emit('histogram'), gauge: emit('gauge') };
 };
 exports.logger = events => {
+  bind('events', events);
   const log = level => event => {
+    if (poisoned) return poisonedErr(`event "${event.name}"`);
     if (!own(events, event.name))
       return drop('unknown_event', `event "${event.name}" is not in the generated event table`);
     if (events[event.name] !== level || event.level !== level)
@@ -50,10 +85,14 @@ exports.logger = events => {
   };
   return { error: log('error'), warn: log('warn'), info: log('info'), debug: log('debug') };
 };
-exports.tracer = table => ({
-  run: (name, attributes, fn) => {
-    const keys = own(table, name) ? table[name].keys : [];
-    for (const k of Object.keys(attributes)) if (!keys.includes(k)) counts.unknown_key += 1;
-    return fn({ set: () => ok(undefined), end: () => ok(undefined) });
-  },
-});
+exports.tracer = table => {
+  bind('spans', table);
+  return {
+    run: (name, attributes, fn) => {
+      if (poisoned) counts.poisoned += 1;
+      const keys = !poisoned && own(table, name) ? table[name].keys : [];
+      for (const k of Object.keys(attributes)) if (!keys.includes(k)) counts.unknown_key += 1;
+      return fn({ set: () => ok(undefined), end: () => ok(undefined) });
+    },
+  };
+};

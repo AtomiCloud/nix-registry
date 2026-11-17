@@ -1,7 +1,7 @@
 // Minimal assumed API from concept §3.4 and goals/lib/bun-interfaces.md, with a small runnable index.js
 // so planted forging consumers can be RUN. NOT the real library. Result is supplied by diene.result in
-// production. Assumed, not in the goal: metrics(table), logger(events), EventTable, dropped(), Level,
-// MetricTable; the goal spells counter(name, labels), log.error(...), bounded(spec, n), Tracer/Span.
+// production. Assumed, not in the goal: register(tables), metrics(table), logger(events), EventTable,
+// dropped(), Level, MetricTable; the goal spells counter(name, labels), log.error(...), bounded(spec, n), Tracer/Span.
 export type Result<T, E = string> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly error: E };
@@ -42,7 +42,20 @@ export interface Log {
 /** The port refuses an event whose name is not in the table or whose level differs from it. */
 export declare function logger(events: EventTable): Log;
 /** The dropped.<reason> counter. */
-export declare function dropped(reason: 'unknown_event' | 'unknown_metric' | 'unknown_key' | 'unknown_value'): number;
+export declare function dropped(
+  reason: 'unknown_event' | 'unknown_metric' | 'unknown_key' | 'unknown_value' | 'register' | 'poisoned',
+): number;
+/**
+ * Registers the generated tables, once per process: the generated signals.ts calls it when it is loaded.
+ * metrics(), logger() and tracer() accept only the registered table objects. A second registration, or any
+ * other table, POISONS the port: it is refused (dropped.register) and every signal is refused until
+ * restart (dropped.poisoned). The lint rule forbids calling register outside generated files.
+ */
+export declare function register(tables: {
+  readonly metrics?: unknown;
+  readonly events?: EventTable;
+  readonly spans?: unknown;
+}): Result<void>;
 export type SpanAttributeValue = string | number | boolean | readonly string[] | readonly number[] | readonly boolean[];
 export type SpanAttributeMap = { readonly [name: string]: { readonly [key: string]: SpanAttributeValue | undefined } };
 export type DurianSignalSpanTable<M> = {

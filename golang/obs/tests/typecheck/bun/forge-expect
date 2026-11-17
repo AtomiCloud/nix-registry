@@ -4,3 +4,5 @@ forge-metric-cast.ts dropped.unknown_metric: metric \"checkout.chargez\" is not 
 forge-extra-key.ts dropped.unknown_key: metric \"checkout.charges\" keys [user_id] are not in its generated keys [provider outcome shard hour]
 forge-bad-value.ts dropped.unknown_value: metric \"checkout.charges\" label provider value \"visa\" is not one of [stripe adyen paypal]
 forge-bad-range.ts dropped.unknown_value: metric \"checkout.charges\" label shard value 999999 is outside 0..15
+forge-foreign-table.ts dropped.poisoned: event \"checkout.chrage.faild\": the port is poisoned (a competing table was refused); every signal is refused until restart
+forge-register-first.ts dropped.poisoned: event \"checkout.chrage.faild\": the port is poisoned (a competing table was refused); every signal is refused until restart
