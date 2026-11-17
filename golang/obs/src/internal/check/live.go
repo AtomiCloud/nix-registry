@@ -300,6 +300,12 @@ func (l *liveRun) runPanel(q *files.Query, res vars.Result, start, end time.Time
 		if step <= 0 {
 			step = 15 * time.Second
 		}
+		// Grafana's Prometheus backend aligns range endpoints to the step's
+		// Unix-time grid. Evaluating at the unaligned seed end shifts rollup
+		// windows and can change panel values even with identical samples.
+		grid := step.Milliseconds()
+		start = time.UnixMilli(start.UnixMilli() / grid * grid)
+		end = time.UnixMilli(end.UnixMilli() / grid * grid)
 		rs, err := l.vm.Range(res.Expr, start, end, step)
 		return len(rs) > 0, err
 	default:
