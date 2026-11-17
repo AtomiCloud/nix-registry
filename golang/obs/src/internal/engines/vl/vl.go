@@ -4,11 +4,14 @@ package vl
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -54,13 +57,20 @@ func (q *Query) HasTimeFilter() bool {
 type Result struct {
 	Labels []seed.Label
 	Value  string
+	Name   string // stats output column; the HTTP stats endpoint emits this as __name__
 }
 
 // Engine is one in-process VictoriaLogs.
 type Engine struct {
-	dir string
-	s   *logstorage.Storage
+	dir         string
+	s           *logstorage.Storage
+	concurrency uint // 0 = VictoriaLogs' default (all CPUs)
 }
+
+// SetQueryConcurrency runs every later query with n workers (options(concurrency=n)).
+// Results do not change; callers that already run queries in parallel save the
+// per-worker buffers each query allocates.
+func (e *Engine) SetQueryConcurrency(n uint) { e.concurrency = n }
 
 // New opens a storage in a temp dir and loads every stream of ds.
 func New(ds *seed.Dataset) (*Engine, error) {
@@ -92,6 +102,12 @@ func New(ds *seed.Dataset) (*Engine, error) {
 			}
 			fs = append(fs, logstorage.Field{Name: "_msg", Value: row.Msg})
 			lr.MustAdd(tenant, row.TsNs, fs, -1)
+			// Hand rows over in blocks, as vlinsert does: one LogRows holding a whole
+			// seed grows (and the GC rescans) a slice of every row and field.
+			if lr.NeedFlush() {
+				e.s.MustAddRows(lr)
+				lr.ResetKeepSettings()
+			}
 		}
 		e.s.MustAddRows(lr)
 		logstorage.PutLogRows(lr)
@@ -115,14 +131,16 @@ func (e *Engine) Stats(qs string, start, end time.Time, withoutTrailingFilters b
 	if err != nil {
 		return nil, err
 	}
-	if _, err := q.ObsStatsLabels(); err != nil {
+	group, err := q.ObsStatsLabels()
+	if err != nil {
 		return nil, err
 	}
 	if withoutTrailingFilters {
 		q, _ = q.ObsWithoutTrailingFilters()
+		group = nil // read again from the changed query
 	}
 	q.AddTimeFilter(start.UnixNano(), end.UnixNano()-1)
-	return e.run(q, true)
+	return e.run(q, true, group)
 }
 
 // Rows runs a log query (no `stats` pipe needed) over [start, end) and returns the rows.
@@ -132,26 +150,66 @@ func (e *Engine) Rows(qs string, start, end time.Time) ([]Result, error) {
 		return nil, err
 	}
 	q.AddTimeFilter(start.UnixNano(), end.UnixNano()-1)
-	return e.run(q, false)
+	return e.run(q, false, nil)
 }
 
-func (e *Engine) run(q *logstorage.Query, stats bool) ([]Result, error) {
+// run executes q. group is the stats labels when the caller already read them from
+// the same query (each read clones the query, a per-tick cost for alerts).
+func (e *Engine) run(q *logstorage.Query, stats bool, group []string) ([]Result, error) {
+	if e.concurrency > 0 {
+		q.ObsSetConcurrency(e.concurrency)
+	}
+	if stats && group == nil {
+		var err error
+		group, err = q.ObsStatsLabels()
+		if err != nil {
+			return nil, err
+		}
+	}
 	var mu sync.Mutex
 	var out []Result
 	write := func(_ uint, db *logstorage.DataBlock) {
-		// Pipe order: the by-fields first, the stats result last.
+		// Column names and values point into the query's 64 KiB allocator chunks;
+		// results outlive the query (the alert query cache keeps every tick), so copy
+		// them out instead of pinning a chunk per kept value.
+		// VictoriaLogs v1.54.0 app/vlselect/logsql/logsql.go:
+		// ProcessStatsQueryRequest emits one series per non-group column;
+		// stats_query_response.qtpl emits its column name as __name__.
 		cols := db.GetColumns(false)
 		for i := 0; i < db.RowsCount(); i++ {
-			var r Result
-			for ci, c := range cols {
-				if stats && ci == len(cols)-1 {
-					r.Value = c.Values[i]
-					continue
+			var labels []seed.Label
+			for _, c := range cols {
+				if !stats || slices.Contains(group, c.Name) {
+					labels = append(labels, seed.Label{Name: strings.Clone(c.Name), Value: strings.Clone(c.Values[i])})
 				}
-				r.Labels = append(r.Labels, seed.Label{Name: c.Name, Value: c.Values[i]})
+			}
+			var rows []Result
+			if !stats {
+				rows = append(rows, Result{Labels: labels})
+			} else {
+				for _, c := range cols {
+					if slices.Contains(group, c.Name) {
+						continue
+					}
+					v := strings.Clone(c.Values[i])
+					if v == "[]" || strings.HasPrefix(v, `[{"vmrange":`) {
+						var buckets []struct {
+							VMRange string `json:"vmrange"`
+							Hits    uint64 `json:"hits"`
+						}
+						if json.Unmarshal([]byte(v), &buckets) == nil {
+							for _, b := range buckets {
+								ls := append(append([]seed.Label{}, labels...), seed.Label{Name: "vmrange", Value: b.VMRange})
+								rows = append(rows, Result{Name: c.Name + "_bucket", Labels: ls, Value: strconv.FormatUint(b.Hits, 10)})
+							}
+							continue
+						}
+					}
+					rows = append(rows, Result{Name: strings.Clone(c.Name), Labels: labels, Value: v})
+				}
 			}
 			mu.Lock()
-			out = append(out, r)
+			out = append(out, rows...)
 			mu.Unlock()
 		}
 	}
@@ -160,7 +218,9 @@ func (e *Engine) run(q *logstorage.Query, stats bool) ([]Result, error) {
 	if err := e.s.RunQuery(qctx, write); err != nil {
 		return nil, err
 	}
-	sort.Slice(out, func(i, j int) bool { return fmt.Sprint(out[i].Labels) < fmt.Sprint(out[j].Labels) })
+	sort.Slice(out, func(i, j int) bool {
+		return out[i].Name+fmt.Sprint(out[i].Labels) < out[j].Name+fmt.Sprint(out[j].Labels)
+	})
 	return out, nil
 }
 

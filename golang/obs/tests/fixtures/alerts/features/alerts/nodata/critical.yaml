@@ -1,0 +1,35 @@
+{
+  apiVersion: grafana.integreatly.org/v1beta1,
+  kind: GrafanaAlertRuleGroup,
+  metadata: { name: fixture-nodata },
+  spec:
+    {
+      interval: 1m,
+      rules:
+        [
+          {
+            uid: nodata,
+            title: nodata,
+            condition: C,
+            for: 1m,
+            noDataState: NoData,
+            data:
+              [
+                {
+                  refId: A,
+                  datasourceUid: fixture-metrics,
+                  relativeTimeRange: { from: 60, to: 0 },
+                  model:
+                    {
+                      datasource: { type: prometheus, uid: fixture-metrics },
+                      expr: 'fixture_requests_total{outcome="error"} > 999999',
+                      instant: true,
+                      range: false,
+                    },
+                },
+                { refId: C, datasourceUid: __expr__, model: { type: math, expression: $A > 0 } },
+              ],
+          },
+        ],
+    },
+}

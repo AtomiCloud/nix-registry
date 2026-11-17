@@ -48,6 +48,9 @@ func contractLogs(r *Report, q *files.Query, parsed *vl.Query, c *contract.Contr
 				"stream field %q is not a stream field: the stream fields are the where-from set (%s)%s", tag, "durian.cloud.landscape, .platform, .service, .module, service.name, service.namespace, deployment.environment.name, k8s.namespace.name", streamHint(tag, sf))
 		}
 	}
+	if q.IsAlert {
+		return
+	} // Alert event values and syntax are handled by logevent.Analyze.
 	for _, ff := range parsed.FieldFilters(eventField) {
 		if ff.InStream {
 			continue // the event inside _stream:{} is refused by the logevent rules, not here

@@ -14,7 +14,7 @@ let
     pname = "obs";
     inherit version;
     src = ./src;
-    vendorHash = "sha256-zjRQ+jXhuyyP9/tjZJRF22tHt+Pv9GfupeoeMJVUWR0=";
+    vendorHash = "sha256-TJBIlSGKPPlmAkE2d2acm9Et5fkvRJSCx3VJOORkmiI=";
     env.CGO_ENABLED = "0";
     env.OBS_REQUIRE_LLVM = "1";
     nativeCheckInputs = [ nixpkgs.llvmPackages.llvm ];
@@ -37,6 +37,7 @@ let
         -exec install -Dm444 {} "$out/share/licenses/obs/{}" \;)
       install -Dm444 vendor/modules.txt "$out/share/licenses/obs/modules.txt"
       install -Dm444 ${./LICENSE} "$out/share/licenses/obs/LICENSE"
+      install -Dm444 ${./src/internal/alerts/gfexpr/LICENSE-grafana-AGPL} "$out/share/licenses/obs/grafana/LICENSE"
     '';
     meta = {
       mainProgram = "obs";

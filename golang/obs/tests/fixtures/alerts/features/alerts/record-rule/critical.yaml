@@ -1,0 +1,34 @@
+{
+  apiVersion: grafana.integreatly.org/v1beta1,
+  kind: GrafanaAlertRuleGroup,
+  metadata: { name: fixture-record-rule },
+  spec:
+    {
+      interval: 1m,
+      rules:
+        [
+          {
+            uid: record-rule,
+            title: record-rule,
+            condition: A,
+            for: 0s,
+            record: { metric: fixture_recorded, from: A },
+            data:
+              [
+                {
+                  refId: A,
+                  datasourceUid: fixture-metrics,
+                  relativeTimeRange: { from: 60, to: 0 },
+                  model:
+                    {
+                      datasource: { type: prometheus, uid: fixture-metrics },
+                      expr: 'sum(rate(fixture_requests_total{outcome="error"}[1m]))',
+                      instant: true,
+                      range: false,
+                    },
+                },
+              ],
+          },
+        ],
+    },
+}

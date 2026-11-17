@@ -393,6 +393,7 @@ bounded number; a value that holds a dashboard variable is not judged),
 undeclared; regex label values must match an allowed value; label functions (`label_replace`, ...) must read
 labels their input has. Names compare with dots
 and underscores equal. Other log fields are free-form (§6): not judged.
+
 ## `obs sandbox`: the local stack, for people
 
 ```text
@@ -745,7 +746,80 @@ OBS_PARITY_VM=http://127.0.0.1:<port> OBS_PARITY_VL=http://127.0.0.1:<port> \
 Use fresh containers for every run (VictoriaLogs keeps duplicate rows). The nightly parity job (a later release)
 replaces this by hand run.
 
-## Not tested yet
+## obs alerts
+
+`obs alerts --dir observability` evaluates the `GrafanaAlertRuleGroup` CRs in
+`alerts/<slug>/<severity>.yaml` on the seed and each named incident. It prints one
+line per rule and expectation, including its file and incident window, and exits
+1 on a miss. Every rule must stay quiet on the baseline; rules omitted from an
+incident's expectations are also checked for quiet. Metric and LogsQL rules run
+inside VictoriaMetrics v1.156.0 and VictoriaLogs v1.54.0 with no network or containers.
+
+```text
+obs alerts --dir observability
+OBS_VERIFY_FAST=1 OBS_VERIFY_SKIP=1 obs alerts --dir observability
+OBS_VERIFY_PRUNE=1 obs alerts --dir observability
+OBS_CACHE_DIR=.cache/obs obs alerts --dir observability
+obs alerts --dir observability --steps steps.json --recorded recorded.json
+```
+
+The seed's `incidents: [spike]` reads `incidents/spike.yaml`. An incident declares
+`window: {start: 10m, duration: 10m}`, `change` entries with a metric, matching
+`where` labels and `rate`, `latency_x` or `share_x`, and
+`expect: {fire: [rule-uid], quiet: [], fire_within: 5m, resolve_within: 5m}`.
+Firing must begin inside the incident and before `fire_within`; it must stop by
+the end plus `resolve_within` (default zero). Use the recovery allowance for the
+query's rollup window and `keepFiringFor`. The time line ends in the past; an
+explicit `--base` whose complete time line reaches the future is refused.
+
+The Grafana 13.3.0 expression port supports math, reduce (including non-number
+mapping), threshold and recovery thresholds, `for`, `keepFiringFor`, missing
+series, `noDataState` and `execErrState`. Source functions are cited alongside
+each state transition. Recording rules use the same CR reader with
+`record: {metric: fixture_recorded, from: A}`; dependent recording rules execute
+first and their samples are appended to the embedded metric store before alerts.
+`--recorded` writes `{labels, timestamps, values}` rows; `--steps` writes each
+minute's evaluation and state. Both exports bypass the persistent result cache.
+
+LogsQL queries use each rule's `relativeTimeRange.from/to`, parse at the resulting
+end time and add the exclusive `[start, end)` range. Final `stats by (...)` fields
+are instance labels, alongside `__name__` for each stats output column. A numeric
+null keeps that instance's labels and evaluates as NoData. With a contract, `durian.cloud/event` filters are checked
+against its event list (exact/phrase names, matching prefixes, regex and in selectors).
+Subqueries, including union/join and in queries, receive the same recursive policy.
+Opaque row-producing forms are refused; pruning retains every event whenever a
+query can read additional sources. Other field-value filters are printed as assumptions and
+removed from the parsed AST; event filters in `_stream` or `or`, unknown events
+and stats reading field values are refused. Seed events must be declared too.
+Without a contract, one event-rule-skipped note is printed for each log query.
+
+The numeric light path is checked against the vendored Grafana dataframe path
+with `OBS_VERIFY_FAST=1`; unchanged incident inputs are compared with their
+baseline reuse by `OBS_VERIFY_SKIP=1`. Both compare over the same already-pruned
+input, so a third check, `OBS_VERIFY_PRUNE=1`, evaluates the whole project twice in
+two isolated child processes on one fixed base with the result cache bypassed: once
+with lazy log/metric/trace pruning and once with `OBS_NO_PRUNE=1`. It compares
+every per-minute value (exact; NaN = NaN, Inf exact), instance label, state, error,
+verdict, recording sample and the raw datasource result per query input, and exits 1
+naming the alert, rule file and query, run and minute of each difference. Any mismatch
+fails the command. The result
+cache includes the binary, seed, incidents, recording rules, contract and each
+alert's normalized CR definition. Time-derived queries (including sample
+timestamps) also include the base timestamp and do not reuse shifted baseline
+results. Wall-clock/random queries and a configured query guard bypass persistent
+caching. Storage uses `OBS_TMPDIR`,
+otherwise a writable `/dev/shm` with at least 1 GiB free (else the system temp
+directory); VictoriaMetrics caches are capped at 512 MiB.
+Unused metric series are omitted and VictoriaLogs starts only when needed.
+
+MEASURED: regression tests cover state transitions, numeric light/full parity,
+event-filter refusals, recording outputs, cache invalidation and planted wrong
+thresholds. NOT TESTED: parity against the live Grafana scheduler and datasource
+in this part PR, notification/persistence behavior, and VictoriaLogs runtime
+timeout/concurrency limits. TraceQL alerts use the `DatasourceEngine` hook in a
+later part. The Grafana AGPL licence ships in `share/licenses/obs/grafana/LICENSE`.
+
+### Existing query-check limits
 
 - `obs sandbox up` on aarch64 and macOS, and with podman (the box that ran it has docker only); Tempo and Pyroscope take no data from the seed yet.
 - `obs look` with a pull request on GitHub (the agent posts the comment; obs only prints the prompt).
@@ -753,6 +827,161 @@ replaces this by hand run.
 - Seeded log rows against a real VictoriaLogs fed through Alloy (field names are FROM SOURCE).
 - LogsQL `_time:[start, end)` handling against real Grafana (the nightly parity job, a later release).
 - aarch64 and macOS builds are in CI; only x86_64 Linux was run by hand.
+
+## `obs alerts` speed (concept §11.1.1, re-measured with VictoriaLogs)
+
+### VictoriaLogs speed measurements
+
+The §11.1.1 table was measured in spike 7 with Loki as the log engine. This is the same
+table with the VictoriaLogs engine, after the profiling fixes below. MEASURED: 3 runs per
+cell, median time, largest peak; peak memory in GiB (`ru_maxrss` KiB / 1048576).
+
+| Alerts | 4 h seed | 24 h seed | Peak memory 4 h / 24 h |
+|---|---|---|---|
+| 1 | 0.35 s | 1.30 s | 0.23 / 0.46 GiB |
+| 20 | 1.25 s | 5.91 s | 0.55 / 0.85 GiB |
+| 200 | 7.17 s | 42.92 s | 0.63 / 1.97 GiB |
+| 1,000 | 9.24 s | 53.46 s | 0.69 / 1.97 GiB |
+
+Before the fixes (same runner, 1 run per cell, `obs-alerts` evaluator at aa2085a; the
+runner then labelled the same KiB / 1048576 numbers "GB"):
+
+| Alerts | 4 h seed | 24 h seed | Peak memory 4 h / 24 h |
+|---|---|---|---|
+| 1 | 3.55 s | 15.78 s | 2.03 / 7.85 GiB |
+| 20 | 3.92 s | 18.55 s | 2.16 / 8.70 GiB |
+| 200 | 11.86 s | 65.46 s | 2.21 / 8.17 GiB |
+| 1,000 | 15.06 s | 68.75 s | 2.14 / 8.21 GiB |
+
+Loki numbers (spike 7, same table, as quoted there in GB) for comparison: 1 alert
+0.23 / 1.10 s, 0.19 / 0.78 GB; 20 alerts 1.05 / 5.45 s, 0.76 / 4.0 GB; 200 alerts
+1.92 / 10.64 s, 1.07 / 5.3 GB; 1,000 alerts 2.44 / 10.14 s, 1.22 / 5.9 GB.
+
+**What the numbers say**
+
+- **Memory holds the budget in every cell**: 1,000 alerts take 0.69 GiB on a 4 h seed
+  (budget 1.2 GB) and 1.97 GiB on a 24 h seed (budget 6 GB). Before: 2.1 and 8.2 GiB.
+- **1 alert is back near the Loki numbers**: 0.35 s / 0.23 GiB at 4 h (Loki 0.23 s /
+  0.19 GB), 1.30 s at 24 h (Loki 1.10 s).
+- **Time does not hold the budget at 1,000 alerts**: 9.2 s at 4 h (budget 2.5 s, 3.7x) and
+  53 s at 24 h (budget ~10 s, 5.3x). 200 alerts: 7.2 s and 43 s. The cause is MEASURED
+  below: one VictoriaLogs stats query per log query, per minute, per run.
+
+**Where the time and memory went (profiled before the fixes, MEASURED)**
+
+Profiles: `go test -cpuprofile/-memprofile` of `obs alerts` in-process, n1 and n1,000, 4 h
+and 24 h, 2 CPUs, plus a heap snapshot during a 24 h n1,000 run.
+
+1. Every log row of every event was loaded, even for 1 alert. The speed alerts read only
+   `checkout.charge.failed` and `checkout.charge.declined` (about 10 % of rows);
+   `succeeded` (90 %) was loaded and never read. Loading the logs was 52 % of CPU at
+   1 alert and 81 % of all allocation.
+2. The whole seed went into VictoriaLogs as one `LogRows` batch: a slice of every row and
+   field, grown and copied (`growslice`, `memmove` 33 % of CPU) and rescanned by the GC
+   (31 %).
+3. At 1,000 alerts, 40-44 % of CPU is VictoriaLogs search: alerts evaluate every minute, and
+   a LogsQL stats query has no range form in Grafana alerting, so each of the 124 distinct
+   log queries runs once per minute per run (240 or 1,440 ticks x 4 runs). Each query
+   unpacks the timestamps of a whole block (`getTimestamps` 15-17 %).
+4. Each of those queries allocates fresh 64 KiB stats buffers (about 90 GB allocated over a
+   24 h n1,000 run). Kept tick results held tiny strings that pointed into those buffers,
+   so 3.1 GiB of buffers stayed alive: that was the 8 GiB peak at 24 h.
+
+**What changed (results identical)**
+
+- Lazy load for logs: only the seed events some log query can see are generated and
+  loaded (`internal/alerts/lazylogs.go`). The event set comes from the query's root
+  filter, `global_filter` and leading filter pipes, evaluated per event with three-valued
+  logic (stream, time, field and regex leaves may be true or false). A query whose pipes
+  read the event field (`stats ... if (event...)`, `by (event)`) loads every event. Each
+  event's rows use their own random stream, so dropping one changes no other row or sample.
+- VictoriaLogs gets the rows in blocks (as `vlinsert` does), not one batch.
+- Query results are copied out of VictoriaLogs' buffers (no pinned buffers).
+- Alert stats queries run with one VictoriaLogs worker each (the rule workers already use
+  every CPU), and the stats labels are read once per query.
+- `obs alerts` sets GOGC 400 and a 2 GiB soft memory limit unless `GOGC` / `GOMEMLIMIT` are
+  set: the per-query buffers are short-lived garbage over a small live heap (n1,000 4 h,
+  3 runs: 13.2 s at the default, 9.2 s at 400).
+- The seed draws its per-request trace randomness only when the seed defines traces.
+
+Same results: `OBS_VERIFY_FAST=1` and `OBS_VERIFY_SKIP=1` checks, `go test
+./internal/alerts/...`, `tests/alerts.sh` (baseline and every planted failure) and every
+expectation of every speed fixture run pass. The pruning rules have their own regression
+tests with planted failures.
+
+**What would close the time gap (NOT TESTED, a proposal)**
+
+The remaining cost is the number of VictoriaLogs queries, not their size. VictoriaLogs has
+its own range form (`stats by (_time:step offset o)`, used by its `stats_query_range`
+endpoint): a window of k alert intervals could be computed with k bucketed queries per run
+instead of one query per minute, about 100x fewer queries. It needs the relative `_time:W`
+filter taken out of the parsed query, zero rows for empty global stats, and the same bucket
+edges and `rate()` step as the instant query, so it belongs in the evaluator with a
+verify mode (both paths, compared), like `OBS_VERIFY_FAST`.
+
+**Box and method**
+
+- Box: Intel Xeon Platinum 8488C, 32 vCPU, 247 GB RAM, Linux 7.0 (AWS). The job runs on
+  2 CPUs (`taskset -c 0,1`), but the box is shared with other builders, so the other
+  30 CPUs, the disk and the memory bus were busy: expect noise. Load average during the
+  final table: 34-38 (17 Nov 2026, 06:37-06:44 UTC).
+- Cold start: a new process per run, an empty `OBS_CACHE_DIR`, the set copied to
+  `/dev/shm` first. The OS page cache is not dropped (needs root). Time is the process's
+  wall clock; peak memory is the process's `ru_maxrss`.
+- Every run also checked its own expectations: all runs exited 0 (the table has no failed
+  cell; a failed run prints FAILED instead of a time).
+- Run it (under the shared heavy lock; `OBS_FIXTURES` must be absolute, the test runs in
+  its package folder):
+
+  ```sh
+  cd golang/obs/src
+  go build -o /tmp/obs . && OBS_BIN=/tmp/obs OBS_FIXTURES=$PWD/../tests/fixtures/alerts-speed OBS_RUNS=3 \
+    go test -tags speedbench -run TestSpeedTable -v -timeout 2h ./internal/alerts/speedfixtures
+  ```
+
+### Fixture sets (`tests/fixtures/alerts-speed/`)
+
+- `n1`, `n20`, `n200`, `n1000`: each has `alerts/` (GrafanaAlertRuleGroup CRs),
+  `incidents/` (3 incidents), `contract.yaml`, `seed.4h.yaml` and `seed.24h.yaml`.
+  The runner copies one seed to `seed.yaml`.
+- Generated, not hand-written: `go generate ./internal/alerts/speedfixtures` (run
+  `treefmt` after; the repo hook reformats the YAML). `go test ./internal/alerts/speedfixtures`
+  checks that every set loads with `internal/files`, has no LogQL, that variants differ,
+  and that the seeds load.
+- The 20 base alerts are the spike prototype's `proj20` mix: 13 metric-only, 6 log-only,
+  1 metric + log (`charge-errors/critical` joins both). The bigger sets repeat them as
+  variants `v2/ ... v50/`: a different rollup window (2–15 min, count thresholds scale with the
+  window) and a new rule uid, so 1,000 rules are 1,000 different rules.
+  Names are made up (landscape `speedland`, service `checkout`); no real landscape.
+- Incidents: `stripe-outage`, `checkout-slow`, `adyen-declines` (seed format of M1). Every
+  alert uid, variants included, is in `expect.fire` or `expect.quiet`.
+  Assertion coverage per set (baseline run + 3 incidents): n1 = 4 (1 positive, 3 negative);
+  n20 = 80 (19 positive, 61 negative); n200 = 800 (190 / 610); n1,000 = 4,000 (950 / 3,050).
+  The expect lists are what the evaluator produced on the 4 h and 24 h seeds, so they are a
+  regression baseline, not an independent oracle.
+
+### Fixture porting rules (prototype LogQL to LogsQL, by hand)
+
+1. `{service_name="checkout"}` becomes the stream filter `{durian.cloud.service="checkout"}`.
+2. `| durian_cloud_event="E"` becomes `"durian.cloud/event":="E"` (the contract event rule
+   needs this form); `| json | event="E"` has no json step in VictoriaLogs, it is the same filter
+   (written as `:in("E")` so the two alerts differ).
+3. `| severity_text="ERROR"` becomes `severity_text:="ERROR"`; `| payment_provider="adyen"`
+   becomes `"payment.provider":="adyen"`.
+4. `sum(count_over_time(S [W]))` becomes `_time:W S | stats count() hits`;
+   `sum(rate(S [W]))` becomes `_time:W S | stats rate() per_s`; `sum by (l)` becomes
+   `stats by (l)`. The rule's `relativeTimeRange.from` is the window in seconds.
+5. The threshold is a Grafana math node (`$A > 100`), as in the prototype, not a LogsQL `filter`.
+6. `unwrap duration_ms` (reads a log field value) has no LogsQL equivalent under seeds that
+   carry no field values; obs refuses it. The speed set replaces it with a count of
+   `declined` events at `WARN` severity (`logs/slow-unwrap`); a refusal test for the real
+   unwrap belongs to the alerts e2e tests.
+7. Metric queries are unchanged (MetricsQL); every metric node is `instant: true`, every
+   log node `queryType: stats`; the datasource types are `prometheus` and
+   `victoriametrics-logs-datasource`.
+
+NOT TESTED: no run was on a quiet box (the 3-run medians are on a shared, loaded box); the cache-hit
+rows of §11.1.1 (unchanged PR 0.2-0.4 s, one changed alert 0.3-0.5 s) were not re-measured.
 
 ## obs store
 

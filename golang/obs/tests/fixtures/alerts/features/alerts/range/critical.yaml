@@ -1,0 +1,39 @@
+{
+  apiVersion: grafana.integreatly.org/v1beta1,
+  kind: GrafanaAlertRuleGroup,
+  metadata: { name: fixture-range },
+  spec:
+    {
+      interval: 1m,
+      rules:
+        [
+          {
+            uid: range,
+            title: range,
+            condition: C,
+            for: 1m,
+            data:
+              [
+                {
+                  refId: A,
+                  datasourceUid: fixture-metrics,
+                  relativeTimeRange: { from: 60, to: 0 },
+                  model:
+                    {
+                      datasource: { type: prometheus, uid: fixture-metrics },
+                      expr: 'sum(rate(fixture_requests_total{outcome="error"}[1m]))',
+                      instant: false,
+                      range: true,
+                    },
+                },
+                {
+                  refId: B,
+                  datasourceUid: __expr__,
+                  model: { type: reduce, expression: A, reducer: mean, settings: { mode: dropNN } },
+                },
+                { refId: C, datasourceUid: __expr__, model: { type: math, expression: $B > 0.5 } },
+              ],
+          },
+        ],
+    },
+}

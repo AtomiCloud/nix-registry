@@ -9,6 +9,7 @@ import (
 	"github.com/AtomiCloud/obs/internal/contract"
 	"github.com/AtomiCloud/obs/internal/engines/vl"
 	"github.com/AtomiCloud/obs/internal/files"
+	"github.com/AtomiCloud/obs/internal/logevent"
 	"github.com/AtomiCloud/obs/internal/vars"
 )
 
@@ -172,11 +173,38 @@ func staticLogs(r *Report, q *files.Query, o Options, eventOn bool, c *contract.
 		switch {
 		case !eventOn:
 			r.add(Note, q.File, q.Where, "event-rule", "event rule skipped: no contract.yaml")
+		case c != nil:
+			a, err := logevent.Analyze(expr, c)
+			if err != nil {
+				id := "logsql-alert-event"
+				msg := err.Error()
+				if strings.Contains(msg, "must filter on the event") {
+					id = "logsql-alert-needs-event"
+				}
+				if strings.HasPrefix(msg, "event ") && strings.Contains(msg, "not in the contract") {
+					id = "contract-undeclared-event"
+				}
+				if strings.Contains(msg, "event filter form not checkable") {
+					id = "contract-event-filter-form"
+				}
+				if strings.Contains(msg, "matches no contract event") {
+					id = "contract-event-regexp-no-match"
+				}
+				if strings.HasPrefix(msg, "event prefix ") && strings.Contains(msg, "matches no contract event") {
+					id = "contract-undeclared-event"
+				}
+				r.add(Fail, q.File, q.Where, id, "%v", err)
+			} else {
+				r.add(Note, q.File, q.Where, "event-rule", "events=%v", a.Events)
+				for _, assumed := range a.Assumed {
+					r.add(Note, q.File, q.Where, "assumed-filter", "assumed true (free-form fields): %s", assumed)
+				}
+			}
 		case !hasEvent:
 			r.add(Fail, q.File, q.Where, "logsql-alert-needs-event",
-				"a log alert must filter on the event field %q (exact :=, negated, regex :~ or in(...)); contract.yaml is present", eventField)
+				"a log alert must filter on the event field %q (exact :=, phrase, prefix, negated, regex :~ or in(...)); contract.yaml is present", eventField)
 		default:
-			r.add(Note, q.File, q.Where, "event-rule", "event filter present; its names are checked against the contract")
+			r.add(Note, q.File, q.Where, "event-rule", "event filter present; no contract event list")
 		}
 	}
 	if o.Names {

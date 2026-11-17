@@ -106,6 +106,36 @@ func (e *Engine) Range(q string, start, end time.Time, step time.Duration) ([]Se
 }
 
 func (e *Engine) exec(q string, start, end time.Time, step time.Duration, instant bool) ([]Series, error) {
+	rs, err := e.execSamples(q, start, end, step, instant)
+	if err != nil {
+		return nil, err
+	}
+	var out []Series
+	for _, r := range rs {
+		var values []float64
+		for _, v := range r.Vals {
+			if !math.IsNaN(v) {
+				values = append(values, v)
+			}
+		}
+		if len(values) > 0 {
+			out = append(out, Series{Labels: r.Labels, Points: len(values), Values: values})
+		}
+	}
+	return out, nil
+}
+
+// SamplesRange preserves timestamps and gaps for alert evaluation and reduce.
+func (e *Engine) SamplesRange(q string, start, end time.Time, step time.Duration) ([]*seed.Series, error) {
+	return e.execSamples(q, start, end, step, false)
+}
+
+// SamplesInstant uses VictoriaMetrics' default five-minute instant step.
+func (e *Engine) SamplesInstant(q string, at time.Time) ([]*seed.Series, error) {
+	return e.execSamples(q, at, at, 5*time.Minute, true)
+}
+
+func (e *Engine) execSamples(q string, start, end time.Time, step time.Duration, instant bool) ([]*seed.Series, error) {
 	ec := &vmpromql.EvalConfig{
 		Context:            context.Background(),
 		Start:              start.UnixMilli(),
@@ -120,7 +150,7 @@ func (e *Engine) exec(q string, start, end time.Time, step time.Duration, instan
 	if err != nil {
 		return nil, err
 	}
-	var out []Series
+	var out []*seed.Series
 	for _, r := range rs {
 		var lbls []seed.Label
 		if len(r.MetricName.MetricGroup) > 0 {
@@ -129,15 +159,42 @@ func (e *Engine) exec(q string, start, end time.Time, step time.Duration, instan
 		for _, t := range r.MetricName.Tags {
 			lbls = append(lbls, seed.Label{Name: string(t.Key), Value: string(t.Value)})
 		}
-		var vals []float64
-		for i := range r.Timestamps {
-			if !math.IsNaN(r.Values[i]) {
-				vals = append(vals, r.Values[i])
+		ts := append([]int64(nil), r.Timestamps...)
+		if instant {
+			for i := range ts {
+				ts[i] = start.UnixMilli()
 			}
 		}
-		if len(vals) > 0 {
-			out = append(out, Series{Labels: lbls, Points: len(vals), Values: vals})
-		}
+		out = append(out, &seed.Series{Labels: lbls, Ts: ts, Vals: append([]float64(nil), r.Values...)})
 	}
 	return out, nil
+}
+
+// Append makes recording-rule output visible to later recording rules and alerts.
+func (e *Engine) Append(series []*seed.Series) error {
+	var ctx common.InsertCtx
+	ctx.Reset(0)
+	n := 0
+	for _, s := range series {
+		labels := make([]prompb.Label, 0, len(s.Labels))
+		for _, l := range s.Labels {
+			labels = append(labels, prompb.Label{Name: l.Name, Value: l.Value})
+		}
+		for i, t := range s.Ts {
+			if err := ctx.WriteDataPoint(nil, labels, t, s.Vals[i]); err != nil {
+				return err
+			}
+			n++
+			if n%10000 == 0 {
+				if err := ctx.FlushBufs(); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	if err := ctx.FlushBufs(); err != nil {
+		return err
+	}
+	vmstorage.DebugFlush()
+	return checkDropped()
 }

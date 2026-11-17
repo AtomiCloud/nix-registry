@@ -29,6 +29,9 @@ func TestStripThresholds(t *testing.T) {
 		{`a_total > b_total`, `a_total > b_total`, 0},         // a comparison of two series stays
 		{`a_total > bool 1`, `a_total > bool 1`, 0},           // `bool` keeps every row
 		{`sum(a_total > 1) by (x)`, `sum(a_total) by (x)`, 1}, // inside an aggregate
+		{`absent(x_total)`, `x_total`, 1},
+		{`absent_over_time(x_total[5m])`, `count_over_time(x_total[5m])`, 1},
+		{`sum(absent(x_total) > 0)`, `sum(x_total)`, 2},
 	}
 	for _, c := range cases {
 		e, n := stripThresholds(parse(t, c.in))

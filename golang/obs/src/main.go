@@ -28,6 +28,7 @@ const usage = `obs: the observability check tool
 usage:
   obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
   obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names]
+  obs alerts [--dir observability] [--seed seed.yaml] [--base unix] [--out results.json]
   obs assert --series FILE [--dir observability] [--pods n] [--unknown warn|fail|ignore]
   obs profile summarize|baseline|compare   (obs profile help)
   obs check [--dir observability] [--pods n] [--landscapes n]
@@ -55,6 +56,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "version", "--version", "-version":
 		printVersion(stdout)
 		return 0
+	case "alerts":
+		return runAlerts(args[1:], stdout, stderr)
 	case "profile":
 		return runProfile(args[1:], stdout, stderr)
 	case "scrape":
@@ -92,6 +95,7 @@ func printVersion(w io.Writer) {
 	fmt.Fprintln(w, "engine Tempo 3.1.1 (commit 9db7df79d2af, TraceQL)")
 	fmt.Fprintf(w, "engine VictoriaMetrics %s (MetricsQL)\n", pinVictoriaMetrics)
 	fmt.Fprintf(w, "engine VictoriaLogs %s (LogsQL)\n", pinVictoriaLogs)
+	fmt.Fprintln(w, "engine Grafana 13.3.0 (commit 752e3462; alert math and state machine)")
 	for _, l := range sandbox.PinLines() {
 		fmt.Fprintln(w, l)
 	}
