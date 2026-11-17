@@ -7,8 +7,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sync"
 	"time"
+
+	"gopkg.in/yaml.v3"
 
 	"github.com/AtomiCloud/obs/internal/check"
 	"github.com/AtomiCloud/obs/internal/contract"
@@ -29,6 +32,18 @@ type Options struct {
 // Check evaluates each rule at every minute on the baseline and each incident.
 func Check(o Options, stdout, stderr io.Writer) int {
 	started := time.Now()
+	// The embedded VictoriaLogs allocates fresh per-query buffers (64 KiB chunks) for
+	// every stats query, while the data kept alive stays small: with Go's default
+	// GOGC=100 the collector runs (and assists) far more often than that live heap
+	// needs. GOGC 400 measured about 30 % faster at the same result; a 2 GiB soft
+	// limit keeps long seeds from growing the heap 5x (24 h seed: 3 GB without it).
+	// An explicit GOGC / GOMEMLIMIT wins.
+	if os.Getenv("GOGC") == "" {
+		defer debug.SetGCPercent(debug.SetGCPercent(400))
+	}
+	if os.Getenv("GOMEMLIMIT") == "" {
+		defer debug.SetMemoryLimit(debug.SetMemoryLimit(2 << 30))
+	}
 	verifyFast = os.Getenv("OBS_VERIFY_FAST") == "1"
 	noFast = os.Getenv("OBS_NO_FAST") == "1"
 	verifySkip = os.Getenv("OBS_VERIFY_SKIP") == "1"
@@ -106,6 +121,7 @@ func Check(o Options, stdout, stderr io.Writer) int {
 		// Include effective settings, not unrelated chart/auth args, in cache keys.
 		p.Files["victorialogs-query-limits"] = []byte(fmt.Sprintf("%#v", limits))
 	}
+	logEvents := logEventSets{}
 	for _, group := range [][]Alert{p.Alerts, p.Records} {
 		for i := range group {
 			for ref, q := range group[i].Queries {
@@ -119,6 +135,7 @@ func Check(o Options, stdout, stderr io.Writer) int {
 				}
 				q.Expr = analysis.Expr
 				group[i].Queries[ref] = q
+				logEvents[q.Expr] = rootEvents(q.Expr, events)
 			}
 		}
 	}
@@ -161,9 +178,10 @@ func Check(o Options, stdout, stderr io.Writer) int {
 		}
 		p.Alerts = misses
 	}
+	var pruneInputs map[string]pruneQuerySnapshot
 	var ars []AlertRun
 	var recordedSeries []*Series
-	pruned, recorded := 0, 0
+	pruned, prunedEvents, recorded := 0, 0, 0
 	if len(p.Alerts) > 0 || len(allAlerts) == 0 {
 		var used []*Alert
 		for i := range p.Alerts {
@@ -173,14 +191,19 @@ func Check(o Options, stdout, stderr io.Writer) int {
 			used = append(used, &p.Records[i])
 		}
 		wantLogs := needsDS(used, "logs")
+		noPrune := os.Getenv("OBS_NO_PRUNE") != ""
 		sd := p.Seed
-		if !wantLogs {
+		if !wantLogs && !noPrune {
 			sd.Logs = nil
+		} else if need := neededLogEvents(used, logEvents); wantLogs && need != nil {
+			// Lazy load for logs: only the events some log query can match.
+			sd.Logs, prunedEvents = keepLogs(sd.Logs, need)
 		}
 		// Generate only seed metrics required by metric selectors or seeded log events.
 		names := neededMetricNames(used)
-		if names != nil {
-			sd.Metrics = map[string]seed.MetricDef{}
+		selected := sd.Metrics
+		if names != nil && !noPrune {
+			selected = map[string]seed.MetricDef{}
 			logMetrics := map[string]bool{}
 			for _, l := range sd.Logs {
 				logMetrics[l.From.Metric] = true
@@ -191,12 +214,27 @@ func Check(o Options, stdout, stderr io.Writer) int {
 					needed = needed || names[stored]
 				}
 				if needed {
-					sd.Metrics[name] = def
+					selected[name] = def
 				} else {
 					pruned += len(def.Series)
 				}
 			}
 		}
+		var err error
+		sd, err = sd.WithMetrics(selected)
+		if err != nil {
+			seedPath := o.SeedPath
+			if seedPath == "" {
+				seedPath = filepath.Join(o.Dir, "seed.yaml")
+			}
+			fmt.Fprintf(stderr, "obs alerts: %s: %v\n", seedPath, err)
+			return 2
+		}
+		if !wantLogs && !noPrune {
+			// Metric-only evaluations never consume trace data. Validate above first.
+			sd.Traces = yaml.Node{}
+		}
+
 		ds, err := buildRuns(&sd, runs)
 		if err != nil {
 			fmt.Fprintln(stderr, "obs alerts:", err)
@@ -241,6 +279,11 @@ func Check(o Options, stdout, stderr io.Writer) int {
 				return 2
 			}
 			defer l.Close()
+			// Rule workers run in parallel (all CPUs by default); one worker per
+			// stats query then. --workers 1 keeps VictoriaLogs' own parallelism.
+			if o.Workers != 1 {
+				l.SetQueryConcurrency(1)
+			}
 			eng.Datasources["logs"] = logsEngine{e: l, guard: checkedLogsGuard{limits, o.LogsGuard}, onRefusal: onRefusal}
 		}
 		cache := &queryCache{m: map[qKey]*qEntry{}}
@@ -254,6 +297,8 @@ func Check(o Options, stdout, stderr io.Writer) int {
 		if reportRefusals() {
 			return 1
 		}
+		cache.capturePruneSnapshot("alerts")
+		pruneInputs = cache.pruneHistory
 		if cacheDir != "" {
 			byAlert := map[string][]AlertRun{}
 			for _, ar := range ars {
@@ -296,10 +341,10 @@ func Check(o Options, stdout, stderr io.Writer) int {
 	if VerifyMismatch.Load() > 0 || SkipMismatch > 0 {
 		failed++
 	}
-	fmt.Fprintf(stdout, "obs alerts: alerts=%d recording=%d runs=%d expectations=%d failed=%d cached=%d pruned=%d recorded_samples=%d\n", len(allAlerts), len(p.Records), len(runs), len(vs), failed, len(cached)/len(runs), pruned, recorded)
+	fmt.Fprintf(stdout, "obs alerts: alerts=%d recording=%d runs=%d expectations=%d failed=%d cached=%d pruned=%d recorded_samples=%d pruned_log_events=%d\n", len(allAlerts), len(p.Records), len(runs), len(vs), failed, len(cached)/len(runs), pruned, recorded, prunedEvents)
 	fmt.Fprintf(stdout, "verify fast: compared=%d mismatches=%d; verify skip: compared=%d mismatches=%d; reused=%d\n", VerifiedTicks.Load(), VerifyMismatch.Load(), SkipChecked, SkipMismatch, SkippedRuns)
 	if o.Out != "" {
-		if err := writeJSON(o.Out, map[string]any{"alert_runs": stripSteps(ars), "verdicts": vs, "failed": failed, "elapsed_ms": time.Since(started).Milliseconds()}); err != nil {
+		if err := writeJSON(o.Out, map[string]any{"alert_runs": stripSteps(ars), "verdicts": vs, "failed": failed, "elapsed_ms": time.Since(started).Milliseconds(), "base_ms": base.UnixMilli()}); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 2
 		}
@@ -320,6 +365,15 @@ func Check(o Options, stdout, stderr io.Writer) int {
 			rows = append(rows, map[string]any{"labels": labels, "timestamps": s.Ts, "values": s.Vals})
 		}
 		if err := writeJSON(o.Recorded, rows); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 2
+		}
+	}
+	if snapshot := os.Getenv("OBS_VERIFY_PRUNE_SNAPSHOT"); snapshot != "" {
+		if pruneInputs == nil {
+			pruneInputs = map[string]pruneQuerySnapshot{}
+		}
+		if err := writeJSON(snapshot, pruneInputs); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 2
 		}

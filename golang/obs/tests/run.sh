@@ -136,22 +136,38 @@ echo "// tamper" >>"$work/tp/lib/logstorage/parser.go"
 (cd "$work/tp" && grep -v ' lib/logstorage/obs_fieldnames.go$' "$SRC/third_party/VictoriaLogs.sha256" | sha256sum -c --quiet >/dev/null 2>&1) &&
   bad "a tampered tree passed the drift check" || ok "a tampered third_party tree fails the drift check"
 
+# ---- obs profile: summarize, baseline, compare (tests/profile.sh) --------------------------
+bash "$here/profile.sh" "$OBS" "$fx/profile" && ok "profile tests (tests/profile.sh)" || bad "profile tests (tests/profile.sh)"
+# ---- obs assert: series per metric against the contract (tests/assert.sh) ------------------
+bash "$here/assert.sh" "$OBS" "$fx/assert" && ok "assert tests (tests/assert.sh)" || bad "assert tests (tests/assert.sh)"
+
 # ---- licences ship with the binary --------------------------------------------------
 if [ -n "${OUT:-}" ]; then
+  # buildGoModule installs every main package. Development-only generators must
+  # stay out of the shipped package: obs is one executable.
+  only_obs() { [ "$(ls -1 "$1/bin")" = obs ] && [ -x "$1/bin/obs" ]; }
+  only_obs "$OUT" && ok "single-binary: bin/obs is the only executable" || bad "single-binary: unexpected file in $OUT/bin"
+  mkdir -p "$work/binary-shape/bin"
+  cp "$OUT/bin/obs" "$work/binary-shape/bin/obs"
+  alias_dir="$work/binary-shape"
+  only_obs "$alias_dir" && ok "single-binary: copied baseline is green" || bad "single-binary: copied baseline failed"
+  touch "$alias_dir/bin/gen"
+  only_obs "$alias_dir" && bad "single-binary: planted bin/gen passed" || ok "single-binary: planted bin/gen is refused"
   lic="$OUT/share/licenses/obs"
   [ -s "$lic/LICENSE" ] && grep -q 'GNU AFFERO GENERAL PUBLIC LICENSE' "$lic/LICENSE" && ok "AGPL-3.0 text ships in share/licenses/obs" || bad "AGPL LICENSE missing in output"
   [ -s "$lic/modules.txt" ] && ok "vendor/modules.txt ships" || bad "modules.txt missing"
   [ -s "$lic/github.com/VictoriaMetrics/VictoriaLogs/LICENSE" ] && ok "VictoriaLogs LICENSE ships" || bad "VictoriaLogs LICENSE missing"
 fi
 
+# ---- obs check, obs gen, generated code (gen.sh)
+# shellcheck disable=SC1091 # path is dynamic; gen.sh is checked on its own
+. "$here/gen.sh"
+bash "$here/store-symbols-sizing.sh" "$OBS" && ok "store/symbols/size fixtures" || bad "store/symbols/size fixtures"
+
 # shellcheck source=/dev/null
 . "$here/sandbox.sh"
 
 bash "$here/links.sh" "$OBS" "${OUT:-}"
-# ---- obs check, obs gen, generated code (gen.sh)
-# shellcheck disable=SC1091 # path is dynamic; gen.sh is checked on its own
-. "$here/gen.sh"
-
 echo "obs tests: $pass passed, $fail failed"
 bash "$here/alerts.sh" "$OBS"
 [ "$fail" -eq 0 ]

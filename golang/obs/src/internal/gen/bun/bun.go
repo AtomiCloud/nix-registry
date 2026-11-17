@@ -4,14 +4,17 @@
 //   - label value types: enum = string-literal union; bounded number up to maxUnion values = number-literal
 //     union; larger bounded number = brand + spec (the hand-written bounded(spec, n) builds it); calendar
 //     date = string brand + spec; free = string;
-//   - one label type per metric, the MetricLabels map and the metricTable key table (the port's run-time
-//     guard refuses keys that are not in it);
-//   - log events as {name, level} constants plus the eventNames list (the port refuses other names);
+//   - one label type per metric, the MetricLabels map and the metricTable (kind, keys, allowed enum values
+//     and bounded-number ranges: the port's run-time guard refuses keys and values that are not in it);
+//   - log events as {name, level} constants plus the eventNames list and the eventTable (name -> level)
+//     that logger(eventTable) takes: the port refuses a name not in it or a level that differs;
 //   - span attributes as the SpanAttrs map and spanTable (kind + allowed keys). Both are `type` aliases:
 //     an interface does not fit the Tracer index-signature constraint;
-//   - one name carrier (a string-literal constant) per metric and span.
+//   - one name carrier (a string-literal constant) per metric and span;
+//   - one call that registers the tables with the port when the module loads (like Go's init): once per
+//     process, and any competing registration or table poisons the port.
 //
-// The file has no imports, so it type-checks alone. The output is a pure function of the contract and is
+// Shared event and large bounded value types are imported from the interfaces library. The output is
 // laid out the way biome formats it (2 spaces, double quotes, semicolons, trailing commas, width 100).
 package bun
 
@@ -39,8 +42,8 @@ type generator struct{}
 
 func (generator) Lang() string { return "bun" }
 
-func (generator) Files(c *contract.Contract, _ gen.Options) ([]gen.File, error) {
-	s, err := Render(c)
+func (generator) Files(c *contract.Contract, o gen.Options) ([]gen.File, error) {
+	s, err := renderWithOptions(c, o)
 	if err != nil {
 		return nil, err
 	}
@@ -194,14 +197,30 @@ func (n *names) claim(ident, what string) error {
 }
 
 // Render returns the text of signals.ts for a valid contract.
-func Render(c *contract.Contract) (string, error) {
+func Render(c *contract.Contract) (string, error) { return renderWithOptions(c, gen.Options{}) }
+
+func renderWithOptions(c *contract.Contract, o gen.Options) (string, error) {
 	nm := &names{seen: map[string]string{}}
 	// Names the file declares itself: a contract name that becomes one of them is a collision.
-	for _, id := range []string{"MetricLabels", "SpanAttrs"} {
+	for _, id := range []string{"MetricLabels", "SpanAttrs", "DurianSignalEvent", "DurianSignalBounded", "durianSignalRegister"} {
 		nm.seen[id] = "the generated " + id + " map"
 	}
 	var b strings.Builder
 	b.WriteString(gen.Header(c, "// "))
+	interfaces := o.Interfaces
+	if interfaces == "" {
+		interfaces = "@atomicloud/diene.interfaces"
+	}
+	fmt.Fprintf(&b, "\nimport { register as durianSignalRegister } from %s;\n", q(interfaces))
+	if len(c.LogOrder) > 0 {
+		fmt.Fprintf(&b, "\nimport type { Event as DurianSignalEvent } from %s;\n", q(interfaces))
+	}
+	for _, t := range c.Types {
+		if t.Kind == contract.KindInt && t.Size() > maxUnion {
+			fmt.Fprintf(&b, "\nimport type { Bounded as DurianSignalBounded } from %s;\n", q(interfaces))
+			break
+		}
+	}
 
 	typeName := map[string]string{} // contract type -> TS type
 	b.WriteString("\n// Label value types.\n")
@@ -223,8 +242,9 @@ func Render(c *contract.Contract) (string, error) {
 			lo, hi := *t.Min, *t.Max
 			if t.Size() <= maxUnion {
 				var ms []string
-				for i := lo; i <= hi; i++ {
-					ms = append(ms, strconv.Itoa(i))
+				// count by index: a range that ends at MaxInt must not be walked with i <= hi; i++ (it wraps)
+				for k := 0; k < t.Size(); k++ {
+					ms = append(ms, strconv.FormatInt(int64(lo)+int64(k), 10))
 				}
 				union(&b, id, ms)
 			} else {
@@ -232,7 +252,7 @@ func Render(c *contract.Contract) (string, error) {
 				if err := nm.claim(spec, "type "+tn+" (spec)"); err != nil {
 					return "", err
 				}
-				fmt.Fprintf(&b, "export type %s = number & { readonly __durianBounded: %s };\n", id, q(id))
+				fmt.Fprintf(&b, "export type %s = DurianSignalBounded<%s>;\n", id, q(id))
 				render(&b, 0, "export const "+spec+" = ", obj{members: []member{
 					{"name", raw(q(id))}, {"min", raw(strconv.Itoa(lo))}, {"max", raw(strconv.Itoa(hi))},
 				}}, " as const;")
@@ -291,9 +311,30 @@ func Render(c *contract.Contract) (string, error) {
 				render(&b, 0, "export type "+id+" = ", labelsOf(m.LabelOrder, m.Labels, false), ";")
 			}
 			mapT.members = append(mapT.members, member{key(mn), raw(id)})
-			table.members = append(table.members, member{key(mn), obj{members: []member{
-				{"kind", raw(q(m.Kind))}, {"keys", strArr(m.LabelOrder)},
-			}}})
+			row := []member{{"kind", raw(q(m.Kind))}, {"keys", strArr(m.LabelOrder)}}
+			values, ranges := obj{}, obj{}
+			for _, l := range m.LabelOrder {
+				t := c.Types[m.Labels[l]]
+				switch t.Kind {
+				case contract.KindEnum:
+					values.members = append(values.members, member{key(l), strArr(t.Values)})
+				case contract.KindInt:
+					ranges.members = append(ranges.members, member{key(l), arr{items: []node{raw(fmt.Sprint(*t.Min)), raw(fmt.Sprint(*t.Max))}}})
+				case contract.KindTime:
+					hi := "23"
+					if t.Unit == contract.UnitWeekday {
+						hi = "6"
+					}
+					ranges.members = append(ranges.members, member{key(l), arr{items: []node{raw("0"), raw(hi)}}})
+				}
+			}
+			if len(values.members) > 0 {
+				row = append(row, member{"values", values})
+			}
+			if len(ranges.members) > 0 {
+				row = append(row, member{"ranges", ranges})
+			}
+			table.members = append(table.members, member{key(mn), obj{members: row}})
 		}
 		render(&b, 0, "export type MetricLabels = ", mapT, ";")
 		render(&b, 0, "export const metricTable = ", table, " as const;")
@@ -310,6 +351,7 @@ func Render(c *contract.Contract) (string, error) {
 	if len(c.LogOrder) > 0 {
 		b.WriteString("\n// Log events: a name and the level it fixes. Fields are free-form.\n")
 		var evs []string
+		levels := obj{}
 		for _, ln := range c.LogOrder {
 			e := c.Logs[ln]
 			id := gen.Pascal(ln)
@@ -318,10 +360,12 @@ func Render(c *contract.Contract) (string, error) {
 			}
 			render(&b, 0, "export const "+id+" = ", obj{members: []member{
 				{"name", raw(q(e.Event))}, {"level", raw(q(e.Level))},
-			}}, " as const;")
+			}}, " as const satisfies DurianSignalEvent<"+q(e.Level)+">;")
 			evs = append(evs, e.Event)
+			levels.members = append(levels.members, member{key(e.Event), raw(q(e.Level))})
 		}
 		render(&b, 0, "export const eventNames = ", strArr(evs), " as const;")
+		render(&b, 0, "export const eventTable = ", levels, " as const;")
 	}
 
 	if len(c.SpanOrder) > 0 {
@@ -359,5 +403,18 @@ func Render(c *contract.Contract) (string, error) {
 			fmt.Fprintf(&b, "export const %s = %s as const;\n", id, q(sn))
 		}
 	}
+	var tables []string
+	if len(c.MetricOrder) > 0 {
+		tables = append(tables, "metrics: metricTable")
+	}
+	if len(c.LogOrder) > 0 {
+		tables = append(tables, "events: eventTable")
+	}
+	if len(c.SpanOrder) > 0 {
+		tables = append(tables, "spans: spanTable")
+	}
+	b.WriteString("\n// Registers the tables with the port when this module loads, once per process. Any competing\n")
+	b.WriteString("// registration, or a table that is not one of these, poisons the port until restart.\n")
+	render(&b, 0, "durianSignalRegister(", raw("{ "+strings.Join(tables, ", ")+" }"), ");")
 	return b.String(), nil
 }

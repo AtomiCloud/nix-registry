@@ -118,6 +118,15 @@ func obsFilterTree(f filter) ObsFilterTree {
 		case *filterExact:
 			n.Kind = "exact"
 			n.Values = []string{v.value}
+		case *filterPhrase:
+			n.Kind = "phrase"
+			n.Values = []string{v.phrase}
+		case *filterPrefix:
+			n.Kind = "prefix"
+			n.Values = []string{v.prefix}
+		case *filterExactPrefix:
+			n.Kind = "prefix"
+			n.Values = []string{v.prefix}
 		case *filterIn:
 			n.Kind = "in"
 			n.Values = append([]string(nil), v.values.values...)
@@ -132,12 +141,92 @@ func obsFilterTree(f filter) ObsFilterTree {
 	return n
 }
 
+// ObsNeedsFullSeed identifies extra query sources using VictoriaLogs' own
+// recursive visitor. It covers union/join and filter/conditional subqueries;
+// opaque row-producing forms also disable pruning conservatively.
+func (q *Query) ObsNeedsFullSeed() bool {
+	extra := false
+	q.visitSubqueries(func(sub *Query) {
+		if sub != q {
+			extra = true
+		}
+	})
+	for _, p := range q.pipes {
+		if slot := obsAlertPipeCondition(p); obsAlertOpaquePipe(p) || (slot != nil && *slot != nil) {
+			extra = true
+		}
+	}
+	return extra
+}
+
+// Conditional transforms also carry filters, not only stats/filter pipes.
+func obsAlertPipeCondition(p pipe) **ifFilter {
+	switch t := p.(type) {
+	case *pipeExtract:
+		return &t.iff
+	case *pipeExtractRegexp:
+		return &t.iff
+	case *pipeUnpackJSON:
+		return &t.iff
+	case *pipeUnpackLogfmt:
+		return &t.iff
+	case *pipeUnpackSyslog:
+		return &t.iff
+	case *pipeUnroll:
+		return &t.iff
+	case *pipeFormat:
+		return &t.iff
+	case *pipeSetStreamFields:
+		return &t.iff
+	case *pipeReplace:
+		return &t.iff
+	case *pipeReplaceRegexp:
+		return &t.iff
+	case *pipeCollapseNums:
+		return &t.iff
+	}
+	return nil
+}
+
+func obsAlertOpaquePipe(p pipe) bool {
+	switch t := p.(type) {
+	case *pipeUnion:
+		return t.q == nil
+	case *pipeJoin:
+		return t.q == nil
+	case *pipeStreamContext, *pipeGenerateSequence:
+		return true
+	}
+	return false
+}
+
 // ObsAlertTransform walks parsed filters before aggregation. The caller owns
 // policy; this adapter only exposes the AST and reconstructs a parsed query.
 // Filters after stats apply to computed values and are retained unchanged.
 // statsFields receives the stats function text and the stored fields it reads.
+// Subqueries are checked from the leaves upward using the native visitor.
 func (q *Query) ObsAlertTransform(transform func(ObsFilterTree) (string, error), statsFields func(string, []string) error) (*Query, error) {
 	qc := q.Clone(q.timestamp)
+	// Collect before rewriting: replacing a free-form in(subquery) predicate can
+	// otherwise erase a subtree before its event/stats policy has been checked.
+	var all []*Query
+	seen := map[*Query]bool{}
+	qc.visitSubqueries(func(sub *Query) {
+		if !seen[sub] {
+			seen[sub] = true
+			all = append(all, sub)
+		}
+	})
+	for i := len(all) - 1; i >= 0; i-- {
+		if _, err := all[i].obsAlertTransformOne(transform, statsFields); err != nil {
+			return nil, err
+		}
+	}
+	return qc, nil
+}
+
+func (q *Query) obsAlertTransformOne(transform func(ObsFilterTree) (string, error), statsFields func(string, []string) error) (*Query, error) {
+	qc := q
 	rewrite := func(f filter) (filter, error) {
 		s, err := transform(obsFilterTree(f))
 		if err != nil {
@@ -168,6 +257,33 @@ func (q *Query) ObsAlertTransform(transform func(ObsFilterTree) (string, error),
 	}
 	seenStats := false
 	for i, p := range qc.pipes {
+		if obsAlertOpaquePipe(p) {
+			return nil, fmt.Errorf("log alert pipe form not checkable: %s", p.String())
+		}
+		hasSubquery := false
+		p.visitSubqueries(func(*Query) { hasSubquery = true })
+		if hasSubquery {
+			switch p.(type) {
+			case *pipeUnion, *pipeJoin:
+				if seenStats {
+					return nil, fmt.Errorf("log alert pipe form not checkable after stats: %s", p.String())
+				}
+			case *pipeStats, *pipeFilter:
+			default:
+				if obsAlertPipeCondition(p) == nil {
+					return nil, fmt.Errorf("log alert pipe form not checkable: %s", p.String())
+				}
+			}
+		}
+		if !seenStats {
+			if slot := obsAlertPipeCondition(p); slot != nil && *slot != nil {
+				f, err := rewrite((*slot).f)
+				if err != nil {
+					return nil, err
+				}
+				*slot = newIfFilter(f)
+			}
+		}
 		switch ps := p.(type) {
 		case *pipeStats:
 			if !seenStats {
@@ -235,8 +351,8 @@ func (q *Query) ObsWithoutTrailingFilters() (qOut *Query, dropped int) {
 
 // ObsFieldFilter is one filter on a single field, as ObsFieldFilters reports it.
 type ObsFieldFilter struct {
-	Op       string   // "exact" (`:=`), "in" (`in(...)`), "regexp" (`:~`) or "other"
-	Values   []string // exact: the one value; in: its values
+	Op       string   // "exact" (`:=`), "phrase" (`:"x"`), "prefix" (`:x*` or `:=x*`), "in" (`in(...)`), "regexp" (`:~`) or "other"
+	Values   []string // exact and phrase: the one value; prefix: the prefix; in: its values
 	Pattern  string   // regexp: the pattern
 	Negated  bool     // under an odd number of `not` / `-`
 	UnderOr  bool     // inside an `or` that has other branches
@@ -283,6 +399,12 @@ func (q *Query) ObsFieldFilters(field string) []ObsFieldFilter {
 				ff.Op, ff.Values = "exact", []string{x.value}
 			case *filterIn:
 				ff.Op, ff.Values = "in", append([]string(nil), x.values.values...)
+			case *filterPhrase:
+				ff.Op, ff.Values = "phrase", []string{x.phrase}
+			case *filterPrefix:
+				ff.Op, ff.Values = "prefix", []string{x.prefix}
+			case *filterExactPrefix:
+				ff.Op, ff.Values = "prefix", []string{x.prefix}
 			case *filterRegexp:
 				ff.Op, ff.Pattern = "regexp", x.re.String()
 			}
@@ -293,3 +415,9 @@ func (q *Query) ObsFieldFilters(field string) []ObsFieldFilter {
 	walk(q.f, false, false)
 	return out
 }
+
+// ObsSetConcurrency sets the query's worker count, as `options(concurrency=n)` written
+// before the query does (it only lowers the CPU count; parallel readers follow it).
+// obs alerts runs many small stats queries from parallel rule workers; one worker
+// per query avoids a set of per-worker stats buffers on every query.
+func (q *Query) ObsSetConcurrency(n uint) { q.opts.concurrency = n }

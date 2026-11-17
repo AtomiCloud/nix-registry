@@ -162,7 +162,7 @@ func TestEndToEnd(t *testing.T) {
 		t.Errorf("version: rc %d\n%s", rc, out)
 	}
 	_, out := obs("version")
-	for _, line := range []string{"engine VictoriaMetrics ", "engine VictoriaLogs ", "reference Grafana ", "reference Pyroscope ", "reference VictoriaLogsDatasource "} {
+	for _, line := range []string{"engine VictoriaMetrics ", "engine VictoriaLogs ", "engine Grafana ", "reference Pyroscope ", "reference VictoriaLogsDatasource "} {
 		if !strings.Contains(out, line) {
 			t.Errorf("version missing %q: %s", line, out)
 		}

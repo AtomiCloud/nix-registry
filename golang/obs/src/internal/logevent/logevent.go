@@ -43,7 +43,8 @@ func AnalyzeAt(expr string, events Events, at time.Time) (Analysis, error) {
 		out.Skipped = true
 		return out, nil
 	}
-	names := append([]string{}, events.EventNames()...)
+	declared := append([]string{}, events.EventNames()...)
+	names := append([]string{}, declared...)
 	sort.Strings(names)
 	known := map[string]bool{}
 	for _, n := range names {
@@ -51,8 +52,9 @@ func AnalyzeAt(expr string, events Events, at time.Time) (Analysis, error) {
 	}
 	hasEvent := false
 	matched := map[string]bool{}
-	// Per-leaf event names are a conservative union for display; the actual AST
-	// (including conjunction and negation) is retained in the rewritten query.
+	// Per-leaf names describe validated selectors for display. The actual AST
+	// (including native phrase/prefix matching and negation) is retained. Row
+	// pruning must derive its own conservative bounds from that rewritten AST.
 	var visit func(logstorage.ObsFilterTree, bool) (string, error)
 	visit = func(n logstorage.ObsFilterTree, neg bool) (string, error) {
 		if n.Kind == "stream" {
@@ -70,15 +72,28 @@ func AnalyzeAt(expr string, events Events, at time.Time) (Analysis, error) {
 			hasEvent = true
 			var matches []string
 			switch n.Kind {
-			case "exact":
+			case "exact", "phrase":
 				if len(n.Values) != 1 || !known[n.Values[0]] {
 					value := ""
 					if len(n.Values) > 0 {
 						value = n.Values[0]
 					}
-					return "", fmt.Errorf("event %q is not in the contract%s", value, hint(value, names))
+					return "", fmt.Errorf("event %q is not in the contract%s", value, hint(value, declared))
 				}
 				matches = append(matches, n.Values[0])
+			case "prefix":
+				prefix := ""
+				if len(n.Values) > 0 {
+					prefix = n.Values[0]
+				}
+				for _, name := range names {
+					if strings.HasPrefix(name, prefix) {
+						matches = append(matches, name)
+					}
+				}
+				if len(matches) == 0 {
+					return "", fmt.Errorf("event prefix %q matches no contract event (contract/events.json: %s)%s", prefix+"*", strings.Join(declared, ", "), hint(prefix, declared))
+				}
 			case "regexp":
 				re, err := regexp.Compile(n.Pattern)
 				if err != nil {
@@ -102,7 +117,7 @@ func AnalyzeAt(expr string, events Events, at time.Time) (Analysis, error) {
 					return "", fmt.Errorf("event in(%s) matches no contract event", strings.Join(n.Values, ", "))
 				}
 			default:
-				return "", fmt.Errorf("event filter %s must use :=, negated :=, :~ or in(...)", n.Text)
+				return "", fmt.Errorf("event filter form not checkable: %s; use :=, phrase, prefix, :~ or in(...)", n.Text)
 			}
 			selected := map[string]bool{}
 			for _, name := range matches {
@@ -159,7 +174,7 @@ func AnalyzeAt(expr string, events Events, at time.Time) (Analysis, error) {
 		return out, err
 	}
 	if !hasEvent {
-		return out, fmt.Errorf("a log alert must filter on the event field %q (:=, negated :=, :~ or in(...))", Field)
+		return out, fmt.Errorf("a log alert must filter on the event field %q (:=, phrase, prefix, negated, :~ or in(...))", Field)
 	}
 	out.Expr = rewritten.String()
 	for name := range matched {
@@ -204,36 +219,37 @@ func unique(xs []string) []string {
 }
 
 func hint(name string, names []string) string {
-	best, distance := "", len(name)+1
+	best, distance := "", 4
 	for _, s := range names {
 		d := editDistance(name, s)
 		if d < distance {
 			best, distance = s, d
 		}
 	}
-	if best != "" && distance <= max(2, len(name)/3) {
-		return fmt.Sprintf("; did you mean %q?", best)
+	if best != "" {
+		return fmt.Sprintf("; did you mean %q", best)
 	}
 	return ""
 }
 func editDistance(a, b string) int {
-	prev := make([]int, len(b)+1)
+	ra, rb := []rune(a), []rune(b)
+	prev := make([]int, len(rb)+1)
 	for j := range prev {
 		prev[j] = j
 	}
-	for i := 1; i <= len(a); i++ {
-		cur := make([]int, len(b)+1)
+	for i := 1; i <= len(ra); i++ {
+		cur := make([]int, len(rb)+1)
 		cur[0] = i
-		for j := 1; j <= len(b); j++ {
+		for j := 1; j <= len(rb); j++ {
 			cost := 0
-			if a[i-1] != b[j-1] {
+			if ra[i-1] != rb[j-1] {
 				cost = 1
 			}
 			cur[j] = min(cur[j-1]+1, prev[j]+1, prev[j-1]+cost)
 		}
 		prev = cur
 	}
-	return prev[len(b)]
+	return prev[len(rb)]
 }
 
 // ValidateSeed refuses an undeclared seed event before any engine is started.

@@ -1,0 +1,9 @@
+package main
+
+import (
+	"context"
+	"example.com/app/signals"
+	obs "github.com/ProtoDurian/diene.go-interfaces/obs"
+)
+
+func main() { _ = obs.Error(context.Background(), signals.ChargeFailed, 42) }

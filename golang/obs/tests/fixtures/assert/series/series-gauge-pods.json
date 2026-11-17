@@ -1,0 +1,34 @@
+{
+  "status": "success",
+  "isPartial": false,
+  "data": [
+    {
+      "__name__": "checkout_queue_depth",
+      "durian_cloud_landscape": "lab",
+      "durian_cloud_service": "checkout",
+      "payment_provider": "stripe",
+      "k8s_pod_name": "pod-a"
+    },
+    {
+      "__name__": "checkout_queue_depth",
+      "durian_cloud_landscape": "lab",
+      "durian_cloud_service": "checkout",
+      "payment_provider": "adyen",
+      "k8s_pod_name": "pod-a"
+    },
+    {
+      "__name__": "checkout_queue_depth",
+      "durian_cloud_landscape": "lab",
+      "durian_cloud_service": "checkout",
+      "payment_provider": "stripe",
+      "k8s_pod_name": "pod-b"
+    },
+    {
+      "__name__": "checkout_queue_depth",
+      "durian_cloud_landscape": "lab",
+      "durian_cloud_service": "checkout",
+      "payment_provider": "adyen",
+      "k8s_pod_name": "pod-b"
+    }
+  ]
+}

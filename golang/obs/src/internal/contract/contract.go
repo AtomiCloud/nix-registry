@@ -128,6 +128,8 @@ type Target struct {
 	Out     string `yaml:"out"`               // folder, relative to the repo root (the folder holding observability/)
 	Package string `yaml:"package,omitempty"` // go package / dart library
 	Module  string `yaml:"namespace,omitempty"`
+	// Interfaces is the import path (go), package (dart, bun) or namespace (dotnet) of the hand-written interfaces library the generated code builds on; empty means the published default.
+	Interfaces string `yaml:"interfaces,omitempty"`
 }
 
 // Contract is the parsed contract.yaml.

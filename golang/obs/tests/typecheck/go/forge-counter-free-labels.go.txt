@@ -1,0 +1,19 @@
+// planted forging (review repro): a hand-made counter with a free user id label and a name not in the
+// contract. It compiles; the port must refuse it at run time and count it.
+package main
+
+import (
+	"context"
+	"fmt"
+
+	_ "example.com/app/signals"
+	obs "github.com/ProtoDurian/diene.go-interfaces/obs"
+)
+
+func main() {
+	n := obs.NewCounter[struct{ UserID string }]("not.in.contract")
+	fmt.Println("result:", obs.Add(context.Background(), n, struct{ UserID string }{"free-customer-123"}))
+	if obs.Dropped("unknown_metric") != 1 {
+		panic("the refusal was not counted in dropped.unknown_metric")
+	}
+}

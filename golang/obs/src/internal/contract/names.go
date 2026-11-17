@@ -146,18 +146,37 @@ func (c *Contract) AllLabels() map[string]bool {
 func (c *Contract) HasSpanAttribute(scope, name string) bool {
 	switch scope {
 	case "resource":
-		return PlatformLabelSet()[Norm(name)] || c.platformHas(name)
-	case "span", "":
-		for _, n := range c.SpanOrder {
-			for _, a := range c.Spans[n].AttrOrder {
-				if a == name || Norm(a) == Norm(name) {
-					return true
-				}
-			}
-		}
-		return false
+		return c.resourceHas(name)
+	case "span":
+		return c.spanHas(name)
+	case "":
+		// an unscoped attribute (.name) matches a span attribute OR a resource attribute
+		return c.spanHas(name) || c.resourceHas(name)
 	}
 	return true
+}
+
+// resourceHas: a traced resource carries every platform label of concept section 2, the pod keys
+// included (a trace has its pod name; only business METRICS drop it, concept 4.1).
+func (c *Contract) resourceHas(name string) bool {
+	n := Norm(name)
+	for _, l := range PlatformLabels {
+		if Norm(l) == n {
+			return true
+		}
+	}
+	return PlatformLabelSet()[n] || c.platformHas(name)
+}
+
+func (c *Contract) spanHas(name string) bool {
+	for _, n := range c.SpanOrder {
+		for _, a := range c.Spans[n].AttrOrder {
+			if a == name || Norm(a) == Norm(name) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (c *Contract) platformHas(name string) bool {

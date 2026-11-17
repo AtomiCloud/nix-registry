@@ -30,10 +30,10 @@ metrics: { provider: { kind: counter } }
 // Review of PR 111, finding 9: helper symbols are in the collision registry, and refused before any write.
 func TestHelperSymbolCollisionRefused(t *testing.T) {
 	for name, doc := range map[string]string{
-		"constructor": "service: s\ntypes: { shard: { kind: int, min: 0, max: 3 }, new_shard: { kind: enum, values: [a] } }\n",
-		"bound":       "service: s\ntypes: { shard: { kind: int, min: 0, max: 3 }, shard_min: { kind: free } }\n",
-		"table":       "service: s\ntypes: { events: { kind: enum, values: [a] } }\nlogs: { A: { event: a.b, level: info } }\n",
-		"base":        "service: s\nmetrics: { durian_signal_gauge: { kind: gauge, per_pod: true } }\n",
+		"spec":  "service: s\ntypes: { shard: { kind: int, min: 0, max: 3 }, shard_spec: { kind: enum, values: [a] } }\n",
+		"bound": "service: s\ntypes: { shard: { kind: int, min: 0, max: 3 }, shard_spec: { kind: free } }\n",
+		"table": "service: s\ntypes: { events: { kind: enum, values: [a] } }\nlogs: { A: { event: a.b, level: info } }\n",
+		"base":  "service: s\nmetrics: { durian_signal_gauge: { kind: gauge, per_pod: true } }\n",
 	} {
 		c, err := contract.Parse("c.yaml", []byte(doc))
 		if err != nil {

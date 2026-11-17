@@ -1,30 +1,12 @@
-// Package dart is the Dart generator of `obs gen` (concept section 3.4).
-//
-// It writes ONE file, signals.g.dart, of types and constants only (same shape as the Go reference):
-//
-//   - the shared base types, prefixed DurianSignal (owner ruling D88 B12): sealed labels, level
-//     markers, an event carrier that fixes its level in its type, name carriers per metric kind
-//     and for spans, a bound spec whose of(n) returns a result, and a minimal Result. Every base
-//     type has a private constructor and is sealed or final, so only this library can make one;
-//   - one label value type per contract type: an enum is a Dart enum, a bounded number and a time
-//     bucket are an extension type with a const-checked constructor plus a `<type>Spec` constant
-//     whose of(n) returns a result, a calendar date is a final class, a free value is a String;
-//   - one labels class per metric and one attributes class per span, each with a generated
-//     `entries` getter (no reflection: Dart AOT has none);
-//   - one name carrier class and one constant per signal, and data tables of allowed keys.
-//
-// The call surface is a method on the generated name (checkoutCharges.add(...)), written by the
-// interfaces library as an extension on the carrier type; the carrier of each signal is its own
-// class, so the labels type is fixed by the receiver. There are no per-metric functions here.
-// The hole the compiler cannot close is a non-const Shard(n) (its assert runs in debug builds
-// only); the port refuses an out-of-range value and a lint rule closes the hole in CI.
-//
-// The output is formatted the way `dart format` leaves it (tall style, 80 columns) without
-// running it: obs is offline.
+// Package dart generates contract-specific types, specs, carriers and key tables.
+// Shared bounded values, results, level markers and port contracts come from the
+// interfaces library, whose import is configurable per generation target.
+// Compiler fixtures use a minimal stub from the goal, not the real library.
 package dart
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 	"unicode"
 
@@ -40,7 +22,14 @@ func (generator) Lang() string { return "dart" }
 
 // Files returns signals.g.dart.
 func (generator) Files(c *contract.Contract, o gen.Options) ([]gen.File, error) {
-	g := &emitter{c: c, pkg: o.Package, declared: map[string]string{}}
+	interfaces := o.Interfaces
+	if interfaces == "" {
+		interfaces = "diene_interfaces"
+	}
+	if !regexp.MustCompile(`^[a-z][a-z0-9_]*$`).MatchString(interfaces) {
+		return nil, fmt.Errorf("interfaces %q must be a Dart package name", interfaces)
+	}
+	g := &emitter{c: c, pkg: o.Package, interfaces: interfaces, declared: map[string]string{}}
 	if err := g.plan(); err != nil {
 		return nil, err
 	}
@@ -48,13 +37,16 @@ func (generator) Files(c *contract.Contract, o gen.Options) ([]gen.File, error) 
 }
 
 type emitter struct {
-	c        *contract.Contract
-	pkg      string
-	declared map[string]string // top-level identifier -> what declared it
+	c          *contract.Contract
+	pkg        string
+	interfaces string
+	declared   map[string]string // top-level identifier -> what declared it
 
 	typeRef  map[string]string   // contract type -> the Dart type of a label value
 	enumVals map[string][]string // enum type -> member identifiers
 	props    map[string][]string // "metrics.x" / "spans.x" -> field identifiers, in label order
+	consts   map[string]string   // metric -> the top-level constant that carries it
+	hasDate  bool                // the contract has a calendar date type, so the date helper is used
 }
 
 // Names the generated file declares itself.
@@ -62,10 +54,32 @@ var baseNames = []string{
 	"DurianSignalWire", "DurianSignalLabels", "DurianSignalLevel", "DurianSignalResult",
 	"DurianSignalOk", "DurianSignalErr", "DurianSignalBoundSpec", "DurianSignalEvent",
 	"DurianSignalCounter", "DurianSignalHistogram", "DurianSignalGauge", "DurianSignalSpan",
-	"DurianSignalMetricInfo", "DurianSignalSpanInfo", "DurianSignalLevelTrace",
+	"DurianSignalMetricInfo", "DurianSignalSpanInfo", "DurianSignalMetric", "DurianSignalPort", "DurianSignalLevelTrace",
 	"DurianSignalLevelDebug", "DurianSignalLevelInfo", "DurianSignalLevelWarn",
 	"DurianSignalLevelError", "DurianSignalLevelFatal", "metricTable", "spanTable", "eventNames",
-	"_durianSignalDate",
+	"_durianSignalDate", "eventTable", "installSignals", "Event", "Result", "TraceLevel", "DebugLevel", "InfoLevel", "WarnLevel", "ErrorLevel", "FatalLevel",
+}
+
+// topReserved are the words a lowercase top-level constant may not take: Dart's reserved words and
+// built-in identifiers, and the lowercase names dart:core (or the generated file) uses itself, which
+// a constant would shadow (const int breaks every int annotation, const override breaks @override).
+var topReserved = map[string]bool{
+	"abstract": true, "as": true, "base": true, "covariant": true, "deferred": true, "dynamic": true,
+	"export": true, "extension": true, "external": true, "factory": true, "get": true, "implements": true,
+	"import": true, "interface": true, "late": true, "library": true, "mixin": true, "of": true,
+	"on": true, "operator": true, "part": true, "set": true, "sealed": true, "show": true, "hide": true,
+	"static": true, "typedef": true, "when": true, "async": true, "sync": true, "type": true,
+	"int": true, "num": true, "bool": true, "double": true, "override": true, "deprecated": true,
+	"pragma": true, "print": true, "identical": true, "identityHashCode": true,
+	"error": true, "warn": true, "info": true,
+}
+
+// topName makes a lowercase top-level identifier safe: a reserved or shadowing word gets a trailing _.
+func topName(id string) string {
+	if reserved[id] || topReserved[id] {
+		return id + "_"
+	}
+	return id
 }
 
 // dart:core (and the generated file's own) names a generated type may not take: it would shadow them.
@@ -159,6 +173,7 @@ func (g *emitter) plan() error {
 	g.typeRef = map[string]string{}
 	g.enumVals = map[string][]string{}
 	g.props = map[string][]string{}
+	g.consts = map[string]string{}
 	for _, b := range baseNames {
 		g.declared[b] = "a generated base type"
 	}
@@ -183,8 +198,12 @@ func (g *emitter) plan() error {
 			if err := g.declare(camel(n)+"Spec", from); err != nil {
 				return err
 			}
+			if err := g.declare(pascal(n)+"Spec", from); err != nil {
+				return err
+			}
 			g.typeRef[n] = pascal(n)
 		case contract.KindDate:
+			g.hasDate = true
 			if err := g.declare(pascal(n), from); err != nil {
 				return err
 			}
@@ -195,7 +214,8 @@ func (g *emitter) plan() error {
 	}
 	for _, m := range c.MetricOrder {
 		p := "metrics." + m
-		for _, id := range []string{pascal(m) + "Labels", pascal(m) + "Metric", camel(m)} {
+		g.consts[m] = topName(camel(m))
+		for _, id := range []string{pascal(m) + "Labels", pascal(m) + "Metric", g.consts[m]} {
 			if err := g.declare(id, p); err != nil {
 				return err
 			}
@@ -280,20 +300,20 @@ func dq(s string) string {
 
 const width = 80
 
-// superCtor writes `  const Name._() : super._(args);`, wrapped the way dart format wraps it:
+// superCtor writes `  const Name._() : super(args);`, wrapped the way dart format wraps it:
 // before the colon, then one argument per line.
 func (x *w) superCtor(name string, args ...string) {
-	one := fmt.Sprintf("  const %s._() : super._(%s);", name, strings.Join(args, ", "))
+	one := fmt.Sprintf("  const %s._() : super(%s);", name, strings.Join(args, ", "))
 	if len(one) <= width {
 		x.line("%s", one)
 		return
 	}
 	x.line("  const %s._()", name)
-	if two := fmt.Sprintf("    : super._(%s);", strings.Join(args, ", ")); len(two) <= width {
+	if two := fmt.Sprintf("    : super(%s);", strings.Join(args, ", ")); len(two) <= width {
 		x.line("%s", two)
 		return
 	}
-	x.line("    : super._(")
+	x.line("    : super(")
 	for _, a := range args {
 		x.line("        %s,", a)
 	}
@@ -324,6 +344,46 @@ func (x *w) declHead(head, kw, typ string) {
 	}
 	x.line("    %s", kw)
 	x.line("        %s {", typ)
+}
+
+// arrow writes `  <head><param>) => <body>` the way dart format does: on one line; else the body on
+// the next line; else the parameter on its own line too.
+func (x *w) arrow(head, param, body string) {
+	sig := "  " + head + param + ")"
+	if one := sig + " => " + body; len(one) <= width {
+		x.line("%s", one)
+		return
+	}
+	if len(sig+" =>") <= width {
+		x.line("%s =>", sig)
+		x.line("      %s", body)
+		return
+	}
+	x.line("  %s", head)
+	x.line("    %s,", param)
+	if one := "  ) => " + body; len(one) <= width {
+		x.line("%s", one)
+		return
+	}
+	x.line("  ) =>")
+	x.line("      %s", body)
+}
+
+// mapLit writes `<prefix>{k: v, ...};` on one line, or one entry per line when it does not fit.
+func (x *w) mapLit(prefix string, kv [][2]string) {
+	items := make([]string, len(kv))
+	for i, e := range kv {
+		items[i] = e[0] + ": " + e[1]
+	}
+	if one := prefix + "{" + strings.Join(items, ", ") + "};"; len(one) <= width {
+		x.line("%s", one)
+		return
+	}
+	x.line("%s{", prefix)
+	for _, e := range kv {
+		x.entry(2, e[0], e[1])
+	}
+	x.line("};")
 }
 
 // assign writes `<lhs> = <rhs>;` on one line, or with the right side on the next.
@@ -397,8 +457,9 @@ func (x *w) entry(indent int, key, value string) {
 	x.line("%s    %s,", pad, value)
 }
 
-// tableRow writes one row of a data table: `'name': Info._(kind: ..., keys: [...]),`.
-func (x *w) tableRow(name, info string, fields []string, keys []string) {
+// tableRow writes one row of a data table: `'name': Info._(kind: ..., keys: [...]),`; after
+// writes more named arguments after keys (each already laid out by its own writer).
+func (x *w) tableRow(name, info string, fields []string, keys []string, after ...func(indent int)) {
 	ind := 2
 	if one := fmt.Sprintf("  %s: %s(", name, info); len(one) <= width {
 		x.line("%s", one)
@@ -412,7 +473,33 @@ func (x *w) tableRow(name, info string, fields []string, keys []string) {
 		x.line("%s  %s,", pad, fl)
 	}
 	x.strList(ind+2, "keys: ", ",", keys)
+	for _, a := range after {
+		a(ind + 2)
+	}
 	x.line("%s),", pad)
+}
+
+// listMap writes `<prefix>{` and one `'k': [a, b],` entry per line (a list split again when it does not
+// fit): dart format always splits a map literal whose values are list literals. Items are already Dart text.
+func (x *w) listMap(indent int, prefix string, keys []string, items [][]string) {
+	pad := strings.Repeat(" ", indent)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = dq(k) + ": [" + strings.Join(items[i], ", ") + "]"
+	}
+	x.line("%s%s{", pad, prefix)
+	for i, k := range keys {
+		if one := pad + "  " + parts[i] + ","; len(one) <= width {
+			x.line("%s", one)
+			continue
+		}
+		x.line("%s  %s: [", pad, dq(k))
+		for _, it := range items[i] {
+			x.line("%s    %s,", pad, it)
+		}
+		x.line("%s  ],", pad)
+	}
+	x.line("%s},", pad)
 }
 
 // strList writes `<prefix>['a', 'b']<suffix>` on one line, or one element per line when it does
@@ -435,13 +522,20 @@ func (x *w) strList(indent int, prefix, suffix string, items []string) {
 	x.line("%s]%s", pad, suffix)
 }
 
-func levelClass(l string) string { return "DurianSignalLevel" + pascal(l) }
+func levelClass(l string) string { return pascal(l) + "Level" }
 
 func spanKind(s contract.Span) string {
 	if s.Kind == "" {
 		return "internal"
 	}
 	return s.Kind
+}
+
+// metricVerb is the method a generated metric class has, and the port call it makes.
+var metricVerb = map[string]string{
+	contract.MetricCounter:   "add",
+	contract.MetricHistogram: "record",
+	contract.MetricGauge:     "set",
 }
 
 var metricBase = map[string]string{
@@ -456,15 +550,12 @@ func (g *emitter) render() string {
 	x.b.WriteString(gen.Header(c, "// "))
 	x.line("// ignore_for_file: type=lint")
 	x.blank()
-	x.line("// ---- shared base types ----")
+	x.line("import 'package:%s/diene_interfaces.dart';", g.interfaces)
 	x.blank()
-	x.b.WriteString(baseCode)
-	for _, l := range contract.Levels {
+	x.line("export 'package:%s/diene_interfaces.dart';", g.interfaces)
+	if g.hasDate {
 		x.blank()
-		x.line("/// The level marker of %s events.", l)
-		x.line("final class %s extends DurianSignalLevel {", levelClass(l))
-		x.line("  const %s._() : super._(%s);", levelClass(l), dq(l))
-		x.line("}")
+		x.b.WriteString(dateHelper)
 	}
 
 	x.blank()
@@ -483,10 +574,14 @@ func (g *emitter) render() string {
 		x.line("/// The %s %s.", c.Metrics[m].Kind, m)
 		x.classHead(pascal(m)+"Metric", fmt.Sprintf("%s<%sLabels>", metricBase[c.Metrics[m].Kind], pascal(m)))
 		x.superCtor(pascal(m)+"Metric", dq(m))
+		x.blank()
+		verb := metricVerb[c.Metrics[m].Kind]
+		x.line("  /// The only call on %s: typed to its own labels class (no generic base method).", m)
+		x.arrow(fmt.Sprintf("Result<bool> %s(", verb), pascal(m)+"Labels labels", fmt.Sprintf("DurianSignalPort.%s(this, labels);", verb))
 		x.line("}")
 		x.blank()
 		x.line("/// The %s %s.", c.Metrics[m].Kind, m)
-		x.assign(0, "const "+camel(m), pascal(m)+"Metric._()")
+		x.assign(0, "const "+g.consts[m], pascal(m)+"Metric._()")
 	}
 	x.blank()
 	x.line("/// The data table of the metrics: kind, unit, budget, pod handling and the allowed")
@@ -494,10 +589,40 @@ func (g *emitter) render() string {
 	x.line("const metricTable = <String, DurianSignalMetricInfo>{")
 	for _, n := range c.MetricOrder {
 		m := c.Metrics[n]
-		x.tableRow(dq(n), "DurianSignalMetricInfo._", []string{
+		var vKeys, rKeys []string
+		var vItems, rItems [][]string
+		for _, l := range m.LabelOrder {
+			t := c.Types[m.Labels[l]]
+			switch t.Kind {
+			case contract.KindEnum:
+				q := make([]string, len(t.Values))
+				for i, v := range t.Values {
+					q[i] = dq(v)
+				}
+				vKeys, vItems = append(vKeys, l), append(vItems, q)
+			case contract.KindInt:
+				rKeys, rItems = append(rKeys, l), append(rItems, []string{fmt.Sprint(*t.Min), fmt.Sprint(*t.Max)})
+			case contract.KindTime:
+				hi := "23"
+				if t.Unit == contract.UnitWeekday {
+					hi = "6"
+				}
+				rKeys, rItems = append(rKeys, l), append(rItems, []string{"0", hi})
+			}
+		}
+		labelsType := pascal(n) + "Labels"
+		x.tableRow(dq(n), "DurianSignalMetricInfo", []string{
 			"kind: " + dq(m.Kind), "unit: " + dq(m.Unit), fmt.Sprintf("budget: %d", m.Budget),
 			"acrossPods: " + dq(m.AcrossPod), fmt.Sprintf("perPod: %t", m.PerPod),
-		}, m.LabelOrder)
+		}, m.LabelOrder, func(ind int) {
+			x.entry(ind, "labels", labelsType)
+			if len(vKeys) > 0 {
+				x.listMap(ind, "values: ", vKeys, vItems)
+			}
+			if len(rKeys) > 0 {
+				x.listMap(ind, "ranges: ", rKeys, rItems)
+			}
+		})
 	}
 	x.line("};")
 
@@ -507,8 +632,8 @@ func (g *emitter) render() string {
 		e := c.Logs[k]
 		x.blank()
 		x.line("/// The event %s at level %s.", e.Event, e.Level)
-		x.classHead(pascal(k)+"Event", "DurianSignalEvent<"+levelClass(e.Level)+">")
-		x.superCtor(pascal(k)+"Event", dq(e.Event), dq(e.Level))
+		x.classHead(pascal(k)+"Event", "Event<"+levelClass(e.Level)+">")
+		x.superCtor(pascal(k)+"Event", dq(e.Event))
 		x.line("}")
 		x.blank()
 		x.line("/// The event %s at level %s.", e.Event, e.Level)
@@ -517,6 +642,20 @@ func (g *emitter) render() string {
 	x.blank()
 	x.line("/// Every event name of the contract, in contract order.")
 	x.strList(0, "const eventNames = <String>", ";", c.EventNames())
+	x.blank()
+	x.line("/// The data table of the events: name -> level. The port refuses any other name or")
+	x.line("/// level.")
+	evs := make([][2]string, 0, len(c.LogOrder))
+	for _, k := range c.LogOrder {
+		evs = append(evs, [2]string{dq(c.Logs[k].Event), dq(c.Logs[k].Level)})
+	}
+	x.mapLit("const eventTable = <String, String>", evs)
+	x.blank()
+	x.line("/// Builds the telemetry port from this contract's tables, once per process (call it at")
+	x.line("/// start-up). Any other install, earlier or later, poisons the port: it refuses every")
+	x.line("/// signal until restart.")
+	x.line("Result<DurianSignalPort> installSignals() =>")
+	x.line("    DurianSignalPort.install(metrics: metricTable, events: eventTable);")
 
 	x.blank()
 	x.line("// ---- spans ----")
@@ -538,7 +677,7 @@ func (g *emitter) render() string {
 	x.line("const spanTable = <String, DurianSignalSpanInfo>{")
 	for _, n := range c.SpanOrder {
 		s := c.Spans[n]
-		x.tableRow(dq(n), "DurianSignalSpanInfo._", []string{"kind: " + dq(spanKind(s))}, s.AttrOrder)
+		x.tableRow(dq(n), "DurianSignalSpanInfo", []string{"kind: " + dq(spanKind(s))}, s.AttrOrder)
 	}
 	x.line("};")
 	return strings.TrimRight(x.b.String(), "\n") + "\n"
@@ -610,8 +749,12 @@ func (g *emitter) boundType(x *w, id, name, doc string, min, max int, unit strin
 	x.line("}")
 	x.blank()
 	x.line("/// The range of [%s]; of(n) returns a result.", id)
-	x.assignCall("const "+camel(name)+"Spec", "DurianSignalBoundSpec<"+id+">._(",
-		[]string{dq(name), fmt.Sprint(min), fmt.Sprint(max), dq(unit), id + ".new"})
+	x.classHead(id+"Spec", "DurianSignalBoundSpec<"+id+">")
+	x.superCtor(id+"Spec", dq(name), fmt.Sprint(min), fmt.Sprint(max), dq(unit), id+".new")
+	x.line("}")
+	x.blank()
+	x.line("/// The range of [%s]; of(n) returns a result.", id)
+	x.assign(0, "const "+camel(name)+"Spec", id+"Spec._()")
 }
 
 func (g *emitter) labelsClass(x *w, id, path, doc string, names []string, types map[string]string) {
@@ -619,7 +762,7 @@ func (g *emitter) labelsClass(x *w, id, path, doc string, names []string, types 
 	x.classHead(id, "DurianSignalLabels")
 	props := g.props[path]
 	if len(names) == 0 {
-		x.line("  const %s() : super._();", id)
+		x.line("  const %s() : super();", id)
 		x.blank()
 		x.line("  @override")
 		x.line("  Map<String, Object> get entries => const {};")
@@ -630,14 +773,14 @@ func (g *emitter) labelsClass(x *w, id, path, doc string, names []string, types 
 	for i, p := range props {
 		params[i] = "required this." + p
 	}
-	if one := fmt.Sprintf("  const %s({%s}) : super._();", id, strings.Join(params, ", ")); len(one) <= width {
+	if one := fmt.Sprintf("  const %s({%s}) : super();", id, strings.Join(params, ", ")); len(one) <= width {
 		x.line("%s", one)
 	} else {
 		x.line("  const %s({", id)
 		for _, p := range params {
 			x.line("    %s,", p)
 		}
-		x.line("  }) : super._();")
+		x.line("  }) : super();")
 	}
 	x.blank()
 	for i, n := range names {
@@ -664,163 +807,11 @@ func (g *emitter) labelsClass(x *w, id, path, doc string, names []string, types 
 	x.line("}")
 }
 
-// baseCode is the shared base types, the same in every contract.
-const baseCode = `/// A label value that has a wire form.
-abstract interface class DurianSignalWire {
-  String get wire;
-}
-
-/// The labels or attributes of a signal. Only the generated classes below extend it.
-sealed class DurianSignalLabels {
-  const DurianSignalLabels._();
-
-  /// The wire name and value of each label, in contract order.
-  Map<String, Object> get entries;
-}
-
-/// The result of making a bounded number: a value, or the reason it was refused.
-sealed class DurianSignalResult<T> {
-  const DurianSignalResult._();
-}
-
-/// A value.
-final class DurianSignalOk<T> extends DurianSignalResult<T> {
-  const DurianSignalOk(this.value) : super._();
-
-  final T value;
-}
-
-/// The reason a value was refused.
-final class DurianSignalErr<T> extends DurianSignalResult<T> {
-  const DurianSignalErr(this.error) : super._();
-
-  final String error;
-}
-
-/// The range of a bounded number or time bucket. Only this library can make one.
-final class DurianSignalBoundSpec<T> {
-  const DurianSignalBoundSpec._(
-    this.name,
-    this.min,
-    this.max,
-    this.unit,
-    this._make,
-  );
-
-  final String name;
-  final int min;
-  final int max;
-
-  /// hour_of_day or weekday for a time bucket, empty for a bounded number.
-  final String unit;
-
-  final T Function(int) _make;
-
-  /// Makes a value, or says why [n] is refused (works in release builds).
-  DurianSignalResult<T> of(int n) =>
-      n < min || n > max
-          ? DurianSignalErr<T>('$name: $n is outside $min..$max')
-          : DurianSignalOk<T>(_make(n));
-
-  /// The bucket of [t] (always in range for a time bucket).
-  DurianSignalResult<T> atTime(DateTime t) => switch (unit) {
-    'hour_of_day' => of(t.hour),
-    'weekday' => of(t.weekday % 7),
-    _ => DurianSignalErr<T>("$name: unit '$unit' is not a time bucket"),
-  };
-}
-
-String _durianSignalDate(DateTime t) {
+const dateHelper = `String _durianSignalDate(DateTime t) {
   final u = t.toUtc();
   final m = u.month.toString().padLeft(2, '0');
   final d = u.day.toString().padLeft(2, '0');
   return '${u.year.toString().padLeft(4, '0')}-$m-$d';
 }
 
-/// The level marker base. Only the markers below extend it.
-sealed class DurianSignalLevel {
-  const DurianSignalLevel._(this.level);
-
-  final String level;
-}
-
-/// A log event: a name carrier whose type includes its level.
-sealed class DurianSignalEvent<L extends DurianSignalLevel> {
-  const DurianSignalEvent._(this.name, this.level);
-
-  /// The event name (the value of the durian.cloud/event field).
-  final String name;
-
-  /// The level the type fixes (trace, debug, info, warn, error or fatal).
-  final String level;
-}
-
-/// A counter name carrier; [L] is its labels class.
-sealed class DurianSignalCounter<L extends DurianSignalLabels> {
-  const DurianSignalCounter._(this.name);
-
-  final String name;
-}
-
-/// A histogram name carrier.
-sealed class DurianSignalHistogram<L extends DurianSignalLabels> {
-  const DurianSignalHistogram._(this.name);
-
-  final String name;
-}
-
-/// A gauge name carrier.
-sealed class DurianSignalGauge<L extends DurianSignalLabels> {
-  const DurianSignalGauge._(this.name);
-
-  final String name;
-}
-
-/// A span name carrier; [A] is its attributes class.
-sealed class DurianSignalSpan<A extends DurianSignalLabels> {
-  const DurianSignalSpan._(this.name, this.kind);
-
-  final String name;
-
-  /// internal, client, server, producer or consumer.
-  final String kind;
-}
-
-/// One row of metricTable.
-final class DurianSignalMetricInfo {
-  const DurianSignalMetricInfo._({
-    required this.kind,
-    required this.unit,
-    required this.budget,
-    required this.acrossPods,
-    required this.perPod,
-    required this.keys,
-  });
-
-  /// counter, histogram or gauge.
-  final String kind;
-
-  /// The stored name suffix (seconds, bytes), or empty.
-  final String unit;
-
-  /// The most series the metric may store per landscape (0: none stated).
-  final int budget;
-
-  /// sum, avg, max or last; empty for counters, histograms and per-pod gauges.
-  final String acrossPods;
-
-  /// True for a gauge that keeps its pod keys.
-  final bool perPod;
-
-  /// The allowed label keys, in contract order.
-  final List<String> keys;
-}
-
-/// One row of spanTable.
-final class DurianSignalSpanInfo {
-  const DurianSignalSpanInfo._({required this.kind, required this.keys});
-
-  final String kind;
-  final List<String> keys;
-}
 `

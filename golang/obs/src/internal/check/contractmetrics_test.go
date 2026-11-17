@@ -3,6 +3,7 @@ package check
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/VictoriaMetrics/metricsql"
 
@@ -104,4 +105,115 @@ func TestRegexMetricName(t *testing.T) {
 	wantGreen(t, "", `{__name__=~"checkout_.*", outcome="error"}`)
 	wantRed(t, "", `{__name__=~"checkout_.*", result="error"}`, "contract-undeclared-label", "result")
 	wantGreen(t, "", `{__name__=~"http_server_request_duration_seconds_.*", http_route="/x"}`)
+}
+
+// Round 2, finding 1: a regex name selects known metrics, whose label values are judged too.
+func TestRegexMetricNameValues(t *testing.T) {
+	wantRed(t, "", `{__name__=~"checkout_charges_total", outcome="erorr"}`, "contract-bad-enum-value", "erorr")
+	wantRed(t, "", `{__name__=~"checkout_.*", outcome=~"success|refunded"}`, "contract-bad-enum-value", "refunded")
+	wantGreen(t, "", `{__name__=~"checkout_charges_total", outcome="error"}`)
+	wantGreen(t, "", `{__name__=~"checkout_charges.*", outcome=~"succe.."}`)
+}
+
+// Round 2, finding 2: a variable on one selector excuses only that selector's matcher.
+func TestVariableDoesNotExcuseFixedTypo(t *testing.T) {
+	wantRed(t, `checkout_charges_total{outcome=~"$outcome"} + checkout_charges_total{outcome="erorr"}`,
+		`checkout_charges_total{outcome=~"x"} + checkout_charges_total{outcome="erorr"}`, "contract-bad-enum-value", "erorr")
+	wantRed(t, `checkout_charges_total{outcome="erorr"} + checkout_charges_total{outcome=~"$outcome"}`,
+		`checkout_charges_total{outcome="erorr"} + checkout_charges_total{outcome=~"x"}`, "contract-bad-enum-value", "erorr")
+	wantGreen(t, `checkout_charges_total{outcome=~"$outcome"} + checkout_charges_total{outcome="error"}`,
+		`checkout_charges_total{outcome=~"x"} + checkout_charges_total{outcome="error"}`)
+	wantGreen(t, `checkout_charges_total{outcome=~"$outcome"}`, `checkout_charges_total{outcome=~"x"}`)
+}
+
+const bigContract = `
+service: s
+types: { n: { kind: int, min: 0, max: 100001 }, top: { kind: int, min: 9223372036854775807, max: 9223372036854775807 } }
+metrics:
+  m: { kind: counter, budget: 200000, labels: { n: n } }
+  t: { kind: counter, budget: 1, labels: { n: top } }
+`
+
+func namesFor(t *testing.T, doc, filled string) []string {
+	t.Helper()
+	c, err := contract.Parse("c.yaml", []byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := metricsql.Parse(filled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := newReport()
+	contractMetrics(r, &files.Query{File: "f", Where: "w", Expr: filled}, e, c)
+	var out []string
+	for _, f := range r.Findings {
+		out = append(out, "["+f.Rule+"] "+f.Msg)
+	}
+	return out
+}
+
+// Round 2, finding 3: a large bounded number is judged without listing it.
+func TestLargeIntDomainLiteral(t *testing.T) {
+	if got := namesFor(t, bigContract, `m_total{n="100002"}`); len(got) != 1 || !strings.Contains(got[0], "100002") {
+		t.Fatalf("out-of-range literal on a large domain: %v", got)
+	}
+	if got := namesFor(t, bigContract, `m_total{n=~"5|100003"}`); len(got) != 1 || !strings.Contains(got[0], "100003") {
+		t.Fatalf("out-of-range alternative on a large domain: %v", got)
+	}
+	if got := namesFor(t, bigContract, `m_total{n="100001"}`); len(got) != 0 {
+		t.Fatalf("in-range literal refused: %v", got)
+	}
+	if got := namesFor(t, bigContract, `m_total{n="007"}`); len(got) != 1 {
+		t.Fatalf("non-canonical literal accepted: %v", got)
+	}
+}
+
+// Round 2, finding 9: a singleton range at MaxInt64 finishes at once (no i <= max; i++ wrap).
+func TestSingletonMaxIntFinishes(t *testing.T) {
+	done := make(chan []string, 1)
+	go func() {
+		a := namesFor(t, bigContract, `t_total{n="9223372036854775807"}`)
+		b := namesFor(t, bigContract, `t_total{n=~"9223372036854775.*"}`)
+		done <- append(a, b...)
+	}()
+	select {
+	case got := <-done:
+		if len(got) != 0 {
+			t.Fatalf("the one allowed value was refused: %v", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the check did not finish on a singleton range at MaxInt64")
+	}
+	if got := namesFor(t, bigContract, `t_total{n="1"}`); len(got) != 1 {
+		t.Fatalf("a wrong value on the singleton: %v", got)
+	}
+}
+
+// Round 3 (GPT verifier): an unrelated platform metric in a regex selection does not switch off value checks.
+func TestRegexWithPlatformMetricStillChecksValues(t *testing.T) {
+	wantRed(t, "", `{__name__=~"checkout_charges_total|http_server_request_duration_seconds_count", outcome="erorr"}`, "contract-bad-enum-value", "erorr")
+	wantGreen(t, "", `{__name__=~"checkout_charges_total|http_server_request_duration_seconds_count", outcome="error"}`)
+}
+
+// Round 3 (GPT verifier): an escaped single-quoted fixed matcher is a fixed matcher, not the variable's.
+func TestEscapedSingleQuotedFixedMatcher(t *testing.T) {
+	wantRed(t, `checkout_charges_total{outcome=~'$outcome'} + checkout_charges_total{outcome='er\'ror'}`,
+		`checkout_charges_total{outcome=~'x'} + checkout_charges_total{outcome='er\'ror'}`, "contract-bad-enum-value", "er'ror")
+}
+
+// Round 3 (GPT verifier, finding 2): a fixed single-quoted matcher with an escape decodes the way MetricsQL does.
+func TestEscapedSingleQuotedHexSibling(t *testing.T) {
+	wantRed(t, `checkout_charges_total{outcome=~"$outcome"} + checkout_charges_total{outcome=~'erro\x72s'}`,
+		`checkout_charges_total{outcome=~"x"} + checkout_charges_total{outcome=~'erro\x72s'}`, "contract-bad-enum-value", "errors")
+	wantRed(t, `checkout_charges_total{outcome=~"$outcome"} + checkout_charges_total{outcome='erro\x72s'}`,
+		`checkout_charges_total{outcome=~"x"} + checkout_charges_total{outcome='erro\x72s'}`, "contract-bad-enum-value", "errors")
+}
+
+// Round 4 (GPT re-check): a bare $ is a regex end anchor, not a dashboard variable.
+func TestAnchoredTypoIsNotAVariable(t *testing.T) {
+	wantRed(t, `checkout_charges_total{outcome=~"erorr$"}`, `checkout_charges_total{outcome=~"erorr$"}`, "contract-bad-enum-value", "erorr")
+	wantGreen(t, `checkout_charges_total{outcome=~"error$"}`, `checkout_charges_total{outcome=~"error$"}`)
+	wantGreen(t, `checkout_charges_total{outcome=~"${outcome:regex}"}`, `checkout_charges_total{outcome=~"x"}`)
+	wantGreen(t, `checkout_charges_total{outcome=~"[[outcome]]"}`, `checkout_charges_total{outcome=~"x"}`)
 }

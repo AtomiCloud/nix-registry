@@ -58,11 +58,13 @@ func profileRequest(profileType, selector string, start, end int64) []byte {
 }
 
 func TestParityProfiles(t *testing.T) {
-	binaryPath := requireCommand(t, "profile")
+	// Same order as the alerts adapters: no stack skips, a stack without the
+	// freshly built binary for an available command fails.
 	base := os.Getenv("OBS_PARITY_PYROSCOPE")
 	if base == "" {
 		t.Skip("OBS_PARITY_PYROSCOPE not set")
 	}
+	binaryPath := requireCommand(t, "profile")
 	fixture := os.Getenv("OBS_PARITY_PROFILE_FIXTURE")
 	if fixture == "" {
 		fixture = "../../../tests/fixtures/profile/base-1.pb.gz"

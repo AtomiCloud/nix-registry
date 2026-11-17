@@ -10,7 +10,7 @@
 // Everything here is synthetic: the landscape, platform and service names are made up.
 package speedfixtures
 
-//go:generate go run ./gen -out ../../../../tests/fixtures/alerts-speed
+//go:generate go run ./gen/main.go -out ../../../../tests/fixtures/alerts-speed
 
 import (
 	"fmt"

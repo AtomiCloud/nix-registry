@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/AtomiCloud/obs/internal/alerts"
 	"io"
+	"os"
 )
 
 func runAlerts(args []string, stdout, stderr io.Writer) int {
@@ -25,6 +26,9 @@ func runAlerts(args []string, stdout, stderr io.Writer) int {
 	if fs.NArg() != 0 || o.Workers < 0 {
 		fmt.Fprintln(stderr, "obs alerts: unexpected argument or negative --workers")
 		return 2
+	}
+	if os.Getenv("OBS_VERIFY_PRUNE") == "1" {
+		return runAlertsVerifyPrune(o, pruneForwardedFlags(fs), stdout, stderr) // cmd_alerts_verify.go
 	}
 	return alerts.Check(o, stdout, stderr)
 }

@@ -102,7 +102,7 @@ func TestSpeedTable(t *testing.T) {
 			}
 			return fmt.Sprintf("%.2f s", c.secs)
 		}
-		fmt.Printf("| %s | %s | %s | %.2f / %.2f GB |\n", fmtN(n), show(a), show(b), float64(a.kb)/1048576, float64(b.kb)/1048576)
+		fmt.Printf("| %s | %s | %s | %.2f / %.2f GiB |\n", fmtN(n), show(a), show(b), float64(a.kb)/1048576, float64(b.kb)/1048576)
 	}
 	fmt.Printf("\n(cpus=%s, runs per cell=%d, median time, largest peak)\n", cpus, runs)
 }

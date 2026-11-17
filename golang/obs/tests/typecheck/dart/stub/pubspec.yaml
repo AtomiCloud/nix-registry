@@ -1,0 +1,4 @@
+name: diene_interfaces
+publish_to: none
+environment:
+  sdk: ^3.7.0

@@ -345,13 +345,16 @@ func BuildIncident(s *Seed, start time.Time, incident *Incident) (*Dataset, erro
 				}
 				tsNs := start.Add(at).UnixNano() + int64(frac*1e9)
 				// Separate trace randomness keeps existing metric and log seeds stable.
-				tr := newRnd(s.RandomSeed, g.k+fmt.Sprint("/trace/", e), sec)
-				hi, lo := tr.next(), tr.next()
+				// It is drawn only when a trace definition exists (nothing else reads it).
 				var trace *TTrace
-				for _, td := range traceDefs {
-					if td.From.Metric == g.metric && matches(g.where, td.From.Where) {
-						trace = makeTrace(td, g.where, res, hi, lo, uint64(tsNs), tr)
-						ds.Traces = append(ds.Traces, trace)
+				if len(traceDefs) > 0 {
+					tr := newRnd(s.RandomSeed, g.k+fmt.Sprint("/trace/", e), sec)
+					hi, lo := tr.next(), tr.next()
+					for _, td := range traceDefs {
+						if td.From.Metric == g.metric && matches(g.where, td.From.Where) {
+							trace = makeTrace(td, g.where, res, hi, lo, uint64(tsNs), tr)
+							ds.Traces = append(ds.Traces, trace)
+						}
 					}
 				}
 				for _, ld := range a.logs {

@@ -24,14 +24,19 @@ const usage = `obs: the observability check tool
 usage:
   obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
   obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names]
+  obs alerts [--dir observability] [--seed seed.yaml] [--base unix] [--out results.json]
+  obs assert --series FILE [--dir observability] [--pods n] [--unknown warn|fail|ignore]
+  obs profile summarize|baseline|compare   (obs profile help)
+  obs check [--dir observability] [--pods n] [--landscapes n]
+  obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
   obs sandbox up|down|status [--dir observability] [--project name] [--port-base n]
   obs scrape --target <url> [--label name=value] [--interval 15s] [--once]
   obs look [--base origin/main] [--all] [--json]
   obs links [--dir observability] [--seed seed.yaml] [--base unix]
-  obs alerts [--dir observability] [--seed seed.yaml] [--base unix] [--out results.json]
-  obs check [--dir observability] [--pods n] [--landscapes n]
-  obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
   obs version
+  obs store move <store> --config move.yaml [--dry-run] [--rollback]
+  obs symbols put|decode --store <dir> --file <file> [options]
+  obs size --req-per-second <n> --services <n> --pods <n> --profiled-pods <n>
 
 exit 0 when clean, 1 when a check failed, 2 on a usage or input error.
 `
@@ -47,6 +52,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "version", "--version", "-version":
 		printVersion(stdout)
 		return 0
+	case "alerts":
+		return runAlerts(args[1:], stdout, stderr)
+	case "profile":
+		return runProfile(args[1:], stdout, stderr)
 	case "scrape":
 		return runScrape(args[1:], stdout, stderr)
 	case "sandbox":
@@ -55,14 +64,20 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runLook(args[1:], stdout, stderr)
 	case "links":
 		return runLinks(args[1:], stdout, stderr)
-	case "alerts":
-		return runAlerts(args[1:], stdout, stderr)
 	case "query":
 		return runQuery(args[1:], stdout, stderr)
+	case "assert":
+		return runAssert(args[1:], stdout, stderr)
 	case "check":
 		return runCheck(args[1:], stdout, stderr)
 	case "gen":
 		return runGen(args[1:], stdout, stderr)
+	case "store":
+		return runStore(args[1:], stdout, stderr)
+	case "symbols":
+		return runSymbols(args[1:], stdout, stderr)
+	case "size":
+		return runSize(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
 		return 0
@@ -79,23 +94,27 @@ func printVersion(w io.Writer) {
 		names = append(names, name)
 	}
 	sort.Strings(names)
+	// Built-in engines and what each evaluates; every other pin is a reference
+	// (sandbox / parity containers only).
+	roles := map[string]string{
+		"VictoriaMetrics": "MetricsQL",
+		"VictoriaLogs":    "LogsQL, vendored in third_party/VictoriaLogs",
+		"Tempo":           "TraceQL",
+		"Grafana":         "alert math and state machine",
+	}
 	for _, name := range names {
 		kind := "reference"
-		if name == "VictoriaMetrics" || name == "VictoriaLogs" {
+		if roles[name] != "" {
 			kind = "engine"
 		}
-		if name == "Tempo" {
-			if bi, ok := debug.ReadBuildInfo(); ok {
-				for _, dep := range bi.Deps {
-					if dep.Path == "github.com/grafana/tempo" {
-						kind = "engine"
-					}
-				}
-			}
-		}
 		fmt.Fprintf(w, "%s %s %s", kind, name, p[name].Version)
-		if p[name].Commit != "" {
+		switch {
+		case p[name].Commit != "" && roles[name] != "":
+			fmt.Fprintf(w, " (tag commit %s; %s)", p[name].Commit, roles[name])
+		case p[name].Commit != "":
 			fmt.Fprintf(w, " (tag commit %s)", p[name].Commit)
+		case roles[name] != "":
+			fmt.Fprintf(w, " (%s)", roles[name])
 		}
 		fmt.Fprintln(w)
 	}

@@ -56,3 +56,22 @@ func TestGenerate(t *testing.T) {
 		t.Fatal(out)
 	}
 }
+
+// Opus 1 (concept 4.1): every rule flushes on shutdown, so a planned restart loses ~8% instead of ~17%.
+func TestEveryRuleFlushesOnShutdown(t *testing.T) {
+	c, err := contract.Parse("c.yaml", []byte(`
+service: s
+metrics:
+  a: { kind: counter }
+  g1: { kind: gauge, across_pods: max }
+  g2: { kind: gauge, across_pods: sum }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := string(Generate(c, "# h\n"))
+	rules, flush := strings.Count(out, "- match:"), strings.Count(out, "  flush_on_shutdown: true\n")
+	if rules != 3 || flush != rules {
+		t.Fatalf("%d rules but %d flush_on_shutdown lines:\n%s", rules, flush, out)
+	}
+}

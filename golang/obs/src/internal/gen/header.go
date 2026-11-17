@@ -2,6 +2,8 @@ package gen
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -19,9 +21,71 @@ const HashPrefix = "contract-hash: sha256:"
 func HeaderLines(c *contract.Contract) []string {
 	return []string{
 		Marker,
-		"contract: observability/contract.yaml",
+		"contract: " + ContractPath(c),
 		HashPrefix + c.Hash,
 	}
+}
+
+// ContractPath identifies the source independently of a target or contract hash.
+// In a Git repository it is relative to the repository root, even when invoked
+// from a service subdirectory. With no .git it is relative to the folder that holds
+// the observability folder (the project folder), whatever the working directory.
+// Synthetic contracts (no file on disk) keep their supplied logical filename.
+func ContractPath(c *contract.Contract) string {
+	name := c.File
+	if name == "" {
+		return "observability/contract.yaml"
+	}
+	abs, err := filepath.Abs(name)
+	if err != nil {
+		return filepath.ToSlash(filepath.Clean(name))
+	}
+	if _, err := os.Stat(abs); err != nil {
+		if !filepath.IsAbs(name) {
+			return filepath.ToSlash(filepath.Clean(name))
+		}
+		return filepath.ToSlash(filepath.Join(filepath.Base(filepath.Dir(abs)), filepath.Base(abs)))
+	}
+	base := GitRoot(filepath.Dir(abs))
+	if base == "" {
+		base = filepath.Dir(filepath.Dir(abs)) // the project folder: it holds observability/
+	}
+	if rel, err := filepath.Rel(base, abs); err == nil {
+		return filepath.ToSlash(rel)
+	}
+	return filepath.ToSlash(filepath.Join(filepath.Base(filepath.Dir(abs)), filepath.Base(abs)))
+}
+
+// GitRoot is the nearest folder at or above dir that holds .git, or "" outside a Git repository.
+func GitRoot(dir string) string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	for d := abs; ; d = filepath.Dir(d) {
+		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+			return d
+		}
+		if filepath.Dir(d) == d {
+			return ""
+		}
+	}
+}
+
+// ContractOf reads the source path in the generated header, not arbitrary body text.
+func ContractOf(content []byte) string {
+	head := content
+	if len(head) > 600 {
+		head = head[:600]
+	}
+	for _, line := range strings.Split(string(head), "\n") {
+		for _, prefix := range []string{"// contract: ", "# contract: "} {
+			if strings.HasPrefix(line, prefix) {
+				return strings.TrimPrefix(line, prefix)
+			}
+		}
+	}
+	return ""
 }
 
 // Header is HeaderLines with each line prefixed by prefix ("// ", "# ") and a trailing newline.

@@ -33,10 +33,11 @@ expect() {
 }
 
 # Full engine run, pending/recovery/no-data/error paths, and exported recording samples.
-OBS_VERIFY_FAST=1 OBS_VERIFY_SKIP=1 run alerts --dir "$o" --steps "$work/steps.json" --recorded "$work/recorded.json"
+OBS_VERIFY_FAST=1 OBS_VERIFY_SKIP=1 OBS_VERIFY_PRUNE=1 run alerts --dir "$o" --steps "$work/steps.json" --recorded "$work/recorded.json"
 expect 0 'failed=0' 'mismatches=0' 'assumed true (free-form fields)' 'events=[fixture.failed]'
 grep -qE 'verify fast: compared=[1-9][0-9]* mismatches=0' "$work/out"
 grep -qE 'verify skip: compared=[1-9][0-9]* mismatches=0' "$work/out"
+grep -qE 'verify prune: base=[0-9]+ compared=[1-9][0-9]* query_inputs=[1-9][0-9]* mismatches=0' "$work/out"
 for state in Pending Recovering NoData Error; do grep -qF "$state" "$work/steps.json"; done
 grep -qF '"__name__":"fixture_recorded"' "$work/recorded.json"
 
@@ -52,6 +53,21 @@ sed -i 's/\$A > 0.5/\$A > 0.6/' "$o/alerts/metric/critical.yaml"
 OBS_CACHE_DIR="$work/cache" run alerts --dir "$o"
 expect 0 'cached=7' 'failed=0'
 cp "$work/metric" "$o/alerts/metric/critical.yaml"
+
+# Unused trace sources are projected with their metrics; invalid sources still fail.
+cp "$o/seed.yaml" "$work/seed-traces"
+awk '
+  /^  metrics:/ { metric=1 }
+  /^  incidents:/ { print "  traces: [{from: {metric: unused}, server: fixture}]," }
+  { print }
+  metric && /^    \{/ { print "      unused: {type: counter, series: [{where: {}, share: 1}]},"; metric=0 }
+' "$work/seed-traces" >"$o/seed.yaml"
+run alerts --dir "$o"
+expect 0 'failed=0' 'pruned=1'
+sed -i 's/metric: unused/metric: missing-trace-source/' "$o/seed.yaml"
+run alerts --dir "$o"
+expect 2 'seed.yaml' 'traces[0].from.metric' 'missing-trace-source'
+cp "$work/seed-traces" "$o/seed.yaml"
 
 # A wrong threshold is red, and identifies the rule, source file, incident and value.
 cp "$o/alerts/logs/critical.yaml" "$work/logs"
@@ -114,4 +130,5 @@ expect 0 'absence check(s)' 'obs query --live: ok'
 run alerts --dir "$here/fixtures/alerts/features" --base "$(($(date +%s) + 86400))"
 expect 2 'time line ends in the future'
 
-echo 'obs alerts tests: baseline and 6 planted failures passed'
+bash "$here/alerts-verify-prune.sh" "$OBS"
+echo 'obs alerts tests: baseline and 7 planted failures passed'

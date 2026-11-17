@@ -1,0 +1,17 @@
+# Bounds and budgets that do not fit Int32, and the whole int64 range.
+service: fuzz
+types:
+  shard: { kind: int, min: 0, max: 2147483648 }
+  below: { kind: int, min: -2147483649, max: -2147483649 }
+  top: { kind: int, min: 9223372036854775807, max: 9223372036854775807 }
+  bottom: { kind: int, min: -9223372036854775808, max: -9223372036854775808 }
+  window: { kind: date, window_days: 3000000000 }
+metrics:
+  a: { kind: counter, budget: 3000000000, labels: { shard: shard, below: below } }
+  b: { kind: counter, budget: 4000000000, labels: { window: window } }
+  c: { kind: counter, budget: 2, labels: { top: top, bottom: bottom } }
+generate:
+  - { lang: go, out: gen/go }
+  - { lang: dotnet, out: gen/dotnet, namespace: Fuzz.Signals }
+  - { lang: dart, out: gen/dart, package: fuzz_signals }
+  - { lang: bun, out: gen/bun }

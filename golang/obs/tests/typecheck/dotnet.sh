@@ -11,6 +11,8 @@ DOTNET=dotnet
 [ "${1:-}" = "--dotnet" ] && DOTNET="$2"
 here="$(cd "$(dirname "$0")/.." && pwd)"
 g="$here/typecheck/dotnet"
+# shellcheck disable=SC1091 # helper is relative to this fixture tree
+source "$here/typecheck/stubs.bash"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 export HOME="$work/home" DOTNET_CLI_HOME="$work/home" DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1 \
@@ -34,6 +36,7 @@ for repo in good stress; do
   </PropertyGroup>
 </Project>
 XML
+  obs_setup_stub dotnet "$d/Signals"
   if out=$(build "$d/Signals/Signals.csproj") && grep -q 'Build succeeded' <<<"$out"; then
     echo "PASS $repo: Signals.g.cs compiles (warnings as errors, all analyzers)"
   else
@@ -58,8 +61,10 @@ cp -f "$g/good.cs" "$d/App/Program.cs"
 if out=$(build "$d/App/App.csproj") && run=$("$DOTNET" "$d/App/bin/Debug/net10.0/App.dll" 2>&1) &&
   grep -q 'label shard=3 valid=True' <<<"$run" &&
   grep -q 'checkout.charges checkout.charge.failed error 2026-11-17 provider,outcome,shard,hour' <<<"$run" &&
-  grep -q 'client default-valid=False' <<<"$run"; then
-  echo "PASS good.cs builds, runs and default(DurianSignalInt) is not Valid"
+  grep -q 'client default-valid=False' <<<"$run" &&
+  grep -q 'guard: dropped.unknown_event: event "checkout.charge.failed" is not in the generated event table' <<<"$run" &&
+  grep -q 'guard-value: dropped.unknown_value: metric "checkout.charges" label provider value "visa" is not one of \[stripe adyen paypal\]' <<<"$run"; then
+  echo "PASS good.cs builds, runs: valid calls Ok, nothing dropped, default/null! refused, a reflection-made value refused, the port refuses what its tables lack"
 else
   echo "FAIL good.cs: $(grep ' error ' <<<"${out:-}" | head -3) ${run:-}"
   fail=1

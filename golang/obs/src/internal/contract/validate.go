@@ -23,6 +23,9 @@ var (
 	keyRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
 )
 
+// Units a metric may state: none, or one that adds its suffix to the stored name (concept 11.2).
+var Units = []string{"", "s", "seconds", "By", "bytes"}
+
 // Known languages (the registry in internal/gen decides which have a generator).
 var Languages = []string{"go", "dotnet", "dart", "bun"}
 
@@ -101,6 +104,7 @@ func (c *Contract) Validate() []Issue {
 
 	// ---- metrics
 	seenName := map[string]string{}
+	seenStored := map[string]string{} // every stored series name -> the metric that owns it
 	for _, n := range c.MetricOrder {
 		m := c.Metrics[n]
 		p := "metrics." + n
@@ -112,6 +116,18 @@ func (c *Contract) Validate() []Issue {
 			add(p, "metric-duplicate", "metric %q and %q are stored under the same name %q", n, prev, stored)
 		}
 		seenName[stored] = n
+		// The stored names themselves must not intersect: a counter requests (requests_total) and a gauge
+		// requests_total would share a series name, and a lookup or an aggregation match could not tell them apart.
+		for _, sn := range StoredNames(n, m) {
+			if prev, dup := seenStored[sn]; dup && prev != n {
+				add(p, "metric-duplicate", "metric %q and %q are both stored as the series %q", n, prev, sn)
+			} else if !dup {
+				seenStored[sn] = n
+			}
+		}
+		if !in(Units, m.Unit) {
+			add(p, "metric-unit", "metric %q: unit %q is not one the stored name supports (%s); other units would store a name no OTLP to VictoriaMetrics path produces", n, m.Unit, strings.Join(Units[1:], ", "))
+		}
 		switch m.Kind {
 		case MetricCounter, MetricHistogram, MetricGauge:
 		case "":
@@ -281,9 +297,17 @@ func (c *Contract) WorstCase(name string) (int64, bool) {
 		if b == 0 {
 			b = DefaultBuckets
 		}
-		w = satMul(w, int64(b)+2)
+		w = satMul(w, satAdd(int64(b), 2))
 	}
 	return w, ok
+}
+
+// satAdd adds and saturates at MaxWorst, so b+2 can not wrap before it is multiplied.
+func satAdd(a, b int64) int64 {
+	if a >= MaxWorst || b >= MaxWorst || a > MaxWorst-b {
+		return MaxWorst
+	}
+	return a + b
 }
 
 // satMul multiplies and saturates at MaxWorst, so a product that does not fit is still over any budget.

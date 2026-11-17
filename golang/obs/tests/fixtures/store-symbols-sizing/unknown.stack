@@ -1,0 +1,3 @@
+problem: fixture
+ at fixture+0x1234
+build-id: 00112233445566778899aabbccddeeff

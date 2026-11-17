@@ -1,2 +1,3 @@
 using Checkout.Signals;
-var t = new DurianSignalInt<ShardSpec>(3);
+using AtomiCloud.Diene.Interfaces;
+var t = new Int<ShardSpec>(3);

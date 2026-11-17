@@ -1,0 +1,26 @@
+// planted forging (review round 5): exact keys on unexported fields. Reflection on them panics; the guard must
+// never panic: it refuses the type before reading any field.
+package main
+
+import (
+	"context"
+	"fmt"
+
+	_ "example.com/app/signals"
+	obs "github.com/ProtoDurian/diene.go-interfaces/obs"
+)
+
+type raw struct {
+	provider string `obs:"provider"`
+	outcome  string `obs:"outcome"`
+	shard    int    `obs:"shard"`
+	hour     int    `obs:"hour"`
+}
+
+func main() {
+	n := obs.NewCounter[raw]("checkout.charges")
+	fmt.Println("result:", obs.Add(context.Background(), n, raw{"visa", "ok", 3, 4}))
+	if obs.Dropped("unknown_key") != 1 {
+		panic("the refusal was not counted in dropped.unknown_key")
+	}
+}
