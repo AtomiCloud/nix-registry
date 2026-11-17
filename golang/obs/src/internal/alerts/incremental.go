@@ -242,7 +242,7 @@ func resultCacheKey(p *Project, a *Alert, binaryID string, base time.Time) (stri
 	if sensitive {
 		k = fmt.Sprintf("%s-%d", k, base.UnixMilli())
 	}
-	return k, true
+	return k + traceRangePhase(rules, base), true
 }
 
 func wheresCompatible(a, b map[string]string) bool {
@@ -349,18 +349,25 @@ func shiftRun(ar AlertRun, run Run, d int64) AlertRun {
 
 // skipPlan: alert k in incident run r reuses the baseline result when the incident
 // cannot change any of its inputs.
-func skipPlan(p *Project) func(a *Alert, run Run) bool {
-	if noSkip {
+func skipPlan(p *Project, runs []Run) func(a *Alert, run Run) bool {
+	if noSkip || len(runs) == 0 {
 		return nil
 	}
 	recorded := map[string]*Alert{}
+	records := make([]*Alert, 0, len(p.Records))
 	for i := range p.Records {
+		records = append(records, &p.Records[i])
 		if p.Records[i].Record != nil {
 			recorded[p.Records[i].Record.Metric] = &p.Records[i]
 		}
 	}
 	return func(a *Alert, run Run) bool {
 		if run.Incident == nil {
+			return false
+		}
+		// A reused result is the baseline's shifted by the run offset; a range Tempo
+		// answer (this rule's or a recording rule's) only shifts by whole steps.
+		if !traceShiftExact(append([]*Alert{a}, records...), run.Start.Sub(runs[0].Start)) {
 			return false
 		}
 		return !affected(p, a, run.Incident, recorded, 0)

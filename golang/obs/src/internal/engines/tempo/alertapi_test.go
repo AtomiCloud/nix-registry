@@ -33,9 +33,12 @@ func alertEngine() (*TempoEngine, time.Time) {
 	return NewTempoEngine(traces), at
 }
 
+// later is a frontend now far after every window these tests read: no cutoff applies.
+var later = time.Unix(1800000000, 0).Add(48 * time.Hour)
+
 func TestQueryInstantCountsTheWholeWindow(t *testing.T) {
 	e, at := alertEngine()
-	resp, err := e.QueryInstant(`{ status = error } | count_over_time() by (span.code)`, at, at.Add(time.Minute))
+	resp, err := e.QueryInstant(DefaultFrontend, later, `{ status = error } | count_over_time() by (span.code)`, at, at.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,22 +53,22 @@ func TestQueryInstantCountsTheWholeWindow(t *testing.T) {
 		t.Fatalf("label keeps the OTLP int type: %+v", l[0].Value)
 	}
 	// rate() over the instant window is spans per second of the whole window.
-	resp, err = e.QueryInstant(`{ } | rate()`, at, at.Add(2*time.Minute))
+	resp, err = e.QueryInstant(DefaultFrontend, later, `{ } | rate()`, at, at.Add(2*time.Minute))
 	if err != nil || len(resp.Series) != 1 || resp.Series[0].Value != 1 {
 		t.Fatalf("rate: %+v %v", resp, err)
 	}
 	// Nothing in the window: no series (Grafana sees no frames, i.e. NoData).
-	resp, err = e.QueryInstant(`{ status = error } | rate()`, at.Add(-time.Hour), at.Add(-time.Minute))
+	resp, err = e.QueryInstant(DefaultFrontend, later, `{ status = error } | rate()`, at.Add(-time.Hour), at.Add(-time.Minute))
 	if err != nil || len(resp.Series) != 0 {
 		t.Fatalf("empty window: %+v %v", resp, err)
 	}
-	if _, err := e.QueryInstant(`{} | rate()`, at, at); !errors.Is(err, ErrEndMustBeGreaterThanStart) {
+	if _, err := e.QueryInstant(DefaultFrontend, later, `{} | rate()`, at, at); !errors.Is(err, ErrEndMustBeGreaterThanStart) {
 		t.Fatalf("empty window must be Tempo's validation error: %v", err)
 	}
-	if _, err := e.QueryRange(`{} | rate()`, at, at, time.Second); !errors.Is(err, ErrEndMustBeGreaterThanStart) {
+	if _, err := e.QueryRange(DefaultFrontend, later, `{} | rate()`, at, at, time.Second); !errors.Is(err, ErrEndMustBeGreaterThanStart) {
 		t.Fatalf("empty range must be Tempo's validation error: %v", err)
 	}
-	if _, err := e.QueryInstant(`{} | no_such_fn()`, at, at.Add(time.Minute)); err == nil {
+	if _, err := e.QueryInstant(DefaultFrontend, later, `{} | no_such_fn()`, at, at.Add(time.Minute)); err == nil {
 		t.Fatal("invalid query passed")
 	}
 }
@@ -73,11 +76,11 @@ func TestQueryInstantCountsTheWholeWindow(t *testing.T) {
 func TestQueryRangeBucketsSumToInstant(t *testing.T) {
 	e, at := alertEngine()
 	q := `{ status = error } | count_over_time()`
-	inst, err := e.QueryInstant(q, at, at.Add(2*time.Minute))
+	inst, err := e.QueryInstant(DefaultFrontend, later, q, at, at.Add(2*time.Minute))
 	if err != nil || len(inst.Series) != 1 {
 		t.Fatalf("instant: %+v %v", inst, err)
 	}
-	rr, err := e.QueryRange(q, at, at.Add(2*time.Minute), time.Minute)
+	rr, err := e.QueryRange(DefaultFrontend, later, q, at, at.Add(2*time.Minute), time.Minute)
 	if err != nil || len(rr.Series) != 1 {
 		t.Fatalf("range: %+v %v", rr, err)
 	}

@@ -1066,13 +1066,13 @@ func (e *TempoEngine) metricsRaw(q string, start, end time.Time, step time.Durat
 	}
 	req := &tempopb.QueryRangeRequest{Query: q, Start: uint64(start.UnixNano()), End: uint64(end.UnixNano()), Step: uint64(step)}
 	req.SetInstant(false)
+	traceql.AlignRequest(req)
 	return e.metricsReq(req)
 }
 
-// metricsReq runs a prepared request (range or instant) over the shards and
-// combines the shard results with Tempo's "final" aggregation.
+// metricsReq runs a prepared (already aligned) request, range or instant, over the
+// shards and combines the shard results with Tempo's "final" aggregation.
 func (e *TempoEngine) metricsReq(req *tempopb.QueryRangeRequest) (*tempopb.QueryRangeResponse, error) {
-	traceql.AlignRequest(req)
 	// spans counted must start in (req.Start, req.End]; their traces overlap that window
 	lo, hi := e.window(req.Start, req.End)
 	shards := tqShards(lo, hi, e.Workers)

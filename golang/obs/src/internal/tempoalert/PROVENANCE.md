@@ -18,10 +18,15 @@ verbatim except the metrics-query pattern):
   fails in Grafana's expression engine (`pkg/expr/converter.go:79-90`, Grafana v13.3.0).
 
 Tempo 3.1.1 server behaviour the port relies on (commit `9db7df79d2af`):
-`modules/frontend/metrics_query_handler.go:139-151, 224-267` (instant rewrite and
-translation), `modules/frontend/metrics_query_range_handler.go:52-54, 235-255`
-(default step, exemplar default), `pkg/api/http.go:685-712` (step parsing),
-`pkg/traceql/engine_metrics.go:37-78` (DefaultQueryRangeStep).
+`modules/frontend/metrics_query_handler.go:139-155, 224-267` (instant rewrite, end
+cutoff and translation), `modules/frontend/metrics_query_range_handler.go:29, 52-54,
+143-160, 199-255` (end cutoff, validation, alignment, default step, exemplar default),
+`modules/frontend/metrics_query_validation.go:14-54` (max_duration, max_intervals),
+`modules/frontend/config.go:53-54, 89, 128-154` (query_end_cutoff and defaults),
+`modules/frontend/metrics_query_range_sharder.go:111` (second alignment, trimmed by the
+combiner), `pkg/api/http.go:685-712` (step parsing), `pkg/traceql/engine_metrics.go:37-78`
+(DefaultQueryRangeStep), `:175-233, 2083-2085` (AlignRequest, AlignEndToLeft, bucket
+bounds). The frontend part lives in `internal/engines/tempo/alertapi.go`.
 
 Grafana 13.3.0 gates Tempo alerting behind the experimental `tempoAlerting`
 feature toggle (`pkg/services/featuremgmt/registry.go:1708-1714`,

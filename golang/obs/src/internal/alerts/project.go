@@ -206,6 +206,15 @@ func loadProject(dir, seedPath string) (*Project, error) {
 // the previous incident's samples or a negative offset from reading the next run.
 func queryLookback(q Query, interval time.Duration) time.Duration {
 	lookback := q.From + 5*time.Minute
+	if q.Datasource == "traces" && q.Tempo != nil && !q.Tempo.Instant() {
+		// A range request reads up to two steps before now-from: Tempo's
+		// AlignRequest rounds the start down to the step and then subtracts one
+		// more step (pkg/traceql/engine_metrics.go:175-187).
+		at := time.Unix(0, 0)
+		if step, err := q.Tempo.RangeStep(at.Add(-q.From), at.Add(-q.To)); err == nil {
+			lookback += 2 * step
+		}
+	}
 	if q.Datasource != "metrics" {
 		return lookback
 	}

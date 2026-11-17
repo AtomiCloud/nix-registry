@@ -45,7 +45,7 @@ func traceRule(t *testing.T, q Query) *cRule {
 
 func TestTraceQLInstantAlertIsASeriesInput(t *testing.T) {
 	start := time.Unix(1800000000, 0).UTC()
-	eng := Engines{Datasources: map[string]DatasourceEngine{"traces": tracesEngine{traceTestEngine(start)}}}
+	eng := Engines{Datasources: map[string]DatasourceEngine{"traces": tracesEngine{e: traceTestEngine(start)}}}
 	m := tempoalert.Model{Query: `{ status = error } | rate() by (span.outcome)`, QueryType: "traceql", MetricsQueryType: "instant"}
 	q := Query{Datasource: "traces", UID: "fixture-traces", Expr: m.Query, Tempo: &m, From: time.Minute}
 	run := Run{Name: "spike", Start: start, End: start.Add(20 * time.Minute)}
@@ -93,7 +93,9 @@ func TestTraceQLRangeAlertUsesStepAndWindow(t *testing.T) {
 	step := "1m"
 	m := tempoalert.Model{Query: `{ status = error } | count_over_time() with (exemplars=false)`, QueryType: "traceql", Step: &step}
 	q := Query{Datasource: "traces", UID: "fixture-traces", Expr: m.Query, Tempo: &m, From: 3 * time.Minute}
-	rs, err := tracesEngine{te}.Instant(q, start.Add(12*time.Minute))
+	// At 12m30s the end (12m30s) is clamped to now - 30 s = 12m, a step boundary, so
+	// the answer holds every bucket up to (11m, 12m].
+	rs, err := tracesEngine{e: te}.Instant(q, start.Add(12*time.Minute+30*time.Second))
 	if err != nil || len(rs) != 1 {
 		t.Fatalf("range: %+v %v", rs, err)
 	}
@@ -107,7 +109,7 @@ func TestTraceQLRangeAlertUsesStepAndWindow(t *testing.T) {
 		}
 	}
 	if total != 240 {
-		t.Fatalf("error spans in [9m,12m]: got %v want 240", total)
+		t.Fatalf("error spans in (8m, 12m]: got %v want 240", total)
 	}
 	// The cache key separates instant from range and the step.
 	other := m
@@ -116,7 +118,7 @@ func TestTraceQLRangeAlertUsesStepAndWindow(t *testing.T) {
 		t.Fatal("cache key ignores metricsQueryType")
 	}
 	// An empty relative range is Tempo's validation error: an Error input, not data.
-	if _, err := (tracesEngine{te}).Instant(Query{Datasource: "traces", Expr: m.Query, Tempo: &m}, start); err == nil || !strings.Contains(err.Error(), "end must be greater than start") {
+	if _, err := (tracesEngine{e: te}).Instant(Query{Datasource: "traces", Expr: m.Query, Tempo: &m}, start); err == nil || !strings.Contains(err.Error(), "end must be greater than start") {
 		t.Fatalf("empty window: %v", err)
 	}
 }

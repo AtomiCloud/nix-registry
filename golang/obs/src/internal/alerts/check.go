@@ -25,10 +25,17 @@ import (
 
 type Options struct {
 	Dir, SeedPath, Out, Steps, Recorded string
-	Base                                int64
-	Workers                             int
-	LogsGuard                           QueryGuard
+	// TempoConfig is a Tempo config file whose query_frontend settings (end
+	// cutoff, metrics max_duration and max_intervals) trace rules run under;
+	// empty means Tempo 3.1.1's defaults.
+	TempoConfig string
+	Base        int64
+	Workers     int
+	LogsGuard   QueryGuard
 }
+
+// TempoAlertingNote is printed once per obs alerts run that has trace rules.
+const TempoAlertingNote = "note: Grafana 13.3.0 runs Tempo alerts only with feature toggle tempoAlerting enabled (FROM SOURCE: without it the Tempo plugin's alerting flag is false); enable it in the Grafana chart"
 
 // Check evaluates each rule at every minute on the baseline and each incident.
 func Check(o Options, stdout, stderr io.Writer) int {
@@ -59,6 +66,25 @@ func Check(o Options, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintln(stderr, "obs alerts:", err)
 		return 2
+	}
+	var tempoFrontend *tempo.Frontend
+	if o.TempoConfig != "" {
+		b, err := os.ReadFile(o.TempoConfig)
+		if err != nil {
+			fmt.Fprintln(stderr, "obs alerts: --tempo-config:", err)
+			return 2
+		}
+		fe, err := tempo.ParseFrontend(b)
+		if err != nil {
+			fmt.Fprintf(stderr, "obs alerts: --tempo-config %s: %v\n", o.TempoConfig, err)
+			return 2
+		}
+		tempoFrontend = &fe
+		// Part of every cached result's key: the settings change what trace rules read.
+		p.Files["tempo-frontend"] = []byte(fmt.Sprintf("%+v", fe))
+	}
+	if hasTraceRules(p) {
+		fmt.Fprintln(stdout, TempoAlertingNote)
 	}
 	var events logevent.Events
 	contractPath := filepath.Join(o.Dir, "contract.yaml")
@@ -264,7 +290,7 @@ func Check(o Options, stdout, stderr io.Writer) int {
 			if o.Workers != 1 {
 				te.Workers = 1
 			}
-			eng.Datasources["traces"] = tracesEngine{te}
+			eng.Datasources["traces"] = tracesEngine{e: te, fe: tempoFrontend}
 			if verifyFast {
 				fmt.Fprintln(stdout, "verify fast: trace rules always take the full Grafana path (Tempo answers with series frames; the light path reads numbers only), nothing to compare for them")
 			}
@@ -275,7 +301,7 @@ func Check(o Options, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "obs alerts:", err)
 			return 1
 		}
-		ars, _ = evaluateAll(p, runs, eng, cache, o.Workers, o.Steps != "", skipPlan(p))
+		ars, _ = evaluateAll(p, runs, eng, cache, o.Workers, o.Steps != "", skipPlan(p, runs))
 		cache.capturePruneSnapshot("alerts")
 		pruneInputs = cache.pruneHistory
 		if cacheDir != "" {

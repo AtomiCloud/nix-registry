@@ -70,6 +70,11 @@ awk '
 ' "$work/seed-traces" >"$o/seed.yaml"
 run alerts --dir "$o"
 expect 0 'failed=0' 'pruned=1'
+if grep -qF 'tempoAlerting' "$work/out"; then
+  cat "$work/out"
+  echo 'alerts: tempoAlerting note in a run without trace rules'
+  exit 1
+fi
 sed -i 's/metric: unused/metric: missing-trace-source/' "$o/seed.yaml"
 run alerts --dir "$o"
 expect 2 'seed.yaml' 'traces[0].from.metric' 'missing-trace-source'
@@ -138,6 +143,57 @@ run alerts --dir "$o"
 expect 1 'alerts/traces-latency/critical.yaml' 'rule traces-latency query A' '[tempo-alert-range-exemplars]'
 cp "$work/traces-latency-rule" "$o/alerts/traces-latency/critical.yaml"
 
+# An incident that changes only a metric no trace definition reads makes no different
+# traces: OBS_VERIFY_SKIP=1 reuses both trace rules from the baseline, evaluates them
+# anyway and finds the same answers.
+cp "$o/seed.yaml" "$work/seed"
+awk '
+  { print }
+  /^      fixture.requests:/ { req=1; next }
+  req { print "      fixture.queue: { type: counter, series: [{ where: {}, share: 1 }] },"; req=0 }
+' "$work/seed" | sed 's/incidents: \[spike\]/incidents: [spike, queue]/' >"$o/seed.yaml"
+cat >"$o/incidents/queue.yaml" <<'YAML'
+{
+  story: A queue the traces do not come from fills up,
+  window: { start: 10m, duration: 10m },
+  change: [{ metric: fixture.queue, rate: 50/s }],
+  expect: { quiet: [traces-errors, traces-latency] },
+}
+YAML
+OBS_VERIFY_SKIP=1 run alerts --dir "$o" --steps "$work/steps.json"
+expect 0 'failed=0' 'rule traces-errors window queue expect quiet' 'rule traces-latency window queue expect quiet'
+grep -qE 'verify skip: compared=[1-9][0-9]* mismatches=0; reused=[1-9][0-9]*' "$work/out" || {
+  cat "$work/out"
+  echo 'alerts: verify skip compared nothing, found a mismatch or reused nothing'
+  exit 1
+}
+for rule in traces-errors traces-latency; do
+  grep -qE "\"alert\":\"$rule\",\"run\":\"queue\",[^}]*\"reused\":\"baseline\"" "$work/steps.json" || {
+    echo "alerts: trace rule $rule was not reused for the queue incident"
+    exit 1
+  }
+done
+grep -cF 'tempoAlerting' "$work/out" | grep -qx 1 || {
+  cat "$work/out"
+  echo 'alerts: want exactly one tempoAlerting note per run with trace rules'
+  exit 1
+}
+rm "$o/incidents/queue.yaml"
+cp "$work/seed" "$o/seed.yaml"
+
+# --tempo-config: Tempo's query_frontend.query_end_cutoff decides what trace rules read.
+# A 1 h cutoff swallows every trace window: Tempo answers 400, the rules are in Error
+# and the spike expectation fails naming the rule; a malformed value is refused.
+printf 'server:\n  http_listen_port: 3200\nquery_frontend:\n  query_end_cutoff: 0s\n' >"$work/tempo.yaml"
+run alerts --dir "$o" --tempo-config "$work/tempo.yaml"
+expect 0 'failed=0'
+printf 'query_frontend:\n  query_end_cutoff: 1h\n' >"$work/tempo.yaml"
+run alerts --dir "$o" --tempo-config "$work/tempo.yaml"
+expect 1 'FAIL alerts/traces-errors/critical.yaml rule traces-errors window spike expect fire' 'FAIL alerts/traces-latency/critical.yaml rule traces-latency window spike expect fire'
+printf 'query_frontend:\n  query_end_cutoff: soon\n' >"$work/tempo.yaml"
+run alerts --dir "$o" --tempo-config "$work/tempo.yaml"
+expect 2 'tempo.yaml' 'query_frontend.query_end_cutoff'
+
 # Absence alerts on a healthy seed are judged like thresholds by query --live.
 cat >"$o/alerts/metric/critical.yaml" <<'YAML'
 apiVersion: grafana.integreatly.org/v1beta1
@@ -168,4 +224,4 @@ run alerts --dir "$here/fixtures/alerts/features" --base "$(($(date +%s) + 86400
 expect 2 'time line ends in the future'
 
 bash "$here/alerts-verify-prune.sh" "$OBS"
-echo 'obs alerts tests: baseline and 11 planted failures passed'
+echo 'obs alerts tests: baseline and 13 planted failures passed'

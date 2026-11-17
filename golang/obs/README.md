@@ -762,6 +762,7 @@ OBS_VERIFY_FAST=1 OBS_VERIFY_SKIP=1 obs alerts --dir observability
 OBS_VERIFY_PRUNE=1 obs alerts --dir observability
 OBS_CACHE_DIR=.cache/obs obs alerts --dir observability
 obs alerts --dir observability --steps steps.json --recorded recorded.json
+obs alerts --dir observability --tempo-config tempo.yaml   # Tempo's query_frontend settings for trace rules
 ```
 
 The seed's `incidents: [spike]` reads `incidents/spike.yaml`. An incident declares
@@ -865,6 +866,31 @@ preinstalls it (`pkg/setting/setting_plugins.go:43`); the paired plugin release 
   query into one range bucket of `end-start` and keeps each series' first sample
   (`modules/frontend/metrics_query_handler.go:139-151,250-267`); an empty window is
   Tempo's `end must be greater than start` error (an Error input).
+- **Tempo's query frontend** (`engines/tempo/alertapi.go`): obs simulates every
+  evaluation at its tick `t`, and Tempo's frontend measures against its own `now`, which
+  obs takes to be `t` (Grafana's request reaches Tempo milliseconds later; with whole-second
+  ends and steps that gives the same request). `query_frontend.query_end_cutoff` (default
+  30 s, `modules/frontend/config.go:154`) then applies, in Tempo's order:
+  - instant (`metrics_query_handler.go:145-150,224-245`): the end moves back by the fewest
+    whole seconds that put it at or before `now - cutoff`; a window left empty is
+    `query window falls entirely within query_end_cutoff` (HTTP 400), an Error input.
+    So `relativeTimeRange: {from: 60}` reads `(t-60s, t-30s]`, and `from: 30` is an Error
+    on every tick;
+  - range (`metrics_query_range_handler.go:143-160,199-232`): clamp the end to
+    `now - cutoff`, validate, `AlignRequest` (start down to the step, then one step
+    earlier; end up to the step), then clamp again and round the end down to the step
+    (`AlignEndToLeft`). With `step: 1m` the `(t-60s, t]` bucket is never in the answer;
+  - validation (`metrics_query_validation.go:18-54`): `metrics.max_duration` (24 h) and
+    `metrics.max_intervals` (10 000) fail the query (an Error input).
+
+  `--tempo-config FILE` reads `query_frontend.query_end_cutoff`,
+  `query_frontend.metrics.max_duration` and `query_frontend.metrics.max_intervals` from a
+  Tempo config file (the YAML Tempo reads with `-config.file`); absent keys keep the
+  defaults above. Because a range request starts up to two steps before `now-from`, runs
+  are spaced at least `from + 2*step + 5m` apart. Tempo aligns range requests to whole
+  steps since the Unix epoch, so a range trace rule reuses a baseline result
+  (`OBS_VERIFY_SKIP`, incident skipping) only when the run offset is a whole number of
+  steps, and its cached result is keyed by the base's position inside each step.
 - **Frames** (`pkg/tempo/traceql/metrics.go:16-142`): every Tempo series is a
   time + value frame, so Grafana's expression engine reads it as a **series**
   (`pkg/expr/converter.go:69-118`): reduce it before a threshold, as for range metric
@@ -887,15 +913,20 @@ preinstalls it (`pkg/setting/setting_plugins.go:43`); the paired plugin release 
   `metricsQueryType: instant`, or end the query with `with (exemplars=false)`. The TraceQL
   is parsed by Tempo and every span/resource attribute goes through the contract's span
   attribute check (`traceql-attribute`), like a dashboard query.
-- Grafana 13.3.0 runs Tempo alert rules only with the experimental `tempoAlerting`
-  feature toggle on (`pkg/services/featuremgmt/registry.go:1708-1714`,
-  `pluginsintegration/pipeline/pipeline.go:46-50`); obs evaluates them as if it were on.
+- Grafana 13.3.0 runs Tempo alerts only with feature toggle `tempoAlerting` enabled
+  (FROM SOURCE: without it the Tempo plugin's alerting flag is false,
+  `pkg/services/featuremgmt/registry.go:1708-1714`,
+  `pluginsintegration/pipeline/pipeline.go:46-50`); enable it in the Grafana chart. obs
+  evaluates the rules as if it were on and prints this as one note per `obs alerts` run
+  that has trace rules. Whether provisioned rules evaluate without the toggle (or only
+  the rule editor hides them) is NOT TESTED.
 
 Seed and self-checks: rules that read traces keep every trace definition and its source
 metric (pruning drops traces only when no rule reads them or log trace IDs). The seed
 spans are indexed once for all runs; each series' spans share one attribute map. An
 incident only re-evaluates trace rules when it changes a series that is a trace source,
-so `OBS_VERIFY_SKIP=1` compares the reuse of the others. `OBS_VERIFY_PRUNE=1` compares
+so `OBS_VERIFY_SKIP=1` compares the reuse of the others (range trace rules also need
+a whole-step run offset, above). `OBS_VERIFY_PRUNE=1` compares
 every Tempo answer per minute (the raw query input) between the pruned and the full run.
 `OBS_VERIFY_FAST=1` prints a note and compares nothing for trace rules: they always take
 the full Grafana path (the light path reads numbers; Tempo answers with series).
@@ -903,18 +934,24 @@ the full Grafana path (the light path reads numbers; Tempo answers with series).
 MEASURED: `tests/alerts.sh` (an instant error-rate rule and an exemplar-free range p90
 rule fire inside the incident window and stay quiet on the baseline; planted: a wrong
 threshold names rule, file, window and value; a rule firing on the baseline; an
-undeclared span attribute; a range query with exemplars), `tests/alerts-verify-prune.sh`
+undeclared span attribute; a range query with exemplars; an incident that changes only a
+metric no trace comes from: `OBS_VERIFY_SKIP=1` reuses both trace rules, `reused > 0`,
+`mismatches=0`; exactly one `tempoAlerting` note), `tests/alerts-verify-prune.sh`
 (planted span durations make the trace inputs differ), Go tests in `internal/tempoalert`,
-`internal/engines/tempo` (`alertapi_test.go`), `internal/alerts` (`traces_test.go`),
+`internal/engines/tempo` (`alertapi_test.go`, `frontend_test.go`: the end cutoff,
+validation, alignment and `--tempo-config` parsing), `internal/alerts` (`traces_test.go`,
+`traces_cutoff_test.go`: `from: 30` instant is an Error on every tick, step `1m` drops
+the `(t-60s, t]` bucket, the run gap covers two 30m steps, whole-step reuse and cache keys),
 `internal/check`, `internal/seed`; speed in the table below. FROM SOURCE: everything in
 the list above. NOT TESTED: trace alert results against real Grafana and Tempo (the
 parity job has no trace rule yet; adding one is cheap: start the parity Grafana with
 `GF_FEATURE_TOGGLES_ENABLE=tempoAlerting`, provision a Tempo datasource, push the alert
 seed's traces with the parity Tempo test's `loadTempo`, and add one Tempo rule to
 `TestParityAlertEval`, which already compares per-minute states and values with
-`/api/v1/eval`); Tempo's server-side limits (`query_end_cutoff`, `max_duration`,
-`max_intervals`, `max_response_series`; obs's time line ends in the past, so the end
-cutoff never applies); exemplar frames themselves (refused, never produced); `obs query
+`/api/v1/eval`); Tempo's `max_response_series` and per-tenant `max_metrics_duration`
+overrides (not modelled); whether provisioned Tempo rules evaluate without the
+`tempoAlerting` toggle; a Helm chart's values file for `--tempo-config` (obs reads the
+rendered Tempo config only); exemplar frames themselves (refused, never produced); `obs query
 --live` for trace alert queries (unchanged: not run).
 
 ### Existing query-check limits
