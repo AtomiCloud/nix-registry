@@ -110,7 +110,11 @@ func (r *cRule) evalTickLight(qd map[string]qTick, loaded map[string]bool) []eva
 		vals := make([]mathexp.LVal, 0, len(q.nums))
 		for i := range q.nums {
 			v := q.nums[i].v
-			vals = append(vals, mathexp.LVal{Kind: mathexp.LNumber, Labels: q.nums[i].labels, V: &v})
+			var value *float64
+			if !q.nums[i].null {
+				value = &v
+			}
+			vals = append(vals, mathexp.LVal{Kind: mathexp.LNumber, Labels: q.nums[i].labels, V: value})
 		}
 		if len(vals) == 0 {
 			ds := queryUID(r.a.Queries[ref])

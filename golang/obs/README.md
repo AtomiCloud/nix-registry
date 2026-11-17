@@ -376,7 +376,8 @@ minute's evaluation and state. Both exports bypass the persistent result cache.
 
 LogsQL queries use each rule's `relativeTimeRange.from/to`, parse at the resulting
 end time and add the exclusive `[start, end)` range. Final `stats by (...)` fields
-are instance labels. With a contract, `durian.cloud/event` filters are checked
+are instance labels, alongside `__name__` for each stats output column. A numeric
+null keeps that instance's labels and evaluates as NoData. With a contract, `durian.cloud/event` filters are checked
 against its event list. Other field-value filters are printed as assumptions and
 removed from the parsed AST; event filters in `_stream` or `or`, unknown events
 and stats reading field values are refused. Seed events must be declared too.
@@ -386,8 +387,10 @@ The numeric light path is checked against the vendored Grafana dataframe path
 with `OBS_VERIFY_FAST=1`; unchanged incident inputs are compared with their
 baseline reuse by `OBS_VERIFY_SKIP=1`. Any mismatch fails the command. The result
 cache includes the binary, seed, incidents, recording rules, contract and each
-alert's normalized CR definition. Time-derived queries also include the base
-timestamp and do not reuse shifted baseline results. Storage uses `OBS_TMPDIR`,
+alert's normalized CR definition. Time-derived queries (including sample
+timestamps) also include the base timestamp and do not reuse shifted baseline
+results. Wall-clock/random queries and a configured query guard bypass persistent
+caching. Storage uses `OBS_TMPDIR`,
 otherwise a writable `/dev/shm` with at least 1 GiB free (else the system temp
 directory); VictoriaMetrics caches are capped at 512 MiB.
 Unused metric series are omitted and VictoriaLogs starts only when needed.

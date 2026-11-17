@@ -22,6 +22,15 @@ func TestRuleLabelsPreserveHysteresisIdentity(t *testing.T) {
 			t.Fatal("labels lost", s.labels)
 		}
 	}
+	res := evalResult{state: stError, labels: data.Labels{"datasource_uid": "real", "ref_id": "A"}, key: "origin"}
+	r.a.Labels = map[string]string{"datasource_uid": "overridden", "ref_id": "B"}
+	rs = newRuleStates(r)
+	rs.process(time.Now(), []evalResult{res})
+	for _, s := range rs.states {
+		if s.labels["datasource_uid"] != "real" || s.labels["ref_id"] != "A" {
+			t.Fatal("rule labels overrode reserved Error origin", s.labels)
+		}
+	}
 }
 
 func TestSkipFootprintsAndTimeSensitivity(t *testing.T) {
@@ -37,11 +46,71 @@ func TestSkipFootprintsAndTimeSensitivity(t *testing.T) {
 		{`time() > 1`, true},
 		{`year()`, true},
 		{`requests_total @ 1700000000`, true},
+		{`timestamp(requests_total)`, true},
+		{`timestamp_with_name(requests_total)`, true},
+		{`tfirst_over_time(requests_total[5m])`, true},
+		{`tlast_over_time(requests_total[5m])`, true},
+		{`tlast_change_over_time(requests_total[5m])`, true},
+		{`tmin_over_time(requests_total[5m])`, true},
+		{`tmax_over_time(requests_total[5m])`, true},
 	} {
 		a := Alert{Queries: map[string]Query{"A": {Datasource: "metrics", Expr: tc.q}}}
 		if got := affected(p, &a, inc, nil, 0); got != tc.affected {
 			t.Fatalf("%s affected=%v want %v", tc.q, got, tc.affected)
 		}
+	}
+}
+
+type timestampEngine struct{}
+
+func (timestampEngine) Instant(_ Query, at time.Time) ([]Result, error) {
+	return []Result{{Points: map[int64]float64{at.UnixMilli(): float64(at.Unix())}}}, nil
+}
+
+func TestTimestampInputsNeverReuseShiftedConditions(t *testing.T) {
+	oldVerify, oldSkip := verifySkip, noSkip
+	verifySkip, noSkip = true, false
+	defer func() { verifySkip, noSkip = oldVerify, oldSkip }()
+	SkipChecked, SkipMismatch = 0, 0
+	a := Alert{ID: "timestamp", Condition: "$A > 1700001800", Queries: map[string]Query{"A": {Datasource: "metrics", Expr: "timestamp(requests_total)"}}}
+	p := &Project{Alerts: []Alert{a}, Files: map[string][]byte{"seed.yaml": []byte("fixture")}}
+	base := time.Unix(1700000000, 0)
+	inc := &Incident{Name: "spike"}
+	runs := []Run{{Name: "baseline", Start: base, End: base.Add(20 * time.Minute)}, {Name: "spike", Start: base.Add(time.Hour), End: base.Add(80 * time.Minute), Incident: inc}}
+	eng := Engines{Datasources: map[string]DatasourceEngine{"metrics": timestampEngine{}}}
+	ars, _ := evaluateAll(p, runs, eng, &queryCache{m: map[qKey]*qEntry{}}, 1, false, skipPlan(p))
+	if ars[0].Fired || !ars[1].Fired || ars[1].Reused != "" || SkipMismatch != 0 {
+		t.Fatalf("shifted timestamp condition reused: %+v mismatches=%d", ars, SkipMismatch)
+	}
+	first, ok := resultCacheKey(p, &a, "binary", base)
+	if !ok {
+		t.Fatal("deterministic timestamp query should be cacheable at the same base")
+	}
+	second, ok := resultCacheKey(p, &a, "binary", base.Add(time.Hour))
+	if !ok || first == second {
+		t.Fatal("timestamp-valued query cache key omitted base")
+	}
+	dir := t.TempDir()
+	cachePut(dir, first, base.UnixMilli(), ars[:1])
+	if _, hit := cacheGet(dir, second, base.Add(time.Hour).UnixMilli()); hit {
+		t.Fatal("persistent cache reused the old timestamp condition at a different base")
+	}
+	for _, expr := range []string{"now()", "rand()", "rand_normal()"} {
+		a.Queries["A"] = Query{Datasource: "metrics", Expr: expr}
+		if _, ok := resultCacheKey(p, &a, "binary", base); ok {
+			t.Fatalf("volatile query %s must not persist results", expr)
+		}
+	}
+}
+
+func TestTemporalRecordingInputsInvalidateDownstreamCache(t *testing.T) {
+	a := Alert{ID: "a", Queries: map[string]Query{"A": {Datasource: "metrics", Expr: "recorded"}}}
+	p := &Project{Records: []Alert{{Queries: map[string]Query{"A": {Datasource: "metrics", Expr: "tlast_over_time(requests_total[5m])"}}}}}
+	base := time.Unix(1700000000, 0)
+	x, _ := resultCacheKey(p, &a, "binary", base)
+	y, _ := resultCacheKey(p, &a, "binary", base.Add(time.Hour))
+	if x == y {
+		t.Fatal("time-valued recording rule did not invalidate downstream alert cache")
 	}
 }
 
@@ -93,5 +162,12 @@ func TestVerdictsFailOutOfWindowAndUnlistedFiring(t *testing.T) {
 	bad := verdicts(p, []Run{run}, []AlertRun{ar, {Alert: "b", Run: "spike", Fired: true}})
 	if bad[0].Pass || bad[1].Pass {
 		t.Fatalf("missed unexpected firing %+v", bad)
+	}
+	inc.Expect.ResolveWithin = "10m"
+	inc.Expect.FireWithin = "10m"
+	ar.FirstFireMs = start.Add(16 * time.Minute).UnixMilli()
+	ar.FiringTimes = []int64{ar.FirstFireMs}
+	if verdicts(p, []Run{run}, []AlertRun{ar})[0].Pass {
+		t.Fatal("a recovery allowance accepted a first fire after the incident ended")
 	}
 }

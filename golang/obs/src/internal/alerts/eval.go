@@ -42,9 +42,9 @@ type AlertRun struct {
 // ---------- query data, cached per (ds, expr, range, run, interval) ----------
 
 type qKey struct {
-	ds, uid, expr, rng, run string
-	from, to                time.Duration
-	interval                time.Duration
+	ds, uid, expr, original, rng, run string
+	from, to                          time.Duration
+	interval                          time.Duration
 }
 
 type qData struct {
@@ -115,6 +115,9 @@ func (d *qData) at(t time.Time) qTick {
 			for _, v := range r.Points {
 				out = append(out, instVal{labels: toDataLabels(r.Labels, KeepNameLabel), v: v})
 			}
+			if r.Nulls[ms] {
+				out = append(out, instVal{labels: toDataLabels(r.Labels, KeepNameLabel), null: true})
+			}
 		}
 		return qTick{nums: out}
 	}
@@ -129,6 +132,9 @@ func (d *qData) at(t time.Time) qTick {
 		for i, r := range d.res {
 			if v, ok := r.Points[ms]; ok {
 				out = append(out, instVal{labels: d.dls[i], v: v})
+			}
+			if r.Nulls[ms] {
+				out = append(out, instVal{labels: d.dls[i], null: true})
 			}
 		}
 		return qTick{nums: out}
@@ -154,7 +160,7 @@ func evalRuleRun(eng Engines, cache *queryCache, cr *cRule, run Run, keepSteps b
 	data := map[string]*qData{}
 	for _, ref := range cr.queries {
 		q := a.Queries[ref]
-		data[ref] = cache.get(qKey{ds: q.Datasource, uid: q.UID, expr: q.Expr, rng: q.Range, run: run.Name, from: q.From, to: q.To, interval: cr.interval}, func() *qData { return fetchQuery(eng, q, run, cr.interval) })
+		data[ref] = cache.get(qKey{ds: q.Datasource, uid: q.UID, expr: q.Expr, original: q.OriginalExpr, rng: q.Range, run: run.Name, from: q.From, to: q.To, interval: cr.interval}, func() *qData { return fetchQuery(eng, q, run, cr.interval) })
 	}
 	rs := newRuleStates(cr)
 	ticks := map[string]qTick{}
@@ -459,13 +465,17 @@ func verdicts(p *Project, runs []Run, out []AlertRun) []Verdict {
 				v.Why = "no such alert"
 			} else {
 				at := time.Duration(ar.FirstFireMs-run.Start.UnixMilli()) * time.Millisecond
-				v.Pass = ar.Fired && at >= ws && at <= ws+within
+				incidentEnd := ws + mustDur(inc.Window.Duration)
+				v.Pass = ar.Fired && ar.Err == "" && at >= ws && at < incidentEnd && at <= ws+within
 				v.Why = describe(ar)
 				if ar.Fired && at < ws {
 					v.Why += " (fired before the incident window)"
 				}
 				if ar.Fired && at > ws+within {
 					v.Why += fmt.Sprintf(" (later than fire_within %s)", within)
+				}
+				if ar.Fired && at >= incidentEnd {
+					v.Why += " (first fire outside the incident window)"
 				}
 				end := ws + mustDur(inc.Window.Duration) + mustDur(inc.Expect.ResolveWithin)
 				for _, ms := range ar.FiringTimes {

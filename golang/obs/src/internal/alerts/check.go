@@ -120,7 +120,7 @@ func Check(o Options, stdout, stderr io.Writer) int {
 		return 2
 	}
 	cacheDir := os.Getenv("OBS_CACHE_DIR")
-	if verifyFast || verifySkip || o.Steps != "" || o.Recorded != "" {
+	if verifyFast || verifySkip || o.Steps != "" || o.Recorded != "" || o.LogsGuard != nil {
 		cacheDir = ""
 	}
 	allAlerts := p.Alerts
@@ -129,13 +129,10 @@ func Check(o Options, stdout, stderr io.Writer) int {
 	if cacheDir != "" {
 		var misses []Alert
 		for _, a := range allAlerts {
-			k := ruleCacheKey(p, &a, buildID())
-			sensitive := timeSensitive(&a)
-			for i := range p.Records {
-				sensitive = sensitive || timeSensitive(&p.Records[i])
-			}
-			if sensitive {
-				k = fmt.Sprintf("%s-%d", k, base.UnixMilli())
+			k, cacheable := resultCacheKey(p, &a, buildID(), base)
+			if !cacheable {
+				misses = append(misses, a)
+				continue
 			}
 			keys[a.ID] = k
 			if ars, ok := cacheGet(cacheDir, k, base.UnixMilli()); ok && len(ars) == len(runs) {
@@ -222,7 +219,9 @@ func Check(o Options, stdout, stderr io.Writer) int {
 				byAlert[ar.Alert] = append(byAlert[ar.Alert], ar)
 			}
 			for id, rs := range byAlert {
-				cachePut(cacheDir, keys[id], base.UnixMilli(), rs)
+				if key := keys[id]; key != "" {
+					cachePut(cacheDir, key, base.UnixMilli(), rs)
+				}
 			}
 		}
 	}

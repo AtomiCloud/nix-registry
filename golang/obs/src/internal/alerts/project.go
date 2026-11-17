@@ -42,6 +42,7 @@ type Alert struct {
 
 type Query struct {
 	Datasource, UID, Expr, Range string
+	OriginalExpr                 string        // before logevent assumptions are stripped (frontend limits)
 	From, To                     time.Duration // Grafana relativeTimeRange, distinct from metrics range queries
 }
 
@@ -139,7 +140,7 @@ func loadProject(dir, seedPath string) (*Project, error) {
 			if q.RelativeTimeRange.From < 0 || q.RelativeTimeRange.To < 0 || q.RelativeTimeRange.To > q.RelativeTimeRange.From {
 				return nil, fmt.Errorf("%s rule %s query %s: invalid relativeTimeRange %d..%d", a.File, id, q.RefID, q.RelativeTimeRange.From, q.RelativeTimeRange.To)
 			}
-			query := Query{Datasource: kind.String(), UID: uid, Expr: expr, From: time.Duration(q.RelativeTimeRange.From) * time.Second, To: time.Duration(q.RelativeTimeRange.To) * time.Second}
+			query := Query{Datasource: kind.String(), UID: uid, Expr: expr, OriginalExpr: expr, From: time.Duration(q.RelativeTimeRange.From) * time.Second, To: time.Duration(q.RelativeTimeRange.To) * time.Second}
 			instant, _ := q.Model["instant"].(bool)
 			rangeQuery, _ := q.Model["range"].(bool)
 			qt, _ := q.Model["queryType"].(string)
@@ -165,7 +166,7 @@ func loadProject(dir, seedPath string) (*Project, error) {
 		// so editing one sibling does not invalidate unrelated alert results.
 		b, err := json.Marshal(a)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%s rule %s: %w", a.File, a.ID, err)
 		}
 		sub := "alerts/"
 		if a.Record != nil {

@@ -32,6 +32,7 @@ type Engines struct {
 type Result struct {
 	Labels []Label
 	Points map[int64]float64
+	Nulls  map[int64]bool // instant numeric frames with a nil value keep their labels
 }
 
 type metricEngine struct{ e *vm.Engine }
@@ -72,7 +73,11 @@ func (l logsEngine) Instant(q Query, at time.Time) ([]Result, error) {
 		from = 10 * time.Minute
 	}
 	if l.guard != nil {
-		if err := l.guard.Check(q.Expr, at.Add(-from), at.Add(-q.To)); err != nil {
+		original := q.OriginalExpr
+		if original == "" {
+			original = q.Expr
+		}
+		if err := l.guard.Check(original, at.Add(-from), at.Add(-q.To)); err != nil {
 			return nil, err
 		}
 	}
@@ -84,11 +89,8 @@ func (l logsEngine) Instant(q Query, at time.Time) ([]Result, error) {
 	for _, r := range rs {
 		// The datasource's alertingDataFrames maps an empty stats value to null
 		// (NoData), and preserves the HTTP endpoint's __name__ column label.
-		if r.Value == "" {
-			continue
-		}
 		v, ok := r.Float()
-		if !ok {
+		if !ok && r.Value != "" {
 			return nil, fmt.Errorf("LogsQL stats value %q is not numeric: %s", r.Value, q.Expr)
 		}
 		labels := append([]Label{}, r.Labels...)
@@ -101,7 +103,13 @@ func (l logsEngine) Instant(q Query, at time.Time) ([]Result, error) {
 				labels = append(labels, Label{Name: "__name__", Value: r.Name})
 			}
 		}
-		out = append(out, Result{Labels: sortLabels(labels), Points: map[int64]float64{at.UnixMilli(): v}})
+		result := Result{Labels: sortLabels(labels)}
+		if r.Value == "" {
+			result.Nulls = map[int64]bool{at.UnixMilli(): true}
+		} else {
+			result.Points = map[int64]float64{at.UnixMilli(): v}
+		}
+		out = append(out, result)
 	}
 	return out, nil
 }
@@ -110,6 +118,11 @@ func (l logsEngine) Instant(q Query, at time.Time) ([]Result, error) {
 // rollup needs VictoriaMetrics' five-minute instant step; explicit-window queries
 // can share one range request with the alert interval as its step.
 func needsInstant(q string) bool {
+	// Besides implicit rollup windows, query-context functions such as start()
+	// and end() must see the instant request's bounds, not a whole run's range.
+	if timeSensitive(&Alert{Queries: map[string]Query{"A": {Datasource: "metrics", Expr: q}}}) {
+		return true
+	}
 	e, err := metricsql.Parse(q)
 	if err != nil {
 		return true

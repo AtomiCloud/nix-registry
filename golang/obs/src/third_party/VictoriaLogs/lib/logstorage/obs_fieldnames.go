@@ -75,30 +75,58 @@ func (q *Query) ObsFieldNames() (filters []string, pipes []string, wildcard bool
 // original spelling, not the evaluator's unexported mutable filter objects.
 type ObsFilterTree struct {
 	Kind, Field, Text, Pattern string
-	Values []string
-	Children []ObsFilterTree
+	Values                     []string
+	Children                   []ObsFilterTree
 }
 
 func obsFilterTree(f filter) ObsFilterTree {
-	n:=ObsFilterTree{Kind:"other"}
-	if f==nil{return n};n.Text=f.String()
-	switch t:=f.(type){
+	n := ObsFilterTree{Kind: "other"}
+	if f == nil {
+		return n
+	}
+	n.Text = f.String()
+	switch t := f.(type) {
 	case *filterAnd:
-		n.Kind="and";for _,f:=range t.filters{n.Children=append(n.Children,obsFilterTree(f))}
+		n.Kind = "and"
+		for _, f := range t.filters {
+			n.Children = append(n.Children, obsFilterTree(f))
+		}
 	case *filterOr:
-		n.Kind="or";for _,f:=range t.filters{n.Children=append(n.Children,obsFilterTree(f))}
+		n.Kind = "or"
+		for _, f := range t.filters {
+			n.Children = append(n.Children, obsFilterTree(f))
+		}
 	case *filterNot:
-		n.Kind="not";n.Children=[]ObsFilterTree{obsFilterTree(t.f)}
-	case *filterTime:n.Kind="time";n.Field="_time"
+		n.Kind = "not"
+		n.Children = []ObsFilterTree{obsFilterTree(t.f)}
+	case *filterTime:
+		n.Kind = "time"
+		n.Field = "_time"
 	case *filterStream:
-		n.Kind="stream";n.Field="_stream"
-		if t.f!=nil{for _,a:=range t.f.orFilters{for _,f:=range a.tagFilters{n.Values=append(n.Values,f.tagName)}}}
+		n.Kind = "stream"
+		n.Field = "_stream"
+		if t.f != nil {
+			for _, a := range t.f.orFilters {
+				for _, f := range a.tagFilters {
+					n.Values = append(n.Values, f.tagName)
+				}
+			}
+		}
 	case *filterGeneric:
-		n.Field=t.fieldName
-		switch v:=t.f.(type){
-		case *filterExact:n.Kind="exact";n.Values=[]string{v.value}
-		case *filterIn:n.Kind="in";n.Values=append([]string(nil),v.values.values...);if v.values.q!=nil{n.Kind="subquery"}
-		case *filterRegexp:n.Kind="regexp";n.Pattern=v.re.String()
+		n.Field = t.fieldName
+		switch v := t.f.(type) {
+		case *filterExact:
+			n.Kind = "exact"
+			n.Values = []string{v.value}
+		case *filterIn:
+			n.Kind = "in"
+			n.Values = append([]string(nil), v.values.values...)
+			if v.values.q != nil {
+				n.Kind = "subquery"
+			}
+		case *filterRegexp:
+			n.Kind = "regexp"
+			n.Pattern = v.re.String()
 		}
 	}
 	return n
@@ -108,43 +136,73 @@ func obsFilterTree(f filter) ObsFilterTree {
 // policy; this adapter only exposes the AST and reconstructs a parsed query.
 // Filters after stats apply to computed values and are retained unchanged.
 // statsFields receives the stats function text and the stored fields it reads.
-func (q *Query) ObsAlertTransform(transform func(ObsFilterTree)(string,error),statsFields func(string,[]string)error)(*Query,error){
-	qc:=q.Clone(q.timestamp)
-	rewrite:=func(f filter)(filter,error){
-		s,err:=transform(obsFilterTree(f));if err!=nil{return nil,err}
-		if s==""{s="*"}
-		parsed,err:=ParseQueryAtTimestamp(s,q.timestamp)
-		if err!=nil{return nil,err}
-		if len(parsed.pipes)>0{return nil,fmt.Errorf("rewritten filter contains pipes")}
-		return parsed.f,nil
+func (q *Query) ObsAlertTransform(transform func(ObsFilterTree) (string, error), statsFields func(string, []string) error) (*Query, error) {
+	qc := q.Clone(q.timestamp)
+	rewrite := func(f filter) (filter, error) {
+		s, err := transform(obsFilterTree(f))
+		if err != nil {
+			return nil, err
+		}
+		if s == "" {
+			s = "*"
+		}
+		parsed, err := ParseQueryAtTimestamp(s, q.timestamp)
+		if err != nil {
+			return nil, err
+		}
+		if len(parsed.pipes) > 0 {
+			return nil, fmt.Errorf("rewritten filter contains pipes")
+		}
+		return parsed.f, nil
 	}
 	var err error
-	qc.f,err=rewrite(qc.f);if err!=nil{return nil,err}
-	if qc.opts.globalFilter!=nil{qc.opts.globalFilter,err=rewrite(qc.opts.globalFilter);if err!=nil{return nil,err}}
-	seenStats:=false
-	for i,p:=range qc.pipes{
-		switch ps:=p.(type){
-		case *pipeStats:
-			if !seenStats{
-				// Flatten the parsed switch form into its equivalent conditional
-				// functions so rewritten conditions are also printed by String().
-				ps.entries=nil
-				for j:=range ps.funcs{
-					f:=&ps.funcs[j]
-					var pf prefixfilter.Filter;f.f.updateNeededFields(&pf)
-					if err:=statsFields(f.f.String(),pf.GetAllowFilters());err!=nil{return nil,err}
-					if f.iff!=nil{
-						ff,err:=rewrite(f.iff.f);if err!=nil{return nil,err};f.iff=newIfFilter(ff)
-					}
-					ps.entries=append(ps.entries,f)
-				}
-			}
-			seenStats=true
-		case *pipeFilter:
-			if !seenStats{ff,err:=rewrite(ps.f);if err!=nil{return nil,err};qc.pipes[i]=&pipeFilter{f:ff}}
+	qc.f, err = rewrite(qc.f)
+	if err != nil {
+		return nil, err
+	}
+	if qc.opts.globalFilter != nil {
+		qc.opts.globalFilter, err = rewrite(qc.opts.globalFilter)
+		if err != nil {
+			return nil, err
 		}
 	}
-	return qc,nil
+	seenStats := false
+	for i, p := range qc.pipes {
+		switch ps := p.(type) {
+		case *pipeStats:
+			if !seenStats {
+				// Flatten the parsed switch form into its equivalent conditional
+				// functions so rewritten conditions are also printed by String().
+				ps.entries = nil
+				for j := range ps.funcs {
+					f := &ps.funcs[j]
+					var pf prefixfilter.Filter
+					f.f.updateNeededFields(&pf)
+					if err := statsFields(f.f.String(), pf.GetAllowFilters()); err != nil {
+						return nil, err
+					}
+					if f.iff != nil {
+						ff, err := rewrite(f.iff.f)
+						if err != nil {
+							return nil, err
+						}
+						f.iff = newIfFilter(ff)
+					}
+					ps.entries = append(ps.entries, f)
+				}
+			}
+			seenStats = true
+		case *pipeFilter:
+			if !seenStats {
+				ff, err := rewrite(ps.f)
+				if err != nil {
+					return nil, err
+				}
+				qc.pipes[i] = &pipeFilter{f: ff}
+			}
+		}
+	}
+	return qc, nil
 }
 
 // ObsStatsLabels returns the `by (...)` labels of the last `stats` pipe, the way

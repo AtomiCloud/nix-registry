@@ -9,6 +9,7 @@ require (
 	github.com/VictoriaMetrics/metricsql v0.87.6
 	github.com/grafana/dataplane/sdata v0.0.9
 	github.com/grafana/grafana-plugin-sdk-go v0.297.0
+	golang.org/x/sys v0.50.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -48,7 +49,6 @@ require (
 	github.com/valyala/quicktemplate v1.8.0 // indirect
 	github.com/zeebo/xxh3 v1.1.0 // indirect
 	golang.org/x/exp v0.0.0-20261106112924-d498a4c2cc9a // indirect
-	golang.org/x/sys v0.50.0 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 

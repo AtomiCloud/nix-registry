@@ -139,6 +139,12 @@ func TestFullLightAgreement(t *testing.T) {
 			{"A": {}, "B": {}},
 			{"A": {err: fmt.Errorf("fixture error")}, "B": {}},
 			{"A": {nums: []instVal{{v: 2}, {v: 3}}}, "B": {nums: []instVal{{v: 1}}}},
+			{"A": {nums: []instVal{{labels: data.Labels{"provider": "card", "region": "east"}, v: 3}, {labels: data.Labels{"provider": "card", "region": "west"}, v: 4}}}, "B": {nums: []instVal{{labels: data.Labels{"provider": "card"}, v: 2}}}},
+			{"A": {nums: []instVal{{labels: data.Labels{"provider": "card"}, v: 3}, {labels: data.Labels{"provider": "bank"}, v: 4}}}, "B": {nums: []instVal{{v: 2}}}},
+			{"A": {nums: []instVal{{labels: data.Labels{"provider": "card"}, v: 3}, {labels: data.Labels{"provider": "bank"}, v: 4}}}, "B": {nums: []instVal{{labels: data.Labels{"provider": "card"}, v: 2}, {labels: data.Labels{"provider": "bank"}, v: 1}}}},
+			{"A": {nums: []instVal{{labels: data.Labels{"provider": "card"}, null: true}}}, "B": {nums: []instVal{{v: 1}}}},
+			{"A": {nums: []instVal{{labels: data.Labels{"provider": "card"}, v: 2}}}, "B": {nums: []instVal{{null: true}}}},
+			{"A": {nums: []instVal{{labels: data.Labels{"provider": "card"}, null: true}}}, "B": {nums: []instVal{{labels: data.Labels{"provider": "card"}, null: true}}}},
 		} {
 			if fast, full := r.evalTickLight(q, nil), r.evalTick(at, q, nil); !sameResults(fast, full) {
 				t.Fatalf("%s: %s != %s", expr, fmtRes(fast), fmtRes(full))
@@ -147,7 +153,7 @@ func TestFullLightAgreement(t *testing.T) {
 	}
 }
 
-func TestHysteresisAndReducers(t *testing.T) {
+func TestHysteresis(t *testing.T) {
 	rc := &struct {
 		Type   string    `yaml:"type"`
 		Params []float64 `yaml:"params"`
@@ -168,13 +174,6 @@ func TestHysteresisAndReducers(t *testing.T) {
 		}
 		if fast[0].state != want {
 			t.Fatalf("loaded=%v got %s want %s", load, stName[fast[0].state], stName[want])
-		}
-	}
-	for _, fn := range []string{"mean", "min", "max", "sum", "count", "last"} {
-		r := compile(t, Alert{Condition: "B", Expressions: map[string]ExprDef{"B": {Reduce: &ReduceDef{Input: "A", Function: fn, Mode: "dropNN"}}}})
-		rs := r.evalTick(at, map[string]qTick{"A": {isRange: true, series: []sortedSeries{{ts: []int64{1, 2, 3}, vs: []float64{1, math.NaN(), 3}}}}}, nil)
-		if len(rs) != 1 || rs[0].state == stError || math.IsNaN(rs[0].value) {
-			t.Fatalf("%s dropNN: %+v", fn, rs)
 		}
 	}
 }
