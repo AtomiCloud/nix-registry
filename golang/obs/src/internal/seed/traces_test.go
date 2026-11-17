@@ -89,3 +89,37 @@ traces:
 		}
 	}
 }
+
+func TestDisjointRoutesShareMetric(t *testing.T) {
+	const doc = `length: 1m
+traffic: {requests: 2/s}
+resource: {service.name: checkout}
+metrics:
+  requests:
+    series: [{where: {http.route: /charge}, share: 0.5}, {where: {http.route: /refund}, share: 0.5}]
+traces:
+  - {from: {metric: requests, where: {http.route: /charge}}, server: POST /charge}
+  - {from: {metric: requests, where: {http.route: /refund}}, server: POST /refund}
+`
+	var s Seed
+	if err := yaml.Unmarshal([]byte(doc), &s); err != nil {
+		t.Fatal(err)
+	}
+	d, err := Build(&s, time.Unix(1800000000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	for _, tr := range d.Traces {
+		names[tr.Spans[0].Name] = true
+	}
+	if len(names) != 2 {
+		t.Fatal(names)
+	}
+	if err := yaml.Unmarshal([]byte(strings.Replace(doc, "from: {metric: requests, where: {http.route: /refund}}", "from: {metric: requests, where: {http.route: /charge}}", 1)), &s); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Build(&s, d.Start); err == nil || !strings.Contains(err.Error(), "overlaps") {
+		t.Fatal("overlap accepted", err)
+	}
+}

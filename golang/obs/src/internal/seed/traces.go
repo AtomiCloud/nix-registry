@@ -37,7 +37,6 @@ func (s *Seed) traceDefs() ([]TraceDef, error) {
 	if err := d.Decode(&defs); err != nil {
 		return nil, fmt.Errorf("traces: %w", err)
 	}
-	seen := map[string]bool{}
 	for i, td := range defs {
 		if _, ok := s.Metrics[td.From.Metric]; !ok {
 			return nil, fmt.Errorf("traces[%d].from.metric %q is not in metrics", i, td.From.Metric)
@@ -48,14 +47,24 @@ func (s *Seed) traceDefs() ([]TraceDef, error) {
 		if td.MedianS < 0 || math.IsNaN(td.MedianS) || math.IsInf(td.MedianS, 0) {
 			return nil, fmt.Errorf("traces[%d].median_s %g must be finite and positive", i, td.MedianS)
 		}
-		// One definition per source metric keeps logs linked to one unambiguous request.
-		if seen[td.From.Metric] {
-			return nil, fmt.Errorf("traces[%d].from.metric %q has multiple definitions", i, td.From.Metric)
-		}
-		seen[td.From.Metric] = true
 		for k, v := range td.Attributes {
 			if _, err := attrValue(v); err != nil {
 				return nil, fmt.Errorf("traces[%d].attributes.%s: %w", i, k, err)
+			}
+		}
+	}
+	// Different routes may use the same metric. Refuse only definitions that
+	// overlap on a seeded series, which would assign two traces to one log event.
+	for name, m := range s.Metrics {
+		for _, series := range m.Series {
+			matched := -1
+			for i, td := range defs {
+				if td.From.Metric == name && matches(series.Where, td.From.Where) {
+					if matched >= 0 {
+						return nil, fmt.Errorf("traces[%d] overlaps traces[%d] for metric %q series %v", i, matched, name, series.Where)
+					}
+					matched = i
+				}
 			}
 		}
 	}

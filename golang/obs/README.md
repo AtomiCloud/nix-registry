@@ -1,7 +1,7 @@
 # obs: observability checks with no running stack
 
-`obs` checks a repo's alerts and dashboards without a running Grafana, VictoriaMetrics
-or VictoriaLogs. It embeds the engines' own parsers and storage in one static Go binary:
+`obs` checks a repo's alerts and dashboards without a running Grafana, VictoriaMetrics,
+VictoriaLogs or Tempo. It embeds the engines' own parsers and storage in one static Go binary:
 no network, no containers.
 
 **Licence: AGPL-3.0-only** (`LICENSE`). Each registry release attaches the Corresponding Source
@@ -10,17 +10,18 @@ says where. Everything in the binary is AGPL-3.0, Apache-2.0, MIT, BSD or MPL-2.
 linked module ship in `share/licenses/obs`. Design: `concepts/observability.md` §11 and
 `design/registry-tools/obs.md` in the diene corpus (the concept wins where this file and it differ).
 
-## Release 0.1.0: what is in it
+## Available commands
 
-| Command              | What it does                                                                                                                                                                   |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `obs query --static` | Parses every MetricsQL and LogsQL query in the alerts and dashboards with the real parsers and applies the rules below.                                                        |
-| `obs query --live`   | Makes the seed, loads it into the embedded VictoriaMetrics and VictoriaLogs, runs every alert and dashboard query on it. Each must return rows. Also applies the static rules. |
-| `obs version`        | The obs version and every engine pin.                                                                                                                                          |
+| Command              | What it does                                                                                                                                                                          |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `obs query --static` | Parses every MetricsQL, LogsQL and TraceQL query in the alerts and dashboards with the real parsers and applies the rules below.                                                      |
+| `obs query --live`   | Makes the seed, loads it into the embedded VictoriaMetrics, VictoriaLogs and Tempo, runs every alert and dashboard query on it. Each must return rows. Also applies the static rules. |
+| `obs links`          | Checks trace → logs, metric → traces and backend span → profile labels on the seed.                                                                                                   |
+| `obs version`        | The obs version and every engine pin.                                                                                                                                                 |
 
-Not in 0.1.0 (they ship in later releases, see the corpus goal): `obs gen`, `obs check`
-(the contract), `obs alerts` (evaluating alerts over incidents), `obs links`, `obs assert`,
-`obs profile`, TraceQL (trace queries are skipped with one note), `obs engines --check-chart`,
+Follow-up commands (see the corpus goal): `obs gen`, `obs check`
+(the contract), `obs alerts` (evaluating alerts over incidents), `obs assert`,
+`obs profile`, trace alert evaluation, `obs engines --check-chart`,
 `obs sandbox`, `obs look`, `obs scrape`, `obs store move`.
 
 ```text
@@ -47,13 +48,14 @@ Not in 0.1.0 (they ship in later releases, see the corpus goal): `obs gen`, `obs
  7. e2e                   obs assert, obs profile compare
 ```
 
-This release ships step 6's `obs query --static` and `obs query --live`.
+This branch also ships step 6's `obs links`; the final release version is set when obs-full lands.
 
 ## Usage
 
 ```text
 obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
 obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names]
+obs links [--dir observability] [--seed seed.yaml] [--base unix]
 obs version
 ```
 
@@ -257,7 +259,9 @@ replaces this by hand run.
 ## obs links
 
 `obs query --static` and `--live` also check Tempo dashboard targets (`query`, `expr`
-or `expression`). TraceQL is parsed and validated by **Tempo 3.1.1**, commit
+or `expression`). `queryType: traceId` targets use a validated ID lookup; an
+unknown ID with no spans fails the live check. Legacy search models are refused
+explicitly. TraceQL is parsed and validated by **Tempo 3.1.1**, commit
 `9db7df79d2af`; no regular-expression query parser is used. `--names` lists every
 non-intrinsic attribute, including those in `select` and metrics grouping. A
 `check.SpanAttributeNames` interface connects the contract's name list; a nil

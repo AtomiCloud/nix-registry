@@ -39,3 +39,21 @@ func TestTraceQLStaticContractAdapter(t *testing.T) {
 		t.Fatalf("%v", r.Findings)
 	}
 }
+
+func TestTempoQueryTypes(t *testing.T) {
+	for _, tc := range []struct{ kind, expr, rule string }{
+		{"traceId", "01000000000000000000000000000000", ""},
+		{"traceId", "planted-not-hex", "trace-id"},
+		{"search", "service.name=checkout", "traceql-query-type"},
+	} {
+		q := files.Query{File: "dashboards/traces.json", Where: "panel 7 target A", Kind: files.Traces, QueryType: tc.kind, Expr: tc.expr}
+		r := Static(&files.Set{Queries: []files.Query{q}, Dashboards: []*files.Dashboard{{}}}, Options{})
+		if tc.rule == "" {
+			if r.Failures() != 0 {
+				t.Fatal(r.Findings)
+			}
+		} else if r.Failures() != 1 || r.Findings[0].Rule != tc.rule {
+			t.Fatal(r.Findings)
+		}
+	}
+}

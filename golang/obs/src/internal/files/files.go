@@ -335,9 +335,6 @@ func (s *Set) readDashboard(rel string, b []byte) {
 				if expr == "" {
 					expr = t.Query
 				}
-				if expr == "" {
-					continue
-				}
 				ref := t.RefID
 				if ref == "" {
 					ref = fmt.Sprint(i + 1)
@@ -362,6 +359,9 @@ func (s *Set) readDashboard(rel string, b []byte) {
 					Where: fmt.Sprintf("panel %d %q target %s", p.ID, p.Title, ref),
 				}
 				kind, err := Classify(dsType, dsUID)
+				if expr == "" && (kind != Traces || t.QueryType == "") {
+					continue
+				}
 				qu.Kind = kind
 				if err != nil {
 					qu.Problem = err.Error()

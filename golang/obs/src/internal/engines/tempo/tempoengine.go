@@ -503,6 +503,21 @@ func tqCmpNum(op traceql.Operator, a, b float64) (bool, bool) {
 	return false, false
 }
 
+// Integer predicates must not round OTLP int64 values through float64.
+func tqCmpInt(op traceql.Operator, a, b int64) (bool, bool) {
+	switch op {
+	case traceql.OpGreater:
+		return a > b, true
+	case traceql.OpGreaterEqual:
+		return a >= b, true
+	case traceql.OpLess:
+		return a < b, true
+	case traceql.OpLessEqual:
+		return a <= b, true
+	}
+	return false, false
+}
+
 func tqNumeric(t traceql.StaticType) bool {
 	return t == traceql.TypeInt || t == traceql.TypeFloat || t == traceql.TypeDuration
 }
@@ -530,7 +545,7 @@ func (tc *tqCond) match(s *tqSpan) (bool, bool) {
 		if c.Op == traceql.OpEqual {
 			return v == uint64(n), true
 		}
-		r, ok := tqCmpNum(c.Op, float64(v), float64(n))
+		r, ok := tqCmpInt(c.Op, int64(v), int64(n))
 		return r, ok
 	case traceql.IntrinsicStructuralDescendant, traceql.IntrinsicStructuralChild, traceql.IntrinsicStructuralSibling,
 		traceql.IntrinsicNestedSetLeft, traceql.IntrinsicNestedSetRight, traceql.IntrinsicNestedSetParent:
@@ -604,6 +619,16 @@ func (tc *tqCond) match(s *tqSpan) (bool, bool) {
 		return v.NotEquals(&o), true
 	}
 	switch {
+	case v.Type == traceql.TypeInt && o.Type == traceql.TypeInt:
+		a, _ := v.Int()
+		b, _ := o.Int()
+		r, ok := tqCmpInt(c.Op, int64(a), int64(b))
+		return r || !ok, ok
+	case v.Type == traceql.TypeDuration && o.Type == traceql.TypeDuration:
+		a, _ := v.Duration()
+		b, _ := o.Duration()
+		r, ok := tqCmpInt(c.Op, int64(a), int64(b))
+		return r || !ok, ok
 	case tqNumeric(v.Type) && tqNumeric(o.Type):
 		r, ok := tqCmpNum(c.Op, v.Float(), o.Float())
 		return r || !ok, ok

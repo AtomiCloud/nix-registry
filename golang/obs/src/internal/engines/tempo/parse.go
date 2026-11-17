@@ -3,9 +3,35 @@
 package tempo
 
 import (
+	"bytes"
+	"encoding/hex"
 	"github.com/grafana/tempo/pkg/traceql"
+	"github.com/grafana/tempo/pkg/util"
 	"sort"
 )
+
+// ValidateTraceID follows Tempo's hexadecimal ID decoder, including left padding.
+func ValidateTraceID(id string) error { _, err := util.HexStringToTraceID(id); return err }
+
+// Lookup is an ID lookup, not TraceQL. Empty traces are missing, matching Tempo's
+// HTTP 200 {"trace":{}} behavior for unknown IDs.
+func (e *TempoEngine) Lookup(id string) ([]TraceHit, error) {
+	b, err := util.HexStringToTraceID(id)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range e.traces {
+		if bytes.Equal(t.id[:], b) && len(t.spans) > 0 {
+			h := TraceHit{TraceID: hex.EncodeToString(t.id[:])}
+			for _, s := range t.spans {
+				h.SpanIDs = append(h.SpanIDs, hex.EncodeToString(s.ID()))
+			}
+			sort.Strings(h.SpanIDs)
+			return []TraceHit{h}, nil
+		}
+	}
+	return nil, nil
+}
 
 const Version = "3.1.1 (commit 9db7df79d2af)"
 

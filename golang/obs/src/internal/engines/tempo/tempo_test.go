@@ -9,7 +9,7 @@ import (
 
 func testEngine() (*TempoEngine, time.Time) {
 	at := time.Unix(1800000000, 0)
-	root := &TSpan{SpanID: [8]byte{1}, Name: "root", Service: "checkout", Kind: 2, StartNs: uint64(at.UnixNano()), DurNs: 1000000000, Attrs: map[string]TAttrVal{"amount": seed.TInt(42)}, Resource: map[string]TAttrVal{"durian.cloud.service": seed.TStr("checkout")}}
+	root := &TSpan{SpanID: [8]byte{1}, Name: "root", Service: "checkout", Kind: 2, StartNs: uint64(at.UnixNano()), DurNs: 1000000000, Attrs: map[string]TAttrVal{"amount": seed.TInt(42), "serial": seed.TInt(9007199254740993)}, Resource: map[string]TAttrVal{"durian.cloud.service": seed.TStr("checkout")}}
 	a := &TSpan{SpanID: [8]byte{2}, ParentID: root.SpanID, Name: "a", Service: "checkout", Kind: 3, Status: 2, StartNs: root.StartNs + 1000, DurNs: 500000000, Attrs: map[string]TAttrVal{"ratio": seed.TFloat(2.5)}}
 	b := &TSpan{SpanID: [8]byte{3}, ParentID: root.SpanID, Name: "b", Service: "checkout", StartNs: root.StartNs + 2000, DurNs: 500000000}
 	c := &TSpan{SpanID: [8]byte{4}, ParentID: a.SpanID, Name: "c", Service: "checkout", StartNs: root.StartNs + 3000, DurNs: 100000000}
@@ -27,6 +27,8 @@ func TestSearchStructuralAndTypedColumns(t *testing.T) {
 		{`{name="a"} < {name="root"}`, 1}, {`{name="a"} !> {name="root"}`, 1}, {`{name="root"} !>> {name="c"}`, 0},
 		{`{name="root"} &>> {name="c"}`, 1}, {`{name="root"} &> {name="a"}`, 1}, {`{name="a"} &~ {name="b"}`, 1},
 		{`{span.amount=42}`, 1}, {`{span.amount="42"}`, 0}, {`{span.ratio>2.0}`, 1}, {`{span.ratio>2}`, 0},
+		{`{span.serial>9007199254740992}`, 1}, {`{span.serial<=9007199254740992}`, 0},
+		{`{.amount=42}`, 1}, {`{.missing="x"}`, 0},
 		{`{status=error}`, 1}, {`{kind=server && resource.service.name="checkout"}`, 1}, {`{span.missing="x"}`, 0},
 	} {
 		t.Run(tc.q, func(t *testing.T) {
@@ -69,5 +71,20 @@ func TestMetricsAndParse(t *testing.T) {
 	p, err = Parse(`{} | count_over_time() by (span.provider)`)
 	if err != nil || !p.Metrics || len(p.Attributes) != 1 {
 		t.Fatalf("metrics names: %+v %v", p, err)
+	}
+}
+
+func TestIDLookup(t *testing.T) {
+	e, _ := testEngine()
+	hits, err := e.Lookup("01000000000000000000000000000000")
+	if err != nil || len(hits) != 1 || len(hits[0].SpanIDs) != 4 {
+		t.Fatalf("known ID: %v %v", hits, err)
+	}
+	hits, err = e.Lookup("02000000000000000000000000000000")
+	if err != nil || len(hits) != 0 {
+		t.Fatalf("unknown ID: %v %v", hits, err)
+	}
+	if _, err := e.Lookup("planted-not-hex"); err == nil {
+		t.Fatal("invalid ID accepted")
 	}
 }

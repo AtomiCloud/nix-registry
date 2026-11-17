@@ -5,6 +5,7 @@ import (
 	"github.com/AtomiCloud/obs/internal/engines/tempo"
 	"github.com/AtomiCloud/obs/internal/files"
 	"math"
+	"strings"
 	"time"
 )
 
@@ -15,6 +16,21 @@ type SpanAttributeNames interface{ HasSpanAttribute(scope, name string) bool }
 
 func staticTraces(r *Report, q *files.Query, o Options) {
 	expr := staticFill(q)
+	id, modeErr := traceQueryMode(q)
+	if modeErr != nil {
+		r.add(Fail, q.File, q.Where, "traceql-query-type", "%v; query: %s", modeErr, oneLine(expr))
+		return
+	}
+	if id {
+		if q.IsAlert {
+			r.add(Fail, q.File, q.Where, "traceql-alert-deferred", "TraceQL alerts await obs alerts integration; trace ID: %s", oneLine(expr))
+			return
+		}
+		if err := tempo.ValidateTraceID(expr); err != nil {
+			r.add(Fail, q.File, q.Where, "trace-id", "%v; trace ID: %s", err, oneLine(expr))
+		}
+		return
+	}
 	p, err := tempo.Parse(expr)
 	if err != nil {
 		r.add(Fail, q.File, q.Where, "traceql-syntax", "%v; query: %s", err, oneLine(expr))
@@ -35,6 +51,14 @@ func staticTraces(r *Report, q *files.Query, o Options) {
 }
 
 func (l *liveRun) tracePanel(q *files.Query, expr string, start, end time.Time, step time.Duration) (bool, error) {
+	id, err := traceQueryMode(q)
+	if err != nil {
+		return true, nil
+	}
+	if id {
+		hits, err := l.tempo.Lookup(expr)
+		return len(hits) > 0, err
+	}
 	p, err := tempo.Parse(expr)
 	if err != nil {
 		return true, nil
@@ -49,12 +73,23 @@ func (l *liveRun) tracePanel(q *files.Query, expr string, start, end time.Time, 
 	}
 	for _, row := range rows {
 		for _, v := range row.Points {
-			if !math.IsNaN(v) && v != 0 {
+			if !math.IsNaN(v) {
 				return true, nil
 			}
 		}
 	}
 	return false, nil
+}
+
+func traceQueryMode(q *files.Query) (bool, error) {
+	switch strings.ToLower(q.QueryType) {
+	case "traceid":
+		return true, nil
+	case "", "traceql", "traceqlsearch":
+		return false, nil
+	default:
+		return false, fmt.Errorf("Tempo queryType %q is not a TraceQL query or traceId lookup; legacy search models are not supported", q.QueryType)
+	}
 }
 
 func (l *liveRun) missingTraceAttrs(expr string) []string {
