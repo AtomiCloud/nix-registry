@@ -1,18 +1,31 @@
-// Minimal assumed API from the goal's typed signal call shapes. NOT the real library.
+// Minimal assumed API from the goal's typed signal call shapes, with enough body to RUN the planted
+// forging consumers. NOT the real library. The goal spells checkoutCharges.add(...), error(Event<L>, ...),
+// enums, extension types, shardSpec.of(n) and the entries getter; every other name here (DurianSignalWire,
+// DurianSignalLabels, the carrier bases, DurianSignalBoundSpec and atTime, the level markers,
+// DurianSignalPort, the table rows, Result/DurianSignalOk/DurianSignalErr in place of diene_result) is
+// assumed, not in the goal.
+//
+// Shape of the type boundary (concept 3.4: one hole per language, a run-time guard and a lint rule):
+// every base is `abstract base class` or sealed, so no app class can `implements` one; the bases have no
+// generic add/record/set (each generated class has its own typed method, so an upcast cannot reach a
+// covariant check that throws). `extends` from an app stays possible (Dart has no friend libraries): the
+// port refuses such a carrier at run time (name, kind, level and label keys checked against the generated
+// tables it was installed with) and the lint rule forbids it outside generated files.
+
 /// A label value that has a wire form.
 abstract interface class DurianSignalWire {
   String get wire;
 }
 
-/// The labels or attributes of a signal. Only the generated classes below extend it.
-abstract class DurianSignalLabels {
+/// The labels or attributes of a signal. Only generated classes extend it.
+abstract base class DurianSignalLabels {
   const DurianSignalLabels();
 
   /// The wire name and value of each label, in contract order.
   Map<String, Object> get entries;
 }
 
-/// The result of making a bounded number: a value, or the reason it was refused.
+/// The result of making a bounded number or of a port call: a value, or the reason it was refused.
 sealed class Result<T> {
   const Result._();
 }
@@ -31,8 +44,8 @@ final class DurianSignalErr<T> extends Result<T> {
   final String error;
 }
 
-/// The range of a bounded number or time bucket. Only this library can make one.
-final class DurianSignalBoundSpec<T> {
+/// The range of a bounded number or time bucket. Abstract: only a generated subclass is made.
+abstract base class DurianSignalBoundSpec<T> {
   const DurianSignalBoundSpec(
     this.name,
     this.min,
@@ -63,44 +76,88 @@ final class DurianSignalBoundSpec<T> {
   };
 }
 
-abstract interface class DurianSignalLevel {
-  String get level;
+/// The level markers: a sealed set, so the level of an Event<L> is fixed by L.
+sealed class DurianSignalLevel {
+  const DurianSignalLevel();
 }
 
-abstract interface class Event<L extends DurianSignalLevel> {
-  String get name;
-  String get level;
+final class TraceLevel extends DurianSignalLevel {
+  const TraceLevel();
+}
+
+final class DebugLevel extends DurianSignalLevel {
+  const DebugLevel();
+}
+
+final class InfoLevel extends DurianSignalLevel {
+  const InfoLevel();
+}
+
+final class WarnLevel extends DurianSignalLevel {
+  const WarnLevel();
+}
+
+final class ErrorLevel extends DurianSignalLevel {
+  const ErrorLevel();
+}
+
+final class FatalLevel extends DurianSignalLevel {
+  const FatalLevel();
+}
+
+String _levelOf(Type l) => l == TraceLevel
+    ? 'trace'
+    : l == DebugLevel
+    ? 'debug'
+    : l == InfoLevel
+    ? 'info'
+    : l == WarnLevel
+    ? 'warn'
+    : l == ErrorLevel
+    ? 'error'
+    : l == FatalLevel
+    ? 'fatal'
+    : '';
+
+/// A log event: a name carrier whose type fixes its level.
+abstract base class Event<L extends DurianSignalLevel> {
+  const Event(this.name);
+
+  /// The event name (the value of the durian.cloud/event field).
+  final String name;
+
+  /// The level, derived from [L] (it cannot disagree with the type).
+  String get level => _levelOf(L);
+}
+
+/// The common part of the metric name carriers. No add/record/set here: each generated class has
+/// its own method typed to its own labels class.
+abstract base class DurianSignalMetric<L extends DurianSignalLabels> {
+  const DurianSignalMetric(this.name);
+
+  final String name;
 }
 
 /// A counter name carrier; [L] is its labels class.
-abstract class DurianSignalCounter<L extends DurianSignalLabels> {
-  const DurianSignalCounter(this.name);
-
-  Result<bool> add(L labels) => const DurianSignalOk(true);
-
-  final String name;
+abstract base class DurianSignalCounter<L extends DurianSignalLabels>
+    extends DurianSignalMetric<L> {
+  const DurianSignalCounter(super.name);
 }
 
 /// A histogram name carrier.
-abstract class DurianSignalHistogram<L extends DurianSignalLabels> {
-  const DurianSignalHistogram(this.name);
-
-  Result<bool> record(L labels) => const DurianSignalOk(true);
-
-  final String name;
+abstract base class DurianSignalHistogram<L extends DurianSignalLabels>
+    extends DurianSignalMetric<L> {
+  const DurianSignalHistogram(super.name);
 }
 
 /// A gauge name carrier.
-abstract class DurianSignalGauge<L extends DurianSignalLabels> {
-  const DurianSignalGauge(this.name);
-
-  Result<bool> set(L labels) => const DurianSignalOk(true);
-
-  final String name;
+abstract base class DurianSignalGauge<L extends DurianSignalLabels>
+    extends DurianSignalMetric<L> {
+  const DurianSignalGauge(super.name);
 }
 
 /// A span name carrier; [A] is its attributes class.
-abstract class DurianSignalSpan<A extends DurianSignalLabels> {
+abstract base class DurianSignalSpan<A extends DurianSignalLabels> {
   const DurianSignalSpan(this.name, this.kind);
 
   final String name;
@@ -118,6 +175,9 @@ final class DurianSignalMetricInfo {
     required this.acrossPods,
     required this.perPod,
     required this.keys,
+    required this.labels,
+    this.values = const {},
+    this.ranges = const {},
   });
 
   /// counter, histogram or gauge.
@@ -137,6 +197,15 @@ final class DurianSignalMetricInfo {
 
   /// The allowed label keys, in contract order.
   final List<String> keys;
+
+  /// The generated labels class of this metric: the port refuses any other runtime type.
+  final Type labels;
+
+  /// The allowed wire values per enum label.
+  final Map<String, List<String>> values;
+
+  /// The [min, max] per bounded-number label.
+  final Map<String, List<int>> ranges;
 }
 
 /// One row of spanTable.
@@ -147,40 +216,168 @@ final class DurianSignalSpanInfo {
   final List<String> keys;
 }
 
-final class TraceLevel implements DurianSignalLevel {
-  const TraceLevel();
-  @override
-  String get level => 'trace';
-}
+/// The telemetry port, built from the generated tables. A refusal is an Err and a count in
+/// [dropped]; it never throws and never changes the app's result.
+final class DurianSignalPort {
+  DurianSignalPort._(this._metrics, this._events);
 
-final class DebugLevel implements DurianSignalLevel {
-  const DebugLevel();
-  @override
-  String get level => 'debug';
-}
+  static DurianSignalPort? _current;
 
-final class InfoLevel implements DurianSignalLevel {
-  const InfoLevel();
-  @override
-  String get level => 'info';
-}
+  /// Builds the port from the generated tables, once per process. The generated installSignals() calls
+  /// it; the lint rule forbids calling it anywhere else. Nothing guarantees installSignals() runs first,
+  /// so a second install, whichever came first, POISONS the port: it is refused and counted in
+  /// dropped.register, and from then on every signal is refused and counted in dropped.poisoned until
+  /// restart. A forged first table is never used silently. The tables are copied.
+  static Result<DurianSignalPort> install({
+    required Map<String, DurianSignalMetricInfo> metrics,
+    required Map<String, String> events,
+  }) {
+    final p = _current;
+    if (p != null) {
+      p._poisoned = true;
+      p.dropped['register'] = p.dropped['register']! + 1;
+      return const DurianSignalErr(
+        'dropped.register: the port is already installed once in this process; it is now poisoned and refuses every signal until restart',
+      );
+    }
+    return DurianSignalOk(
+      _current = DurianSignalPort._(Map.of(metrics), Map.of(events)),
+    );
+  }
 
-final class WarnLevel implements DurianSignalLevel {
-  const WarnLevel();
-  @override
-  String get level => 'warn';
-}
+  final Map<String, DurianSignalMetricInfo> _metrics;
+  final Map<String, String> _events;
+  bool _poisoned = false;
 
-final class ErrorLevel implements DurianSignalLevel {
-  const ErrorLevel();
-  @override
-  String get level => 'error';
-}
+  /// dropped.<reason>: unknown_event, unknown_metric, unknown_key, unknown_value, register, poisoned, guard_error.
+  final Map<String, int> dropped = {
+    'unknown_event': 0,
+    'unknown_metric': 0,
+    'unknown_key': 0,
+    'unknown_value': 0,
+    'register': 0,
+    'poisoned': 0,
+    'guard_error': 0,
+  };
 
-final class FatalLevel implements DurianSignalLevel {
-  const FatalLevel();
-  @override
-  String get level => 'fatal';
+  Result<bool> _drop(String reason, String why) {
+    dropped[reason] = dropped[reason]! + 1;
+    return DurianSignalErr<bool>('dropped.$reason: $why');
+  }
+
+  /// Called by a generated counter's add.
+  static Result<bool> add(
+    DurianSignalCounter<DurianSignalLabels> metric,
+    DurianSignalLabels labels,
+  ) => _emit('counter', metric.name, labels);
+
+  /// Called by a generated histogram's record.
+  static Result<bool> record(
+    DurianSignalHistogram<DurianSignalLabels> metric,
+    DurianSignalLabels labels,
+  ) => _emit('histogram', metric.name, labels);
+
+  /// Called by a generated gauge's set.
+  static Result<bool> set(
+    DurianSignalGauge<DurianSignalLabels> metric,
+    DurianSignalLabels labels,
+  ) => _emit('gauge', metric.name, labels);
+
+  static Result<bool> _emit(
+    String kind,
+    String name,
+    DurianSignalLabels labels,
+  ) {
+    final p = _current;
+    if (p == null) return const DurianSignalErr('no port installed');
+    try {
+      return p._check(kind, name, labels);
+    } catch (e) {
+      // Last resort: a hand-made labels class can throw from its entries getter. Never rethrow.
+      return p._drop('guard_error', 'metric "$name": $e');
+    }
+  }
+
+  Result<bool> _check(String kind, String name, DurianSignalLabels labels) {
+    final p = this;
+    if (_poisoned) {
+      return _drop(
+        'poisoned',
+        'metric "$name": the port is poisoned (a second install was refused); every signal is refused until restart',
+      );
+    }
+    final info = p._metrics[name];
+    if (info == null) {
+      return p._drop(
+        'unknown_metric',
+        'metric "$name" is not in the generated metric table',
+      );
+    }
+    if (info.kind != kind) {
+      return p._drop(
+        'unknown_metric',
+        'metric "$name" is a ${info.kind} in the generated metric table, not a $kind',
+      );
+    }
+    if (labels.runtimeType != info.labels) {
+      return p._drop(
+        'unknown_key',
+        'metric "$name" labels type ${labels.runtimeType} is not its generated type ${info.labels}',
+      );
+    }
+    final entries = labels.entries;
+    final keys = entries.keys.toList();
+    if (keys.join(' ') != info.keys.join(' ')) {
+      return p._drop(
+        'unknown_key',
+        'metric "$name" labels [${keys.join(' ')}] are not its generated keys [${info.keys.join(' ')}]',
+      );
+    }
+    for (final MapEntry(:key, :value) in entries.entries) {
+      final allowed = info.values[key];
+      final wire = value is DurianSignalWire ? value.wire : '$value';
+      if (allowed != null && !allowed.contains(wire)) {
+        return p._drop(
+          'unknown_value',
+          'metric "$name" label $key value "$wire" is not one of $allowed',
+        );
+      }
+      final range = info.ranges[key];
+      if (range != null &&
+          (value is! int || value < range[0] || value > range[1])) {
+        return p._drop(
+          'unknown_value',
+          'metric "$name" label $key value $value is outside ${range[0]}..${range[1]}',
+        );
+      }
+    }
+    return const DurianSignalOk(true);
+  }
+
+  static Result<bool> _log(String level, Event<DurianSignalLevel> event) {
+    final p = _current;
+    if (p == null) return const DurianSignalErr('no port installed');
+    if (p._poisoned) {
+      return p._drop(
+        'poisoned',
+        'event "${event.name}": the port is poisoned (a second install was refused); every signal is refused until restart',
+      );
+    }
+    final want = p._events[event.name];
+    if (want == null) {
+      return p._drop(
+        'unknown_event',
+        'event "${event.name}" is not in the generated event table',
+      );
+    }
+    if (want != level) {
+      return p._drop(
+        'unknown_event',
+        'event "${event.name}" is $want in the generated event table, not $level',
+      );
+    }
+    return const DurianSignalOk(true);
+  }
 }
 
 Result<bool> error(
@@ -188,4 +385,10 @@ Result<bool> error(
   Map<String, Object?>? fields,
   Object? cause,
   StackTrace? stack,
-]) => const DurianSignalOk(true);
+]) => DurianSignalPort._log('error', event);
+
+Result<bool> warn(Event<WarnLevel> event, [Map<String, Object?>? fields]) =>
+    DurianSignalPort._log('warn', event);
+
+Result<bool> info(Event<InfoLevel> event, [Map<String, Object?>? fields]) =>
+    DurianSignalPort._log('info', event);

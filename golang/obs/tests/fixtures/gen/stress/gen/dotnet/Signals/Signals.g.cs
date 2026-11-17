@@ -126,14 +126,17 @@ public static class Spans
 
 // ---- data tables ----
 
-/// <summary>The data tables: allowed label keys per metric and span, and every event name.</summary>
+/// <summary>The data tables: allowed label keys per metric and span, every event name and its level.</summary>
 public static class SignalTables
 {
     public static readonly IReadOnlyDictionary<string, DurianSignalMetricInfo> Metrics =
         new Dictionary<string, DurianSignalMetricInfo>
         {
-            ["payments.provider.settlement.batch.reconciliation.duration"] = new("histogram", "seconds", 3000000, "", false, new string[] { "region", "default", "very_long_bounded_number_type_name_for_wrapping", "k8s.zone" }),
-            ["payments.provider.settlement.batch.reconciliation.late"] = new("counter", "", 9000000, "", false, new string[] { "very_long_calendar_date_type_name_to_wrap_the_line", "hour" }),
+            ["payments.provider.settlement.batch.reconciliation.duration"] = new("histogram", "seconds", 3000000, "", false, new string[] { "region", "default", "very_long_bounded_number_type_name_for_wrapping", "k8s.zone" },
+                Values: new Dictionary<string, string[]> { ["region"] = new string[] { "us-east-1", "default", "class", "1xx", "it's", "a$b", "Wire", "All", "region" }, ["default"] = new string[] { "us-east-1", "default", "class", "1xx", "it's", "a$b", "Wire", "All", "region" } },
+                Ranges: new Dictionary<string, long[]> { ["very_long_bounded_number_type_name_for_wrapping"] = new long[] { -5, 99 }, ["k8s.zone"] = new long[] { 0, 23 } }),
+            ["payments.provider.settlement.batch.reconciliation.late"] = new("counter", "", 9000000, "", false, new string[] { "very_long_calendar_date_type_name_to_wrap_the_line", "hour" },
+                Ranges: new Dictionary<string, long[]> { ["hour"] = new long[] { 0, 23 } }),
             ["payments.idle"] = new("gauge", "", 0, "last", false, new string[] { }),
         };
 
@@ -144,4 +147,13 @@ public static class SignalTables
         };
 
     public static readonly IReadOnlyList<string> EventNames = new string[] { "payments.class.started", "payments.new", "payments.provider.settlement.batch.reconciliation.failed" };
+
+    /// <summary>Event name to level: Port.Install takes it, and the port refuses any other name or level.</summary>
+    public static readonly IReadOnlyDictionary<string, string> EventLevels =
+        new Dictionary<string, string>
+        {
+            ["payments.class.started"] = "fatal",
+            ["payments.new"] = "trace",
+            ["payments.provider.settlement.batch.reconciliation.failed"] = "error",
+        };
 }

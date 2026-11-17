@@ -36,6 +36,9 @@ usage:
   obs look [--base origin/main] [--all] [--json]
   obs links [--dir observability] [--seed seed.yaml] [--base unix]
   obs version
+  obs store move <store> --config move.yaml [--dry-run] [--rollback]
+  obs symbols put|decode --store <dir> --file <file> [options]
+  obs size --req-per-second <n> --services <n> --pods <n> --profiled-pods <n>
 
 exit 0 when clean, 1 when a check failed, 2 on a usage or input error.
 `
@@ -67,6 +70,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runCheck(args[1:], stdout, stderr)
 	case "gen":
 		return runGen(args[1:], stdout, stderr)
+	case "store":
+		return runStore(args[1:], stdout, stderr)
+	case "symbols":
+		return runSymbols(args[1:], stdout, stderr)
+	case "size":
+		return runSize(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
 		return 0

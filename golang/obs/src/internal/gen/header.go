@@ -28,9 +28,9 @@ func HeaderLines(c *contract.Contract) []string {
 
 // ContractPath identifies the source independently of a target or contract hash.
 // In a Git repository it is relative to the repository root, even when invoked
-// from a service subdirectory. Standalone fixture projects have no .git; their
-// contract is relative to the supplied project directory. Synthetic contracts
-// keep their supplied logical filename without inspecting unrelated cwd files.
+// from a service subdirectory. With no .git it is relative to the folder that holds
+// the observability folder (the project folder), whatever the working directory.
+// Synthetic contracts (no file on disk) keep their supplied logical filename.
 func ContractPath(c *contract.Contract) string {
 	name := c.File
 	if name == "" {
@@ -40,22 +40,36 @@ func ContractPath(c *contract.Contract) string {
 	if err != nil {
 		return filepath.ToSlash(filepath.Clean(name))
 	}
-	if _, err := os.Stat(abs); err == nil {
-		for dir := filepath.Dir(abs); ; dir = filepath.Dir(dir) {
-			if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
-				if rel, err := filepath.Rel(dir, abs); err == nil {
-					return filepath.ToSlash(rel)
-				}
-			}
-			if filepath.Dir(dir) == dir {
-				break
-			}
+	if _, err := os.Stat(abs); err != nil {
+		if !filepath.IsAbs(name) {
+			return filepath.ToSlash(filepath.Clean(name))
 		}
+		return filepath.ToSlash(filepath.Join(filepath.Base(filepath.Dir(abs)), filepath.Base(abs)))
 	}
-	if !filepath.IsAbs(name) {
-		return filepath.ToSlash(filepath.Clean(name))
+	base := GitRoot(filepath.Dir(abs))
+	if base == "" {
+		base = filepath.Dir(filepath.Dir(abs)) // the project folder: it holds observability/
+	}
+	if rel, err := filepath.Rel(base, abs); err == nil {
+		return filepath.ToSlash(rel)
 	}
 	return filepath.ToSlash(filepath.Join(filepath.Base(filepath.Dir(abs)), filepath.Base(abs)))
+}
+
+// GitRoot is the nearest folder at or above dir that holds .git, or "" outside a Git repository.
+func GitRoot(dir string) string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	for d := abs; ; d = filepath.Dir(d) {
+		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+			return d
+		}
+		if filepath.Dir(d) == d {
+			return ""
+		}
+	}
 }
 
 // ContractOf reads the source path in the generated header, not arbitrary body text.

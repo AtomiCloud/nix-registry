@@ -1,3 +1,3 @@
-import { logError } from '@atomicloud/diene.interfaces';
-import { ChargeFailed } from './signals';
-logError(ChargeFailed, 42);
+import { logger } from '@atomicloud/diene.interfaces';
+import { ChargeFailed, eventTable } from './signals';
+logger(eventTable).error(ChargeFailed, 42);

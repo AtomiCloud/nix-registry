@@ -222,19 +222,25 @@ public static class Spans
 
 // ---- data tables ----
 
-/// <summary>The data tables: allowed label keys per metric and span, and every event name.</summary>
+/// <summary>The data tables: allowed label keys per metric and span, every event name and its level.</summary>
 public static class SignalTables
 {
     public static readonly IReadOnlyDictionary<string, DurianSignalMetricInfo> Metrics =
         new Dictionary<string, DurianSignalMetricInfo>
         {
-            ["checkout.charges"] = new("counter", "", 5000, "", false, new string[] { "provider", "outcome", "shard", "hour" }),
-            ["checkout.charge.duration"] = new("histogram", "seconds", 200, "", false, new string[] { "provider", "outcome" }),
-            ["checkout.invoices"] = new("counter", "", 400, "", false, new string[] { "billing_day", "provider" }),
-            ["checkout.queue.depth"] = new("gauge", "", 10, "sum", false, new string[] { "lane" }),
+            ["checkout.charges"] = new("counter", "", 5000, "", false, new string[] { "provider", "outcome", "shard", "hour" },
+                Values: new Dictionary<string, string[]> { ["provider"] = new string[] { "stripe", "adyen", "paypal" }, ["outcome"] = new string[] { "ok", "declined", "error" } },
+                Ranges: new Dictionary<string, long[]> { ["shard"] = new long[] { 0, 15 }, ["hour"] = new long[] { 0, 23 } }),
+            ["checkout.charge.duration"] = new("histogram", "seconds", 200, "", false, new string[] { "provider", "outcome" },
+                Values: new Dictionary<string, string[]> { ["provider"] = new string[] { "stripe", "adyen", "paypal" }, ["outcome"] = new string[] { "ok", "declined", "error" } }),
+            ["checkout.invoices"] = new("counter", "", 400, "", false, new string[] { "billing_day", "provider" },
+                Values: new Dictionary<string, string[]> { ["provider"] = new string[] { "stripe", "adyen", "paypal" } }),
+            ["checkout.queue.depth"] = new("gauge", "", 10, "sum", false, new string[] { "lane" },
+                Ranges: new Dictionary<string, long[]> { ["lane"] = new long[] { 1, 3 } }),
             ["checkout.worker.lag"] = new("gauge", "seconds", 0, "max", false, new string[] { }),
             ["checkout.config.generation"] = new("gauge", "", 0, "last", false, new string[] { }),
-            ["checkout.cache.entries"] = new("gauge", "", 20, "avg", false, new string[] { "day" }),
+            ["checkout.cache.entries"] = new("gauge", "", 20, "avg", false, new string[] { "day" },
+                Ranges: new Dictionary<string, long[]> { ["day"] = new long[] { 0, 6 } }),
             ["checkout.runtime.memory"] = new("gauge", "bytes", 0, "", true, new string[] { }),
         };
 
@@ -247,4 +253,14 @@ public static class SignalTables
         };
 
     public static readonly IReadOnlyList<string> EventNames = new string[] { "checkout.charge.succeeded", "checkout.charge.declined", "checkout.charge.failed", "checkout.worker.started" };
+
+    /// <summary>Event name to level: Port.Install takes it, and the port refuses any other name or level.</summary>
+    public static readonly IReadOnlyDictionary<string, string> EventLevels =
+        new Dictionary<string, string>
+        {
+            ["checkout.charge.succeeded"] = "info",
+            ["checkout.charge.declined"] = "warn",
+            ["checkout.charge.failed"] = "error",
+            ["checkout.worker.started"] = "debug",
+        };
 }

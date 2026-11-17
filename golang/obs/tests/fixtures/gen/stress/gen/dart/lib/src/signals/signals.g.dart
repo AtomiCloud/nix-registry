@@ -46,14 +46,21 @@ extension type const VeryLongBoundedNumberTypeNameForWrapping._(int value)
 }
 
 /// The range of [VeryLongBoundedNumberTypeNameForWrapping]; of(n) returns a result.
+final class VeryLongBoundedNumberTypeNameForWrappingSpec
+    extends DurianSignalBoundSpec<VeryLongBoundedNumberTypeNameForWrapping> {
+  const VeryLongBoundedNumberTypeNameForWrappingSpec._()
+    : super(
+        'very_long_bounded_number_type_name_for_wrapping',
+        -5,
+        99,
+        '',
+        VeryLongBoundedNumberTypeNameForWrapping.new,
+      );
+}
+
+/// The range of [VeryLongBoundedNumberTypeNameForWrapping]; of(n) returns a result.
 const veryLongBoundedNumberTypeNameForWrappingSpec =
-    DurianSignalBoundSpec<VeryLongBoundedNumberTypeNameForWrapping>(
-      'very_long_bounded_number_type_name_for_wrapping',
-      -5,
-      99,
-      '',
-      VeryLongBoundedNumberTypeNameForWrapping.new,
-    );
+    VeryLongBoundedNumberTypeNameForWrappingSpec._();
 
 /// The time bucket hour (hour_of_day, 0..23); it rolls over by itself.
 ///
@@ -64,13 +71,12 @@ extension type const Hour._(int value) implements int {
 }
 
 /// The range of [Hour]; of(n) returns a result.
-const hourSpec = DurianSignalBoundSpec<Hour>(
-  'hour',
-  0,
-  23,
-  'hour_of_day',
-  Hour.new,
-);
+final class HourSpec extends DurianSignalBoundSpec<Hour> {
+  const HourSpec._() : super('hour', 0, 23, 'hour_of_day', Hour.new);
+}
+
+/// The range of [Hour]; of(n) returns a result.
+const hourSpec = HourSpec._();
 
 /// The calendar date very_long_calendar_date_type_name_to_wrap_the_line: a metric label with 365 values live at once
 /// (window_days).
@@ -127,6 +133,11 @@ final class PaymentsProviderSettlementBatchReconciliationDurationMetric
         > {
   const PaymentsProviderSettlementBatchReconciliationDurationMetric._()
     : super('payments.provider.settlement.batch.reconciliation.duration');
+
+  /// The only call on payments.provider.settlement.batch.reconciliation.duration: typed to its own labels class (no generic base method).
+  Result<bool> record(
+    PaymentsProviderSettlementBatchReconciliationDurationLabels labels,
+  ) => DurianSignalPort.record(this, labels);
 }
 
 /// The histogram payments.provider.settlement.batch.reconciliation.duration.
@@ -161,6 +172,11 @@ final class PaymentsProviderSettlementBatchReconciliationLateMetric
         > {
   const PaymentsProviderSettlementBatchReconciliationLateMetric._()
     : super('payments.provider.settlement.batch.reconciliation.late');
+
+  /// The only call on payments.provider.settlement.batch.reconciliation.late: typed to its own labels class (no generic base method).
+  Result<bool> add(
+    PaymentsProviderSettlementBatchReconciliationLateLabels labels,
+  ) => DurianSignalPort.add(this, labels);
 }
 
 /// The counter payments.provider.settlement.batch.reconciliation.late.
@@ -178,6 +194,10 @@ final class PaymentsIdleLabels extends DurianSignalLabels {
 /// The gauge payments.idle.
 final class PaymentsIdleMetric extends DurianSignalGauge<PaymentsIdleLabels> {
   const PaymentsIdleMetric._() : super('payments.idle');
+
+  /// The only call on payments.idle: typed to its own labels class (no generic base method).
+  Result<bool> set(PaymentsIdleLabels labels) =>
+      DurianSignalPort.set(this, labels);
 }
 
 /// The gauge payments.idle.
@@ -199,6 +219,35 @@ const metricTable = <String, DurianSignalMetricInfo>{
           'very_long_bounded_number_type_name_for_wrapping',
           'k8s.zone',
         ],
+        labels: PaymentsProviderSettlementBatchReconciliationDurationLabels,
+        values: {
+          'region': [
+            'us-east-1',
+            'default',
+            'class',
+            '1xx',
+            'it\'s',
+            'a\$b',
+            'Wire',
+            'All',
+            'region',
+          ],
+          'default': [
+            'us-east-1',
+            'default',
+            'class',
+            '1xx',
+            'it\'s',
+            'a\$b',
+            'Wire',
+            'All',
+            'region',
+          ],
+        },
+        ranges: {
+          'very_long_bounded_number_type_name_for_wrapping': [-5, 99],
+          'k8s.zone': [0, 23],
+        },
       ),
   'payments.provider.settlement.batch.reconciliation.late':
       DurianSignalMetricInfo(
@@ -208,6 +257,10 @@ const metricTable = <String, DurianSignalMetricInfo>{
         acrossPods: '',
         perPod: false,
         keys: ['very_long_calendar_date_type_name_to_wrap_the_line', 'hour'],
+        labels: PaymentsProviderSettlementBatchReconciliationLateLabels,
+        ranges: {
+          'hour': [0, 23],
+        },
       ),
   'payments.idle': DurianSignalMetricInfo(
     kind: 'gauge',
@@ -216,34 +269,23 @@ const metricTable = <String, DurianSignalMetricInfo>{
     acrossPods: 'last',
     perPod: false,
     keys: [],
+    labels: PaymentsIdleLabels,
   ),
 };
 
 // ---- log events ----
 
 /// The event payments.class.started at level fatal.
-final class ClassEvent implements Event<FatalLevel> {
-  const ClassEvent._();
-
-  @override
-  String get name => 'payments.class.started';
-
-  @override
-  String get level => 'fatal';
+final class ClassEvent extends Event<FatalLevel> {
+  const ClassEvent._() : super('payments.class.started');
 }
 
 /// The event payments.class.started at level fatal.
 const classEvent = ClassEvent._();
 
 /// The event payments.new at level trace.
-final class NewEvent implements Event<TraceLevel> {
-  const NewEvent._();
-
-  @override
-  String get name => 'payments.new';
-
-  @override
-  String get level => 'trace';
+final class NewEvent extends Event<TraceLevel> {
+  const NewEvent._() : super('payments.new');
 }
 
 /// The event payments.new at level trace.
@@ -251,14 +293,9 @@ const newEvent = NewEvent._();
 
 /// The event payments.provider.settlement.batch.reconciliation.failed at level error.
 final class VeryLongEventKeyNameThatNeedsWrappingInTheGeneratedCodeEvent
-    implements Event<ErrorLevel> {
-  const VeryLongEventKeyNameThatNeedsWrappingInTheGeneratedCodeEvent._();
-
-  @override
-  String get name => 'payments.provider.settlement.batch.reconciliation.failed';
-
-  @override
-  String get level => 'error';
+    extends Event<ErrorLevel> {
+  const VeryLongEventKeyNameThatNeedsWrappingInTheGeneratedCodeEvent._()
+    : super('payments.provider.settlement.batch.reconciliation.failed');
 }
 
 /// The event payments.provider.settlement.batch.reconciliation.failed at level error.
@@ -271,6 +308,20 @@ const eventNames = <String>[
   'payments.new',
   'payments.provider.settlement.batch.reconciliation.failed',
 ];
+
+/// The data table of the events: name -> level. The port refuses any other name or
+/// level.
+const eventTable = <String, String>{
+  'payments.class.started': 'fatal',
+  'payments.new': 'trace',
+  'payments.provider.settlement.batch.reconciliation.failed': 'error',
+};
+
+/// Builds the telemetry port from this contract's tables, once per process (call it at
+/// start-up). Any other install, earlier or later, poisons the port: it refuses every
+/// signal until restart.
+Result<DurianSignalPort> installSignals() =>
+    DurianSignalPort.install(metrics: metricTable, events: eventTable);
 
 // ---- spans ----
 

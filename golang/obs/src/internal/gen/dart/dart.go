@@ -54,10 +54,10 @@ var baseNames = []string{
 	"DurianSignalWire", "DurianSignalLabels", "DurianSignalLevel", "DurianSignalResult",
 	"DurianSignalOk", "DurianSignalErr", "DurianSignalBoundSpec", "DurianSignalEvent",
 	"DurianSignalCounter", "DurianSignalHistogram", "DurianSignalGauge", "DurianSignalSpan",
-	"DurianSignalMetricInfo", "DurianSignalSpanInfo", "DurianSignalLevelTrace",
+	"DurianSignalMetricInfo", "DurianSignalSpanInfo", "DurianSignalMetric", "DurianSignalPort", "DurianSignalLevelTrace",
 	"DurianSignalLevelDebug", "DurianSignalLevelInfo", "DurianSignalLevelWarn",
 	"DurianSignalLevelError", "DurianSignalLevelFatal", "metricTable", "spanTable", "eventNames",
-	"_durianSignalDate", "Event", "Result", "TraceLevel", "DebugLevel", "InfoLevel", "WarnLevel", "ErrorLevel", "FatalLevel",
+	"_durianSignalDate", "eventTable", "installSignals", "Event", "Result", "TraceLevel", "DebugLevel", "InfoLevel", "WarnLevel", "ErrorLevel", "FatalLevel",
 }
 
 // topReserved are the words a lowercase top-level constant may not take: Dart's reserved words and
@@ -71,7 +71,7 @@ var topReserved = map[string]bool{
 	"static": true, "typedef": true, "when": true, "async": true, "sync": true, "type": true,
 	"int": true, "num": true, "bool": true, "double": true, "override": true, "deprecated": true,
 	"pragma": true, "print": true, "identical": true, "identityHashCode": true,
-	"error": true,
+	"error": true, "warn": true, "info": true,
 }
 
 // topName makes a lowercase top-level identifier safe: a reserved or shadowing word gets a trailing _.
@@ -196,6 +196,9 @@ func (g *emitter) plan() error {
 				return err
 			}
 			if err := g.declare(camel(n)+"Spec", from); err != nil {
+				return err
+			}
+			if err := g.declare(pascal(n)+"Spec", from); err != nil {
 				return err
 			}
 			g.typeRef[n] = pascal(n)
@@ -343,6 +346,46 @@ func (x *w) declHead(head, kw, typ string) {
 	x.line("        %s {", typ)
 }
 
+// arrow writes `  <head><param>) => <body>` the way dart format does: on one line; else the body on
+// the next line; else the parameter on its own line too.
+func (x *w) arrow(head, param, body string) {
+	sig := "  " + head + param + ")"
+	if one := sig + " => " + body; len(one) <= width {
+		x.line("%s", one)
+		return
+	}
+	if len(sig+" =>") <= width {
+		x.line("%s =>", sig)
+		x.line("      %s", body)
+		return
+	}
+	x.line("  %s", head)
+	x.line("    %s,", param)
+	if one := "  ) => " + body; len(one) <= width {
+		x.line("%s", one)
+		return
+	}
+	x.line("  ) =>")
+	x.line("      %s", body)
+}
+
+// mapLit writes `<prefix>{k: v, ...};` on one line, or one entry per line when it does not fit.
+func (x *w) mapLit(prefix string, kv [][2]string) {
+	items := make([]string, len(kv))
+	for i, e := range kv {
+		items[i] = e[0] + ": " + e[1]
+	}
+	if one := prefix + "{" + strings.Join(items, ", ") + "};"; len(one) <= width {
+		x.line("%s", one)
+		return
+	}
+	x.line("%s{", prefix)
+	for _, e := range kv {
+		x.entry(2, e[0], e[1])
+	}
+	x.line("};")
+}
+
 // assign writes `<lhs> = <rhs>;` on one line, or with the right side on the next.
 func (x *w) assign(indent int, lhs, rhs string) {
 	pad := strings.Repeat(" ", indent)
@@ -414,8 +457,9 @@ func (x *w) entry(indent int, key, value string) {
 	x.line("%s    %s,", pad, value)
 }
 
-// tableRow writes one row of a data table: `'name': Info._(kind: ..., keys: [...]),`.
-func (x *w) tableRow(name, info string, fields []string, keys []string) {
+// tableRow writes one row of a data table: `'name': Info._(kind: ..., keys: [...]),`; after
+// writes more named arguments after keys (each already laid out by its own writer).
+func (x *w) tableRow(name, info string, fields []string, keys []string, after ...func(indent int)) {
 	ind := 2
 	if one := fmt.Sprintf("  %s: %s(", name, info); len(one) <= width {
 		x.line("%s", one)
@@ -429,7 +473,33 @@ func (x *w) tableRow(name, info string, fields []string, keys []string) {
 		x.line("%s  %s,", pad, fl)
 	}
 	x.strList(ind+2, "keys: ", ",", keys)
+	for _, a := range after {
+		a(ind + 2)
+	}
 	x.line("%s),", pad)
+}
+
+// listMap writes `<prefix>{` and one `'k': [a, b],` entry per line (a list split again when it does not
+// fit): dart format always splits a map literal whose values are list literals. Items are already Dart text.
+func (x *w) listMap(indent int, prefix string, keys []string, items [][]string) {
+	pad := strings.Repeat(" ", indent)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = dq(k) + ": [" + strings.Join(items[i], ", ") + "]"
+	}
+	x.line("%s%s{", pad, prefix)
+	for i, k := range keys {
+		if one := pad + "  " + parts[i] + ","; len(one) <= width {
+			x.line("%s", one)
+			continue
+		}
+		x.line("%s  %s: [", pad, dq(k))
+		for _, it := range items[i] {
+			x.line("%s    %s,", pad, it)
+		}
+		x.line("%s  ],", pad)
+	}
+	x.line("%s},", pad)
 }
 
 // strList writes `<prefix>['a', 'b']<suffix>` on one line, or one element per line when it does
@@ -459,6 +529,13 @@ func spanKind(s contract.Span) string {
 		return "internal"
 	}
 	return s.Kind
+}
+
+// metricVerb is the method a generated metric class has, and the port call it makes.
+var metricVerb = map[string]string{
+	contract.MetricCounter:   "add",
+	contract.MetricHistogram: "record",
+	contract.MetricGauge:     "set",
 }
 
 var metricBase = map[string]string{
@@ -497,6 +574,10 @@ func (g *emitter) render() string {
 		x.line("/// The %s %s.", c.Metrics[m].Kind, m)
 		x.classHead(pascal(m)+"Metric", fmt.Sprintf("%s<%sLabels>", metricBase[c.Metrics[m].Kind], pascal(m)))
 		x.superCtor(pascal(m)+"Metric", dq(m))
+		x.blank()
+		verb := metricVerb[c.Metrics[m].Kind]
+		x.line("  /// The only call on %s: typed to its own labels class (no generic base method).", m)
+		x.arrow(fmt.Sprintf("Result<bool> %s(", verb), pascal(m)+"Labels labels", fmt.Sprintf("DurianSignalPort.%s(this, labels);", verb))
 		x.line("}")
 		x.blank()
 		x.line("/// The %s %s.", c.Metrics[m].Kind, m)
@@ -508,10 +589,40 @@ func (g *emitter) render() string {
 	x.line("const metricTable = <String, DurianSignalMetricInfo>{")
 	for _, n := range c.MetricOrder {
 		m := c.Metrics[n]
+		var vKeys, rKeys []string
+		var vItems, rItems [][]string
+		for _, l := range m.LabelOrder {
+			t := c.Types[m.Labels[l]]
+			switch t.Kind {
+			case contract.KindEnum:
+				q := make([]string, len(t.Values))
+				for i, v := range t.Values {
+					q[i] = dq(v)
+				}
+				vKeys, vItems = append(vKeys, l), append(vItems, q)
+			case contract.KindInt:
+				rKeys, rItems = append(rKeys, l), append(rItems, []string{fmt.Sprint(*t.Min), fmt.Sprint(*t.Max)})
+			case contract.KindTime:
+				hi := "23"
+				if t.Unit == contract.UnitWeekday {
+					hi = "6"
+				}
+				rKeys, rItems = append(rKeys, l), append(rItems, []string{"0", hi})
+			}
+		}
+		labelsType := pascal(n) + "Labels"
 		x.tableRow(dq(n), "DurianSignalMetricInfo", []string{
 			"kind: " + dq(m.Kind), "unit: " + dq(m.Unit), fmt.Sprintf("budget: %d", m.Budget),
 			"acrossPods: " + dq(m.AcrossPod), fmt.Sprintf("perPod: %t", m.PerPod),
-		}, m.LabelOrder)
+		}, m.LabelOrder, func(ind int) {
+			x.entry(ind, "labels", labelsType)
+			if len(vKeys) > 0 {
+				x.listMap(ind, "values: ", vKeys, vItems)
+			}
+			if len(rKeys) > 0 {
+				x.listMap(ind, "ranges: ", rKeys, rItems)
+			}
+		})
 	}
 	x.line("};")
 
@@ -521,14 +632,8 @@ func (g *emitter) render() string {
 		e := c.Logs[k]
 		x.blank()
 		x.line("/// The event %s at level %s.", e.Event, e.Level)
-		x.declHead("final class "+pascal(k)+"Event", "implements", "Event<"+levelClass(e.Level)+">")
-		x.line("  const %s._();", pascal(k)+"Event")
-		x.blank()
-		x.line("  @override")
-		x.line("  String get name => %s;", dq(e.Event))
-		x.blank()
-		x.line("  @override")
-		x.line("  String get level => %s;", dq(e.Level))
+		x.classHead(pascal(k)+"Event", "Event<"+levelClass(e.Level)+">")
+		x.superCtor(pascal(k)+"Event", dq(e.Event))
 		x.line("}")
 		x.blank()
 		x.line("/// The event %s at level %s.", e.Event, e.Level)
@@ -537,6 +642,20 @@ func (g *emitter) render() string {
 	x.blank()
 	x.line("/// Every event name of the contract, in contract order.")
 	x.strList(0, "const eventNames = <String>", ";", c.EventNames())
+	x.blank()
+	x.line("/// The data table of the events: name -> level. The port refuses any other name or")
+	x.line("/// level.")
+	evs := make([][2]string, 0, len(c.LogOrder))
+	for _, k := range c.LogOrder {
+		evs = append(evs, [2]string{dq(c.Logs[k].Event), dq(c.Logs[k].Level)})
+	}
+	x.mapLit("const eventTable = <String, String>", evs)
+	x.blank()
+	x.line("/// Builds the telemetry port from this contract's tables, once per process (call it at")
+	x.line("/// start-up). Any other install, earlier or later, poisons the port: it refuses every")
+	x.line("/// signal until restart.")
+	x.line("Result<DurianSignalPort> installSignals() =>")
+	x.line("    DurianSignalPort.install(metrics: metricTable, events: eventTable);")
 
 	x.blank()
 	x.line("// ---- spans ----")
@@ -630,8 +749,12 @@ func (g *emitter) boundType(x *w, id, name, doc string, min, max int, unit strin
 	x.line("}")
 	x.blank()
 	x.line("/// The range of [%s]; of(n) returns a result.", id)
-	x.assignCall("const "+camel(name)+"Spec", "DurianSignalBoundSpec<"+id+">(",
-		[]string{dq(name), fmt.Sprint(min), fmt.Sprint(max), dq(unit), id + ".new"})
+	x.classHead(id+"Spec", "DurianSignalBoundSpec<"+id+">")
+	x.superCtor(id+"Spec", dq(name), fmt.Sprint(min), fmt.Sprint(max), dq(unit), id+".new")
+	x.line("}")
+	x.blank()
+	x.line("/// The range of [%s]; of(n) returns a result.", id)
+	x.assign(0, "const "+camel(name)+"Spec", id+"Spec._()")
 }
 
 func (g *emitter) labelsClass(x *w, id, path, doc string, names []string, types map[string]string) {

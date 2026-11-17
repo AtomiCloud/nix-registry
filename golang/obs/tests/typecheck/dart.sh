@@ -62,4 +62,18 @@ while read -r f token; do
     fail=1
   fi
 done <"$g/expect"
+# Forging the compiler cannot stop (an app class extends a library base; Dart has no friend libraries): each
+# forge-*.dart must compile AND run (a refusal never throws to the app), and its output must show the port's
+# refusal listed in forge-expect.
+while read -r f token; do
+  cp -f "$g/$f" "$d/bin/forge.dart"
+  if ! out=$(cd "$d" && "$DART" run bin/forge.dart 2>&1); then
+    echo "FAIL $f must compile and run (the port refuses at run time, it never throws to the app): $(tail -3 <<<"$out")"
+    fail=1
+  elif grep -qF -- "$token" <<<"$out"; then echo "PASS $f compiles, runs, the port refuses: $token"; else
+    echo "FAIL $f ran but the port did not refuse it (want: $token): $out"
+    fail=1
+  fi
+  rm -f "$d/bin/forge.dart"
+done <"$g/forge-expect"
 exit $fail

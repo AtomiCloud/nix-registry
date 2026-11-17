@@ -2,6 +2,8 @@
 // contract: observability/contract.yaml
 // contract-hash: sha256:9129ac662e5875890cc17bf5204b61c434716b9df86e6a05575befa205924c2d
 
+import { register as durianSignalRegister } from '@atomicloud/diene.interfaces';
+
 import type { Event as DurianSignalEvent } from '@atomicloud/diene.interfaces';
 
 import type { Bounded as DurianSignalBounded } from '@atomicloud/diene.interfaces';
@@ -69,13 +71,26 @@ export type MetricLabels = {
   'checkout.runtime.memory': CheckoutRuntimeMemoryLabels;
 };
 export const metricTable = {
-  'checkout.charges': { kind: 'counter', keys: ['provider', 'outcome', 'shard', 'hour'] },
-  'checkout.charge.duration': { kind: 'histogram', keys: ['provider', 'outcome'] },
-  'checkout.invoices': { kind: 'counter', keys: ['billing_day', 'provider'] },
-  'checkout.queue.depth': { kind: 'gauge', keys: ['lane'] },
+  'checkout.charges': {
+    kind: 'counter',
+    keys: ['provider', 'outcome', 'shard', 'hour'],
+    values: { provider: ['stripe', 'adyen', 'paypal'], outcome: ['ok', 'declined', 'error'] },
+    ranges: { shard: [0, 15], hour: [0, 23] },
+  },
+  'checkout.charge.duration': {
+    kind: 'histogram',
+    keys: ['provider', 'outcome'],
+    values: { provider: ['stripe', 'adyen', 'paypal'], outcome: ['ok', 'declined', 'error'] },
+  },
+  'checkout.invoices': {
+    kind: 'counter',
+    keys: ['billing_day', 'provider'],
+    values: { provider: ['stripe', 'adyen', 'paypal'] },
+  },
+  'checkout.queue.depth': { kind: 'gauge', keys: ['lane'], ranges: { lane: [1, 3] } },
   'checkout.worker.lag': { kind: 'gauge', keys: [] },
   'checkout.config.generation': { kind: 'gauge', keys: [] },
-  'checkout.cache.entries': { kind: 'gauge', keys: ['day'] },
+  'checkout.cache.entries': { kind: 'gauge', keys: ['day'], ranges: { day: [0, 6] } },
   'checkout.runtime.memory': { kind: 'gauge', keys: [] },
 } as const;
 
@@ -112,6 +127,12 @@ export const eventNames = [
   'checkout.charge.failed',
   'checkout.worker.started',
 ] as const;
+export const eventTable = {
+  'checkout.charge.succeeded': 'info',
+  'checkout.charge.declined': 'warn',
+  'checkout.charge.failed': 'error',
+  'checkout.worker.started': 'debug',
+} as const;
 
 // Spans: attribute types are `type` aliases (an interface does not fit the Tracer constraint).
 export type CheckoutChargeAttrs = { user_id?: UserId; provider?: Provider; shard?: Shard };
@@ -137,3 +158,7 @@ export const spanTable = {
 export const CheckoutCharge = 'checkout.charge' as const;
 export const CheckoutProviderCall = 'checkout.provider.call' as const;
 export const CheckoutQueueConsume = 'checkout.queue.consume' as const;
+
+// Registers the tables with the port when this module loads, once per process. Any competing
+// registration, or a table that is not one of these, poisons the port until restart.
+durianSignalRegister({ metrics: metricTable, events: eventTable, spans: spanTable });

@@ -76,7 +76,7 @@ func (w *writer) render(pkg string) string {
 		w.f("\t\"time\"\n")
 	}
 	w.f(")\n\n")
-	for _, id := range []string{"obs", "MetricTable", "SpanTable", "Events", "DurianSignalGauge", "DurianSignalCounter", "DurianSignalHistogram", "Event"} {
+	for _, id := range []string{"obs", "MetricTable", "SpanTable", "Events", "DurianSignalGauge", "DurianSignalCounter", "DurianSignalHistogram", "Event", "EventTable"} {
 		w.decl(id, "shared interfaces name")
 	}
 	w.f("// Event is the interfaces library's level-typed event carrier.\ntype Event[L obs.Level] = obs.Event[L]\n\n")
@@ -97,11 +97,36 @@ func (w *writer) render(pkg string) string {
 	for _, n := range c.MetricOrder {
 		w.metric(n, c.Metrics[n])
 	}
-	w.f("\n// MetricTable is the data table of the metrics: kind, unit, budget, pod handling and the allowed label keys.\n")
+	w.f("\n// MetricTable is the data table of the metrics: kind, unit, budget, pod handling, the allowed label keys,\n")
+	w.f("// the generated labels type, and the allowed values (enums) and ranges (bounded numbers) the port checks.\n")
 	w.f("var MetricTable = map[string]obs.DurianSignalMetricInfo{\n")
 	for _, n := range c.MetricOrder {
 		m := c.Metrics[n]
-		w.f("\t%q: {Kind: %q, Unit: %q, Budget: %d, AcrossPods: %q, PerPod: %v, Keys: %s},\n", n, m.Kind, m.Unit, m.Budget, m.AcrossPod, m.PerPod, strList(m.LabelOrder))
+		w.f("\t%q: {\n\t\tKind: %q, Unit: %q, Budget: %d, AcrossPods: %q, PerPod: %v, Keys: %s,\n", n, m.Kind, m.Unit, m.Budget, m.AcrossPod, m.PerPod, strList(m.LabelOrder))
+		w.f("\t\tLabels: %sLabels{},\n", gen.Pascal(n))
+		var values, ranges []string
+		for _, l := range m.LabelOrder {
+			t := c.Types[m.Labels[l]]
+			switch t.Kind {
+			case contract.KindEnum:
+				values = append(values, fmt.Sprintf("%q: %s", l, strings.TrimPrefix(strList(t.Values), "[]string")))
+			case contract.KindInt:
+				ranges = append(ranges, fmt.Sprintf("%q: {%d, %d}", l, *t.Min, *t.Max))
+			case contract.KindTime:
+				hi := 23
+				if t.Unit == contract.UnitWeekday {
+					hi = 6
+				}
+				ranges = append(ranges, fmt.Sprintf("%q: {0, %d}", l, hi))
+			}
+		}
+		if len(values) > 0 {
+			w.f("\t\tValues: map[string][]string{%s},\n", strings.Join(values, ", "))
+		}
+		if len(ranges) > 0 {
+			w.f("\t\tRanges: map[string][2]int64{%s},\n", strings.Join(ranges, ", "))
+		}
+		w.f("\t},\n")
 	}
 	w.f("}\n")
 
@@ -114,6 +139,13 @@ func (w *writer) render(pkg string) string {
 		w.f("// %s is the event %s at level %s.\nvar %s = obs.NewEvent[obs.%sLevel](%q)\n\n", id, e.Event, e.Level, id, levelIdent[e.Level], e.Event)
 	}
 	w.f("// Events lists every event name of the contract, in contract order.\nvar Events = %s\n", strList(c.EventNames()))
+	w.f("\n// EventTable is the data table of the events: name -> level. The port refuses any other name or level.\n")
+	w.f("var EventTable = map[string]string{\n")
+	for _, k := range c.LogOrder {
+		e := c.Logs[k]
+		w.f("\t%q: %q,\n", e.Event, e.Level)
+	}
+	w.f("}\n")
 
 	// ---- spans
 	w.f("\n// ---- spans ----\n")
@@ -127,6 +159,10 @@ func (w *writer) render(pkg string) string {
 		w.f("\t%q: {Kind: %q, Keys: %s},\n", n, spanKind(s), strList(s.AttrOrder))
 	}
 	w.f("}\n")
+	w.f("\n// init registers the tables with the port, once per process. Any competing registration (earlier or later)\n")
+	w.f("// poisons the port: it then refuses every signal until restart. The port refuses names, kinds, levels,\n")
+	w.f("// label types, keys and values not in the tables.\n")
+	w.f("func init() {\n\t_ = obs.Register(obs.DurianSignalTables{Metrics: MetricTable, Events: EventTable, Spans: SpanTable})\n}\n")
 	return w.String()
 }
 

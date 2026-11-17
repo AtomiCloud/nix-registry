@@ -266,39 +266,115 @@ and `contract-hash: sha256:<hash of the contract file>`.
 not (the contract changed and nobody regenerated); a missing file is `[gen-missing]`.
 A header-marked file absent from the output plan is `[gen-orphan]`, including files left after
 dropping a target. Each header names the contract's repository-relative path, so generated files
-owned by another contract in a monorepo are ignored. The check scans the consumer root without
-following symlinks or entering dependency/cache directories. `--lang` checks only the selected languages.
+owned by another contract in a monorepo are ignored. The check scans from the Git root (or the project
+folder outside Git) without following symlinks or entering dependency/cache directories. `--lang` checks only the selected languages.
 Golden files: `tests/fixtures/gen/good` is a consumer repo with its generated files committed; the
 Go unit tests and `obs gen --check` compare against it (`OBS_UPDATE_GOLDEN=1 go test ./internal/gen/...`
 rewrites them). The tests find `tests/` in an ancestor of the package (or `OBS_TESTS_DIR`); a build from `src/` alone skips them, and the nix check copies `tests/` next to the source root.
 
-**Each language compiles against a stub written from the goal; NOT TESTED against the real library.**
-`tests/typecheck/<lang>/stub/` contains only the assumed interfaces API used by the generated
-code and consumers. The nix check links these stubs, compiles/runs good consumers, and requires
-planted bad consumers to fail for the expected diagnostic. The same stubs support the 36 name-fuzz
-contract/language cases. The .NET harness builds three separate assemblies, Obs, Signals, and App; only Signals
-has access to the library's internal name/event constructors. Dart inherits the library's metric
-methods, so `checkoutCharges.add(labels)` fixes the labels type through its receiver.
+**Each language compiles and runs against a stub written from the goal; NOT TESTED against the real library.**
+`tests/typecheck/<lang>/stub/` holds a minimal assumed interfaces API with just enough body to run the
+consumers (the Bun stub has an `index.js`, run with the `node` that nixpkgs `tsc` wraps). The nix check:
 
-Each `generate:` target accepts optional `interfaces:` to override its dependency import:
+- compiles and RUNS a good consumer: every valid call returns Ok and nothing is dropped;
+- requires every planted `bad-*` consumer to fail to compile with the expected diagnostic;
+- requires every planted `forge-*` consumer to compile, run without throwing, and show the port's refusal
+  (`dropped.unknown_event`, `unknown_metric`, `unknown_key`, `unknown_value`, `register` or `poisoned`).
 
-| Language | Default `interfaces`                             | Assumed API used by generated code / consumers                                                                                                                                                                                                                                                                                                                                                                     |
-| -------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Go       | `github.com/ProtoDurian/diene.go-interfaces/obs` | `Int[Spec]`, `NewInt[Spec](int64)` and `AtTime[Spec](time.Time)` returning `(value, error)`; specs expose `Name/Min/Max/Unit`, with Int64 bounds; `Event[Level]` and level markers; `NewEvent`, `NewCounter`, `NewHistogram`, `NewGauge`, `NewSpan`; `DurianSignal*` carriers/metadata; `Add`, `Record`, `Set`, `Error` ports. Generated `Event`/level and bounded-value names are aliases of these library types. |
-| Bun      | `@atomicloud/diene.interfaces`                   | Structural `Event<level>`; opaque `Bounded<name>` plus `bounded(spec, n): Result`; specs carry literal `name/min/max`; typed `Metrics<MetricLabels>` and `Tracer<SpanAttrs>` plus key tables. Small bounds remain literal unions.                                                                                                                                                                                  |
-| .NET     | `AtomiCloud.Diene.Interfaces`                    | `Int<Spec>.Of/AtTime` returning `Result` with `Ok/Err`; static `IDurianSignalIntSpec` members `Name/Min/Max/Unit` using Int64 for every range; `Event<Level>`, level markers, `DurianSignal*` metadata/carriers/interfaces/label attributes and date specs/values; internal constructors with friend access for the generated Signals assembly; `Port.Add` and `Log.Error`.                                        |
-| Dart     | `diene_interfaces`                               | Public barrel `diene_interfaces.dart`; shared `Event<Level>` interface, level markers, `DurianSignal*` labels/wire/metadata/carriers; public base carrier constructors and inherited `add/record/set` methods; `DurianSignalBoundSpec.of/atTime` returning `Result` with `DurianSignalOk/Err`.                                                                                                                     |
+The same stubs support the 36 name-fuzz contract/language cases. The .NET harness builds three separate
+assemblies, Obs, Signals and App; only Signals has access to the library's internal constructors.
 
-The goals leave these exact base/spec signatures unspecified; the table records assumptions for
-the interfaces nodes to reconcile. The compile fixtures model Result locally and do not validate
-integration with the separately published result libraries. .NET name constructors require the real
-library to grant friend access to the consumer's generated assembly.
+**Forging: three layers (concept §3.4 "one hole per language").** With shared carriers in the library,
+an app can make its own carrier in Go (exported constructors) and Dart (`extends` of a library base).
 
-Dart's generated event classes are final and have private constructors, while implementing the
-library's shared `Event` interface. An imported private or sealed constructor cannot be called or
-extended across Dart libraries. These private concrete carriers prevent constructing/subclassing
-the generated events; a hand-written implementation of the shared interface remains possible and
-needs a library guard. No real adapter, runtime sink or published package compatibility is claimed.
+1. The type hole is kept small. Go carriers have unexported fields; only the constructors are exported.
+   Dart bases are `abstract base class` (an app cannot `implements` them) or sealed (level markers), the
+   level of `Event<L>` comes from `L`, the bound spec class is abstract (only the generated subclass is
+   made), and the bases have no generic `add/record/set`: each generated metric class has its own method
+   typed to its own labels class, so an upcast cannot reach a covariant check that throws. .NET is closed
+   at compile time (internal constructors, friend access for Signals only).
+2. A run-time guard in all four, which checks everything against the generated tables. Go's generated
+   `init()` calls `obs.Register`; Bun's generated `signals.ts` calls `register(...)` when it loads, and
+   `metrics(...)`, `logger(...)` and `tracer(...)` accept only those same table objects (any other table
+   poisons the port, see below); Dart's generated `installSignals()` calls `DurianSignalPort.install`;
+   .NET calls `Port.Install(SignalTables.Metrics, SignalTables.EventLevels)` (no one-shot rule there: .NET
+   carriers cannot be forged, so a foreign table could only drop real signals, never admit a forged one). Each metric row carries its generated
+   labels type (Go, Dart), the allowed values of each enum label and the min..max of each bounded label.
+   The port refuses a name not in its table, a kind or level that differs, a labels value of another type
+   (even with the same keys), keys that are not the name's keys, and a value outside the allowed values or
+   range. Registration is once per process: Go `Register` (called by the generated `init()`), Bun
+   `register` (called by the generated `signals.ts` when it loads) and Dart `install` (called by the
+   generated `installSignals()`). Nothing guarantees the generated call comes first (an independent Go
+   package's `init()`, a Bun module loaded before `signals.ts`, or app code before `installSignals()` can
+   register a forged table earlier), so a competing registration, earlier or later, poisons the port (in
+   Bun also a table passed to `metrics/logger/tracer` that is not the registered object): it is refused
+   and counted (`dropped.register`), and from then on the port refuses every signal (`dropped.poisoned`)
+   until restart. A forged table is never used silently; it is a loud telemetry failure, never an app
+   failure. The lint rule forbids `obs.Register`, Bun `register` and `DurianSignalPort.install` outside
+   generated files.
+   The tables are deep-copied at registration (in Bun also frozen; the guard reads only that copy), so
+   editing the exported generated tables later changes nothing. The port counts `dropped.<reason>`, returns an
+   error and never throws or panics (the type is checked before any field is read; a panic or exception
+   is recovered and counted as a last resort).
+3. A lint rule in the template's CI (documented here, NOT TESTED; the lint config lives in the templates).
+
+| Language | Hole the compiler leaves | Run-time guard (tested) | Lint rule (NOT TESTED) |
+| -------- | ------------------------ | ----------------------- | ---------------------- |
+| Go | `obs.New(Event\|Counter\|...)` from app code; zero enum, unset number | `Register`ed tables; empty/unset refused | `forbidigo` (below) |
+| Bun | hand-written `{name, level}`; widened object with an extra key; `as` cast; a foreign table | tables registered by `signals.ts`; any other table poisons | no `as <generated type>`; no event object literal |
+| .NET | `default` bounded number, `null!` enum | `Port.Install` tables; both refused | Roslyn analyzer for `default(Int<...>)` |
+| Dart | app class `extends` a library base; non-const `Shard(n)` | `DurianSignalPort.install` tables | no `extends` of library bases; no non-const `Shard(...)` |
+
+Lint rule text per language (to copy into the templates):
+
+- **Go** (golangci-lint v2; generated files are skipped because of their header):
+
+  ```yaml
+  linters:
+    enable: [forbidigo]
+    settings:
+      forbidigo:
+        analyze-types: true
+        forbid:
+          - pattern: ^obs\.(New(Event|Counter|Histogram|Gauge|Span)|Register)$
+            pkg: ^github\.com/ProtoDurian/diene\.go-interfaces/obs$
+            msg: only obs gen output makes signal carriers; use the generated signals package
+    exclusions:
+      generated: strict
+  ```
+
+  Assigning to a generated exported variable stays a `forbidigo`/`gocritic` rule as in concept §3.4, and
+  `depguard` denies `unsafe` in app packages (an unsafe-made enum value is refused at run time anyway).
+- **Dart**: one analyzer-plugin rule (`analysis_server_plugin`): in a file whose first line is not
+  `// Code generated by obs gen. DO NOT EDIT.`, flag `extends`, `implements` or `with` of any
+  `package:diene_interfaces` type named `Event` or `DurianSignal*`, and any call of
+  `DurianSignalPort.install/add/record/set`; also flag a non-const `Shard(...)` of a generated extension type.
+- **Bun**: in files without the header, flag `as <generated type>`, an object literal passed where an
+  `Event<...>` is expected (use the generated constant), any call of `register`, and a `metrics/logger/tracer`
+  argument that is not the generated `metricTable`/`eventTable`/`spanTable`.
+- **.NET**: a Roslyn analyzer for `default(Int<...>)`, `null!` of a generated enum class, and reflection
+  on generated types (a reflection-made enum value is refused at run time by the allowed values).
+
+**`out:` and orphans.** In a Git repository `out:` may point anywhere under the Git root (for example
+`../shared/bun`); headers name the contract's repository-relative path and the orphan walk starts at the
+Git root. An `out:` that leaves the Git root, or is absolute, is refused before anything is written; the
+check is made on the written path and on its resolved path, so a symlink in `out:` cannot lead outside.
+With no `.git`, `out:` may not use `..` or a symlink that leads out of the project folder, and the header's contract path is relative to the folder that holds
+`observability/`, whatever the working directory (so `--check` from another folder sees the same headers).
+
+Each `generate:` target accepts optional `interfaces:` to override its dependency import. Every name
+in the last column is assumed, not in the goal; the interfaces nodes reconcile them:
+
+| Language | Default `interfaces` | In the goal | Assumed, not in goal |
+| -------- | -------------------- | ----------- | -------------------- |
+| Go | `github.com/ProtoDurian/diene.go-interfaces/obs` | module `ProtoDurian/diene.go-interfaces`; `obs.Add`, `obs.Int[Spec]`, `obs.NewInt`, `obs.AtTime` with an error return; `obs.Error(ctx, Event[Error], ...)` | the `/obs` package path; `IntSpec` `Name/Min/Max/Unit` (int64); `Int.Valid`; `Level` and the six markers; `NewEvent/NewCounter/NewHistogram/NewGauge/NewSpan`; `DurianSignal*` carriers and info rows (`Labels`, `Values`, `Ranges`); `Field`; `Record/Set/Warn/Info`; one-shot `Register` returning an error (a second one poisons the port), `DurianSignalTables`, `Dropped` |
+| Bun | `@atomicloud/diene.interfaces` | `counter(name, labels)`; `log.error(ev, fields?, err?)`; `bounded(spec, n): Result`; `Tracer`/`Span`, `DurianSignalSpanTable` | `register(tables)` (one-shot; a second one or a foreign table poisons the port); `metrics(table)`, `histogram/gauge`, `MetricTable` (with `values`, `ranges`); `logger(eventTable)`, `EventTable`, `Level`; `dropped()`; `tracer(table)`; `Bounded<N>`; a synchronous `{ok, value}` Result (the published Result is promise-based) |
+| .NET | `AtomiCloud.Diene.Interfaces` | `Port.Add(Names.X, new XLabels(...))`; `Int<Spec>.Of(n)` returning a `Result` (package `AtomiCloud.Diene.Result`: struct `Result<T, E>`, `Ok/Err`, `IsSuccess`); `Log.Error(Event<ErrorLevel>, ...)`; internal carrier constructors | namespace `AtomiCloud.Diene.Result` and `Value/Error`; `IDurianSignal*` interfaces, `Valid/Wire`; `AtTime`; `DurianSignalDate`; label attribute and info rows; `Port.Record/Set/Install/Dropped`; info row `Values`/`Ranges`; `Log.Warn` |
+| Dart | `diene_interfaces` | `checkoutCharges.add(XLabels(...))`; `error(Event<ErrorLevel>, ...)`; enums; extension types; `shardSpec.of(n)` returning a `Result`; `entries` getter | barrel `diene_interfaces.dart`; `DurianSignalWire/Labels/Metric`, carrier bases and constructors; `DurianSignalBoundSpec` and `atTime`; sealed level markers; `DurianSignalPort` (one-shot `install` returning a Result, a second one poisons the port, `add/record/set/dropped`); generated `installSignals()`; `warn/info`; info rows (`labels` Type, `values`, `ranges`); local `Result/DurianSignalOk/DurianSignalErr` in place of `diene_result` |
+
+The compile fixtures model Result locally and do not validate integration with the separately published
+result libraries. .NET name constructors require the real library to grant friend access to the
+consumer's generated assembly. No real adapter, runtime sink or published package compatibility is claimed.
 
 ## Contract name checks in `obs query --static`
 
@@ -711,6 +787,258 @@ verify mode (both paths, compared), like `OBS_VERIFY_FAST`.
 
 NOT TESTED: no run was on a quiet box (the 3-run medians are on a shared, loaded box); the cache-hit
 rows of §11.1.1 (unchanged PR 0.2-0.4 s, one changed alert 0.3-0.5 s) were not re-measured.
+
+## obs store
+
+`obs store move <tempo|pyroscope|victorialogs|victoriametrics> --config move.yaml --dry-run`
+runs every static check and prints the mandatory steps (and, for VictoriaLogs/VictoriaMetrics, the
+derived storage endpoints) without commands or HTTP requests. Remove `--dry-run` to execute;
+`--rollback` undoes the move. Kubernetes access uses `kubectl` on PATH with the explicit context
+and namespace from the config. Nothing runs automatically after a failed step; inspect the
+reported state and re-run (it resumes) or roll back explicitly. There is no skip option.
+
+### How obs changes the cluster
+
+- **New objects** (the scaled workloads or new storage nodes and their headless Services,
+  ConfigMaps, Pyroscope discovery RBAC) come from one hand-written `scaled_manifest`. obs creates
+  them with `kubectl create` (never `apply`), so the API server refuses any object that already
+  exists. obs writes the objects it checked to its own file (Lists flattened, namespace set) and adds
+  to each the label `obs.diene/store-move: <store>` and the annotation
+  `obs.diene/store-move-digest` (a hash of that manifest object). Before creating, it reads live:
+  every object must be absent (or carry exactly that label and digest: a re-run), every claim a
+  StatefulSet's `volumeClaimTemplates` would bind (`<template>-<statefulset>-<ordinal>` for every
+  ordinal from `spec.ordinals.start`, default 0) must be absent, and no live pod may match a new workload's selector, so nothing existing
+  is adopted.
+- **Existing objects** (the single, a separate Tempo compactor, the insert/select routers,
+  vmstorage) are never described by hand. obs builds each change itself from the live object as a
+  JSON patch (`kubectl patch --type=json`). Every patch obs sends starts with `test` operations of
+  the object's uid, its whole `spec` and its annotations as obs read them, then of every old value
+  the change relies on; the API server refuses the whole patch if anything changed since obs read
+  it (an appended `-replicationFactor=1`, a duplicate `-storageNode`, a retention policy set where
+  none was). The inverse patch (also with `test` operations) is stored on the object in the
+  annotation `obs.diene/store-move-inverse`, and `obs.diene/store-move-origin` records a digest of
+  the uid and of the old value at every path the change writes. The rollback replays the inverse on
+  a copy of the live object, requires the restored values to match that digest, rebuilds the
+  forward patch from the result and applies the stored inverse only when everything matches
+  exactly, so a hand-edited inverse (for example the compactor's replicas 1 to 7), another config or
+  a pinned value changed after the move is refused. Both annotations live on the object itself: they
+  catch an edited inverse, not someone who rewrites both with the same access that could change the
+  workload directly. A single must run exactly one replica, so its restored count never depends on
+  them. It undoes only obs's own change; other fields stay as they are.
+
+| Store | Change obs makes to existing objects |
+|---|---|
+| Tempo | single: `spec.replicas` N to 0 and every template role `true` to `false`, in one patch, after the drain; compactor (if separate): replicas N to 0 |
+| Pyroscope | single: `-target=all` to `-target=metastore` (same spelling) and every template role to `false`; replicas, claims, raft id and all else untouched |
+| VictoriaLogs, VictoriaMetrics | each router: the one `-storageNode` flag gains the derived endpoints (same spelling, existing endpoints kept in order) |
+| VictoriaMetrics, `copies: 2` | vminsert also gains `-replicationFactor=2`; vmselect gains `-dedup.minScrapeInterval=1ms` (VictoriaMetrics v1.156.0 docs: required on vmselect when replication is enabled); every listed existing vmstorage gains `-dedup.minScrapeInterval=1ms` at the front of its args (concept 10.5) |
+
+Role labels change only on pods a workload's controller owns by uid (StatefulSet pods, or
+Deployment pods whose ReplicaSet the Deployment owns), one JSON patch per pod by name with `test`
+operations of its uid, owner references and old labels; a pod that merely matches the selector is
+refused, never relabelled, and only workloads obs created receive roles (make before break: new
+pods and templates get their roles and are Ready before the single's pods lose theirs). Alloy is rolled with
+`kubectl rollout restart`. Nothing else is changed: no app, Alloy config or stable Service.
+
+### One check up front, then resume
+
+Before step 1 obs checks everything, static and live: the manifest allow-list, every object, claim
+and pod above, the stable Services (`tempo-distributor`/`tempo-query`,
+`pyroscope-write`/`pyroscope-query` must each select exactly one role label `true`, and every
+other selector term must be on the single's pod template and on the pod template of every scaled
+workload that receives that role, so the Service routes to the scaled pods after the flip; obs
+never changes these Services and re-reads them at the role step and right before the single
+stops), Alloy (at least
+two replicas, or a DaemonSet on at least two nodes), and that every change obs will make to an
+existing object can be built from its live state now (so a Pyroscope single without exactly one
+`-target=all`, a single whose template lacks its roles, a live `persistentVolumeClaimRetentionPolicy`
+of `Delete`, a single with more than one replica, or a malformed `-storageNode` fails before anything
+changes). The same check reads
+which step the live state shows and starts there (printed as `already live; resuming`): created but
+not routed restarts at step 1 (creating only absent objects, then waiting), routed restarts at the
+Alloy roll, a stopped/converted single goes to verification. It never redoes a finished step and
+never touches the roles of pods that already serve. Before the first step a resumed run executes, it
+waits again for every scaled workload or new storage node (and the routers and storage workloads)
+to be Ready, because the skipped steps' readiness may no longer hold. A state the move cannot produce (for example
+the single's pods without roles while no scaled workload has them) is refused.
+
+### Tempo and Pyroscope
+
+```yaml
+context: fixture-only
+namespace: observability-fixture
+scaled_manifest: scaled.yaml
+scaled:
+  - deployment/tempo-distributor
+  - deployment/tempo-query
+  - statefulset/tempo-live-store
+  - statefulset/redpanda
+single: statefulset/tempo
+alloy: deployment/alloy
+role_labels: [obs.diene/tempo-write, obs.diene/tempo-read]
+role_workloads:
+  deployment/tempo-distributor: [obs.diene/tempo-write]
+  deployment/tempo-query: [obs.diene/tempo-read]
+# Provide the actual verified adapter executable and argv in the single pod.
+stop_compaction: [operator-control, stop-compaction]
+resume_compaction: [operator-control, resume-compaction]
+single_metrics_url: http://tempo-single.fixture.invalid:3200/metrics
+read_url: http://tempo-query.fixture.invalid:3200/api/metrics/query_range
+query: '{} | count_over_time()' # known immutable dataset; aggregate to one series
+```
+
+The scaled manifest holds every listed workload (StatefulSet or Deployment, positive explicit
+replicas, a `matchLabels` selector without role labels and disjoint from the single's and from each
+other's) and nothing that routes yet (no role label `true`). Supporting objects must carry a scaled
+workload's or the single's name, alone or followed by `-` (`tempo-live-store-headless`):
+headless Services (`clusterIP: None`; Tempo also `publishNotReadyAddresses: true`; no external IPs,
+load balancer or node ports), ConfigMaps and, for Pyroscope's `kubernetes:///` metastore discovery
+only, a ServiceAccount, a Role limited to get/list/watch on pods, endpoints and endpointslices, and a
+RoleBinding of that Role to that ServiceAccount. Refused: other kinds (Secret, PVC, Endpoints,
+DaemonSet, ClusterRole, ...), the eight stable Services, Alloy ConfigMaps (also custom names in
+`alloy_config_objects`), the single/Alloy/compactor/routers themselves, `persistentVolumeClaim` or
+`hostPath` volumes, `hostNetwork`/`hostPID`/`hostIPC`, a `serviceAccountName` the manifest does not
+create, the owner/digest/inverse annotations written by hand, Kind aliases or another apiVersion
+(`sts`, a CRD reusing a Kind), `items` on any kind but `List`, typed lists, another namespace,
+`generateName`, the same object twice. Each assigned role goes only to its workload (Kafka is never
+labelled). Suspend external GitOps reconciliation of these workloads while moving.
+
+Tempo requires a verified compaction-control adapter (`kubectl exec` with argv, no local shell),
+or a **separate** `compactor: deployment/backend-worker` (not the single, Alloy or a new workload);
+obs stores its replica count in the inverse. The drain waits for
+`tempo_live_store_blocks_completed_total` and `tempo_live_store_local_blocks_flushed_total` to rise
+and for flushed blocks to catch up with completed blocks before the stop patch. No `/flush` endpoint
+is assumed. Source: Tempo 3.1.1 `modules/livestore/complete_block_lifecycle.go:18–22`; its
+downscale routes in `cmd/tempo/app/modules.go:725–730` only change ring/shutdown state
+(`modules/livestore/downscale.go:130–234`), so they do not replace this durability check. An idle
+store that produces no new completed block times out safely; feed a known dataset before moving.
+
+For Pyroscope use `obs.diene/pyroscope-write` and `obs.diene/pyroscope-query`, set `profile_type`
+(for example `process_cpu:cpu:nanoseconds:cpu:nanoseconds`) and a label selector in `query`;
+`read_url` ends in `/querier.v1.QuerierService/SelectSeries`. The single must be a StatefulSet: it
+becomes the v2 metastore in place (same PVC, same raft id) and keeps running.
+
+Rollback reads the live single first. A single obs stopped or converted comes back through its
+verified inverse: replicas and template roles (and Pyroscope's `-target=all`) in one patch, so the
+first Ready pod already serves; Tempo's compaction then resumes. A single that is still running (the
+move stopped before the drain) is never scaled down: only its pods get their roles back. A single at
+0 replicas without obs's inverse is refused. Then the scaled pods and templates lose their roles,
+Alloy is rolled, and every scaled receive counter (`scaled_metrics_urls`, or `metrics_url` for the
+whole tier) must stay flat. Scaled pods, data and PVCs remain. Rolling back when nothing was moved
+is refused.
+
+### VictoriaLogs and VictoriaMetrics
+
+```yaml
+context: fixture-only
+namespace: observability-fixture
+scaled_manifest: vm-scaled.yaml   # new vmstorage StatefulSet + its headless Service
+scaled: [statefulset/vmstorage-b]
+routers:
+  - {workload: deployment/vminsert, role: insert, port: 8400}
+  - {workload: deployment/vmselect, role: select, port: 8401}
+# copies: 2                       # VictoriaMetrics two copies (concept 10.5)
+# storage_workloads: [statefulset/vmstorage]   # with copies 2: existing vmstorage gains dedup
+metrics_url: http://vminsert.fixture.invalid:8480/metrics
+read_url: http://vm-select.fixture.invalid:8481/select/0/prometheus/api/v1/query_range
+query: 'sum(count_over_time(fixture_known_total[1m]))'
+```
+
+New storage nodes are new StatefulSets. Their endpoints are derived, never typed:
+`<statefulset>-<i>.<serviceName>.<namespace>.svc.<cluster_domain>:<router port>` for every pod
+ordinal `i` from `spec.ordinals.start` (default 0) on (`cluster_domain` defaults to
+`cluster.local`). `serviceName` must name a headless Service of the
+same manifest that selects the pods, and every router port must be a `containerPort` of the pods.
+VictoriaLogs routers dial 9491. With `copies: 2` every new vmstorage container must carry exactly
+`-dedup.minScrapeInterval=1ms`; a live router with another `-replicationFactor`, a live vmselect or
+vmstorage with another dedup value is refused, one that already has exactly the value is left alone (and the
+rollback keeps it). obs extends only one well-formed `-storageNode` per router, read with Go flag
+syntax as the stores read it (`lib/envflag`): one or two leading dashes, `=` or the next argument as
+value, nothing read after `--` or a positional argument; a value after another flag without `=` is
+that flag's value (the router is running, so its arguments already parse). Positional
+`storageNode=…`, `---storageNode=…`, a missing value, an empty or `%{ENV}` endpoint, two
+`-storageNode` flags, or a derived endpoint already listed without obs's inverse are refused. obs
+inserts dedup only into the front of an existing, nonempty args list of a single-container
+vmstorage. Steps: create and wait Ready; patch storage side (two copies) then routers, wait for the
+rollouts; VL checks the OTLP received counter rising and remote send errors flat, VM checks inserted
+rows rising; verify. There is no drain, rebalance, PVC deletion or Alloy restart. Rollback applies
+the verified inverses (routers, then vmstorage) and **retains the new pods and PVCs**; data written
+there is unreadable until the endpoints are added back.
+
+### Verification and limits
+
+Verification takes one fixed, closed 60-minute window before the move and queries the same
+window through the read Service afterward. Missing minutes, empty/all-zero baselines, errors,
+and unequal counts fail. `tenant` optionally sets `X-Scope-OrgID` on range queries. Query
+responses use each store's real format: Tempo `series[].samples[].timestampMs/value`,
+Pyroscope `series[].points[]`, and Victoria stores' Prometheus matrices.
+Counter endpoints must expose only the intended old single or insert tier; absent/reset counters fail.
+`--interval` defaults to 15s and `--timeout` to 15m. Unit tests drive the real implementation
+against a stateful fake kubectl (objects, pods, `create` refusing existing objects, JSON patches with
+`test` semantics) and fake HTTP; they never contact a real cluster. **NOT TESTED:** real cluster
+moves/rollback (API-server patch and admission behaviour), chart compaction adapters,
+Tempo/Pyroscope drain durability, live store HTTP endpoints, ReplicaSet/ControllerRevision
+adoption by new workloads (only pods are checked), and claims of replicas added after the move.
+
+## obs symbols
+
+```text
+obs symbols put --store .obs/symbols --kind native --build-id <gnu-id> --app service --file service.dbg
+obs symbols put --store .obs/symbols --kind jit --build-id <module-MVID> --app service --file service.pdb
+obs symbols put --store .obs/symbols --kind dart --build-id <id> --file app.symbols --obfuscation-map map.json
+obs symbols decode --store .obs/symbols --file stack.txt
+```
+
+Native keys are `<gnu-build-id>/<app>.dbg`, JIT keys `<module-MVID>/<app>.pdb`, and Dart keys
+`<build_id>.symbols` with `<build_id>.obfuscation-map.json`. IDs are normalized to lowercase.
+Keys are immutable: uploading identical bytes is idempotent; different bytes under an existing
+key fail. Native/Dart uploads must be ELF files whose `.note.gnu.build-id` equals `--build-id`;
+mismatched identities and non-ELF files are refused. **NOT CHECKED:** a Portable PDB does not
+carry the assembly's module MVID, so its MVID key is supplied by the uploader; obfuscation-map
+provenance likewise comes from the build. Keep this private directory and symbols for as long as
+that release can send data. An exported `Backend` interface supports object-store adapters;
+no object-store implementation or remote bucket is claimed as tested.
+
+The native decoder recognizes `at <module>+0x<offset>` frames with a `build-id: <id>` footer.
+Dart/Flutter uses `build_id: '<hex>'` and frames such as
+`#00 abs 00007f1234567890 virt 0000000000123456 _kDartIsolateSnapshotInstructions+0x22`;
+the decoder resolves the **virt** address, not the symbol-relative `+0x22`.
+then runs stock `llvm-symbolizer` found on PATH (`--symbolizer` or `OBS_SYMBOLIZER` can override it).
+LLVM is a test-only dependency, not part of the obs runtime closure. If it is unavailable, decoding
+prints one note to stderr, preserves native/Dart frames and keeps exit status zero; JIT decoding still works.
+The development shell includes LLVM. A manual Go test skips the ELF proof clearly if LLVM is
+missing; Nix checks set `OBS_REQUIRE_LLVM=1`, making absence a failure rather than a skipped proof.
+Unknown identities and unresolved addresses are preserved. Decode cause stacks with different
+build identities separately; ambiguous conflicting footers are refused. Split-debug ELF files
+retain real Dart names; the obfuscation map is stored for other consumers, not applied as a text
+substitution over stack traces.
+
+JIT frames use `at <module>!0x06000001+0x<IL-offset> mvid:<module-MVID>`. The decoder reads
+Portable PDB Document and MethodDebugInformation sequence points directly and appends `file:line`.
+The exporter must supply an IL offset, never a raw JIT native PC. Unknown MVIDs pass through;
+Windows/MSF PDBs are explicitly refused. **MEASURED:** a Go-built ELF resolves to function plus
+source line using LLVM; a small Portable PDB fixture resolves IL offsets and rejects corruption.
+**NOT TESTED:** actual NativeAOT/Flutter release artifacts or a compiler-produced .NET PDB.
+
+## obs size
+
+`obs size --req-per-second 1000 --services 30 --pods 90 --profiled-pods 30` prints deterministic
+JSON: incremental traffic cores/GiB, pod-index MiB, typical stored series, metrics ingest memory
+and disk GB/day, bucket GB/day and Class A/B requests/day. For that input: 0.27 traffic cores,
+0.3 GiB, 81,000 series, 8.7 GB/day to the bucket and 8.3 GB/day of VictoriaLogs disk.
+Idle base memory, query peaks, applications
+and the control plane are excluded; these components are deliberately reported separately.
+
+Traffic CPU/RAM and Class A/B retain the concept §10.7 **Loki-era reference costs**.
+Current bucket storage includes only traces (4 GB/day per 1,000 req/s) and profiles
+(4.7 GB/day per 30 profiled pods). `loki_logs_reference_gb_per_day` reports the historical
+16.6 GB/day log figure separately; it is excluded from the bucket total. VictoriaLogs disk uses
+8.3 GB/day per 1,000 req/s (concept §10.4, line 1440 in the 17 Nov corpus; spike 6, 28 B/line).
+Class A/B are 17k/28k per 1,000 req/s as a historical write-path reference, not a measurement of
+the current VictoriaLogs setup. Series use §3.2 (2,520/service + 60/pod), and metrics RAM/disk use §10.4
+(0.6–1.1 KB/series; 5.3 GB/day/M series at 30s). Profile operations and interactive object reads
+have no measured unit cost. Three checked-in golden cases cover idle, typical and busy shapes;
+invalid, non-finite and negative inputs fail.
 
 ## obs links
 

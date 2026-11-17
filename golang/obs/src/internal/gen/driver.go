@@ -67,9 +67,13 @@ func Plan(c *contract.Contract, obsDir string, langs []string) ([]Output, error)
 	for _, l := range langs {
 		want[l] = true
 	}
+	git := GitRoot(root)
 	for _, t := range c.Generate {
 		if len(want) > 0 && !want[t.Lang] {
 			continue
+		}
+		if err := checkOut(root, git, t.Lang, t.Out); err != nil {
+			return nil, err
 		}
 		fs, err := Generate(t.Lang, c, Options{Package: t.Package, Namespace: t.Module, Interfaces: t.Interfaces})
 		if err != nil {
@@ -86,6 +90,50 @@ func Plan(c *contract.Contract, obsDir string, langs []string) ([]Output, error)
 		}
 	}
 	return outs, nil
+}
+
+// checkOut refuses an out: folder that leaves the repository: in a Git repository it must stay under the
+// Git root (headers and the orphan walk are relative to it); with no repository it may not leave the
+// project folder (the folder that holds observability/). Both the written path and its resolved path
+// (symlinks followed as far as the folders exist) are checked, so a symlink cannot lead outside.
+func checkOut(root, git, lang, out string) error {
+	if filepath.IsAbs(out) || path.IsAbs(filepath.ToSlash(out)) {
+		return fmt.Errorf("generate %s: out: %q must be relative to the project folder", lang, out)
+	}
+	target := filepath.Join(root, filepath.FromSlash(out))
+	if git == "" {
+		if rel := path.Clean(filepath.ToSlash(out)); rel == ".." || strings.HasPrefix(rel, "../") || !within(resolve(root), resolve(target)) {
+			return fmt.Errorf("generate %s: out: %q leaves the project folder %s (no Git repository, so '..' and symlinks out are refused)", lang, out, root)
+		}
+		return nil
+	}
+	if !within(git, target) || !within(resolve(git), resolve(target)) {
+		return fmt.Errorf("generate %s: out: %q leaves the git repository %s", lang, out, git)
+	}
+	return nil
+}
+
+// within reports whether p is base or below it.
+func within(base, p string) bool {
+	rel, err := filepath.Rel(base, p)
+	return err == nil && rel != ".." && !strings.HasPrefix(filepath.ToSlash(rel), "../")
+}
+
+// resolve follows symlinks in the longest existing prefix of p and appends the rest unchanged.
+func resolve(p string) string {
+	p = filepath.Clean(p)
+	rest := ""
+	for {
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return filepath.Join(r, rest)
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return filepath.Join(p, rest)
+		}
+		rest = filepath.Join(filepath.Base(p), rest)
+		p = parent
+	}
 }
 
 // Events is contract/events.json: the event names the log-alert check reads (concept 3.4, 11.1).
@@ -162,7 +210,7 @@ func Check(root string, outs []Output, c *contract.Contract, langs ...string) ([
 	var probs []string
 	planned := make(map[string]bool, len(outs))
 	for _, o := range outs {
-		planned[filepath.Clean(filepath.FromSlash(o.Path))] = true
+		planned[filepath.Join(root, filepath.FromSlash(o.Path))] = true
 		fresh, err := os.ReadFile(filepath.Join(tmp, filepath.FromSlash(o.Path)))
 		if err != nil {
 			return nil, err
@@ -190,20 +238,27 @@ func Check(root string, outs []Output, c *contract.Contract, langs ...string) ([
 	}
 	// Scan for obs-owned files too: a removed target is absent from both the plan and
 	// the current target list. Looking only in current targets misses its old directory.
-	// Do not follow symlinks, dependency trees, git internals, or build caches.
+	// The walk starts at the Git root (headers name repo-relative contract paths and out:
+	// may point outside the project folder), or at the project folder outside Git.
+	// Do not follow symlinks, dependency trees, git internals, or build caches; only the
+	// file types obs writes are opened.
 	selected := map[string]bool{}
 	for _, lang := range langs {
 		selected[lang] = true
 	}
 	all := len(langs) == 0
 	contractPath := ContractPath(c)
-	extensions := map[string]string{".go": "go", ".cs": "dotnet", ".dart": "dart", ".ts": "bun"}
-	err = filepath.WalkDir(root, func(p string, entry fs.DirEntry, walkErr error) error {
+	extensions := map[string]string{".go": "go", ".cs": "dotnet", ".dart": "dart", ".ts": "bun", ".yaml": ""}
+	walkRoot := root
+	if git := GitRoot(root); git != "" {
+		walkRoot = git
+	}
+	err = filepath.WalkDir(walkRoot, func(p string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if entry.IsDir() {
-			if p != root {
+			if p != walkRoot {
 				switch entry.Name() {
 				case ".git", ".direnv", "node_modules", "vendor", ".dart_tool", ".obs-cache":
 					return filepath.SkipDir
@@ -214,18 +269,16 @@ func Check(root string, outs []Output, c *contract.Contract, langs ...string) ([
 		if !entry.Type().IsRegular() {
 			return nil
 		}
+		if planned[p] {
+			return nil
+		}
+		lang, known := extensions[filepath.Ext(p)]
+		if !known || (!all && !selected[lang]) {
+			return nil
+		}
 		rel, err := filepath.Rel(root, p)
 		if err != nil {
 			return err
-		}
-		if planned[rel] {
-			return nil
-		}
-		if !all {
-			lang := extensions[filepath.Ext(p)]
-			if !selected[lang] {
-				return nil
-			}
 		}
 		file, err := os.Open(p)
 		if err != nil {
