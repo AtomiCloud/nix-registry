@@ -3,8 +3,8 @@
 #   bun.sh [--tsc <tsc binary>]      (default: tsc on PATH)
 # good.ts (a consumer sketch incl. the trace-port constraint) must compile; every bad-*.ts must fail
 # and the compiler output must name the bad token listed in tests/typecheck/bun/expect.
-# Not part of the nix sandbox check: typescript is not in the obs test inputs (CI runs it with
-# `nix shell nixpkgs#typescript -c tests/typecheck/bun.sh`).
+# Runs in the nix check (nixpkgs.typescript is an input of the obs-tests derivation); by hand:
+# `nix shell nixpkgs#typescript -c tests/typecheck/bun.sh`.
 set -euo pipefail
 TSC=tsc
 [ "${1:-}" = "--tsc" ] && TSC="$2"
