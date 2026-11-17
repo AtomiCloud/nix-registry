@@ -253,6 +253,7 @@ replaces this by hand run.
 - Seeded log rows against a real VictoriaLogs fed through Alloy (field names are FROM SOURCE).
 - LogsQL `_time:[start, end)` handling against real Grafana (the nightly parity job, a later release).
 - aarch64 and macOS builds are in CI; only x86_64 Linux was run by hand.
+
 # Nightly parity
 
 The `Obs parity` workflow runs nightly and on changes to engine pins, and can be
@@ -311,4 +312,3 @@ bash golang/obs/parity/stack.sh down
 
 Every container has `obs.parity=1` and a unique run label. Cleanup removes only
 that run's containers and network. No Docker prune is used.
-

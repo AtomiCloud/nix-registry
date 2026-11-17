@@ -21,19 +21,19 @@ image() { jq -r --arg name "$1" '.[$name] | .image + "@" + .digest' "$here/image
 owned() { docker ps -aq --filter "label=obs.parity=1" --filter "label=obs.parity.run=$name"; }
 case "$command" in
 up)
-    # Resolve each moving tag before starting anything, and compare it with the
-    # recorded digest. Running by digest then prevents a race with a tag re-push.
-    for engine in VictoriaMetrics VictoriaLogs Tempo Grafana Pyroscope; do
-      tag=$(jq -r --arg engine "$engine" '.[$engine].image' "$here/images.json")
-      digest=$(jq -r --arg engine "$engine" '.[$engine].digest' "$here/images.json")
-      docker pull "$tag" >/dev/null
-      repository=${tag%:*}
-      docker image inspect "$tag" --format '{{json .RepoDigests}}' \
-        | jq -e --arg pinned "$repository@$digest" 'index($pinned) != null' >/dev/null || {
-        echo "images.json: $engine tag $tag no longer resolves to pinned digest $digest" >&2
-        exit 1
-      }
-    done
+  # Resolve each moving tag before starting anything, and compare it with the
+  # recorded digest. Running by digest then prevents a race with a tag re-push.
+  for engine in VictoriaMetrics VictoriaLogs Tempo Grafana Pyroscope; do
+    tag=$(jq -r --arg engine "$engine" '.[$engine].image' "$here/images.json")
+    digest=$(jq -r --arg engine "$engine" '.[$engine].digest' "$here/images.json")
+    docker pull "$tag" >/dev/null
+    repository=${tag%:*}
+    docker image inspect "$tag" --format '{{json .RepoDigests}}' |
+      jq -e --arg pinned "$repository@$digest" 'index($pinned) != null' >/dev/null || {
+      echo "images.json: $engine tag $tag no longer resolves to pinned digest $digest" >&2
+      exit 1
+    }
+  done
   # Everything, including the network, belongs to this run. Never prune.
   trap 'bash "$here/stack.sh" logs; bash "$here/stack.sh" down' ERR
   docker network create --label obs.parity=1 --label "obs.parity.run=$name" "$name" >/dev/null
@@ -113,10 +113,10 @@ YAML
   done
   curl --fail --silent "$OBS_PARITY_GRAFANA/api/plugins/victoriametrics-logs-datasource/settings" >"$state/plugin.json"
   jq -e --arg v "$(jq -r '.VictoriaLogsDatasource.version | ltrimstr("v")' "$here/images.json")" '.info.version == $v' "$state/plugin.json" >/dev/null
-    curl --fail --silent "$OBS_PARITY_GRAFANA/api/health" >"$state/grafana-health.json"
-    jq -e --arg version "$(jq -r '.Grafana.version' "$here/images.json")" \
-      --arg commit "$(jq -r '.Grafana.imageBuildCommit' "$here/images.json")" \
-      '.version == $version and .commit == $commit' "$state/grafana-health.json" >/dev/null
+  curl --fail --silent "$OBS_PARITY_GRAFANA/api/health" >"$state/grafana-health.json"
+  jq -e --arg version "$(jq -r '.Grafana.version' "$here/images.json")" \
+    --arg commit "$(jq -r '.Grafana.imageBuildCommit' "$here/images.json")" \
+    '.version == $version and .commit == $commit' "$state/grafana-health.json" >/dev/null
   # Record the real image digests and effective VL flags, not just declared tags.
   docker inspect "$(owned | head -1)" >/dev/null
   mapfile -t containers < <(owned)
