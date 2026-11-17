@@ -72,7 +72,8 @@ run profile baseline "${base_args[@]}" --update "$fx/base-1.pb.gz" "$fx/base-2.p
 cmp -s "$work/first.json" "$b/checkout.browse.json" && ok "baseline is byte-identical on a second run (--update)" || bad "baseline differs between runs"
 run profile baseline "${base_args[@]}" --update "$fx/base-1.pb.gz" "$fx/base-2.pb.gz"
 expect 2 "baseline of 2 runs is refused" "exactly 3 runs"
-grep -q '"name": "svc/render.Page"' "$b/checkout.browse.json" && ! grep -q 'rare.Thing\|func1\|json.Marshal' "$b/checkout.browse.json" &&
+baseline_rows=$(awk '/^  "functions": \[/ { rows=1; next } rows && /^  \],?$/ { exit } rows { print }' "$b/checkout.browse.json")
+grep -q '"name": "svc/render.Page"' <<<"$baseline_rows" && ! grep -q 'rare.Thing\|func1\|json.Marshal' <<<"$baseline_rows" &&
   ok "baseline rows: functions >= 3 % in own code, no closure, no library, no function under 3 %" || bad "baseline rows wrong"
 bl="$b/checkout.browse.json"
 
