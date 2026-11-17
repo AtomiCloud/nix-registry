@@ -54,6 +54,26 @@ func obs(args ...string) (int, string) {
 	return rc, out.String() + errb.String()
 }
 
+func TestVLSettingsCLI(t *testing.T) {
+	dir := project(t, map[string]string{"logs/warning.yaml": alert("primordial-logs", `_time:5m "durian.cloud/event":="checkout.charge.failed" | stats count() n`, "stats")})
+	if rc, out := obs("query", "--live", "--dir", dir); rc != 0 || strings.Count(out, "[vl-settings]") != 1 {
+		t.Fatalf("default note: rc=%d %s", rc, out)
+	}
+	path := filepath.Join(dir, "victorialogs-settings.yaml")
+	if err := os.WriteFile(path, []byte("-search.maxQueryLen: 5"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"query", "--live", "--dir", dir}, {"query", "--live", "--dir", dir, "--vl-settings", path}} {
+		rc, out := obs(args...)
+		if rc != 1 || !strings.Contains(out, "-search.maxQueryLen=5") || !strings.Contains(out, "logs/warning.yaml") || !strings.Contains(out, "rule r1 query A") || strings.Contains(out, "[vl-settings]") {
+			t.Fatalf("settings refusal: rc=%d %s", rc, out)
+		}
+	}
+	if rc, out := obs("query", "--live", "--dir", dir, "--vl-settings", path+".missing"); rc != 2 || !strings.Contains(out, ".missing") {
+		t.Fatalf("explicit missing settings: rc=%d %s", rc, out)
+	}
+}
+
 func TestEndToEnd(t *testing.T) {
 	good := project(t, map[string]string{
 		"a/critical.yaml": alert("primordial-metrics", `sum(rate(checkout_charges_total{outcome="error"}[5m])) > 1`, "instant"),

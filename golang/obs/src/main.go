@@ -60,7 +60,20 @@ func printVersion(w io.Writer) {
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		fmt.Fprintf(w, "engine %s %s", name, p[name].Version)
+		kind := "reference"
+		if name == "VictoriaMetrics" || name == "VictoriaLogs" {
+			kind = "engine"
+		}
+		if name == "Tempo" {
+			if bi, ok := debug.ReadBuildInfo(); ok {
+				for _, dep := range bi.Deps {
+					if dep.Path == "github.com/grafana/tempo" {
+						kind = "engine"
+					}
+				}
+			}
+		}
+		fmt.Fprintf(w, "%s %s %s", kind, name, p[name].Version)
 		if p[name].Commit != "" {
 			fmt.Fprintf(w, " (tag commit %s)", p[name].Commit)
 		}
@@ -79,6 +92,7 @@ func runQuery(args []string, stdout, stderr io.Writer) int {
 	live := fs.Bool("live", false, "run every alert and dashboard query on the seed; each must return rows")
 	dir := fs.String("dir", "observability", "the observability folder")
 	seedPath := fs.String("seed", "", "seed file (default <dir>/seed.yaml)")
+	vlSettings := fs.String("vl-settings", "", "VictoriaLogs chart args YAML (default <dir>/victorialogs-settings.yaml, else pinned defaults)")
 	base := fs.Int64("base", 0, "unix seconds of the seed's start (default: ends in the past)")
 	names := fs.Bool("names", false, "print the names each query reads")
 	eventRule := fs.String("event-rule", "auto", "a LogsQL alert must name a contract event: auto (only when <dir>/contract.yaml exists), on, off")
@@ -95,7 +109,7 @@ func runQuery(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "obs query: --event-rule %q: want auto, on or off\n", *eventRule)
 		return 2
 	}
-	o := check.Options{Dir: *dir, SeedPath: *seedPath, Base: *base, Names: *names, EventRule: *eventRule, Out: stdout}
+	o := check.Options{Dir: *dir, SeedPath: *seedPath, VLSettings: *vlSettings, Base: *base, Names: *names, EventRule: *eventRule, Out: stdout}
 	set, err := files.Load(*dir)
 	if err != nil {
 		fmt.Fprintf(stderr, "obs query: %v\n", err)

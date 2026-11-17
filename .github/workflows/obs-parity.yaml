@@ -4,12 +4,19 @@ on:
   schedule:
     - cron: '23 2 * * *'
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      release_check:
+        description: Skip parity when obs has not changed since the latest release tag
+        type: boolean
+        default: false
   push:
     paths:
       - 'golang/obs/src/internal/pins/**'
       - 'golang/obs/src/go.mod'
       - 'golang/obs/src/go.sum'
       - 'golang/obs/src/third_party/VictoriaLogs/**'
+      - 'golang/obs/src/third_party/VictoriaLogs.source.json'
       - 'golang/obs/src/internal/alerts/gfexpr/**'
       - 'golang/obs/parity/images.json'
 
@@ -21,7 +28,27 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      run: ${{ steps.diff.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check whether this release changes obs
+        id: diff
+        env:
+          RELEASE_CHECK: ${{ inputs.release_check || false }}
+        run: |
+          if test "$RELEASE_CHECK" = true; then
+            bash golang/obs/parity/release-changes.sh >> "$GITHUB_OUTPUT"
+          else
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+          fi
   parity:
+    needs: changes
+    if: needs.changes.outputs.run == 'true'
     # Public repository, standard GitHub runner: no paid runner or external spend.
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -32,7 +59,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Refuse drift before starting stores
-        run: bash golang/obs/parity/test-pins.sh
+        run: |
+          bash golang/obs/parity/test-pins.sh
+          bash golang/obs/parity/test-release-changes.sh
       - uses: actions/setup-go@v6
         with:
           go-version: '1.27.4'

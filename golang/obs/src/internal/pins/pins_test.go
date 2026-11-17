@@ -1,10 +1,36 @@
 package pins
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"os"
 	"strings"
 	"testing"
 )
+
+func TestVictoriaLogsSourceMarker(t *testing.T) {
+	var marker struct{ Version, Commit, ManifestSHA256 string }
+	b, err := os.ReadFile("../../third_party/VictoriaLogs.source.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(b, &marker); err != nil {
+		t.Fatal(err)
+	}
+	p := All()["VictoriaLogs"]
+	if marker.Version != p.Version || marker.Commit != p.Commit {
+		t.Fatalf("VictoriaLogs source marker differs from pins.json: %+v vs %+v", marker, p)
+	}
+	b, err = os.ReadFile("../../third_party/VictoriaLogs.sha256")
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := sha256.Sum256(b)
+	if hex.EncodeToString(h[:]) != marker.ManifestSHA256 {
+		t.Fatal("VictoriaLogs.sha256 differs from pinned source marker")
+	}
+}
 
 func TestEngineModulePins(t *testing.T) {
 	b, err := os.ReadFile("../../go.mod")

@@ -67,6 +67,7 @@ func Live(set *files.Set, o Options) (*Report, error) {
 	}
 	var m metricsEngine
 	var l logsEngine
+	var settingsNote string
 	if needVM {
 		e, err := vm.New(ds)
 		if err != nil {
@@ -76,14 +77,23 @@ func Live(set *files.Set, o Options) (*Report, error) {
 		m = e
 	}
 	if needVL {
-		e, err := vl.New(ds)
+		limits, note, err := vl.LoadLimits(o.Dir, o.VLSettings)
+		if err != nil {
+			return nil, err
+		}
+		settingsNote = note
+		e, err := vl.NewWithLimits(ds, limits)
 		if err != nil {
 			return nil, err
 		}
 		defer e.Close()
 		l = e
 	}
-	return runLive(set, o, ds, m, l), nil
+	r := runLive(set, o, ds, m, l)
+	if settingsNote != "" {
+		r.add(Note, "", "", "vl-settings", "%s", settingsNote)
+	}
+	return r, nil
 }
 
 // runLive runs every query of set on the given engines.
