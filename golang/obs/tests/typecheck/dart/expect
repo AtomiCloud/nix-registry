@@ -1,0 +1,11 @@
+bad-venmo-not-an-enum-value.dart undefined_enum_constant
+bad-const-out-of-range.dart const_eval_throws_exception
+bad-raw-int-for-bounded.dart argument_type_not_assignable
+bad-raw-string-for-enum.dart argument_type_not_assignable
+bad-missing-label.dart missing_required_argument
+bad-wrong-level.dart invalid_assignment
+bad-wrong-labels-for-name.dart invalid_assignment
+bad-name-made-outside.dart undefined_constructor
+bad-event-made-outside.dart no_default_super_constructor
+bad-labels-made-outside.dart no_default_super_constructor
+bad-bound-spec-made-outside.dart undefined_constructor

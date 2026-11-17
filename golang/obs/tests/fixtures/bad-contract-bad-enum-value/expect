@@ -1,0 +1,6 @@
+mode: static
+exit: 1
+contains: alerts/bad-enum-value/critical.yaml
+contains: [contract-bad-enum-value]
+contains: refunded
+contains: allowed: success, declined, error

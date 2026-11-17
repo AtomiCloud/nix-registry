@@ -1,0 +1,5 @@
+mode: check
+exit: 1
+contains: [gauge-pods]
+contains: metrics.checkout.queue.depth
+contains: neither across_pods
