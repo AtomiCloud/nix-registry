@@ -1,5 +1,6 @@
 // planted forging (review round 5): app code installs the port a second time with its own tables. install
-// works once per process: the second call is refused and counted, and the first tables stay.
+// works once per process: the second call is refused and counted, and poisons the port (every signal,
+// even a valid one, is refused until restart).
 // ignore_for_file: avoid_print
 import 'package:checkout_signals/src/signals/signals.g.dart';
 
@@ -16,7 +17,7 @@ void main() {
   if (second is! DurianSignalErr<DurianSignalPort> ||
       port.dropped['register'] != 1 ||
       ev is! DurianSignalErr<bool> ||
-      valid is! DurianSignalOk<bool>) {
+      valid is! DurianSignalErr<bool>) {
     throw StateError('the second install was taken');
   }
 }

@@ -5,4 +5,5 @@ forge-wrong-kind.dart dropped.unknown_metric: metric "checkout.charge.duration" 
 forge-upcast-labels.dart dropped.unknown_key: metric "checkout.charges" labels type CheckoutChargeDurationLabels is not its generated type CheckoutChargesLabels
 forge-same-keys.dart dropped.unknown_key: metric "checkout.charges" labels type Raw is not its generated type CheckoutChargesLabels
 forge-wider-bound.dart dropped.unknown_value: metric "checkout.charges" label shard value 999999 is outside 0..15
-forge-second-install.dart dropped.register: the port is already installed (installSignals runs once per process)
+forge-second-install.dart dropped.register: the port is already installed once in this process; it is now poisoned and refuses every signal until restart
+forge-register-first.dart dropped.poisoned: event "checkout.chrage.faild": the port is poisoned (a second install was refused); every signal is refused until restart

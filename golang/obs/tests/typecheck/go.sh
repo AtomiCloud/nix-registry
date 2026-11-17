@@ -36,7 +36,13 @@ while read -r f token; do
 done <"$g/expect"
 # Forging the compiler cannot stop (exported obs.New* constructors): each forge-*.go.txt must compile AND run
 # (a refusal never changes the app's result), and its output must show the port's refusal listed in forge-expect.
+# A forge-X.early.go.txt companion becomes package example.com/app/early (its init runs before the generated one).
 while read -r f token; do
+  rm -rf early
+  if [ -f "$g/${f%.go.txt}.early.go.txt" ]; then
+    mkdir -p early
+    cp -f "$g/${f%.go.txt}.early.go.txt" early/early.go
+  fi
   cp -f "$g/$f" main.go
   if ! out=$("$GO" run . 2>&1); then
     echo "FAIL $f must compile and run (the port refuses at run time, it never crashes the app): $out"
@@ -46,4 +52,5 @@ while read -r f token; do
     fail=1
   fi
 done <"$g/forge-expect"
+rm -rf early
 exit $fail
