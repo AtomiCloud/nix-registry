@@ -136,6 +136,9 @@ YAML
   mapfile -t containers < <(owned)
   docker inspect "${containers[@]}" >"$state/containers.json"
   curl --fail --silent "$OBS_PARITY_VL/flags" >"$state/victorialogs-flags.txt"
+  for endpoint in "$OBS_PARITY_VM" "$OBS_PARITY_VL" "$OBS_PARITY_TEMPO" "$OBS_PARITY_PYROSCOPE"; do
+    curl --fail --silent "$endpoint/metrics" | awk '/^(vm_app_version|tempo_build_info|pyroscope_build_info)/ {print}'
+  done >"$state/image-build-info.txt"
   echo "Parity stores ready. Environment: $state/env"
   ;;
 env)

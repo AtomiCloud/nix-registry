@@ -63,7 +63,10 @@ func TestParityProfiles(t *testing.T) {
 	if base == "" {
 		t.Skip("OBS_PARITY_PYROSCOPE not set")
 	}
-	fixture := "../../../tests/fixtures/profile/base-1.pb.gz"
+	fixture := os.Getenv("OBS_PARITY_PROFILE_FIXTURE")
+	if fixture == "" {
+		fixture = "../../../tests/fixtures/profile/base-1.pb.gz"
+	}
 	original := summarizeProfile(t, binaryPath, fixture)
 	if len(original.Spans) == 0 {
 		t.Fatal("profile fixture has no span_name labels")
@@ -73,6 +76,12 @@ func TestParityProfiles(t *testing.T) {
 	profile, err := os.ReadFile(fixture)
 	if err != nil {
 		t.Fatal(err)
+	}
+	parityEvidence(t, "original-summary", original)
+	if state := os.Getenv("OBS_PARITY_STATE"); state != "" {
+		if err := os.WriteFile(filepath.Join(state, "profile-original.pb.gz"), profile, 0644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	params := url.Values{"name": {"obs-parity{service_name=\"obs-parity\"}"}, "from": {strconv.FormatInt(start.Unix(), 10)}, "until": {strconv.FormatInt(end.Unix(), 10)}, "format": {"pprof"}, "spyName": {"gospy"}, "sampleRate": {"100"}}
 	postReal(t, base+"/ingest?"+params.Encode(), "application/octet-stream", bytes.NewReader(profile))
@@ -99,8 +108,15 @@ func TestParityProfiles(t *testing.T) {
 	if profileType == "" {
 		t.Fatal("real Pyroscope did not store the pprof CPU profile")
 	}
+	mergedCount := 0
 	merge := func(selector string) profileSummary {
 		body := postReal(t, base+"/querier.v1.QuerierService/SelectMergeProfile", "application/proto", bytes.NewReader(profileRequest(profileType, selector, start.UnixMilli()-1000, end.UnixMilli()+1000)))
+		mergedCount++
+		if state := os.Getenv("OBS_PARITY_STATE"); state != "" {
+			if err := os.WriteFile(filepath.Join(state, fmt.Sprintf("profile-pyroscope-%d.pprof", mergedCount)), body, 0644); err != nil {
+				t.Fatal(err)
+			}
+		}
 		file := filepath.Join(t.TempDir(), "merged.pprof")
 		if err := os.WriteFile(file, body, 0644); err != nil {
 			t.Fatal(err)

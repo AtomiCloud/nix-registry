@@ -50,6 +50,9 @@ func requireCommand(t *testing.T, command string) string {
 		t.Fatalf("obs help: %v: %s", err, help)
 	}
 	if !strings.Contains(string(help), "obs "+command+" ") {
+		if _, err := os.Stat("../../cmd_" + command + ".go"); err == nil {
+			t.Fatalf("obs %s source exists but the freshly built binary does not advertise it: %s", command, help)
+		}
 		t.Skip("obs " + command + " has not landed in the tested binary")
 	}
 	return binary
