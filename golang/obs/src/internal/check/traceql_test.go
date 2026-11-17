@@ -128,6 +128,13 @@ func TestTraceQLLiveProjectionAttributeDrift(t *testing.T) {
 			}
 		})
 	}
+	// Baseline: a '= nil' filter on an attribute the seed lacks is not drift, alone or beside a projection.
+	for _, expr := range []string{"{span.drifted = nil} | select(span.provider)", "{span.drifted = nil} | count_over_time() by (span.provider)"} {
+		q := files.Query{File: "dashboards/traces.json", Where: "panel 7 target A", Kind: files.Traces, Dash: &files.Dashboard{}, Expr: expr}
+		if r := runLive(&files.Set{Queries: []files.Query{q}, Dashboards: []*files.Dashboard{{}}}, Options{}, ds, nil, nil); r.Failures() != 0 {
+			t.Fatalf("nil baseline %s: %+v", expr, r.Findings)
+		}
+	}
 }
 
 func TestTraceQLBareIDLiveLookup(t *testing.T) {
@@ -141,5 +148,64 @@ func TestTraceQLBareIDLiveLookup(t *testing.T) {
 		if (r.Failures() > 0) != tc.fail {
 			t.Fatalf("%s: %+v", tc.id, r.Findings)
 		}
+	}
+}
+
+func TestTraceQLLiveNilFilterOnAbsentAttribute(t *testing.T) {
+	at := time.Unix(1800000000, 0)
+	ds := &seed.Dataset{End: at.Add(time.Minute), Traces: []*seed.TTrace{{TraceID: [16]byte{1}, Spans: []*seed.TSpan{{
+		Service: "checkout", StartNs: uint64(at.UnixNano()), DurNs: uint64(time.Second), Attrs: map[string]seed.TAttrVal{"provider": seed.TStr("stripe")},
+	}}}}}
+	for _, tc := range []struct{ expr, rule string }{
+		{`{resource.service.name="checkout" && span.error.type = nil}`, ""},
+		{`{span.error.type = nil}`, ""},
+		// Asking for presence of an attribute the seed lacks is the no-rows path, with the name listed.
+		{`{resource.service.name="checkout" && span.error.type != nil}`, "no-rows"},
+	} {
+		q := files.Query{File: "dashboards/traces.json", Where: "panel 7 target A", Kind: files.Traces, Dash: &files.Dashboard{}, Expr: tc.expr}
+		r := runLive(&files.Set{Queries: []files.Query{q}, Dashboards: []*files.Dashboard{{}}}, Options{}, ds, nil, nil)
+		text := fmt.Sprint(r.Findings)
+		if strings.Contains(text, "query-run") {
+			t.Fatalf("filter attribute reported as seed drift: %s: %+v", tc.expr, r.Findings)
+		}
+		if tc.rule == "" && len(r.Findings) != 0 || tc.rule != "" && (len(r.Findings) != 1 || r.Findings[0].Rule != tc.rule || !strings.Contains(text, "span.error.type")) {
+			t.Fatalf("%s: %+v", tc.expr, r.Findings)
+		}
+	}
+}
+
+func TestTraceQLSingleVariableIsIDLookup(t *testing.T) {
+	for _, expr := range []string{"${traceId}", "$traceId", "[[traceId]]", " ${traceId} "} {
+		for _, kind := range []string{"traceql", "", "traceId"} {
+			t.Run(kind+"/"+expr, func(t *testing.T) {
+				dash := &files.Dashboard{Vars: []files.Variable{{Name: "traceId", Type: "textbox"}}}
+				q := files.Query{File: "dashboards/traces.json", Where: "panel 7 target A", Kind: files.Traces, Dash: dash, QueryType: kind, Expr: expr}
+				r := Static(&files.Set{Queries: []files.Query{q}, Dashboards: []*files.Dashboard{dash}}, Options{})
+				if r.Failures() != 0 || len(r.Findings) != 1 || r.Findings[0].Level != Note || !strings.Contains(r.Findings[0].Msg, "trace ID") || !strings.Contains(r.Findings[0].Msg, "traceId") {
+					t.Fatalf("static: %+v", r.Findings)
+				}
+			})
+		}
+	}
+	// A variable inside a larger query is still filled and parsed.
+	dash := &files.Dashboard{Vars: []files.Variable{{Name: "svc", Type: "textbox", Current: "checkout"}}}
+	q := files.Query{File: "dashboards/traces.json", Where: "panel 7 target A", Kind: files.Traces, Dash: dash, QueryType: "traceql", Expr: `{resource.service.name="$svc"`}
+	if r := Static(&files.Set{Queries: []files.Query{q}, Dashboards: []*files.Dashboard{dash}}, Options{}); r.Failures() != 1 || r.Findings[0].Rule != "traceql-syntax" {
+		t.Fatalf("%+v", r.Findings)
+	}
+}
+
+func TestTraceQLSingleVariableLive(t *testing.T) {
+	dash := &files.Dashboard{Vars: []files.Variable{{Name: "traceId", Type: "textbox"}}}
+	q := files.Query{File: "dashboards/traces.json", Where: "panel 7 target A", Kind: files.Traces, Dash: dash, QueryType: "traceql", Expr: "${traceId}"}
+	set := &files.Set{Queries: []files.Query{q}, Dashboards: []*files.Dashboard{dash}}
+	seeded := &seed.Dataset{End: time.Now(), Traces: []*seed.TTrace{{TraceID: [16]byte{1}, Spans: []*seed.TSpan{{Service: "checkout"}}}}}
+	r := runLive(set, Options{}, seeded, nil, nil)
+	if r.Failures() != 0 || len(r.Findings) != 0 {
+		t.Fatalf("seeded: %+v", r.Findings)
+	}
+	r = runLive(set, Options{}, &seed.Dataset{End: time.Now()}, nil, nil)
+	if r.Failures() != 0 || len(r.Findings) != 1 || r.Findings[0].Level != Note || !strings.Contains(r.Findings[0].Msg, "no trace") {
+		t.Fatalf("unseeded: %+v", r.Findings)
 	}
 }

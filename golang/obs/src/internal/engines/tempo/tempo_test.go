@@ -1,6 +1,7 @@
 package tempo
 
 import (
+	"fmt"
 	"github.com/AtomiCloud/obs/internal/seed"
 	"strings"
 	"testing"
@@ -86,5 +87,27 @@ func TestIDLookup(t *testing.T) {
 	}
 	if _, err := e.Lookup("planted-not-hex"); err == nil {
 		t.Fatal("invalid ID accepted")
+	}
+}
+
+func TestParseProjectionsAreNotFilters(t *testing.T) {
+	for _, tc := range []struct {
+		q    string
+		proj string
+	}{
+		{`{span.a = "x"} | select(span.b)`, "[span.b]"},
+		{`{span.a = nil} | select(span.b)`, "[span.b]"},
+		{`{} | count_over_time() by (span.b)`, "[span.b]"},
+		{`{span.b = nil} | count_over_time() by (span.b)`, "[]"},
+		{`{span.a = "x" && resource.c != nil}`, "[]"},
+		{`{span.a = nil}`, "[]"},
+	} {
+		p, err := Parse(tc.q)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.q, err)
+		}
+		if got := fmt.Sprint(p.Projections); got != tc.proj {
+			t.Fatalf("%s: projections %s, want %s (attributes %v)", tc.q, got, tc.proj, p.Attributes)
+		}
 	}
 }

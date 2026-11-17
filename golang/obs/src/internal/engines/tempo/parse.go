@@ -48,7 +48,12 @@ func (a Attribute) String() string {
 
 type Query struct {
 	Attributes []Attribute
-	Metrics    bool
+	// Projections are the attributes a query reads only to carry them forward
+	// (select(), by(), a metrics function's attribute): Tempo fetches them in the
+	// second pass, so they are not filters. An attribute that is also filtered
+	// is fetched in the first pass and is listed in Attributes only.
+	Projections []Attribute
+	Metrics     bool
 }
 
 // Parse validates with Tempo, then reads its storage requests with optimizations
@@ -60,8 +65,10 @@ func Parse(q string) (*Query, error) {
 	}
 	out := &Query{Metrics: len(ast.BatchSpanProcessor) > 0}
 	seen := map[Attribute]bool{}
-	for _, req := range reqs {
-		for _, c := range append(req.Conditions, req.SecondPassConditions...) {
+	// First pass (filters) is read before the second pass (projections), so an
+	// attribute that is filtered anywhere is never reported as a projection.
+	read := func(cs []traceql.Condition, projection bool) {
+		for _, c := range cs {
 			a := c.Attribute
 			if a.Intrinsic != traceql.IntrinsicNone {
 				continue
@@ -77,9 +84,22 @@ func Parse(q string) (*Query, error) {
 			if !seen[x] {
 				seen[x] = true
 				out.Attributes = append(out.Attributes, x)
+				if projection {
+					out.Projections = append(out.Projections, x)
+				}
 			}
 		}
 	}
-	sort.Slice(out.Attributes, func(i, j int) bool { return out.Attributes[i].String() < out.Attributes[j].String() })
+	for _, req := range reqs {
+		read(req.Conditions, false)
+	}
+	for _, req := range reqs {
+		read(req.SecondPassConditions, true)
+	}
+	byName := func(s []Attribute) {
+		sort.Slice(s, func(i, j int) bool { return s[i].String() < s[j].String() })
+	}
+	byName(out.Attributes)
+	byName(out.Projections)
 	return out, nil
 }

@@ -1,8 +1,10 @@
 package check
 
 import (
+	"encoding/hex"
 	"fmt"
 	"math"
+	"regexp"
 	"strings"
 	"time"
 
@@ -19,6 +21,10 @@ func staticTraces(r *Report, q *files.Query, o Options) {
 	expr := staticFill(q)
 	if q.IsAlert {
 		r.add(Note, q.File, q.Where, "traces", "trace alerts not checked: await obs alerts integration; query: %s", oneLine(expr))
+		return
+	}
+	if v, ok := traceIDVariable(q); ok {
+		r.add(Note, q.File, q.Where, "traces", "query is the single variable %s: Grafana fills it, then looks the value up as a trace ID; the value is not known statically (run --live)", v)
 		return
 	}
 	mode, modeErr := traceQueryMode(q, expr)
@@ -52,6 +58,16 @@ func staticTraces(r *Report, q *files.Query, o Options) {
 }
 
 func (l *liveRun) tracePanel(q *files.Query, expr string, start, end time.Time, step time.Duration) (bool, error) {
+	if v, ok := traceIDVariable(q); ok {
+		// Grafana fills the variable with the real value first, then does the ID lookup
+		// (datasource.ts applyVariables, b92bfd830f9c). Look up a seeded trace's ID.
+		if len(l.ds.Traces) == 0 {
+			l.r.add(Note, q.File, q.Where, "traces", "query is the single variable %s (a trace ID lookup) and the seed has no trace: not run", v)
+			return true, nil
+		}
+		hits, err := l.tempo.Lookup(hex.EncodeToString(l.ds.Traces[0].TraceID[:]))
+		return len(hits) > 0, err
+	}
 	mode, err := traceQueryMode(q, expr)
 	if err != nil || mode == traceSkipped {
 		return true, nil
@@ -64,7 +80,7 @@ func (l *liveRun) tracePanel(q *files.Query, expr string, start, end time.Time, 
 	if err != nil {
 		return true, nil
 	}
-	if missing := l.missingTraceAttrs(expr); len(missing) > 0 {
+	if missing := l.seedLacks(p.Projections); len(missing) > 0 {
 		return false, fmt.Errorf("not in the seed: %s", strings.Join(missing, ", "))
 	}
 	if !p.Metrics {
@@ -83,6 +99,34 @@ func (l *liveRun) tracePanel(q *files.Query, expr string, start, end time.Time, 
 		}
 	}
 	return false, nil
+}
+
+// singleVariable matches a query that is exactly one template variable:
+// $v, ${v} (also ${v:fmt}) or [[v]].
+var singleVariable = regexp.MustCompile(`^(?:\$(\w+)|\$\{(\w+)(?::[^}]*)?\}|\[\[(\w+)(?::\w+)?\]\])$`)
+
+// traceIDVariable reports a Tempo trace-view query that is one unfilled template
+// variable. Grafana fills the real value first and then decides, so obs treats it
+// as an ID lookup rather than guessing TraceQL from a placeholder. It returns the variable's name.
+func traceIDVariable(q *files.Query) (string, bool) {
+	switch strings.ToLower(q.DSType) {
+	case "jaeger", "zipkin":
+		return "", false
+	}
+	switch strings.ToLower(q.QueryType) {
+	case "", "traceql", "traceid":
+	default:
+		return "", false
+	}
+	m := singleVariable.FindStringSubmatch(strings.TrimSpace(q.Expr))
+	if m == nil {
+		return "", false
+	}
+	name := firstNonEmpty(m[1:]...)
+	if strings.HasPrefix(name, "__") {
+		return "", false // a built-in macro, not a user-entered ID
+	}
+	return name, true
 }
 
 type traceMode int
@@ -121,13 +165,22 @@ func traceQueryMode(q *files.Query, expr string) (traceMode, error) {
 	}
 }
 
+// missingTraceAttrs names every attribute a query reads that no seeded span carries.
 func (l *liveRun) missingTraceAttrs(expr string) []string {
-	var out []string
 	p, err := tempo.Parse(expr)
 	if err != nil {
 		return nil
 	}
-	for _, a := range p.Attributes {
+	return l.seedLacks(p.Attributes)
+}
+
+// seedLacks names the attributes no seeded span carries. The hard failure in
+// tracePanel passes only projections (select, by, a metrics function's
+// attribute): a filter such as span.error.type = nil asks for the absence, so
+// filter attributes are left to the no-rows path.
+func (l *liveRun) seedLacks(attrs []tempo.Attribute) []string {
+	var out []string
+	for _, a := range attrs {
 		found := false
 		for _, t := range l.ds.Traces {
 			for _, s := range t.Spans {
