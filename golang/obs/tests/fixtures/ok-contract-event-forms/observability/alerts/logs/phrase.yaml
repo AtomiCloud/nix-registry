@@ -1,12 +1,12 @@
 apiVersion: grafana.integreatly.org/v1beta1
 kind: GrafanaAlertRuleGroup
 metadata:
-  name: payments-checkout-logs-warning
+  name: payments-checkout-phrase-warning
 spec:
   folderRef: payments-checkout-folder
   interval: 1m
   rules:
-    - uid: logs-warning
+    - uid: phrase-warning
       title: Charge log lines
       condition: A
       for: 5m
@@ -17,7 +17,7 @@ spec:
           relativeTimeRange: { from: 300, to: 0 }
           datasourceUid: primordial-logs
           model:
-            expr: '_time:5m {durian.cloud.service="checkout"} ("durian.cloud/event":"checkout.charge.failed" or "durian.cloud/event":checkout.charge.s*) | stats by (payment.provider) count() failed | filter failed:>100'
+            expr: '_time:5m {durian.cloud.service="checkout"} "durian.cloud/event":"checkout.charge.failed" | stats by (payment.provider) count() failed | filter failed:>100'
             queryType: stats
       labels: { severity: warning }
       annotations: { summary: 'Charge log lines' }
