@@ -34,4 +34,16 @@ while read -r f token; do
     fail=1
   fi
 done <"$g/expect"
+# Forging the compiler cannot stop (exported obs.New* constructors): each forge-*.go.txt must compile AND run
+# (a refusal never changes the app's result), and its output must show the port's refusal listed in forge-expect.
+while read -r f token; do
+  cp -f "$g/$f" main.go
+  if ! out=$("$GO" run . 2>&1); then
+    echo "FAIL $f must compile and run (the port refuses at run time, it never crashes the app): $out"
+    fail=1
+  elif grep -qF -- "$token" <<<"$out"; then echo "PASS $f compiles, runs, the port refuses: $token"; else
+    echo "FAIL $f ran but the port did not refuse it (want: $token): $out"
+    fail=1
+  fi
+done <"$g/forge-expect"
 exit $fail

@@ -1,9 +1,12 @@
-// Minimal assumed API from concept §3.4 and goals/lib/bun-interfaces.md.
-// Compile-only stub; NOT the real library. Result is supplied by diene.result in production.
+// Minimal assumed API from concept §3.4 and goals/lib/bun-interfaces.md, with a small runnable index.js
+// so planted forging consumers can be RUN. NOT the real library. Result is supplied by diene.result in
+// production. Assumed, not in the goal: metrics(table), logger(events), EventTable, dropped(), Level,
+// MetricTable; the goal spells counter(name, labels), log.error(...), bounded(spec, n), Tracer/Span.
 export type Result<T, E = string> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly error: E };
-export type Event<L extends string> = { readonly name: string; readonly level: L };
+export type Level = 'trace' | 'debug' | 'info' | 'warn' | 'error' | 'fatal';
+export type Event<L extends Level> = { readonly name: string; readonly level: L };
 declare const boundedBrand: unique symbol;
 export type Bounded<N extends string> = number & { readonly [boundedBrand]: N };
 export declare function bounded<const N extends string>(
@@ -15,9 +18,23 @@ export type MetricTable<M> = {
 };
 export interface Metrics<M> {
   counter<N extends keyof M>(name: N, labels: M[N]): Result<void>;
+  histogram<N extends keyof M>(name: N, labels: M[N]): Result<void>;
+  gauge<N extends keyof M>(name: N, labels: M[N]): Result<void>;
 }
+/** The port refuses a name not in the table, a kind that differs and keys not in the name's key list. */
 export declare function metrics<M>(table: MetricTable<M>): Metrics<M>;
-export declare function logError(event: Event<'error'>, fields?: Record<string, unknown>, error?: Error): Result<void>;
+/** The generated event table: event name -> level. */
+export type EventTable = { readonly [name: string]: Level };
+export interface Log {
+  error(event: Event<'error'>, fields?: Record<string, unknown>, error?: Error): Result<void>;
+  warn(event: Event<'warn'>, fields?: Record<string, unknown>): Result<void>;
+  info(event: Event<'info'>, fields?: Record<string, unknown>): Result<void>;
+  debug(event: Event<'debug'>, fields?: Record<string, unknown>): Result<void>;
+}
+/** The port refuses an event whose name is not in the table or whose level differs from it. */
+export declare function logger(events: EventTable): Log;
+/** The dropped.<reason> counter. */
+export declare function dropped(reason: 'unknown_event' | 'unknown_metric' | 'unknown_key'): number;
 export type SpanAttributeValue = string | number | boolean | readonly string[] | readonly number[] | readonly boolean[];
 export type SpanAttributeMap = { readonly [name: string]: { readonly [key: string]: SpanAttributeValue | undefined } };
 export type DurianSignalSpanTable<M> = {
@@ -38,5 +55,3 @@ export interface Tracer<M extends SpanAttributeMap> {
   ): Result<T, E>;
 }
 export declare function tracer<M extends SpanAttributeMap>(table: DurianSignalSpanTable<M>): Tracer<M>;
-
-export declare function logWarn(event: Event<'warn'>, fields?: Record<string, unknown>): Result<void>;

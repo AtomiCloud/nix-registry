@@ -76,7 +76,7 @@ func (w *writer) render(pkg string) string {
 		w.f("\t\"time\"\n")
 	}
 	w.f(")\n\n")
-	for _, id := range []string{"obs", "MetricTable", "SpanTable", "Events", "DurianSignalGauge", "DurianSignalCounter", "DurianSignalHistogram", "Event"} {
+	for _, id := range []string{"obs", "MetricTable", "SpanTable", "Events", "DurianSignalGauge", "DurianSignalCounter", "DurianSignalHistogram", "Event", "EventTable"} {
 		w.decl(id, "shared interfaces name")
 	}
 	w.f("// Event is the interfaces library's level-typed event carrier.\ntype Event[L obs.Level] = obs.Event[L]\n\n")
@@ -114,6 +114,13 @@ func (w *writer) render(pkg string) string {
 		w.f("// %s is the event %s at level %s.\nvar %s = obs.NewEvent[obs.%sLevel](%q)\n\n", id, e.Event, e.Level, id, levelIdent[e.Level], e.Event)
 	}
 	w.f("// Events lists every event name of the contract, in contract order.\nvar Events = %s\n", strList(c.EventNames()))
+	w.f("\n// EventTable is the data table of the events: name -> level. The port refuses any other name or level.\n")
+	w.f("var EventTable = map[string]string{\n")
+	for _, k := range c.LogOrder {
+		e := c.Logs[k]
+		w.f("\t%q: %q,\n", e.Event, e.Level)
+	}
+	w.f("}\n")
 
 	// ---- spans
 	w.f("\n// ---- spans ----\n")
@@ -127,6 +134,8 @@ func (w *writer) render(pkg string) string {
 		w.f("\t%q: {Kind: %q, Keys: %s},\n", n, spanKind(s), strList(s.AttrOrder))
 	}
 	w.f("}\n")
+	w.f("\n// init registers the tables with the port: it refuses names, kinds, levels and label keys not in them.\n")
+	w.f("func init() {\n\tobs.Register(obs.DurianSignalTables{Metrics: MetricTable, Events: EventTable, Spans: SpanTable})\n}\n")
 	return w.String()
 }
 

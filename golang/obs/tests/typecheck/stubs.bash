@@ -22,7 +22,7 @@ MOD
   dotnet)
     local dep="$d/../interfaces-stub"
     mkdir -p "$dep"
-    cp "$stubs/dotnet/stub/Obs.cs" "$dep/"
+    cp "$stubs/dotnet/stub/"*.cs "$dep/"
     cat >"$dep/Obs.csproj" <<'XML'
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>

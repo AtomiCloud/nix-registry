@@ -54,10 +54,10 @@ var baseNames = []string{
 	"DurianSignalWire", "DurianSignalLabels", "DurianSignalLevel", "DurianSignalResult",
 	"DurianSignalOk", "DurianSignalErr", "DurianSignalBoundSpec", "DurianSignalEvent",
 	"DurianSignalCounter", "DurianSignalHistogram", "DurianSignalGauge", "DurianSignalSpan",
-	"DurianSignalMetricInfo", "DurianSignalSpanInfo", "DurianSignalLevelTrace",
+	"DurianSignalMetricInfo", "DurianSignalSpanInfo", "DurianSignalMetric", "DurianSignalPort", "DurianSignalLevelTrace",
 	"DurianSignalLevelDebug", "DurianSignalLevelInfo", "DurianSignalLevelWarn",
 	"DurianSignalLevelError", "DurianSignalLevelFatal", "metricTable", "spanTable", "eventNames",
-	"_durianSignalDate", "Event", "Result", "TraceLevel", "DebugLevel", "InfoLevel", "WarnLevel", "ErrorLevel", "FatalLevel",
+	"_durianSignalDate", "eventTable", "Event", "Result", "TraceLevel", "DebugLevel", "InfoLevel", "WarnLevel", "ErrorLevel", "FatalLevel",
 }
 
 // topReserved are the words a lowercase top-level constant may not take: Dart's reserved words and
@@ -71,7 +71,7 @@ var topReserved = map[string]bool{
 	"static": true, "typedef": true, "when": true, "async": true, "sync": true, "type": true,
 	"int": true, "num": true, "bool": true, "double": true, "override": true, "deprecated": true,
 	"pragma": true, "print": true, "identical": true, "identityHashCode": true,
-	"error": true,
+	"error": true, "warn": true, "info": true,
 }
 
 // topName makes a lowercase top-level identifier safe: a reserved or shadowing word gets a trailing _.
@@ -196,6 +196,9 @@ func (g *emitter) plan() error {
 				return err
 			}
 			if err := g.declare(camel(n)+"Spec", from); err != nil {
+				return err
+			}
+			if err := g.declare(pascal(n)+"Spec", from); err != nil {
 				return err
 			}
 			g.typeRef[n] = pascal(n)
@@ -343,6 +346,46 @@ func (x *w) declHead(head, kw, typ string) {
 	x.line("        %s {", typ)
 }
 
+// arrow writes `  <head><param>) => <body>` the way dart format does: on one line; else the body on
+// the next line; else the parameter on its own line too.
+func (x *w) arrow(head, param, body string) {
+	sig := "  " + head + param + ")"
+	if one := sig + " => " + body; len(one) <= width {
+		x.line("%s", one)
+		return
+	}
+	if len(sig+" =>") <= width {
+		x.line("%s =>", sig)
+		x.line("      %s", body)
+		return
+	}
+	x.line("  %s", head)
+	x.line("    %s,", param)
+	if one := "  ) => " + body; len(one) <= width {
+		x.line("%s", one)
+		return
+	}
+	x.line("  ) =>")
+	x.line("      %s", body)
+}
+
+// mapLit writes `<prefix>{k: v, ...};` on one line, or one entry per line when it does not fit.
+func (x *w) mapLit(prefix string, kv [][2]string) {
+	items := make([]string, len(kv))
+	for i, e := range kv {
+		items[i] = e[0] + ": " + e[1]
+	}
+	if one := prefix + "{" + strings.Join(items, ", ") + "};"; len(one) <= width {
+		x.line("%s", one)
+		return
+	}
+	x.line("%s{", prefix)
+	for _, e := range kv {
+		x.entry(2, e[0], e[1])
+	}
+	x.line("};")
+}
+
 // assign writes `<lhs> = <rhs>;` on one line, or with the right side on the next.
 func (x *w) assign(indent int, lhs, rhs string) {
 	pad := strings.Repeat(" ", indent)
@@ -461,6 +504,13 @@ func spanKind(s contract.Span) string {
 	return s.Kind
 }
 
+// metricVerb is the method a generated metric class has, and the port call it makes.
+var metricVerb = map[string]string{
+	contract.MetricCounter:   "add",
+	contract.MetricHistogram: "record",
+	contract.MetricGauge:     "set",
+}
+
 var metricBase = map[string]string{
 	contract.MetricCounter:   "DurianSignalCounter",
 	contract.MetricHistogram: "DurianSignalHistogram",
@@ -497,6 +547,10 @@ func (g *emitter) render() string {
 		x.line("/// The %s %s.", c.Metrics[m].Kind, m)
 		x.classHead(pascal(m)+"Metric", fmt.Sprintf("%s<%sLabels>", metricBase[c.Metrics[m].Kind], pascal(m)))
 		x.superCtor(pascal(m)+"Metric", dq(m))
+		x.blank()
+		verb := metricVerb[c.Metrics[m].Kind]
+		x.line("  /// The only call on %s: typed to its own labels class (no generic base method).", m)
+		x.arrow(fmt.Sprintf("Result<bool> %s(", verb), pascal(m)+"Labels labels", fmt.Sprintf("DurianSignalPort.%s(this, labels);", verb))
 		x.line("}")
 		x.blank()
 		x.line("/// The %s %s.", c.Metrics[m].Kind, m)
@@ -521,14 +575,8 @@ func (g *emitter) render() string {
 		e := c.Logs[k]
 		x.blank()
 		x.line("/// The event %s at level %s.", e.Event, e.Level)
-		x.declHead("final class "+pascal(k)+"Event", "implements", "Event<"+levelClass(e.Level)+">")
-		x.line("  const %s._();", pascal(k)+"Event")
-		x.blank()
-		x.line("  @override")
-		x.line("  String get name => %s;", dq(e.Event))
-		x.blank()
-		x.line("  @override")
-		x.line("  String get level => %s;", dq(e.Level))
+		x.classHead(pascal(k)+"Event", "Event<"+levelClass(e.Level)+">")
+		x.superCtor(pascal(k)+"Event", dq(e.Event))
 		x.line("}")
 		x.blank()
 		x.line("/// The event %s at level %s.", e.Event, e.Level)
@@ -537,6 +585,14 @@ func (g *emitter) render() string {
 	x.blank()
 	x.line("/// Every event name of the contract, in contract order.")
 	x.strList(0, "const eventNames = <String>", ";", c.EventNames())
+	x.blank()
+	x.line("/// The data table of the events: name -> level. The port refuses any other name or")
+	x.line("/// level.")
+	evs := make([][2]string, 0, len(c.LogOrder))
+	for _, k := range c.LogOrder {
+		evs = append(evs, [2]string{dq(c.Logs[k].Event), dq(c.Logs[k].Level)})
+	}
+	x.mapLit("const eventTable = <String, String>", evs)
 
 	x.blank()
 	x.line("// ---- spans ----")
@@ -630,8 +686,12 @@ func (g *emitter) boundType(x *w, id, name, doc string, min, max int, unit strin
 	x.line("}")
 	x.blank()
 	x.line("/// The range of [%s]; of(n) returns a result.", id)
-	x.assignCall("const "+camel(name)+"Spec", "DurianSignalBoundSpec<"+id+">(",
-		[]string{dq(name), fmt.Sprint(min), fmt.Sprint(max), dq(unit), id + ".new"})
+	x.classHead(id+"Spec", "DurianSignalBoundSpec<"+id+">")
+	x.superCtor(id+"Spec", dq(name), fmt.Sprint(min), fmt.Sprint(max), dq(unit), id+".new")
+	x.line("}")
+	x.blank()
+	x.line("/// The range of [%s]; of(n) returns a result.", id)
+	x.assign(0, "const "+camel(name)+"Spec", id+"Spec._()")
 }
 
 func (g *emitter) labelsClass(x *w, id, path, doc string, names []string, types map[string]string) {

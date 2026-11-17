@@ -126,7 +126,7 @@ public static class Spans
 
 // ---- data tables ----
 
-/// <summary>The data tables: allowed label keys per metric and span, and every event name.</summary>
+/// <summary>The data tables: allowed label keys per metric and span, every event name and its level.</summary>
 public static class SignalTables
 {
     public static readonly IReadOnlyDictionary<string, DurianSignalMetricInfo> Metrics =
@@ -144,4 +144,13 @@ public static class SignalTables
         };
 
     public static readonly IReadOnlyList<string> EventNames = new string[] { "payments.class.started", "payments.new", "payments.provider.settlement.batch.reconciliation.failed" };
+
+    /// <summary>Event name to level: Port.Install takes it, and the port refuses any other name or level.</summary>
+    public static readonly IReadOnlyDictionary<string, string> EventLevels =
+        new Dictionary<string, string>
+        {
+            ["payments.class.started"] = "fatal",
+            ["payments.new"] = "trace",
+            ["payments.provider.settlement.batch.reconciliation.failed"] = "error",
+        };
 }

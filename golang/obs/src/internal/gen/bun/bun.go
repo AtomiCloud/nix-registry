@@ -6,7 +6,8 @@
 //     date = string brand + spec; free = string;
 //   - one label type per metric, the MetricLabels map and the metricTable key table (the port's run-time
 //     guard refuses keys that are not in it);
-//   - log events as {name, level} constants plus the eventNames list (the port refuses other names);
+//   - log events as {name, level} constants plus the eventNames list and the eventTable (name -> level)
+//     that logger(eventTable) takes: the port refuses a name not in it or a level that differs;
 //   - span attributes as the SpanAttrs map and spanTable (kind + allowed keys). Both are `type` aliases:
 //     an interface does not fit the Tracer index-signature constraint;
 //   - one name carrier (a string-literal constant) per metric and span.
@@ -326,6 +327,7 @@ func renderWithOptions(c *contract.Contract, o gen.Options) (string, error) {
 	if len(c.LogOrder) > 0 {
 		b.WriteString("\n// Log events: a name and the level it fixes. Fields are free-form.\n")
 		var evs []string
+		levels := obj{}
 		for _, ln := range c.LogOrder {
 			e := c.Logs[ln]
 			id := gen.Pascal(ln)
@@ -336,8 +338,10 @@ func renderWithOptions(c *contract.Contract, o gen.Options) (string, error) {
 				{"name", raw(q(e.Event))}, {"level", raw(q(e.Level))},
 			}}, " as const satisfies DurianSignalEvent<"+q(e.Level)+">;")
 			evs = append(evs, e.Event)
+			levels.members = append(levels.members, member{key(e.Event), raw(q(e.Level))})
 		}
 		render(&b, 0, "export const eventNames = ", strArr(evs), " as const;")
+		render(&b, 0, "export const eventTable = ", levels, " as const;")
 	}
 
 	if len(c.SpanOrder) > 0 {

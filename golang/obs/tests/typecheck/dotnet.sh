@@ -61,8 +61,9 @@ cp -f "$g/good.cs" "$d/App/Program.cs"
 if out=$(build "$d/App/App.csproj") && run=$("$DOTNET" "$d/App/bin/Debug/net10.0/App.dll" 2>&1) &&
   grep -q 'label shard=3 valid=True' <<<"$run" &&
   grep -q 'checkout.charges checkout.charge.failed error 2026-11-17 provider,outcome,shard,hour' <<<"$run" &&
-  grep -q 'client default-valid=False' <<<"$run"; then
-  echo "PASS good.cs builds, runs and default(DurianSignalInt) is not Valid"
+  grep -q 'client default-valid=False' <<<"$run" &&
+  grep -q 'guard: dropped.unknown_event: event "checkout.charge.failed" is not in the generated event table' <<<"$run"; then
+  echo "PASS good.cs builds, runs: valid calls Ok, nothing dropped, default/null! refused, the port refuses what its tables lack"
 else
   echo "FAIL good.cs: $(grep ' error ' <<<"${out:-}" | head -3) ${run:-}"
   fail=1

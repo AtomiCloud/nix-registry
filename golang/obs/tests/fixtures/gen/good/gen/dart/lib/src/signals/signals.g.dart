@@ -49,7 +49,12 @@ extension type const Shard._(int value) implements int {
 }
 
 /// The range of [Shard]; of(n) returns a result.
-const shardSpec = DurianSignalBoundSpec<Shard>('shard', 0, 15, '', Shard.new);
+final class ShardSpec extends DurianSignalBoundSpec<Shard> {
+  const ShardSpec._() : super('shard', 0, 15, '', Shard.new);
+}
+
+/// The range of [Shard]; of(n) returns a result.
+const shardSpec = ShardSpec._();
 
 /// The bounded number sequence, 0..9999.
 ///
@@ -60,13 +65,12 @@ extension type const Sequence._(int value) implements int {
 }
 
 /// The range of [Sequence]; of(n) returns a result.
-const sequenceSpec = DurianSignalBoundSpec<Sequence>(
-  'sequence',
-  0,
-  9999,
-  '',
-  Sequence.new,
-);
+final class SequenceSpec extends DurianSignalBoundSpec<Sequence> {
+  const SequenceSpec._() : super('sequence', 0, 9999, '', Sequence.new);
+}
+
+/// The range of [Sequence]; of(n) returns a result.
+const sequenceSpec = SequenceSpec._();
 
 /// The bounded number lane, 1..3.
 ///
@@ -77,7 +81,12 @@ extension type const Lane._(int value) implements int {
 }
 
 /// The range of [Lane]; of(n) returns a result.
-const laneSpec = DurianSignalBoundSpec<Lane>('lane', 1, 3, '', Lane.new);
+final class LaneSpec extends DurianSignalBoundSpec<Lane> {
+  const LaneSpec._() : super('lane', 1, 3, '', Lane.new);
+}
+
+/// The range of [Lane]; of(n) returns a result.
+const laneSpec = LaneSpec._();
 
 /// The time bucket hour (hour_of_day, 0..23); it rolls over by itself.
 ///
@@ -88,13 +97,12 @@ extension type const Hour._(int value) implements int {
 }
 
 /// The range of [Hour]; of(n) returns a result.
-const hourSpec = DurianSignalBoundSpec<Hour>(
-  'hour',
-  0,
-  23,
-  'hour_of_day',
-  Hour.new,
-);
+final class HourSpec extends DurianSignalBoundSpec<Hour> {
+  const HourSpec._() : super('hour', 0, 23, 'hour_of_day', Hour.new);
+}
+
+/// The range of [Hour]; of(n) returns a result.
+const hourSpec = HourSpec._();
 
 /// The time bucket day (weekday, 0..6); it rolls over by itself.
 ///
@@ -105,7 +113,12 @@ extension type const Day._(int value) implements int {
 }
 
 /// The range of [Day]; of(n) returns a result.
-const daySpec = DurianSignalBoundSpec<Day>('day', 0, 6, 'weekday', Day.new);
+final class DaySpec extends DurianSignalBoundSpec<Day> {
+  const DaySpec._() : super('day', 0, 6, 'weekday', Day.new);
+}
+
+/// The range of [Day]; of(n) returns a result.
+const daySpec = DaySpec._();
 
 /// The calendar date billing_day: a metric label with 30 values live at once
 /// (window_days).
@@ -155,6 +168,10 @@ final class CheckoutChargesLabels extends DurianSignalLabels {
 final class CheckoutChargesMetric
     extends DurianSignalCounter<CheckoutChargesLabels> {
   const CheckoutChargesMetric._() : super('checkout.charges');
+
+  /// The only call on checkout.charges: typed to its own labels class (no generic base method).
+  Result<bool> add(CheckoutChargesLabels labels) =>
+      DurianSignalPort.add(this, labels);
 }
 
 /// The counter checkout.charges.
@@ -178,6 +195,10 @@ final class CheckoutChargeDurationLabels extends DurianSignalLabels {
 final class CheckoutChargeDurationMetric
     extends DurianSignalHistogram<CheckoutChargeDurationLabels> {
   const CheckoutChargeDurationMetric._() : super('checkout.charge.duration');
+
+  /// The only call on checkout.charge.duration: typed to its own labels class (no generic base method).
+  Result<bool> record(CheckoutChargeDurationLabels labels) =>
+      DurianSignalPort.record(this, labels);
 }
 
 /// The histogram checkout.charge.duration.
@@ -204,6 +225,10 @@ final class CheckoutInvoicesLabels extends DurianSignalLabels {
 final class CheckoutInvoicesMetric
     extends DurianSignalCounter<CheckoutInvoicesLabels> {
   const CheckoutInvoicesMetric._() : super('checkout.invoices');
+
+  /// The only call on checkout.invoices: typed to its own labels class (no generic base method).
+  Result<bool> add(CheckoutInvoicesLabels labels) =>
+      DurianSignalPort.add(this, labels);
 }
 
 /// The counter checkout.invoices.
@@ -223,6 +248,10 @@ final class CheckoutQueueDepthLabels extends DurianSignalLabels {
 final class CheckoutQueueDepthMetric
     extends DurianSignalGauge<CheckoutQueueDepthLabels> {
   const CheckoutQueueDepthMetric._() : super('checkout.queue.depth');
+
+  /// The only call on checkout.queue.depth: typed to its own labels class (no generic base method).
+  Result<bool> set(CheckoutQueueDepthLabels labels) =>
+      DurianSignalPort.set(this, labels);
 }
 
 /// The gauge checkout.queue.depth.
@@ -240,6 +269,10 @@ final class CheckoutWorkerLagLabels extends DurianSignalLabels {
 final class CheckoutWorkerLagMetric
     extends DurianSignalGauge<CheckoutWorkerLagLabels> {
   const CheckoutWorkerLagMetric._() : super('checkout.worker.lag');
+
+  /// The only call on checkout.worker.lag: typed to its own labels class (no generic base method).
+  Result<bool> set(CheckoutWorkerLagLabels labels) =>
+      DurianSignalPort.set(this, labels);
 }
 
 /// The gauge checkout.worker.lag.
@@ -258,6 +291,10 @@ final class CheckoutConfigGenerationMetric
     extends DurianSignalGauge<CheckoutConfigGenerationLabels> {
   const CheckoutConfigGenerationMetric._()
     : super('checkout.config.generation');
+
+  /// The only call on checkout.config.generation: typed to its own labels class (no generic base method).
+  Result<bool> set(CheckoutConfigGenerationLabels labels) =>
+      DurianSignalPort.set(this, labels);
 }
 
 /// The gauge checkout.config.generation.
@@ -277,6 +314,10 @@ final class CheckoutCacheEntriesLabels extends DurianSignalLabels {
 final class CheckoutCacheEntriesMetric
     extends DurianSignalGauge<CheckoutCacheEntriesLabels> {
   const CheckoutCacheEntriesMetric._() : super('checkout.cache.entries');
+
+  /// The only call on checkout.cache.entries: typed to its own labels class (no generic base method).
+  Result<bool> set(CheckoutCacheEntriesLabels labels) =>
+      DurianSignalPort.set(this, labels);
 }
 
 /// The gauge checkout.cache.entries.
@@ -294,6 +335,10 @@ final class CheckoutRuntimeMemoryLabels extends DurianSignalLabels {
 final class CheckoutRuntimeMemoryMetric
     extends DurianSignalGauge<CheckoutRuntimeMemoryLabels> {
   const CheckoutRuntimeMemoryMetric._() : super('checkout.runtime.memory');
+
+  /// The only call on checkout.runtime.memory: typed to its own labels class (no generic base method).
+  Result<bool> set(CheckoutRuntimeMemoryLabels labels) =>
+      DurianSignalPort.set(this, labels);
 }
 
 /// The gauge checkout.runtime.memory.
@@ -371,56 +416,32 @@ const metricTable = <String, DurianSignalMetricInfo>{
 // ---- log events ----
 
 /// The event checkout.charge.succeeded at level info.
-final class ChargeSucceededEvent implements Event<InfoLevel> {
-  const ChargeSucceededEvent._();
-
-  @override
-  String get name => 'checkout.charge.succeeded';
-
-  @override
-  String get level => 'info';
+final class ChargeSucceededEvent extends Event<InfoLevel> {
+  const ChargeSucceededEvent._() : super('checkout.charge.succeeded');
 }
 
 /// The event checkout.charge.succeeded at level info.
 const chargeSucceededEvent = ChargeSucceededEvent._();
 
 /// The event checkout.charge.declined at level warn.
-final class ChargeDeclinedEvent implements Event<WarnLevel> {
-  const ChargeDeclinedEvent._();
-
-  @override
-  String get name => 'checkout.charge.declined';
-
-  @override
-  String get level => 'warn';
+final class ChargeDeclinedEvent extends Event<WarnLevel> {
+  const ChargeDeclinedEvent._() : super('checkout.charge.declined');
 }
 
 /// The event checkout.charge.declined at level warn.
 const chargeDeclinedEvent = ChargeDeclinedEvent._();
 
 /// The event checkout.charge.failed at level error.
-final class ChargeFailedEvent implements Event<ErrorLevel> {
-  const ChargeFailedEvent._();
-
-  @override
-  String get name => 'checkout.charge.failed';
-
-  @override
-  String get level => 'error';
+final class ChargeFailedEvent extends Event<ErrorLevel> {
+  const ChargeFailedEvent._() : super('checkout.charge.failed');
 }
 
 /// The event checkout.charge.failed at level error.
 const chargeFailedEvent = ChargeFailedEvent._();
 
 /// The event checkout.worker.started at level debug.
-final class WorkerStartedEvent implements Event<DebugLevel> {
-  const WorkerStartedEvent._();
-
-  @override
-  String get name => 'checkout.worker.started';
-
-  @override
-  String get level => 'debug';
+final class WorkerStartedEvent extends Event<DebugLevel> {
+  const WorkerStartedEvent._() : super('checkout.worker.started');
 }
 
 /// The event checkout.worker.started at level debug.
@@ -433,6 +454,15 @@ const eventNames = <String>[
   'checkout.charge.failed',
   'checkout.worker.started',
 ];
+
+/// The data table of the events: name -> level. The port refuses any other name or
+/// level.
+const eventTable = <String, String>{
+  'checkout.charge.succeeded': 'info',
+  'checkout.charge.declined': 'warn',
+  'checkout.charge.failed': 'error',
+  'checkout.worker.started': 'debug',
+};
 
 // ---- spans ----
 

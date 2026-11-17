@@ -263,39 +263,93 @@ and `contract-hash: sha256:<hash of the contract file>`.
 not (the contract changed and nobody regenerated); a missing file is `[gen-missing]`.
 A header-marked file absent from the output plan is `[gen-orphan]`, including files left after
 dropping a target. Each header names the contract's repository-relative path, so generated files
-owned by another contract in a monorepo are ignored. The check scans the consumer root without
-following symlinks or entering dependency/cache directories. `--lang` checks only the selected languages.
+owned by another contract in a monorepo are ignored. The check scans from the Git root (or the project
+folder outside Git) without following symlinks or entering dependency/cache directories. `--lang` checks only the selected languages.
 Golden files: `tests/fixtures/gen/good` is a consumer repo with its generated files committed; the
 Go unit tests and `obs gen --check` compare against it (`OBS_UPDATE_GOLDEN=1 go test ./internal/gen/...`
 rewrites them). The tests find `tests/` in an ancestor of the package (or `OBS_TESTS_DIR`); a build from `src/` alone skips them, and the nix check copies `tests/` next to the source root.
 
-**Each language compiles against a stub written from the goal; NOT TESTED against the real library.**
-`tests/typecheck/<lang>/stub/` contains only the assumed interfaces API used by the generated
-code and consumers. The nix check links these stubs, compiles/runs good consumers, and requires
-planted bad consumers to fail for the expected diagnostic. The same stubs support the 36 name-fuzz
-contract/language cases. The .NET harness builds three separate assemblies, Obs, Signals, and App; only Signals
-has access to the library's internal name/event constructors. Dart inherits the library's metric
-methods, so `checkoutCharges.add(labels)` fixes the labels type through its receiver.
+**Each language compiles and runs against a stub written from the goal; NOT TESTED against the real library.**
+`tests/typecheck/<lang>/stub/` holds a minimal assumed interfaces API with just enough body to run the
+consumers (the Bun stub has an `index.js`, run with the `node` that nixpkgs `tsc` wraps). The nix check:
 
-Each `generate:` target accepts optional `interfaces:` to override its dependency import:
+- compiles and RUNS a good consumer: every valid call returns Ok and nothing is dropped;
+- requires every planted `bad-*` consumer to fail to compile with the expected diagnostic;
+- requires every planted `forge-*` consumer to compile, run without throwing, and show the port's refusal
+  (`dropped.unknown_event`, `dropped.unknown_metric` or `dropped.unknown_key`, counted once).
 
-| Language | Default `interfaces`                             | Assumed API used by generated code / consumers                                                                                                                                                                                                                                                                                                                                                                     |
-| -------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Go       | `github.com/ProtoDurian/diene.go-interfaces/obs` | `Int[Spec]`, `NewInt[Spec](int64)` and `AtTime[Spec](time.Time)` returning `(value, error)`; specs expose `Name/Min/Max/Unit`, with Int64 bounds; `Event[Level]` and level markers; `NewEvent`, `NewCounter`, `NewHistogram`, `NewGauge`, `NewSpan`; `DurianSignal*` carriers/metadata; `Add`, `Record`, `Set`, `Error` ports. Generated `Event`/level and bounded-value names are aliases of these library types. |
-| Bun      | `@atomicloud/diene.interfaces`                   | Structural `Event<level>`; opaque `Bounded<name>` plus `bounded(spec, n): Result`; specs carry literal `name/min/max`; typed `Metrics<MetricLabels>` and `Tracer<SpanAttrs>` plus key tables. Small bounds remain literal unions.                                                                                                                                                                                  |
-| .NET     | `AtomiCloud.Diene.Interfaces`                    | `Int<Spec>.Of/AtTime` returning `Result` with `Ok/Err`; static `IDurianSignalIntSpec` members `Name/Min/Max/Unit` using Int64 for every range; `Event<Level>`, level markers, `DurianSignal*` metadata/carriers/interfaces/label attributes and date specs/values; internal constructors with friend access for the generated Signals assembly; `Port.Add` and `Log.Error`.                                        |
-| Dart     | `diene_interfaces`                               | Public barrel `diene_interfaces.dart`; shared `Event<Level>` interface, level markers, `DurianSignal*` labels/wire/metadata/carriers; public base carrier constructors and inherited `add/record/set` methods; `DurianSignalBoundSpec.of/atTime` returning `Result` with `DurianSignalOk/Err`.                                                                                                                     |
+The same stubs support the 36 name-fuzz contract/language cases. The .NET harness builds three separate
+assemblies, Obs, Signals and App; only Signals has access to the library's internal constructors.
 
-The goals leave these exact base/spec signatures unspecified; the table records assumptions for
-the interfaces nodes to reconcile. The compile fixtures model Result locally and do not validate
-integration with the separately published result libraries. .NET name constructors require the real
-library to grant friend access to the consumer's generated assembly.
+**Forging: three layers (concept §3.4 "one hole per language").** With shared carriers in the library,
+an app can make its own carrier in Go (exported constructors) and Dart (`extends` of a library base).
 
-Dart's generated event classes are final and have private constructors, while implementing the
-library's shared `Event` interface. An imported private or sealed constructor cannot be called or
-extended across Dart libraries. These private concrete carriers prevent constructing/subclassing
-the generated events; a hand-written implementation of the shared interface remains possible and
-needs a library guard. No real adapter, runtime sink or published package compatibility is claimed.
+1. The type hole is kept small. Go carriers have unexported fields; only the constructors are exported.
+   Dart bases are `abstract base class` (an app cannot `implements` them) or sealed (level markers), the
+   level of `Event<L>` comes from `L`, the bound spec class is abstract (only the generated subclass is
+   made), and the bases have no generic `add/record/set`: each generated metric class has its own method
+   typed to its own labels class, so an upcast cannot reach a covariant check that throws. .NET is closed
+   at compile time (internal constructors, friend access for Signals only).
+2. A run-time guard in all four. The generated code hands its tables to the port: Go's generated `init()`
+   calls `obs.Register`; Bun passes `metricTable` to `metrics(...)` and the generated `eventTable` to
+   `logger(...)`; Dart (`DurianSignalPort.install`) and .NET (`Port.Install`) build the port from the
+   generated tables. The port refuses a name not in its table, a kind or level that differs, and label
+   keys that are not the name's keys. It counts `dropped.<reason>`, returns an error, and never throws.
+3. A lint rule in the template's CI (documented here, NOT TESTED; the lint config lives in the templates).
+
+| Language | Hole the compiler leaves | Run-time guard (tested) | Lint rule (NOT TESTED) |
+| -------- | ------------------------ | ----------------------- | ---------------------- |
+| Go | `obs.New(Event\|Counter\|...)` from app code; zero enum, unset number | `Register`ed tables; empty/unset refused | `forbidigo` (below) |
+| Bun | hand-written `{name, level}`; widened object with an extra key; `as` cast | `logger(eventTable)`, `metrics(metricTable)` | no `as <generated type>`; no event object literal |
+| .NET | `default` bounded number, `null!` enum | `Port.Install` tables; both refused | Roslyn analyzer for `default(Int<...>)` |
+| Dart | app class `extends` a library base; non-const `Shard(n)` | `DurianSignalPort.install` tables | no `extends` of library bases; no non-const `Shard(...)` |
+
+Lint rule text per language (to copy into the templates):
+
+- **Go** (golangci-lint v2; generated files are skipped because of their header):
+
+  ```yaml
+  linters:
+    enable: [forbidigo]
+    settings:
+      forbidigo:
+        analyze-types: true
+        forbid:
+          - pattern: ^obs\.(New(Event|Counter|Histogram|Gauge|Span)|Register)$
+            pkg: ^github\.com/ProtoDurian/diene\.go-interfaces/obs$
+            msg: only obs gen output makes signal carriers; use the generated signals package
+    exclusions:
+      generated: strict
+  ```
+
+  Assigning to a generated exported variable stays a `forbidigo`/`gocritic` rule as in concept §3.4.
+- **Dart**: one analyzer-plugin rule (`analysis_server_plugin`): in a file whose first line is not
+  `// Code generated by obs gen. DO NOT EDIT.`, flag `extends`, `implements` or `with` of any
+  `package:diene_interfaces` type named `Event` or `DurianSignal*`, and any call of
+  `DurianSignalPort.add/record/set`; also flag a non-const `Shard(...)` of a generated extension type.
+- **Bun**: in files without the header, flag `as <generated type>` and an object literal passed where an
+  `Event<...>` is expected (use the generated constant).
+- **.NET**: a Roslyn analyzer for `default(Int<...>)` and `null!` of a generated enum class.
+
+**`out:` and orphans.** In a Git repository `out:` may point anywhere under the Git root (for example
+`../shared/bun`); headers name the contract's repository-relative path and the orphan walk starts at the
+Git root. An `out:` that leaves the Git root, or is absolute, is refused before anything is written.
+With no `.git`, `out:` may not use `..`, and the header's contract path is relative to the folder that holds
+`observability/`, whatever the working directory (so `--check` from another folder sees the same headers).
+
+Each `generate:` target accepts optional `interfaces:` to override its dependency import. Every name
+in the last column is assumed, not in the goal; the interfaces nodes reconcile them:
+
+| Language | Default `interfaces` | In the goal | Assumed, not in goal |
+| -------- | -------------------- | ----------- | -------------------- |
+| Go | `github.com/ProtoDurian/diene.go-interfaces/obs` | module `ProtoDurian/diene.go-interfaces`; `obs.Add`, `obs.Int[Spec]`, `obs.NewInt`, `obs.AtTime` with an error return; `obs.Error(ctx, Event[Error], ...)` | the `/obs` package path; `IntSpec` `Name/Min/Max/Unit` (int64); `Int.Valid`; `Level` and the six markers; `NewEvent/NewCounter/NewHistogram/NewGauge/NewSpan`; `DurianSignal*` carriers and info rows; `Field`; `Record/Set/Warn/Info`; `Register`, `DurianSignalTables`, `Dropped` |
+| Bun | `@atomicloud/diene.interfaces` | `counter(name, labels)`; `log.error(ev, fields?, err?)`; `bounded(spec, n): Result`; `Tracer`/`Span`, `DurianSignalSpanTable` | `metrics(table)`, `histogram/gauge`, `MetricTable`; `logger(eventTable)`, `EventTable`, `Level`; `dropped()`; `tracer(table)`; `Bounded<N>`; a synchronous `{ok, value}` Result (the published Result is promise-based) |
+| .NET | `AtomiCloud.Diene.Interfaces` | `Port.Add(Names.X, new XLabels(...))`; `Int<Spec>.Of(n)` returning a `Result` (package `AtomiCloud.Diene.Result`: struct `Result<T, E>`, `Ok/Err`, `IsSuccess`); `Log.Error(Event<ErrorLevel>, ...)`; internal carrier constructors | namespace `AtomiCloud.Diene.Result` and `Value/Error`; `IDurianSignal*` interfaces, `Valid/Wire`; `AtTime`; `DurianSignalDate`; label attribute and info rows; `Port.Record/Set/Install/Dropped`; `Log.Warn` |
+| Dart | `diene_interfaces` | `checkoutCharges.add(XLabels(...))`; `error(Event<ErrorLevel>, ...)`; enums; extension types; `shardSpec.of(n)` returning a `Result`; `entries` getter | barrel `diene_interfaces.dart`; `DurianSignalWire/Labels/Metric`, carrier bases and constructors; `DurianSignalBoundSpec` and `atTime`; sealed level markers; `DurianSignalPort` (`install/add/record/set/dropped`); `warn/info`; info rows; local `Result/DurianSignalOk/DurianSignalErr` in place of `diene_result` |
+
+The compile fixtures model Result locally and do not validate integration with the separately published
+result libraries. .NET name constructors require the real library to grant friend access to the
+consumer's generated assembly. No real adapter, runtime sink or published package compatibility is claimed.
 
 ## Contract name checks in `obs query --static`
 

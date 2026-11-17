@@ -1,0 +1,23 @@
+// planted forging: compiles (Go cannot stop an exported constructor), the port must refuse it at run time.
+package main
+
+import (
+	"context"
+	"fmt"
+
+	"example.com/app/signals"
+	obs "github.com/ProtoDurian/diene.go-interfaces/obs"
+)
+
+func main() {
+	ctx := context.Background()
+	shard, _ := obs.NewInt[signals.ShardSpec](3)
+	hour, _ := obs.NewInt[signals.HourSpec](4)
+	l := signals.CheckoutChargesLabels{Provider: signals.ProviderStripe, Outcome: signals.OutcomeOk, Shard: shard, Hour: hour}
+	d := signals.CheckoutChargeDurationLabels{Provider: signals.ProviderStripe, Outcome: signals.OutcomeOk}
+	_, _ = l, d
+	fmt.Println("result:", obs.Add(ctx, obs.NewCounter[signals.CheckoutChargeDurationLabels]("checkout.charges"), d))
+	if obs.Dropped("unknown_key") != 1 {
+		panic("the refusal was not counted in dropped.unknown_key")
+	}
+}

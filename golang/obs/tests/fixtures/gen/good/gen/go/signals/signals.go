@@ -216,6 +216,14 @@ var WorkerStarted = obs.NewEvent[obs.DebugLevel]("checkout.worker.started")
 // Events lists every event name of the contract, in contract order.
 var Events = []string{"checkout.charge.succeeded", "checkout.charge.declined", "checkout.charge.failed", "checkout.worker.started"}
 
+// EventTable is the data table of the events: name -> level. The port refuses any other name or level.
+var EventTable = map[string]string{
+	"checkout.charge.succeeded": "info",
+	"checkout.charge.declined":  "warn",
+	"checkout.charge.failed":    "error",
+	"checkout.worker.started":   "debug",
+}
+
 // ---- spans ----
 
 // CheckoutChargeAttrs holds the attributes of span checkout.charge.
@@ -252,4 +260,9 @@ var SpanTable = map[string]obs.DurianSignalSpanInfo{
 	"checkout.charge":        {Kind: "internal", Keys: []string{"user_id", "provider", "shard"}},
 	"checkout.provider.call": {Kind: "client", Keys: []string{"provider", "order_id", "lane", "hour"}},
 	"checkout.queue.consume": {Kind: "consumer", Keys: []string{"order_id"}},
+}
+
+// init registers the tables with the port: it refuses names, kinds, levels and label keys not in them.
+func init() {
+	obs.Register(obs.DurianSignalTables{Metrics: MetricTable, Events: EventTable, Spans: SpanTable})
 }

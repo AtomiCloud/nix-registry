@@ -1,2 +1,3 @@
-import { logError } from '@atomicloud/diene.interfaces';
-logError('checkout.charge.failed');
+import { logger } from '@atomicloud/diene.interfaces';
+import { eventTable } from './signals';
+logger(eventTable).error('checkout.charge.failed');

@@ -45,5 +45,18 @@ func main() {
 	if obs.Add(context.Background(), signals.CheckoutCharges, bad) == nil {
 		panic("zero enum accepted")
 	}
+	if err := obs.Record(context.Background(), signals.CheckoutChargeDuration, signals.CheckoutChargeDurationLabels{Provider: signals.ProviderAdyen, Outcome: signals.OutcomeOk}); err != nil {
+		panic(err)
+	}
+	// The generated init() registered the tables: every valid call above passed, nothing was dropped
+	// for an unknown name, level or key (the two planted unset labels count as unset_label).
+	for _, r := range []string{"unknown_event", "unknown_metric", "unknown_key"} {
+		if obs.Dropped(r) != 0 {
+			panic("a valid generated call was dropped as " + r)
+		}
+	}
+	if obs.Dropped("unset_label") != 2 {
+		panic("unset labels not counted")
+	}
 	fmt.Println(l.Provider, signals.ChargeFailed.Name(), signals.ChargeFailed.Level(), signals.MetricTable["checkout.charges"].Keys)
 }

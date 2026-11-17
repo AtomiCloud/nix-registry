@@ -112,6 +112,12 @@ export const eventNames = [
   'checkout.charge.failed',
   'checkout.worker.started',
 ] as const;
+export const eventTable = {
+  'checkout.charge.succeeded': 'info',
+  'checkout.charge.declined': 'warn',
+  'checkout.charge.failed': 'error',
+  'checkout.worker.started': 'debug',
+} as const;
 
 // Spans: attribute types are `type` aliases (an interface does not fit the Tracer constraint).
 export type CheckoutChargeAttrs = { user_id?: UserId; provider?: Provider; shard?: Shard };

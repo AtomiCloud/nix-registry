@@ -1,0 +1,5 @@
+forge-event-typo.dart dropped.unknown_event: event "checkout.chrage.faild" is not in the generated event table
+forge-event-level.dart dropped.unknown_event: event "checkout.charge.succeeded" is info in the generated event table, not error
+forge-free-label-metric.dart dropped.unknown_metric: metric "not.in.contract" is not in the generated metric table
+forge-wrong-kind.dart dropped.unknown_metric: metric "checkout.charge.duration" is a histogram in the generated metric table, not a counter
+forge-upcast-labels.dart dropped.unknown_key: metric "checkout.charges" labels [provider outcome] are not its generated keys [provider outcome shard hour]

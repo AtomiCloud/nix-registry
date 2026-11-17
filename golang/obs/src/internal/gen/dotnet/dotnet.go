@@ -338,7 +338,7 @@ func (g *emitter) render() string {
 	x.blank()
 	x.line("// ---- data tables ----")
 	x.blank()
-	x.line("/// <summary>The data tables: allowed label keys per metric and span, and every event name.</summary>")
+	x.line("/// <summary>The data tables: allowed label keys per metric and span, every event name and its level.</summary>")
 	x.line("public static class SignalTables")
 	x.line("{")
 	x.line("    public static readonly IReadOnlyDictionary<string, DurianSignalMetricInfo> Metrics =")
@@ -359,6 +359,15 @@ func (g *emitter) render() string {
 	x.line("        };")
 	x.blank()
 	x.line("    public static readonly IReadOnlyList<string> EventNames = %s;", strArray(c.EventNames()))
+	x.blank()
+	x.line("    /// <summary>Event name to level: Port.Install takes it, and the port refuses any other name or level.</summary>")
+	x.line("    public static readonly IReadOnlyDictionary<string, string> EventLevels =")
+	x.line("        new Dictionary<string, string>")
+	x.line("        {")
+	for _, k := range c.LogOrder {
+		x.line("            [%s] = %s,", cs(c.Logs[k].Event), cs(c.Logs[k].Level))
+	}
+	x.line("        };")
 	x.line("}")
 	return strings.TrimRight(x.b.String(), "\n") + "\n"
 }
