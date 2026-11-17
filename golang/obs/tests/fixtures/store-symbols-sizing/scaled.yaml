@@ -1,0 +1,94 @@
+# Tempo distributed form (concept 10.5): new objects only; obs creates them with
+# kubectl create, adds the owner label and digest, and refuses any that exist.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: { name: redpanda }
+spec:
+  replicas: 1
+  serviceName: redpanda-headless
+  selector: { matchLabels: { component: redpanda } }
+  template:
+    metadata: { labels: { component: redpanda } }
+    spec: { containers: [{ name: redpanda, image: 'redpandadata/redpanda:fixture' }] }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec: { accessModes: [ReadWriteOnce], resources: { requests: { storage: 10Gi } } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: redpanda-headless }
+spec: { clusterIP: None, publishNotReadyAddresses: true, selector: { component: redpanda } }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: { name: tempo-live-store }
+spec:
+  replicas: 2
+  serviceName: tempo-live-store-headless
+  selector: { matchLabels: { component: tempo-live-store } }
+  template:
+    metadata: { labels: { component: tempo-live-store } }
+    spec:
+      {
+        containers:
+          [
+            {
+              name: tempo,
+              image: 'grafana/tempo:3.1.1',
+              args: ['-target=live-store', '-config.file=/conf/tempo.yaml'],
+            },
+          ],
+      }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec: { accessModes: [ReadWriteOnce], resources: { requests: { storage: 10Gi } } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: tempo-live-store-headless }
+spec: { clusterIP: None, publishNotReadyAddresses: true, selector: { component: tempo-live-store } }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: tempo-distributor }
+spec:
+  replicas: 2
+  selector: { matchLabels: { component: tempo-distributor } }
+  template:
+    metadata: { labels: { component: tempo-distributor } }
+    spec:
+      {
+        containers:
+          [
+            {
+              name: tempo,
+              image: 'grafana/tempo:3.1.1',
+              args: ['-target=distributor', '-config.file=/conf/tempo.yaml'],
+            },
+          ],
+      }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: tempo-query }
+spec:
+  replicas: 2
+  selector: { matchLabels: { component: tempo-query } }
+  template:
+    metadata: { labels: { component: tempo-query } }
+    spec:
+      {
+        containers:
+          [
+            {
+              name: tempo,
+              image: 'grafana/tempo:3.1.1',
+              args: ['-target=query-frontend', '-config.file=/conf/tempo.yaml'],
+            },
+          ],
+      }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata: { name: tempo-live-store-config }
+data: { tempo.yaml: 'fixture' }

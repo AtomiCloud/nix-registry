@@ -16,6 +16,8 @@ let
     src = ./src;
     vendorHash = "sha256-/1G6Z6mShYwCPLk6fdzAnkm9B6U+pmtTzh6H1TMt6IU=";
     env.CGO_ENABLED = "0";
+    env.OBS_REQUIRE_LLVM = "1";
+    nativeCheckInputs = [ nixpkgs.llvmPackages.llvm ];
     ldflags = [ "-w" "-s" "-X main.version=${version}" ];
     # third_party/VictoriaLogs is its own Go module (wired by a go.mod replace), not part of this one.
     excludedPackages = [ "third_party" ];
@@ -47,9 +49,9 @@ let
   # TypeScript, C# and Dart compile (go, tsc, the dotnet SDK and dart are inputs here),
   # every planted failure runs red naming file + rule + token, the vendored tree equals its tag.
   tests = nixpkgs.runCommand "obs-tests"
-    { nativeBuildInputs = [ obs nixpkgs.bash nixpkgs.gnugrep nixpkgs.gnused nixpkgs.coreutils nixpkgs.findutils nixpkgs.diffutils go nixpkgs.typescript nixpkgs.dotnet-sdk_10 nixpkgs.dart ]; }
+    { nativeBuildInputs = [ obs nixpkgs.bash nixpkgs.gnugrep nixpkgs.gnused nixpkgs.coreutils nixpkgs.findutils nixpkgs.diffutils go nixpkgs.typescript nixpkgs.dotnet-sdk_10 nixpkgs.dart nixpkgs.llvmPackages.llvm ]; }
     ''
-      bash ${./tests}/run.sh --obs ${obs}/bin/obs --src ${./src} --out ${obs}
+      OBS_REQUIRE_LLVM=1 bash ${./tests}/run.sh --obs ${obs}/bin/obs --src ${./src} --out ${obs}
       mkdir -p "$out"
     '';
 

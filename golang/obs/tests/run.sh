@@ -147,6 +147,8 @@ fi
 # ---- obs check, obs gen, generated code (gen.sh)
 # shellcheck disable=SC1091 # path is dynamic; gen.sh is checked on its own
 . "$here/gen.sh"
+bash "$here/store-symbols-sizing.sh" "$OBS" && ok "store/symbols/size fixtures" || bad "store/symbols/size fixtures"
+
 # shellcheck source=/dev/null
 . "$here/sandbox.sh"
 
