@@ -152,6 +152,12 @@ var streamFieldNames = map[string]bool{
 // Build makes one baseline run starting at start. The run is laid out on a time
 // line that ends in the past, because stores drop data dated in the future.
 func Build(s *Seed, start time.Time) (*Dataset, error) {
+	return BuildIncident(s, start, nil)
+}
+
+// BuildIncident uses the same deterministic stream as Build, changing only the
+// matching series inside the incident's half-open window.
+func BuildIncident(s *Seed, start time.Time, incident *Incident) (*Dataset, error) {
 	length := s.Duration()
 	ds := &Dataset{Start: start, End: start.Add(length), Series: map[string]*Series{}, Streams: map[string]*Stream{}}
 	reqRate, err := ParseRate(s.Traffic.Requests)
@@ -301,12 +307,30 @@ func Build(s *Seed, start time.Time) (*Dataset, error) {
 		for _, a := range accs {
 			g := a.g
 			r := newRnd(s.RandomSeed, g.k, sec)
-			n := r.poisson(reqRate * shape * g.share)
+			rate, latencyX := reqRate*shape*g.share, 1.0
+			if incident != nil && incident.Contains(at) {
+				for _, c := range incident.Change {
+					if c.Metric != g.metric || !matches(g.where, c.Where) {
+						continue
+					}
+					if c.ShareX != nil {
+						rate *= *c.ShareX
+					}
+					if c.Rate != "" {
+						extra, _ := ParseRate(c.Rate)
+						rate += extra
+					}
+					if c.LatencyX != 0 {
+						latencyX *= c.LatencyX
+					}
+				}
+			}
+			n := r.poisson(rate)
 			for e := 0; e < n; e++ {
 				a.count++
 				frac := r.float()
 				if g.def.Type == "histogram" && g.def.Latency != nil {
-					v := g.def.Latency.Median * math.Exp(g.def.Latency.Sigma*r.normal())
+					v := g.def.Latency.Median * latencyX * math.Exp(g.def.Latency.Sigma*r.normal())
 					a.sum += v
 					for bi, le := range g.def.Buckets {
 						if v <= le {

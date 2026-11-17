@@ -35,4 +35,12 @@ func Init() {
 
 // TmpBase is the directory the engines keep their storage in. OBS_TMPDIR wins;
 // otherwise the system temp dir (TMPDIR in the nix sandbox).
-func TmpBase() string { return os.Getenv("OBS_TMPDIR") }
+func TmpBase() string {
+	if d := os.Getenv("OBS_TMPDIR"); d != "" {
+		return d
+	}
+	if st, err := os.Stat("/dev/shm"); err == nil && st.IsDir() {
+		return "/dev/shm"
+	}
+	return ""
+}

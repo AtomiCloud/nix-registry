@@ -29,6 +29,7 @@ const usage = `obs: the observability check tool
 usage:
   obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
   obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names]
+  obs alerts [--dir observability] [--seed seed.yaml] [--base unix] [--out results.json]
   obs version
 
 exit 0 when clean, 1 when a check failed, 2 on a usage or input error.
@@ -45,6 +46,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "version", "--version", "-version":
 		printVersion(stdout)
 		return 0
+	case "alerts":
+		return runAlerts(args[1:], stdout, stderr)
 	case "query":
 		return runQuery(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
@@ -59,6 +62,7 @@ func printVersion(w io.Writer) {
 	fmt.Fprintf(w, "obs %s\n", version)
 	fmt.Fprintf(w, "engine VictoriaMetrics %s (MetricsQL)\n", pinVictoriaMetrics)
 	fmt.Fprintf(w, "engine VictoriaLogs %s (LogsQL)\n", pinVictoriaLogs)
+	fmt.Fprintln(w, "engine Grafana 13.3.0 (commit 752e3462; alert math and state machine)")
 	fmt.Fprintln(w, "licence AGPL-3.0-only; source: https://github.com/AtomiCloud/nix-registry/tree/main/golang/obs (each release also attaches a source and vendored-modules tarball)")
 	if bi, ok := debug.ReadBuildInfo(); ok {
 		fmt.Fprintf(w, "go %s\n", bi.GoVersion)
