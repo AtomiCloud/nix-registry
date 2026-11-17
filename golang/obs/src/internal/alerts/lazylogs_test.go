@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AtomiCloud/obs/internal/logevent"
 	"github.com/AtomiCloud/obs/internal/seed"
 )
 
@@ -98,5 +99,54 @@ func TestLazyLogsKeepOtherRowsIdentical(t *testing.T) {
 	}
 	if n := len(pick(part, "pay.ok")) + len(pick(part, "pay.any")); n != 0 {
 		t.Fatalf("lazy seed still has %d rows of dropped events", n)
+	}
+}
+
+type contractEvents []string
+
+func (c contractEvents) EventNames() []string { return c }
+
+// Only rows no stats input can see may be dropped. An event predicate inside a pipe
+// (stats if, by) keeps every event; under NOT, a non-event leaf (stream, time, field)
+// may be true or false, so !(stream event:=e) still passes e (review cases).
+func TestRootEventsAreSuperset(t *testing.T) {
+	contract := contractEvents{"pay.ok", "pay.failed", "pay.declined"}
+	all := []string{"pay.declined", "pay.failed", "pay.ok"}
+	for _, tc := range []struct {
+		name, expr string
+		want       []string
+	}{
+		{"root exact", `_time:5m "durian.cloud/event":="pay.failed" | stats count() hits`, []string{"pay.failed"}},
+		{"root in", `"durian.cloud/event":in("pay.failed", "pay.declined") | stats by ("payment.provider") rate() r`, []string{"pay.declined", "pay.failed"}},
+		{"negated event leaf", `-"durian.cloud/event":="pay.ok" | stats count()`, []string{"pay.declined", "pay.failed"}},
+		{"in minus one", `"durian.cloud/event":in("pay.failed", "pay.declined") -"durian.cloud/event":="pay.declined" | stats count()`, []string{"pay.failed"}},
+		{"global filter", `options(global_filter=("durian.cloud/event":="pay.failed")) * | stats count()`, []string{"pay.failed"}},
+		// VictoriaLogs folds a leading filter pipe into the root filter: a narrowing.
+		{"leading filter pipe", `* | filter "durian.cloud/event":="pay.failed" | stats count()`, []string{"pay.failed"}},
+		{"conditional stats only", `* | stats count() all, count() if ("durian.cloud/event":="pay.failed") n`, nil},
+		{"root plus conditional", `"durian.cloud/event":in("pay.failed", "pay.declined") | stats count() all, count() if ("durian.cloud/event":="pay.failed") n`, nil},
+		{"grouped by event", `"durian.cloud/event":="pay.failed" | stats by ("durian.cloud/event") count()`, nil},
+		{"not over stream and event", `!({durian.cloud.service="checkout"} "durian.cloud/event":="pay.failed") | stats count()`, all},
+		{"not over time and event", `!(_time:5m "durian.cloud/event":="pay.failed") | stats count()`, all},
+		// logevent assumes free-form fields true, so the query that runs is
+		// !event:=pay.failed; pruning follows the query that runs.
+		{"not over field and event (rewritten)", `"durian.cloud/event":in("pay.failed", "pay.ok") !("payment.provider":="adyen" "durian.cloud/event":="pay.failed") | stats count()`, []string{"pay.ok"}},
+		{"or with a field", `("durian.cloud/event":="pay.failed" or "payment.provider":="adyen") | stats count()`, all},
+		{"regex is unknown", `"durian.cloud/event":~"failed" | stats count()`, all},
+	} {
+		expr := tc.expr
+		if a, err := logevent.AnalyzeAt(tc.expr, contract, time.Now()); err == nil {
+			expr = a.Expr // check.go prunes on the rewritten query
+		}
+		if got := rootEvents(expr, contract); !reflect.DeepEqual(got, tc.want) {
+			t.Fatalf("%s: %s: root events %v, want %v", tc.name, expr, got, tc.want)
+		}
+	}
+	raw := `"durian.cloud/event":in("pay.failed", "pay.ok") !("payment.provider":="adyen" "durian.cloud/event":="pay.failed") | stats count()`
+	if got := rootEvents(raw, contract); !reflect.DeepEqual(got, []string{"pay.failed", "pay.ok"}) {
+		t.Fatalf("not over field and event (raw): %s: root events %v, want [pay.failed pay.ok]", raw, got)
+	}
+	if got := rootEvents(`"durian.cloud/event":="pay.failed" | stats count()`, nil); got != nil {
+		t.Fatalf("no contract: root events %v, want nil", got)
 	}
 }

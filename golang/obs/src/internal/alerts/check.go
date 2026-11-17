@@ -102,11 +102,7 @@ func Check(o Options, stdout, stderr io.Writer) int {
 				}
 				q.Expr = analysis.Expr
 				group[i].Queries[ref] = q
-				if analysis.Skipped {
-					logEvents[q.Expr] = nil
-				} else {
-					logEvents[q.Expr] = analysis.Events
-				}
+				logEvents[q.Expr] = rootEvents(q.Expr, events)
 			}
 		}
 	}
