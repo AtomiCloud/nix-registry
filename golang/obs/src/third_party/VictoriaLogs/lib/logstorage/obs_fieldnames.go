@@ -293,3 +293,9 @@ func (q *Query) ObsFieldFilters(field string) []ObsFieldFilter {
 	walk(q.f, false, false)
 	return out
 }
+
+// ObsSetConcurrency sets the query's worker count, as `options(concurrency=n)` written
+// before the query does (it only lowers the CPU count; parallel readers follow it).
+// obs alerts runs many small stats queries from parallel rule workers; one worker
+// per query avoids a set of per-worker stats buffers on every query.
+func (q *Query) ObsSetConcurrency(n uint) { q.opts.concurrency = n }
