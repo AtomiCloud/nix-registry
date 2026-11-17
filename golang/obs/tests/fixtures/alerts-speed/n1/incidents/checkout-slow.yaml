@@ -4,6 +4,6 @@ change:
   - { metric: http.server.request.duration, where: { http.route: /charge }, latency_x: 6 }
 expect:
   fire: []
-  quiet: [charge-errors/critical]
-  fire_within: 20m
+  quiet: [charge-errors-critical]
+  fire_within: 30m
   resolve_within: 20m

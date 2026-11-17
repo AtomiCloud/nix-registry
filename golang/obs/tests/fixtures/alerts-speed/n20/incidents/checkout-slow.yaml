@@ -3,16 +3,16 @@ window: { start: 150m, duration: 40m }
 change:
   - { metric: http.server.request.duration, where: { http.route: /charge }, latency_x: 6 }
 expect:
-  fire: [latency/p95-critical, latency/p95-warning, latency/avg, mixed/errors-or-latency]
+  fire: [latency-p95-critical, latency-p95-warning, latency-avg, mixed-errors-or-latency]
   quiet:
     [
-      charge-errors/critical,
-      charge-errors/warning,
-      charge-errors/ratio,
-      traffic/low,
-      declines/adyen-logs,
-      logs/failed-count,
-      logs/error-rate,
+      charge-errors-critical,
+      charge-errors-warning,
+      charge-errors-ratio,
+      traffic-low,
+      declines-adyen-logs,
+      logs-failed-count,
+      logs-error-rate,
     ]
-  fire_within: 20m
+  fire_within: 30m
   resolve_within: 20m

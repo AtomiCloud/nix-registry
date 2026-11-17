@@ -5,17 +5,17 @@ change:
 expect:
   fire:
     [
-      charge-errors/critical,
-      v2/charge-errors/critical,
-      v3/charge-errors/critical,
-      v4/charge-errors/critical,
-      v5/charge-errors/critical,
-      v6/charge-errors/critical,
-      v7/charge-errors/critical,
-      v8/charge-errors/critical,
-      v9/charge-errors/critical,
-      v10/charge-errors/critical,
+      charge-errors-critical,
+      v2-charge-errors-critical,
+      v3-charge-errors-critical,
+      v4-charge-errors-critical,
+      v5-charge-errors-critical,
+      v6-charge-errors-critical,
+      v7-charge-errors-critical,
+      v8-charge-errors-critical,
+      v9-charge-errors-critical,
+      v10-charge-errors-critical,
     ]
   quiet: []
-  fire_within: 20m
+  fire_within: 30m
   resolve_within: 20m

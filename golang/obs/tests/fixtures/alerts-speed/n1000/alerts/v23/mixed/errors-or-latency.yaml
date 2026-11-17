@@ -29,6 +29,6 @@ spec:
             instant: true
         - refId: C
           datasourceUid: __expr__
-          model: { type: math, expression: '$A > 1.2 || $B > 0.6' }
+          model: { type: math, expression: '$A > 1 || $B > 0.5' }
       labels: { severity: critical }
       annotations: { summary: 'Checkout unhealthy' }

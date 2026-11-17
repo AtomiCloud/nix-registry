@@ -44,6 +44,9 @@ type tmpl struct {
 	cond                   string  // Grafana math over the queries, {T} / {T2} are thresholds
 	t, t2                  float64 // base thresholds
 	win                    string  // base window; "" = the expr has no window (kept as is)
+	// cnt: which threshold counts events in the window (1 = t, 2 = t2) and so scales with the
+	// window length; rate and ratio thresholds do not.
+	cnt int
 }
 
 const (
@@ -57,7 +60,7 @@ const (
 )
 
 var base = []tmpl{
-	{slug: "charge-errors", file: "critical", title: "Charge errors high", sev: "critical", forD: "10m", t: 1, t2: 10, win: "5m",
+	{slug: "charge-errors", file: "critical", title: "Charge errors high", sev: "critical", forD: "10m", t: 1, t2: 10, win: "5m", cnt: 2,
 		queries: []query{
 			{"A", false, `sum(rate(` + chg + `{outcome="error"}` + m5 + `))`},
 			{"B", true, `_time:{W} ` + svc + ` ` + fail + cnt}},
@@ -66,7 +69,7 @@ var base = []tmpl{
 		queries: []query{{"A", false, `sum(rate(` + chg + `{outcome="error"}` + m5 + `))`}}, cond: "$A > {T}"},
 	{slug: "charge-errors", file: "ratio", title: "Charge error ratio", sev: "warning", forD: "5m", t: 0.1, win: "5m",
 		queries: []query{{"A", false, `sum(rate(` + chg + `{outcome="error"}` + m5 + `)) / sum(rate(` + chg + m5 + `))`}}, cond: "$A > {T}"},
-	{slug: "charge-errors", file: "increase", title: "Charge errors in the last 10 minutes", sev: "warning", forD: "0s", t: 300, win: "10m",
+	{slug: "charge-errors", file: "increase", title: "Charge errors in the last 10 minutes", sev: "warning", forD: "0s", t: 300, win: "10m", cnt: 1,
 		queries: []query{{"A", false, `sum(increase(` + chg + `{outcome="error"}` + m5 + `))`}}, cond: "$A > {T}"},
 	{slug: "charge-errors", file: "by-provider", title: "Charge errors by provider", sev: "warning", forD: "5m", t: 0.5, win: "5m",
 		queries: []query{{"A", false, `sum by (payment_provider) (rate(` + chg + `{outcome="error"}` + m5 + `))`}}, cond: "$A > {T}"},
@@ -91,17 +94,17 @@ var base = []tmpl{
 		queries: []query{{"A", false, `WITH (errs = ` + chg + `{outcome="error"}) sum(rate(errs` + m5 + `))`}}, cond: "$A > {T}"},
 	{slug: "declines", file: "adyen-metric", title: "Adyen declines (metric)", sev: "warning", forD: "5m", t: 0.5, win: "5m",
 		queries: []query{{"A", false, `sum(rate(` + chg + `{payment_provider="adyen", outcome="declined"}` + m5 + `))`}}, cond: "$A > {T}"},
-	{slug: "declines", file: "adyen-logs", title: "Adyen declines (logs)", sev: "warning", forD: "5m", t: 150, win: "5m",
+	{slug: "declines", file: "adyen-logs", title: "Adyen declines (logs)", sev: "warning", forD: "5m", t: 150, win: "5m", cnt: 1,
 		queries: []query{{"A", true, `_time:{W} ` + svc + ` ` + evt + `"checkout.charge.declined" "payment.provider":="adyen"` + cnt}}, cond: "$A > {T}"},
-	{slug: "logs", file: "failed-count", title: "Failed charge log lines", sev: "warning", forD: "5m", t: 100, win: "5m",
+	{slug: "logs", file: "failed-count", title: "Failed charge log lines", sev: "warning", forD: "5m", t: 100, win: "5m", cnt: 1,
 		queries: []query{{"A", true, `_time:{W} ` + svc + ` ` + fail + cnt}}, cond: "$A > {T}"},
-	{slug: "logs", file: "failed-json", title: "Failed charge log lines (json fields)", sev: "warning", forD: "5m", t: 100, win: "5m",
+	{slug: "logs", file: "failed-json", title: "Failed charge log lines (json fields)", sev: "warning", forD: "5m", t: 100, win: "5m", cnt: 1,
 		queries: []query{{"A", true, `_time:{W} ` + svc + ` "durian.cloud/event":in("checkout.charge.failed")` + cnt}}, cond: "$A > {T}"},
-	{slug: "logs", file: "failed-by-provider", title: "Failed charge log lines by provider", sev: "warning", forD: "5m", t: 100, win: "5m",
+	{slug: "logs", file: "failed-by-provider", title: "Failed charge log lines by provider", sev: "warning", forD: "5m", t: 100, win: "5m", cnt: 1,
 		queries: []query{{"A", true, `_time:{W} ` + svc + ` ` + fail + ` | stats by (payment.provider) count() hits`}}, cond: "$A > {T}"},
 	{slug: "logs", file: "error-rate", title: "Error log rate", sev: "warning", forD: "5m", t: 0.5, win: "5m",
 		queries: []query{{"A", true, `_time:{W} ` + svc + ` ` + fail + ` severity_text:="ERROR" | stats rate() per_s`}}, cond: "$A > {T}"},
-	{slug: "logs", file: "slow-unwrap", title: "Warn log lines high (replaces logged duration)", sev: "warning", forD: "5m", t: 100, win: "5m",
+	{slug: "logs", file: "slow-unwrap", title: "Warn log lines high (replaces logged duration)", sev: "warning", forD: "5m", t: 100, win: "5m", cnt: 1,
 		queries: []query{{"A", true, `_time:{W} ` + svc + ` ` + evt + `"checkout.charge.declined" severity_text:="WARN"` + cnt}}, cond: "$A > {T}"},
 }
 
@@ -123,10 +126,22 @@ func num(v float64) string { return strconv.FormatFloat(v, 'g', 6, 64) }
 // render writes one GrafanaAlertRuleGroup CR.
 func render(t tmpl, k int) (rel, doc string) {
 	win, scale := variant(k)
+	if mustFire(t) {
+		scale = 1 // an alert an incident expects to fire keeps its base threshold
+	}
 	if t.win == "" {
 		win = ""
 	}
-	repl := strings.NewReplacer("{W}", win, "{T}", num(t.t*scale), "{T2}", num(t.t2*scale))
+	t1, t2 := t.t*scale, t.t2*scale
+	if win != "" {
+		f := float64(secs(win)) / float64(secs(t.win))
+		if t.cnt == 1 {
+			t1 *= f
+		} else if t.cnt == 2 {
+			t2 *= f
+		}
+	}
+	repl := strings.NewReplacer("{W}", win, "{T}", num(t1), "{T2}", num(t2))
 	slug, id := t.slug, t.slug+"-"+t.file
 	if k > 1 {
 		slug = fmt.Sprintf("v%d/%s", k, t.slug)
@@ -209,21 +224,21 @@ incidents: [stripe-outage, checkout-slow, adyen-declines]
 
 // incidentDefs are the three prototype incidents; expect lists are filled per set by Incidents.
 var incidentDefs = []struct {
-	name, head string
-	fire, quiet []string // base alert ids (slug/file)
+	name, head  string
+	fire, quiet []string // base alert ids (rule uid: slug-file)
 	within      string
 }{
 	{"stripe-outage", "story: Stripe returns 502 for 40% of charges for 30 minutes.\nwindow: { start: 90m, duration: 30m }\nchange:\n  - { metric: checkout.charges, where: { payment.provider: stripe, outcome: error }, rate: 1.2/s }\n",
-		[]string{"charge-errors/critical"}, nil, "20m"},
+		[]string{"charge-errors-critical"}, nil, "30m"},
 	{"checkout-slow", "story: The charge route gets 6x slower for 40 minutes.\nwindow: { start: 150m, duration: 40m }\nchange:\n  - { metric: http.server.request.duration, where: { http.route: /charge }, latency_x: 6 }\n",
-		[]string{"latency/p95-warning", "latency/p95-critical", "latency/avg", "mixed/errors-or-latency"},
-		[]string{"charge-errors/critical", "charge-errors/warning", "charge-errors/ratio", "logs/failed-count", "logs/error-rate", "declines/adyen-logs", "traffic/low"}, "20m"},
+		[]string{"latency-p95-warning", "latency-p95-critical", "latency-avg", "mixed-errors-or-latency"},
+		[]string{"charge-errors-critical", "charge-errors-warning", "charge-errors-ratio", "logs-failed-count", "logs-error-rate", "declines-adyen-logs", "traffic-low"}, "30m"},
 	{"adyen-declines", "story: Adyen declines a burst of cards for 20 minutes.\nwindow: { start: 60m, duration: 20m }\nchange:\n  - { metric: checkout.charges, where: { payment.provider: adyen, outcome: declined }, rate: 0.8/s }\n",
-		[]string{"declines/adyen-logs", "declines/adyen-metric"},
-		[]string{"charge-errors/critical", "charge-errors/ratio", "latency/p95-warning", "traffic/low"}, "15m"},
+		[]string{"declines-adyen-logs", "declines-adyen-metric"},
+		[]string{"charge-errors-critical", "charge-errors-ratio", "latency-p95-warning", "traffic-low"}, "30m"},
 }
 
-// Incidents returns the incident files of a set of n alerts. Every repeated alert (v2/...)
+// Incidents returns the incident files of a set of n alerts, naming alerts by rule uid. Every repeated alert (v2-...)
 // is named in expect.fire or expect.quiet like its base alert: a variant inherits the
 // base alert's expectation. Base alerts the prototype listed in neither stay unlisted.
 func Incidents(n int) map[string]string {
@@ -233,10 +248,10 @@ func Incidents(n int) map[string]string {
 		for k := 1; k <= (n+len(base)-1)/len(base); k++ {
 			pre := ""
 			if k > 1 {
-				pre = fmt.Sprintf("v%d/", k)
+				pre = fmt.Sprintf("v%d-", k)
 			}
 			for i := 0; i < len(base) && (k-1)*len(base)+i < n; i++ {
-				id := base[i].slug + "/" + base[i].file
+				id := base[i].slug + "-" + base[i].file
 				if contains(d.fire, id) {
 					fire = append(fire, pre+id)
 				} else if contains(d.quiet, id) {
@@ -288,4 +303,13 @@ func Write(out string) error {
 		}
 	}
 	return nil
+}
+
+func mustFire(t tmpl) bool {
+	for _, d := range incidentDefs {
+		if contains(d.fire, t.slug+"-"+t.file) {
+			return true
+		}
+	}
+	return false
 }

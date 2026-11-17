@@ -22,6 +22,6 @@ spec:
             instant: true
         - refId: B
           datasourceUid: __expr__
-          model: { type: math, expression: '$A > 0.42' }
+          model: { type: math, expression: '$A > 0.3' }
       labels: { severity: warning }
       annotations: { summary: 'Average request time high' }

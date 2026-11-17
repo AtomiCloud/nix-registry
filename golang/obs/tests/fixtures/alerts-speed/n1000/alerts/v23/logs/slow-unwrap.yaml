@@ -22,6 +22,6 @@ spec:
             queryType: stats
         - refId: B
           datasourceUid: __expr__
-          model: { type: math, expression: '$A > 120' }
+          model: { type: math, expression: '$A > 72' }
       labels: { severity: warning }
       annotations: { summary: 'Warn log lines high (replaces logged duration)' }

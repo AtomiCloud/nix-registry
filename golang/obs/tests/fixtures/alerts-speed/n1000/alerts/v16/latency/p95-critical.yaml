@@ -22,6 +22,6 @@ spec:
             instant: true
         - refId: B
           datasourceUid: __expr__
-          model: { type: math, expression: '$A > 0.88' }
+          model: { type: math, expression: '$A > 0.8' }
       labels: { severity: critical }
       annotations: { summary: 'Charge p95 very slow' }

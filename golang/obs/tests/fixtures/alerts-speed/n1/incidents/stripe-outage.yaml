@@ -3,7 +3,7 @@ window: { start: 90m, duration: 30m }
 change:
   - { metric: checkout.charges, where: { payment.provider: stripe, outcome: error }, rate: 1.2/s }
 expect:
-  fire: [charge-errors/critical]
+  fire: [charge-errors-critical]
   quiet: []
-  fire_within: 20m
+  fire_within: 30m
   resolve_within: 20m

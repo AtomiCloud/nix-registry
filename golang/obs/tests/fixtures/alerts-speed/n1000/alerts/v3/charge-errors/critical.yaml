@@ -29,6 +29,6 @@ spec:
             queryType: stats
         - refId: C
           datasourceUid: __expr__
-          model: { type: math, expression: '$A > 1 && $B > 10' }
+          model: { type: math, expression: '$A > 1 && $B > 6' }
       labels: { severity: critical }
       annotations: { summary: 'Charge errors high' }

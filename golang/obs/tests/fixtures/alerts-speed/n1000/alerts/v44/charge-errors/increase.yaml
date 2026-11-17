@@ -22,6 +22,6 @@ spec:
             instant: true
         - refId: B
           datasourceUid: __expr__
-          model: { type: math, expression: '$A > 420' }
+          model: { type: math, expression: '$A > 168' }
       labels: { severity: warning }
       annotations: { summary: 'Charge errors in the last 10 minutes' }

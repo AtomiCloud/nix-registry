@@ -1,8 +1,8 @@
 package speedfixtures
 
 import (
-	"strconv"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 

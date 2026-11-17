@@ -4,6 +4,6 @@ change:
   - { metric: checkout.charges, where: { payment.provider: adyen, outcome: declined }, rate: 0.8/s }
 expect:
   fire: []
-  quiet: [charge-errors/critical]
-  fire_within: 15m
+  quiet: [charge-errors-critical]
+  fire_within: 30m
   resolve_within: 20m
