@@ -26,9 +26,6 @@ func Static(set *files.Set, o Options) *Report {
 		r.add(Fail, o.Dir, "", "empty", "no alerts/**/*.yaml and no dashboards/**/*.json found")
 	}
 	c, problems := loadContract(&o)
-	if o.SpanAttributes == nil && c != nil {
-		o.SpanAttributes = c
-	}
 	for _, p := range problems {
 		r.add(Fail, o.contractPath(), "", "contract", "%s", p)
 	}
