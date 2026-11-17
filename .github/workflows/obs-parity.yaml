@@ -42,6 +42,7 @@ jobs:
         working-directory: golang/obs/src
         run: |
           mkdir -p "$OBS_PARITY_STATE"
+          go test ./internal/pins
           go build -o "$OBS_PARITY_STATE/obs" .
           "$OBS_PARITY_STATE/obs" version | tee "$OBS_PARITY_STATE/version.txt"
           for command in alerts links profile; do
@@ -55,6 +56,8 @@ jobs:
         run: bash golang/obs/parity/stack.sh up
       - name: Fixture and panel query parity (VM relative tolerance 1e-11)
         run: bash golang/obs/parity/step.sh TestParity
+      - name: Comparison guard planted failures
+        run: bash golang/obs/parity/step.sh TestParityComparator
       - name: Historic per-minute datasource evaluation
         run: bash golang/obs/parity/step.sh TestParityHistoricMetrics
       - name: LogsQL alert parity through Grafana VictoriaLogs datasource
