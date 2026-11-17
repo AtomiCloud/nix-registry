@@ -253,3 +253,57 @@ replaces this by hand run.
 - Seeded log rows against a real VictoriaLogs fed through Alloy (field names are FROM SOURCE).
 - LogsQL `_time:[start, end)` handling against real Grafana (the nightly parity job, a later release).
 - aarch64 and macOS builds are in CI; only x86_64 Linux was run by hand.
+# Nightly parity
+
+The `Obs parity` workflow runs nightly and on changes to engine pins, and can be
+dispatched before a release. It uses GitHub's standard `ubuntu-24.04` runner in
+this public repository. Ordinary pull requests do not trigger it.
+
+`src/internal/pins/pins.json` is obs's version source, embedded in `obs version`.
+Before any container starts, `parity/check-pins.sh` compares every version and
+source commit with `parity/images.json`, including the image tags and datasource
+plugin version. The job starts VictoriaMetrics v1.156.0, VictoriaLogs v1.54.0,
+Tempo 3.1.1, Pyroscope 2.4.3 and Grafana 13.3.0 with VictoriaLogs datasource
+v0.34.0. **Chart pins are NOT TESTED:** their location in the chart registry has
+not been specified. Recorded image digests establish which binaries ran; the
+manifest's source commit fields describe the embedded source provenance, not a
+proof that an image tag was built from that commit.
+
+Each comparison is a separate workflow step: fixture and panel queries, historic
+per-minute datasource values, LogsQL alert values through Grafana's `/api/ds/query`,
+VictoriaLogs query limits, and (when the corresponding command exists) full
+Grafana alert evaluation, live scheduler history, TraceQL, links and profiles.
+An available command with a missing parity test fails. Container tests carry the
+`parity` build tag and never run in the offline Nix checks.
+
+On 17 November 2026, the first local real-store run compared **23 fixture query
+executions, 472 LogsQL alert minutes through Grafana, 462 MetricsQL alert minutes
+through Grafana, and five VictoriaLogs limit cases in 31.036 seconds (MEASURED)**.
+The three deliberately empty fixture queries remained empty on both sides.
+VictoriaMetrics values use a relative tolerance of `1e-11`.
+
+VictoriaLogs referee settings found on that run: a recent, disjoint time line per
+fixture; `-retentionPeriod=10y`; explicit insert `/internal/force_flush` before
+queries; a two-second settling wait; `-memory.allowedBytes=256MiB`;
+`-search.maxQueryDuration=30s`; `-search.maxQueryLen=16KiB`;
+`-search.maxQueryTimeRange=7d`. Length and range boundaries are compared with
+`vl.Limits.Check`; deployed chart settings, runtime timeouts and concurrency
+limits are NOT TESTED. The artifacts include the real server's `/flags`, plugin
+metadata, container digests, test output and timings.
+
+For a local run, use a unique absolute scratch directory and hold the machine's
+heavy-work lock for the whole stack and test session:
+
+```bash
+export OBS_PARITY_STATE=/tmp/obs-parity-local
+bash golang/obs/parity/stack.sh up
+(cd golang/obs/src && go build -o "$OBS_PARITY_STATE/obs" .)
+bash golang/obs/parity/step.sh TestParity
+bash golang/obs/parity/step.sh TestParityGrafanaLogs
+bash golang/obs/parity/stack.sh logs
+bash golang/obs/parity/stack.sh down
+```
+
+Every container has `obs.parity=1` and a unique run label. Cleanup removes only
+that run's containers and network. No Docker prune is used.
+

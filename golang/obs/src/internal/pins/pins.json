@@ -1,0 +1,8 @@
+{
+  "VictoriaMetrics": { "version": "v1.156.0" },
+  "VictoriaLogs": { "version": "v1.54.0", "commit": "6433dae5" },
+  "Tempo": { "version": "3.1.1", "commit": "9db7df79d2af" },
+  "Grafana": { "version": "13.3.0", "commit": "752e3462" },
+  "Pyroscope": { "version": "2.4.3" },
+  "VictoriaLogsDatasource": { "version": "v0.34.0" }
+}

@@ -10,19 +10,15 @@ import (
 	"io"
 	"os"
 	"runtime/debug"
+	"sort"
 
 	"github.com/AtomiCloud/obs/internal/check"
 	"github.com/AtomiCloud/obs/internal/files"
+	"github.com/AtomiCloud/obs/internal/pins"
 )
 
 // version is set by the nix build (-X main.version=...).
 var version = "dev"
-
-// Engine pins: each equals the version in the charts (concept section 1).
-const (
-	pinVictoriaMetrics = "v1.156.0"
-	pinVictoriaLogs    = "v1.54.0 (tag commit 6433dae5, vendored in third_party/VictoriaLogs)"
-)
 
 const usage = `obs: the observability check tool
 
@@ -57,8 +53,19 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func printVersion(w io.Writer) {
 	fmt.Fprintf(w, "obs %s\n", version)
-	fmt.Fprintf(w, "engine VictoriaMetrics %s (MetricsQL)\n", pinVictoriaMetrics)
-	fmt.Fprintf(w, "engine VictoriaLogs %s (LogsQL)\n", pinVictoriaLogs)
+	p := pins.All()
+	var names []string
+	for name := range p {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		fmt.Fprintf(w, "engine %s %s", name, p[name].Version)
+		if p[name].Commit != "" {
+			fmt.Fprintf(w, " (source commit %s)", p[name].Commit)
+		}
+		fmt.Fprintln(w)
+	}
 	fmt.Fprintln(w, "licence AGPL-3.0-only; source: https://github.com/AtomiCloud/nix-registry/tree/main/golang/obs (each release also attaches a source and vendored-modules tarball)")
 	if bi, ok := debug.ReadBuildInfo(); ok {
 		fmt.Fprintf(w, "go %s\n", bi.GoVersion)

@@ -58,17 +58,20 @@ func near(a, b float64) bool {
 	if a == b {
 		return true
 	}
-	return math.Abs(a-b) <= 1e-9*math.Max(math.Abs(a), math.Abs(b))
+	return math.Abs(a-b) <= 1e-11*math.Max(math.Abs(a), math.Abs(b))
 }
 
 func get(t *testing.T, u string) []byte {
 	t.Helper()
-	resp, err := http.Get(u)
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Get(u)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if resp.StatusCode/100 != 2 {
 		return []byte(fmt.Sprintf(`{"status":"error","error":%q}`, strings.TrimSpace(string(b))))
 	}
@@ -286,9 +289,7 @@ func loadReal(t *testing.T, vmURL, vlURL string, ds *seed.Dataset) {
 			t.Fatal(err)
 		}
 	}
-	if resp, err := http.Post(vmURL+"/api/v1/import", "application/json", &vmBody); err != nil || resp.StatusCode/100 != 2 {
-		t.Fatalf("vm import: %v %v", err, resp)
-	}
+	postReal(t, vmURL+"/api/v1/import", "application/json", &vmBody)
 	get(t, vmURL+"/internal/force_flush")
 	for _, st := range ds.Streams {
 		var names []string
@@ -310,13 +311,27 @@ func loadReal(t *testing.T, vmURL, vlURL string, ds *seed.Dataset) {
 			}
 		}
 		q := url.Values{"_stream_fields": {strings.Join(names, ",")}, "_msg_field": {"_msg"}, "_time_field": {"_time"}}
-		resp, err := http.Post(vlURL+"/insert/jsonline?"+q.Encode(), "application/stream+json", &body)
-		if err != nil || resp.StatusCode/100 != 2 {
-			t.Fatalf("vl insert: %v %v", err, resp)
-		}
+		postReal(t, vlURL+"/insert/jsonline?"+q.Encode(), "application/stream+json", &body)
 	}
 	get(t, vlURL+"/internal/force_flush")
 	time.Sleep(2 * time.Second)
+}
+
+func postReal(t *testing.T, endpoint, contentType string, body io.Reader) []byte {
+	t.Helper()
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Post(endpoint, contentType, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode/100 != 2 {
+		t.Fatalf("POST %s: HTTP %d: %s", endpoint, resp.StatusCode, b)
+	}
+	return b
 }
 
 func TestParity(t *testing.T) {
