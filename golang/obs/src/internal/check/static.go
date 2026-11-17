@@ -184,6 +184,9 @@ func staticLogs(r *Report, q *files.Query, o Options, eventOn bool, c *contract.
 				if strings.HasPrefix(msg, "event ") && strings.Contains(msg, "not in the contract") {
 					id = "contract-undeclared-event"
 				}
+				if strings.Contains(msg, "event filter form not checkable") {
+					id = "contract-event-filter-form"
+				}
 				if strings.Contains(msg, "matches no contract event") {
 					id = "contract-event-regexp-no-match"
 				}
@@ -196,7 +199,7 @@ func staticLogs(r *Report, q *files.Query, o Options, eventOn bool, c *contract.
 			}
 		case !hasEvent:
 			r.add(Fail, q.File, q.Where, "logsql-alert-needs-event",
-				"a log alert must filter on the event field %q (exact :=, negated, regex :~ or in(...)); contract.yaml is present", eventField)
+				"a log alert must filter on the event field %q (exact :=, phrase, prefix, negated, regex :~ or in(...)); contract.yaml is present", eventField)
 		default:
 			r.add(Note, q.File, q.Where, "event-rule", "event filter present; no contract event list")
 		}

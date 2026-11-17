@@ -1,6 +1,10 @@
 package seed
 
-import "gopkg.in/yaml.v3"
+import (
+	"strconv"
+
+	"gopkg.in/yaml.v3"
+)
 
 // WithMetrics projects a seed onto retained metric definitions. Validate trace
 // definitions against the original metrics before dropping their unused sources;
@@ -15,6 +19,13 @@ func (s Seed) WithMetrics(metrics map[string]MetricDef) (Seed, error) {
 	var kept []TraceDef
 	for _, td := range defs {
 		if _, ok := metrics[td.From.Metric]; ok {
+			// yaml.v3 emits integral float64 map values as integer-looking scalars.
+			// An explicit tag preserves the OTLP double kind through this round trip.
+			for name, value := range td.Attributes {
+				if f, ok := value.(float64); ok {
+					td.Attributes[name] = &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!float", Value: strconv.FormatFloat(f, 'g', -1, 64), Style: yaml.TaggedStyle}
+				}
+			}
 			kept = append(kept, td)
 		}
 	}

@@ -61,8 +61,9 @@ type qData struct {
 }
 
 type queryCache struct {
-	mu sync.Mutex
-	m  map[qKey]*qEntry
+	mu           sync.Mutex
+	m            map[qKey]*qEntry
+	pruneHistory map[string]pruneQuerySnapshot
 }
 
 type qEntry struct {
@@ -340,6 +341,7 @@ func runRecording(p *Project, runs []Run, eng Engines, cache *queryCache, sink *
 		if err := eng.Metrics.Append(out); err != nil {
 			return written, err
 		}
+		cache.capturePruneSnapshot("record:" + cr.a.ID)
 		// later rules (and alerts) must not reuse results cached before this write
 		cache.mu.Lock()
 		for k := range cache.m {

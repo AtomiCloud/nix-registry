@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/AtomiCloud/obs/internal/check"
 	"github.com/AtomiCloud/obs/internal/contract"
 	"github.com/AtomiCloud/obs/internal/engines/vl"
@@ -158,6 +160,7 @@ func Check(o Options, stdout, stderr io.Writer) int {
 		}
 		p.Alerts = misses
 	}
+	var pruneInputs map[string]pruneQuerySnapshot
 	var ars []AlertRun
 	var recordedSeries []*Series
 	pruned, prunedEvents, recorded := 0, 0, 0
@@ -170,17 +173,19 @@ func Check(o Options, stdout, stderr io.Writer) int {
 			used = append(used, &p.Records[i])
 		}
 		wantLogs := needsDS(used, "logs")
+		noPrune := os.Getenv("OBS_NO_PRUNE") != ""
 		sd := p.Seed
-		if !wantLogs {
+		if !wantLogs && !noPrune {
 			sd.Logs = nil
-		} else if need := neededLogEvents(used, logEvents); need != nil {
+		} else if need := neededLogEvents(used, logEvents); wantLogs && need != nil {
 			// Lazy load for logs: only the events some log query can match.
 			sd.Logs, prunedEvents = keepLogs(sd.Logs, need)
 		}
 		// Generate only seed metrics required by metric selectors or seeded log events.
 		names := neededMetricNames(used)
+		selected := sd.Metrics
 		if names != nil {
-			selected := map[string]seed.MetricDef{}
+			selected = map[string]seed.MetricDef{}
 			logMetrics := map[string]bool{}
 			for _, l := range sd.Logs {
 				logMetrics[l.From.Metric] = true
@@ -196,17 +201,22 @@ func Check(o Options, stdout, stderr io.Writer) int {
 					pruned += len(def.Series)
 				}
 			}
-			var err error
-			sd, err = sd.WithMetrics(selected)
-			if err != nil {
-				seedPath := o.SeedPath
-				if seedPath == "" {
-					seedPath = filepath.Join(o.Dir, "seed.yaml")
-				}
-				fmt.Fprintf(stderr, "obs alerts: %s: %v\n", seedPath, err)
-				return 2
-			}
 		}
+		var err error
+		sd, err = sd.WithMetrics(selected)
+		if err != nil {
+			seedPath := o.SeedPath
+			if seedPath == "" {
+				seedPath = filepath.Join(o.Dir, "seed.yaml")
+			}
+			fmt.Fprintf(stderr, "obs alerts: %s: %v\n", seedPath, err)
+			return 2
+		}
+		if !wantLogs && !noPrune {
+			// Metric-only evaluations never consume trace data. Validate above first.
+			sd.Traces = yaml.Node{}
+		}
+
 		ds, err := buildRuns(&sd, runs)
 		if err != nil {
 			fmt.Fprintln(stderr, "obs alerts:", err)
@@ -246,6 +256,8 @@ func Check(o Options, stdout, stderr io.Writer) int {
 			return 1
 		}
 		ars, _ = evaluateAll(p, runs, eng, cache, o.Workers, o.Steps != "", skipPlan(p))
+		cache.capturePruneSnapshot("alerts")
+		pruneInputs = cache.pruneHistory
 		if cacheDir != "" {
 			byAlert := map[string][]AlertRun{}
 			for _, ar := range ars {
@@ -291,7 +303,7 @@ func Check(o Options, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "obs alerts: alerts=%d recording=%d runs=%d expectations=%d failed=%d cached=%d pruned=%d recorded_samples=%d pruned_log_events=%d\n", len(allAlerts), len(p.Records), len(runs), len(vs), failed, len(cached)/len(runs), pruned, recorded, prunedEvents)
 	fmt.Fprintf(stdout, "verify fast: compared=%d mismatches=%d; verify skip: compared=%d mismatches=%d; reused=%d\n", VerifiedTicks.Load(), VerifyMismatch.Load(), SkipChecked, SkipMismatch, SkippedRuns)
 	if o.Out != "" {
-		if err := writeJSON(o.Out, map[string]any{"alert_runs": stripSteps(ars), "verdicts": vs, "failed": failed, "elapsed_ms": time.Since(started).Milliseconds()}); err != nil {
+		if err := writeJSON(o.Out, map[string]any{"alert_runs": stripSteps(ars), "verdicts": vs, "failed": failed, "elapsed_ms": time.Since(started).Milliseconds(), "base_ms": base.UnixMilli()}); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 2
 		}
@@ -312,6 +324,15 @@ func Check(o Options, stdout, stderr io.Writer) int {
 			rows = append(rows, map[string]any{"labels": labels, "timestamps": s.Ts, "values": s.Vals})
 		}
 		if err := writeJSON(o.Recorded, rows); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 2
+		}
+	}
+	if snapshot := os.Getenv("OBS_VERIFY_PRUNE_SNAPSHOT"); snapshot != "" {
+		if pruneInputs == nil {
+			pruneInputs = map[string]pruneQuerySnapshot{}
+		}
+		if err := writeJSON(snapshot, pruneInputs); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 2
 		}

@@ -5,17 +5,22 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 func TestMetricProjectionKeepsTraceAndLogIdentity(t *testing.T) {
 	metric := MetricDef{Type: "counter", Series: []SeriesDef{{Where: map[string]string{}, Share: 1}}}
 	s := Seed{Length: "3s", RandomSeed: 7, Resource: map[string]string{"durian.cloud.service": "fixture"}, Traffic: Traffic{Requests: "3/s"}, Metrics: map[string]MetricDef{"used": metric, "unused": metric}, Logs: []LogDef{{Event: "fixture.used", From: LogSource{Metric: "used"}}}}
-	if err := s.Traces.Encode([]TraceDef{
-		{From: LogSource{Metric: "used"}, Server: "kept", Client: "child", Attributes: map[string]any{"code": 200, "cached": true}},
-		{From: LogSource{Metric: "unused"}, Server: "dropped"},
-	}); err != nil {
+	// Use authored YAML so integral doubles retain their explicit scalar tag.
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(`[
+ {from: {metric: used}, server: kept, client: child, attributes: {code: 200, cached: true, ratio: 1.0, fraction: 0.25, text: value}},
+ {from: {metric: unused}, server: dropped}
+]`), &doc); err != nil {
 		t.Fatal(err)
 	}
+	s.Traces = *doc.Content[0]
 	at := time.Unix(1700000000, 0)
 	full, err := Build(&s, at)
 	if err != nil {
@@ -35,8 +40,11 @@ func TestMetricProjectionKeepsTraceAndLogIdentity(t *testing.T) {
 			want = append(want, tr)
 		}
 	}
-	if len(want) == 0 || !reflect.DeepEqual(want, part.Traces) {
-		t.Fatal("retained trace IDs, spans or typed attributes changed")
+	if len(want) == 0 || len(part.Traces) == 0 {
+		t.Fatal("fixture made no retained traces")
+	}
+	if !reflect.DeepEqual(want, part.Traces) {
+		t.Fatalf("retained trace IDs, spans or typed attributes changed: want=%+v got=%+v", want[0].Spans[0].Attrs, part.Traces[0].Spans[0].Attrs)
 	}
 	if !reflect.DeepEqual(full.Streams, part.Streams) {
 		t.Fatal("retained log trace/span IDs changed")

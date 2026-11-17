@@ -132,6 +132,10 @@ func TestRootEventsAreSuperset(t *testing.T) {
 		// !event:=pay.failed; pruning follows the query that runs.
 		{"not over field and event (rewritten)", `"durian.cloud/event":in("pay.failed", "pay.ok") !("payment.provider":="adyen" "durian.cloud/event":="pay.failed") | stats count()`, []string{"pay.ok"}},
 		{"or with a field", `("durian.cloud/event":="pay.failed" or "payment.provider":="adyen") | stats count()`, all},
+		{"phrase is unknown", `"durian.cloud/event":"pay.failed" | stats count()`, all},
+		{"prefix is unknown", `"durian.cloud/event":pay.* | stats count()`, all},
+		{"exact prefix is unknown", `"durian.cloud/event":=pay.* | stats count()`, all},
+		{"negative prefix is unknown", `-"durian.cloud/event":pay.* | stats count()`, all},
 		{"regex is unknown", `"durian.cloud/event":~"failed" | stats count()`, all},
 	} {
 		expr := tc.expr

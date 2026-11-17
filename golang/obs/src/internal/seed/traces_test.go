@@ -3,6 +3,7 @@ package seed
 import (
 	"fmt"
 	"gopkg.in/yaml.v3"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -74,6 +75,25 @@ traces:
 	d2, err := Build(&s, d.Start)
 	if err != nil || fmt.Sprint(d.Traces[0].TraceID) != fmt.Sprint(d2.Traces[0].TraceID) {
 		t.Fatal("seed is not deterministic", err)
+	}
+	// Full-seed regression from the parity builder: preserve every linked row,
+	// span hierarchy and typed attribute, even when no metric source is removed.
+	filtered, err := s.WithMetrics(s.Metrics)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d3, err := Build(&filtered, d.Start)
+	if err != nil || !reflect.DeepEqual(d.Traces, d3.Traces) || !reflect.DeepEqual(d.Streams, d3.Streams) {
+		t.Fatalf("retained definitions changed linked log IDs: %v", err)
+	}
+	filtered.Logs = nil
+	filtered, err = filtered.WithMetrics(map[string]MetricDef{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defs, err := filtered.traceDefs()
+	if err != nil || len(defs) != 0 {
+		t.Fatalf("removed sources still have trace definitions: %v %+v", err, defs)
 	}
 	for _, planted := range []struct{ old, new, token string }{
 		{"server: POST /charge", "unknown: planted", "unknown"},

@@ -48,6 +48,9 @@ func rootEvents(expr string, events logevent.Events) []string {
 	if err != nil {
 		return nil
 	}
+	if lq.ObsNeedsFullSeed() {
+		return nil
+	}
 	possible := map[string]bool{}
 	for _, n := range names {
 		possible[n] = true
