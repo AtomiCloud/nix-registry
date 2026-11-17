@@ -6,14 +6,22 @@ import (
 	"testing"
 )
 
-func TestVictoriaMetricsModulePin(t *testing.T) {
+func TestEngineModulePins(t *testing.T) {
 	b, err := os.ReadFile("../../go.mod")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "github.com/VictoriaMetrics/VictoriaMetrics " + All()["VictoriaMetrics"].Version
-	if !strings.Contains(string(b), want+"\n") {
-		t.Fatalf("go.mod: VictoriaMetrics pin differs: want %s", want)
+	for _, name := range []string{"VictoriaMetrics", "VictoriaLogs"} {
+		want := "github.com/VictoriaMetrics/" + name + " " + All()[name].Version
+		if !strings.Contains(string(b), want+"\n") {
+			t.Fatalf("go.mod: %s pin differs: want %s", name, want)
+		}
+	}
+	for _, line := range strings.Split(string(b), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 2 && fields[0] == "github.com/grafana/tempo" && !strings.HasSuffix(fields[1], "-"+All()["Tempo"].Commit) {
+			t.Fatalf("go.mod: Tempo module %s differs from source commit %s", fields[1], All()["Tempo"].Commit)
+		}
 	}
 }
 

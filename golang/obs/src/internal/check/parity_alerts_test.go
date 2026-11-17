@@ -67,6 +67,13 @@ func writeParityJSON(t *testing.T, path string, value any) {
 	}
 }
 
+func parityEvidence(t *testing.T, name string, value any) {
+	t.Helper()
+	if state := os.Getenv("OBS_PARITY_STATE"); state != "" {
+		writeParityJSON(t, filepath.Join(state, strings.ReplaceAll(t.Name(), "/", "-")+"-"+name+".json"), value)
+	}
+}
+
 func instantAlertData(expr, expression string) []any {
 	return []any{
 		map[string]any{"refId": "A", "datasourceUid": "parity-metrics", "relativeTimeRange": map[string]int{"from": 600, "to": 0}, "model": map[string]any{"refId": "A", "expr": expr, "instant": true, "range": false, "datasource": map[string]string{"type": "prometheus", "uid": "parity-metrics"}}},
@@ -81,7 +88,21 @@ func alertProject(t *testing.T, length, interval string, rules []map[string]any)
 	if err := os.WriteFile(filepath.Join(dir, "seed.yaml"), []byte(sd), 0644); err != nil {
 		t.Fatal(err)
 	}
-	writeParityJSON(t, filepath.Join(dir, "alerts/parity/warning.yaml"), map[string]any{"apiVersion": "grafana.integreatly.org/v1beta1", "kind": "GrafanaAlertRuleGroup", "metadata": map[string]string{"name": "parity"}, "spec": map[string]any{"interval": interval, "rules": rules}})
+	var crRules []map[string]any
+	for _, rule := range rules {
+		cr := map[string]any{}
+		for key, value := range rule {
+			cr[key] = value
+		}
+		// The operator CR uses camelCase; Grafana's HTTP provisioning API uses
+		// keep_firing_for. Both represent exactly the same duration.
+		if value, ok := cr["keep_firing_for"]; ok {
+			cr["keepFiringFor"] = value
+			delete(cr, "keep_firing_for")
+		}
+		crRules = append(crRules, cr)
+	}
+	writeParityJSON(t, filepath.Join(dir, "alerts/parity/warning.yaml"), map[string]any{"apiVersion": "grafana.integreatly.org/v1beta1", "kind": "GrafanaAlertRuleGroup", "metadata": map[string]string{"name": "parity"}, "spec": map[string]any{"interval": interval, "rules": crRules}})
 	return dir
 }
 
@@ -108,6 +129,7 @@ func obsAlertSteps(t *testing.T, binary, dir string, base int64) []parityAlertRu
 	if len(runs) == 0 {
 		t.Fatalf("obs alerts emitted no runs: %s", output)
 	}
+	parityEvidence(t, "obs-steps", runs)
 	return runs
 }
 
@@ -140,6 +162,8 @@ func TestParityAlertEval(t *testing.T) {
 		byUID[rule["uid"].(string)] = rule
 	}
 	count := 0
+	var evidence []json.RawMessage
+	defer func() { parityEvidence(t, "grafana-eval", evidence) }()
 	for _, run := range runs {
 		rule := byUID[run.Alert]
 		if rule == nil {
@@ -148,6 +172,7 @@ func TestParityAlertEval(t *testing.T) {
 		for _, step := range run.Steps {
 			body, _ := json.Marshal(map[string]any{"condition": "C", "now": time.UnixMilli(step.T).UTC().Format(time.RFC3339Nano), "data": rule["data"]})
 			response := postReal(t, os.Getenv("OBS_PARITY_GRAFANA")+"/api/v1/eval", "application/json", bytes.NewReader(body))
+			evidence = append(evidence, json.RawMessage(response))
 			var result struct {
 				Results map[string]struct {
 					Error  string         `json:"error"`
@@ -249,13 +274,14 @@ func TestParityAlertHistory(t *testing.T) {
 	requireGrafana(t)
 	binary := requireCommand(t, "alerts")
 	created := time.Now().UTC()
+	folder := "obs-parity-" + strconv.FormatInt(created.Unix(), 10)
 	// An absolute-time pulse lets the real scheduler see Normal -> Pending ->
 	// Alerting -> Recovering -> Normal without admitting future seed data to obs.
 	on := created.Add(35 * time.Second).Unix()
 	off := created.Add(75 * time.Second).Unix()
-	rule := map[string]any{"uid": "parity-live", "title": "parity live", "condition": "C", "for": "20s", "keep_firing_for": "20s", "noDataState": "NoData", "execErrState": "Error", "folderUID": "obs-parity", "ruleGroup": "parity", "data": instantAlertData(fmt.Sprintf("vector((time() >= bool %d) * (time() < bool %d))", on, off), "$A > 0")}
-	grafanaRequest(t, http.MethodPost, "/api/folders", map[string]string{"uid": "obs-parity", "title": "obs-parity"})
-	grafanaRequest(t, http.MethodPut, "/api/v1/provisioning/folder/obs-parity/rule-groups/parity", map[string]any{"title": "parity", "folderUid": "obs-parity", "interval": 10, "rules": []any{rule}})
+	rule := map[string]any{"uid": "parity-live", "title": "parity live", "condition": "C", "for": "20s", "keep_firing_for": "20s", "noDataState": "NoData", "execErrState": "Error", "folderUID": folder, "ruleGroup": "parity", "data": instantAlertData(fmt.Sprintf("vector((time() >= bool %d) * (time() < bool %d))", on, off), "$A > 0")}
+	grafanaRequest(t, http.MethodPost, "/api/folders", map[string]string{"uid": folder, "title": folder})
+	grafanaRequest(t, http.MethodPut, "/api/v1/provisioning/folder/"+folder+"/rule-groups/parity", map[string]any{"title": "parity", "folderUid": folder, "interval": 10, "rules": []any{rule}})
 	defer grafanaRequest(t, http.MethodDelete, "/api/v1/provisioning/alert-rules/parity-live", nil)
 	var first int64
 	deadline := created.Add(120 * time.Second)
@@ -302,6 +328,7 @@ func TestParityAlertHistory(t *testing.T) {
 	if err := json.Unmarshal(body, &annotations); err != nil {
 		t.Fatal(err)
 	}
+	parityEvidence(t, "grafana-annotations", json.RawMessage(body))
 	var real, ours []string
 	for _, a := range annotations {
 		if a.AlertName == "parity live" && a.Time <= last*1000 {

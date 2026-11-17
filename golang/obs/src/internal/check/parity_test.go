@@ -38,10 +38,11 @@ import (
 )
 
 type tally struct {
-	compared  int
-	empty     int
-	mismatch  []string
-	byFixture map[string]int
+	compared      int
+	empty         int
+	mismatch      []string
+	byFixture     map[string]int
+	grafanaPanels int
 }
 
 func labelKey(ls []seed.Label) string {
@@ -175,6 +176,23 @@ func (e *teeVM) Range(q string, start, end time.Time, step time.Duration) ([]vm.
 	v := url.Values{"query": {q}, "start": {strconv.FormatInt(start.Unix(), 10)}, "end": {strconv.FormatInt(end.Unix(), 10)}, "step": {strconv.FormatInt(int64(step/time.Second), 10)}, "nocache": {"1"}}
 	_ = json.Unmarshal(get(e.t, e.base+"/api/v1/query_range?"+v.Encode()), &real)
 	e.record(fmt.Sprintf("range %s step %s", q, step), ours, real, false)
+	if os.Getenv("OBS_PARITY_GRAFANA") != "" {
+		frames := grafanaQuery(e.t, map[string]any{"datasource": map[string]string{"uid": "parity-metrics", "type": "prometheus"}, "expr": q, "range": true, "instant": false, "intervalMs": step.Milliseconds(), "maxDataPoints": 100000}, start, end)
+		got := map[string][]float64{}
+		for _, series := range ours {
+			var labels []seed.Label
+			for _, label := range series.Labels {
+				if label.Name != "__name__" {
+					labels = append(labels, label)
+				}
+			}
+			got[labelKey(labels)] = series.Values
+		}
+		if err := compareNumbers(got, frameNumbers(e.t, frames)); err != nil {
+			e.ta.mismatch = append(e.ta.mismatch, fmt.Sprintf("Grafana panel fixture %s query %q: %v", e.fx, q, err))
+		}
+		e.ta.grafanaPanels++
+	}
 	return ours, nil
 }
 
@@ -375,8 +393,16 @@ func TestParity(t *testing.T) {
 		ours.Close()
 		lours.Close()
 		t.Logf("%s: %s", r.name, rep.Summary("live"))
+		if strings.HasPrefix(r.name, "bad-") {
+			if rep.Failures() == 0 {
+				t.Errorf("%s: planted bad fixture unexpectedly passed", r.dir)
+			}
+		} else if rep.Failures() != 0 {
+			t.Errorf("%s: baseline fixture failed: %s", r.dir, rep.Summary("live"))
+		}
 	}
 	t.Logf("compared %d query executions (%d with an empty result on both sides): %v", ta.compared, ta.empty, ta.byFixture)
+	t.Logf("compared %d metric panel executions through Grafana /api/ds/query", ta.grafanaPanels)
 	for _, m := range ta.mismatch {
 		t.Errorf("MISMATCH %s", m)
 	}
