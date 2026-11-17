@@ -53,6 +53,21 @@ OBS_CACHE_DIR="$work/cache" run alerts --dir "$o"
 expect 0 'cached=7' 'failed=0'
 cp "$work/metric" "$o/alerts/metric/critical.yaml"
 
+# Unused trace sources are projected with their metrics; invalid sources still fail.
+cp "$o/seed.yaml" "$work/seed-traces"
+awk '
+  /^  metrics:/ { metric=1 }
+  /^  incidents:/ { print "  traces: [{from: {metric: unused}, server: fixture}]," }
+  { print }
+  metric && /^    \{/ { print "      unused: {type: counter, series: [{where: {}, share: 1}]},"; metric=0 }
+' "$work/seed-traces" >"$o/seed.yaml"
+run alerts --dir "$o"
+expect 0 'failed=0' 'pruned=1'
+sed -i 's/metric: unused/metric: missing-trace-source/' "$o/seed.yaml"
+run alerts --dir "$o"
+expect 2 'seed.yaml' 'traces[0].from.metric' 'missing-trace-source'
+cp "$work/seed-traces" "$o/seed.yaml"
+
 # A wrong threshold is red, and identifies the rule, source file, incident and value.
 cp "$o/alerts/logs/critical.yaml" "$work/logs"
 sed -i 's/\$A > 20/\$A > 999999/' "$o/alerts/logs/critical.yaml"
@@ -114,4 +129,4 @@ expect 0 'absence check(s)' 'obs query --live: ok'
 run alerts --dir "$here/fixtures/alerts/features" --base "$(($(date +%s) + 86400))"
 expect 2 'time line ends in the future'
 
-echo 'obs alerts tests: baseline and 6 planted failures passed'
+echo 'obs alerts tests: baseline and 7 planted failures passed'

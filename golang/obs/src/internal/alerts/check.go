@@ -180,7 +180,7 @@ func Check(o Options, stdout, stderr io.Writer) int {
 		// Generate only seed metrics required by metric selectors or seeded log events.
 		names := neededMetricNames(used)
 		if names != nil {
-			sd.Metrics = map[string]seed.MetricDef{}
+			selected := map[string]seed.MetricDef{}
 			logMetrics := map[string]bool{}
 			for _, l := range sd.Logs {
 				logMetrics[l.From.Metric] = true
@@ -191,10 +191,20 @@ func Check(o Options, stdout, stderr io.Writer) int {
 					needed = needed || names[stored]
 				}
 				if needed {
-					sd.Metrics[name] = def
+					selected[name] = def
 				} else {
 					pruned += len(def.Series)
 				}
+			}
+			var err error
+			sd, err = sd.WithMetrics(selected)
+			if err != nil {
+				seedPath := o.SeedPath
+				if seedPath == "" {
+					seedPath = filepath.Join(o.Dir, "seed.yaml")
+				}
+				fmt.Fprintf(stderr, "obs alerts: %s: %v\n", seedPath, err)
+				return 2
 			}
 		}
 		ds, err := buildRuns(&sd, runs)
