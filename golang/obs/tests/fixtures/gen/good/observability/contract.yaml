@@ -72,6 +72,4 @@ spans:
 
 generate:
   - { lang: go, out: gen/go/signals, package: signals }
-  - { lang: dotnet, out: gen/dotnet/Signals, namespace: Checkout.Signals }
-  - { lang: dart, out: gen/dart/lib/src/signals, package: checkout_signals }
   - { lang: bun, out: gen/bun/src/signals }

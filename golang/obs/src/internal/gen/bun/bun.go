@@ -150,7 +150,15 @@ func union(b *strings.Builder, name string, members []string) {
 	}
 }
 
-func q(s string) string { return strconv.Quote(s) }
+// q is a TypeScript string literal in single quotes: the registry formatter (prettier) writes them
+// that way, so a committed generated file stays equal to a fresh generate.
+func q(s string) string {
+	v := strconv.Quote(s) // escapes \\ and control characters
+	v = v[1 : len(v)-1]
+	v = strings.ReplaceAll(v, `\"`, `"`)
+	v = strings.ReplaceAll(v, `'`, `\'`)
+	return "'" + v + "'"
+}
 
 func key(s string) string {
 	if identRe.MatchString(s) {
