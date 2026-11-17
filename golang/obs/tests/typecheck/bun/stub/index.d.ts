@@ -49,7 +49,8 @@ export declare function dropped(
  * Registers the generated tables, once per process: the generated signals.ts calls it when it is loaded.
  * metrics(), logger() and tracer() accept only the registered table objects. A second registration, or any
  * other table, POISONS the port: it is refused (dropped.register) and every signal is refused until
- * restart (dropped.poisoned). The lint rule forbids calling register outside generated files.
+ * restart (dropped.poisoned). The guard reads a frozen deep copy taken at registration. The lint rule
+ * forbids calling register outside generated files.
  */
 export declare function register(tables: {
   readonly metrics?: unknown;

@@ -312,7 +312,8 @@ an app can make its own carrier in Go (exported constructors) and Dart (`extends
    until restart. A forged table is never used silently; it is a loud telemetry failure, never an app
    failure. The lint rule forbids `obs.Register`, Bun `register` and `DurianSignalPort.install` outside
    generated files.
-   The tables are deep-copied, so editing the exported generated tables later changes nothing. The port counts `dropped.<reason>`, returns an
+   The tables are deep-copied at registration (in Bun also frozen; the guard reads only that copy), so
+   editing the exported generated tables later changes nothing. The port counts `dropped.<reason>`, returns an
    error and never throws or panics (the type is checked before any field is read; a panic or exception
    is recovered and counted as a last resort).
 3. A lint rule in the template's CI (documented here, NOT TESTED; the lint config lives in the templates).
