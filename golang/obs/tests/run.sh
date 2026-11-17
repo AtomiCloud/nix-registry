@@ -138,6 +138,8 @@ echo "// tamper" >>"$work/tp/lib/logstorage/parser.go"
 
 # ---- obs profile: summarize, baseline, compare (tests/profile.sh) --------------------------
 bash "$here/profile.sh" "$OBS" "$fx/profile" && ok "profile tests (tests/profile.sh)" || bad "profile tests (tests/profile.sh)"
+# ---- obs assert: series per metric against the contract (tests/assert.sh) ------------------
+bash "$here/assert.sh" "$OBS" "$fx/assert" && ok "assert tests (tests/assert.sh)" || bad "assert tests (tests/assert.sh)"
 
 # ---- licences ship with the binary --------------------------------------------------
 if [ -n "${OUT:-}" ]; then

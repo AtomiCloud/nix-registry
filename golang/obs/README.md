@@ -208,6 +208,37 @@ The engines run in-process; obs marks the global flag set parsed before the firs
 (VictoriaMetrics' `lib/memory` panics otherwise) and caps VictoriaMetrics' cache at 512 MiB
 (it takes 60 % of host memory by default).
 
+## `obs assert`
+
+Step 7 of the workflow (concept §11.4). After e2e, take a series export from the store the e2e run wrote to
+and give it to obs as a file; obs counts the real series per metric and fails when a count is above the
+contract's worst case (a hole: a cast, reflection, a raw OTel call). No network.
+
+```text
+obs assert --series FILE [--dir observability] [--pods n] [--unknown warn|fail|ignore]
+```
+
+- **Input** (`--series`): `/api/v1/series` JSON (`{"status":"success","data":[{"__name__":...}]}`) or
+  `/api/v1/export` lines (`{"metric":{...},"values":[...],"timestamps":[...]}`), for example
+  `curl -g "$VM/api/v1/series?match[]={durian_cloud_service=\"checkout\"}&start=<e2e start>"`. Scope the export to the
+  service under test: obs counts every series it is given. A series repeated in an export counts once.
+  Label names compare with dots and underscores equal (`payment.provider` = `payment_provider`).
+- **Count.** A series belongs to the contract metric whose stored names it carries (`checkout_charges_total`,
+  `checkout_charge_duration_seconds_bucket|_sum|_count`: a histogram counts all three, like the worst case of
+  `obs check`, buckets + 2 per label set). The series are counted **per landscape** (label
+  `durian_cloud_landscape`; none = one group), since the worst case is per landscape.
+- **Limit.** `contract.WorstCase(metric)`; for a `per_pod` metric worst case × `--pods` (the pods per landscape,
+  from the landscape config). Fails with `series-over-worst-case`, naming the series file, the metric, the count,
+  the stored names and the worst case. Platform metrics (`platform_metrics:`) are counted and printed, with no
+  limit.
+- **Why it is over.** When a metric is over, extra lines name the hole: `label-not-in-contract` (a label the contract
+  does not give the metric, with example values), `pod-label-on-business-metric` (a pod key on a metric without
+  `per_pod`), `label-value-outside-type` (a value outside an enum, int or time type).
+- **Metrics outside the contract** (neither a contract metric nor in `platform_metrics`; runtime and process metrics
+  of a pod land here) are a `warn` (`metric-not-in-contract`); `--unknown fail` makes them failures, `ignore` hides them.
+- Exit 0 clean, 1 a count over its limit, 2 input error (no contract, unreadable or wrong export, a failed export
+  response). _NOT TESTED: against a real VictoriaMetrics export; the two forms follow the documented API._
+
 ## `obs profile summarize|baseline|compare`
 
 Step 7 of the workflow (concept §11.6). An e2e run sends a fixed number of requests, takes a CPU
