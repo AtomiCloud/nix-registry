@@ -37,7 +37,7 @@ func TestPlantedChangeIsRed(t *testing.T) {
 	pt.Values = append(pt.Values, "square")
 	c.Types["provider"] = pt
 	changed, _ := Render(c)
-	if base == changed || !strings.Contains(changed, `"square"`) {
+	if base == changed || !strings.Contains(changed, `'square'`) {
 		t.Fatal("a contract change did not change the output")
 	}
 	want, err := os.ReadFile(filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(gentest.Fixture(t)))), "gen", "bun", "src", "signals", "signals.ts"))
@@ -60,8 +60,8 @@ func TestLargeNumberGetsBrand(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, w := range []string{
-		`export type Shard = number & { readonly __durianBounded: "Shard" };`,
-		`export const ShardSpec = { name: "Shard", min: 0, max: 9999 } as const;`,
+		`export type Shard = number & { readonly __durianBounded: 'Shard' };`,
+		`export const ShardSpec = { name: 'Shard', min: 0, max: 9999 } as const;`,
 	} {
 		if !strings.Contains(s, w) {
 			t.Fatalf("missing %q in\n%s", w, s)
