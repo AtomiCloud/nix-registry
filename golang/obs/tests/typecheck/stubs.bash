@@ -8,7 +8,7 @@ obs_setup_stub() {
   case "$lang" in
   go)
     mkdir -p "$d/interfaces-stub"
-    cp -r "$stubs/go/stub/." "$d/interfaces-stub/"
+    cp -r --no-preserve=mode "$stubs/go/stub/." "$d/interfaces-stub/"
     cat >>"$d/go.mod" <<'MOD'
 
 require github.com/ProtoDurian/diene.go-interfaces v0.0.0
@@ -17,7 +17,7 @@ MOD
     ;;
   bun)
     mkdir -p "$d/node_modules/@atomicloud/diene.interfaces"
-    cp -r "$stubs/bun/stub/." "$d/node_modules/@atomicloud/diene.interfaces/"
+    cp -r --no-preserve=mode "$stubs/bun/stub/." "$d/node_modules/@atomicloud/diene.interfaces/"
     ;;
   dotnet)
     local dep="$d/../interfaces-stub"
@@ -37,7 +37,7 @@ XML
     ;;
   dart)
     mkdir -p "$d/interfaces-stub"
-    cp -r "$stubs/dart/stub/." "$d/interfaces-stub/"
+    cp -r --no-preserve=mode "$stubs/dart/stub/." "$d/interfaces-stub/"
     cat >>"$d/pubspec.yaml" <<'YAML'
 dependencies:
   diene_interfaces:
