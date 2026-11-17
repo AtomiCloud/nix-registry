@@ -76,11 +76,29 @@ func fromParts(root, cwd, p string) ([]string, bool) {
 	if st, err := os.Stat(abs); err != nil || !st.IsDir() {
 		abs = filepath.Dir(abs)
 	}
+	abs = realExisting(abs)
 	rel, err := filepath.Rel(root, abs)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return nil, false
 	}
 	return splitDir(filepath.ToSlash(rel)), true
+}
+
+// realExisting resolves symlinks in the nearest existing parent of p and keeps the rest, so a
+// --from path through a symlink ranks like its real path (the root is a real path).
+func realExisting(p string) string {
+	rest := ""
+	for d := p; ; {
+		if r, err := filepath.EvalSymlinks(d); err == nil {
+			return filepath.Join(r, rest)
+		}
+		parent := filepath.Dir(d)
+		if parent == d {
+			return p
+		}
+		rest = filepath.Join(filepath.Base(d), rest)
+		d = parent
+	}
 }
 
 func levenshtein(a, b []rune) int {

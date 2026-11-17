@@ -2,8 +2,10 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -31,13 +33,25 @@ func load(g *globals, e *env) (*loaded, error) {
 	for _, rel := range l.scan.Yaml {
 		data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
 		if err != nil {
-			return nil, err
+			// One unreadable or dangling UL.yaml is that file's problem, not the repo's:
+			// every other UL still loads, and ul check reports it.
+			l.probs = append(l.probs, Problem{Code: "UL101", File: rel, Line: 1, Message: "cannot read the file: " + readErrText(err)})
+			continue
 		}
 		docs, probs := parseDocs(rel, data)
 		l.repo = append(l.repo, docs...)
 		l.probs = append(l.probs, probs...)
 	}
 	return l, nil
+}
+
+// readErrText drops the absolute path from a read error so the message stays repo-relative.
+func readErrText(err error) string {
+	var pe *fs.PathError
+	if errors.As(err, &pe) {
+		return pe.Err.Error()
+	}
+	return err.Error()
 }
 
 func (l *loaded) final() *Final {

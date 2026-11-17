@@ -11,7 +11,7 @@ import (
 )
 
 // testEnv runs ul in-process with its own environment, so tests never read the real
-// $FY_SESSION_ID or the real state directory.
+// environment of the machine running them.
 type testEnv struct {
 	t    *testing.T
 	cwd  string

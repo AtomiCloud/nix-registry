@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -40,16 +42,67 @@ func resolveRoot(flagRoot, cwd string) (string, error) {
 		if !st.IsDir() {
 			return "", &fs.PathError{Op: "root", Path: abs, Err: fs.ErrInvalid}
 		}
-		return abs, nil
+		return realPath(abs), nil
 	}
 	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
 	cmd.Dir = cwd
-	if out, err := cmd.Output(); err == nil {
+	out, err := cmd.Output()
+	if err == nil {
 		if top := strings.TrimSpace(string(out)); top != "" {
-			return top, nil
+			return realPath(top), nil
 		}
 	}
-	return cwd, nil
+	if err != nil && gitRefused(cwd, err) {
+		return "", gitFailure(cwd, err)
+	}
+	return realPath(cwd), nil
+}
+
+// realPath resolves symlinks so the root and --from compare as the same real folders
+// (git reports real paths; macOS /var is /private/var). A path that cannot be resolved is
+// kept as it is.
+func realPath(p string) string {
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		return r
+	}
+	return p
+}
+
+// insideGitTree reports whether dir or one of its parents holds a .git entry. When git fails
+// there, ul must not fall back to a walk: the walk would read ignored files, or (from a
+// subfolder) see only part of the repo and pass a check it should fail.
+func insideGitTree(dir string) bool {
+	for d := filepath.Clean(dir); ; {
+		if _, err := os.Lstat(filepath.Join(d, ".git")); err == nil {
+			return true
+		}
+		parent := filepath.Dir(d)
+		if parent == d {
+			return false
+		}
+		d = parent
+	}
+}
+
+// gitRefused is true when git failed for a reason other than "not a git repository" while a
+// .git entry sits in dir or a parent: a broken or refused repo, never a plain folder.
+func gitRefused(dir string, err error) bool {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && bytes.Contains(ee.Stderr, []byte("not a git repository")) {
+		return false
+	}
+	return insideGitTree(dir)
+}
+
+// gitFailure is the error for a git that refuses to run inside a git work tree (for example
+// "dubious ownership" in a container): ul stops with exit 2 instead of guessing.
+func gitFailure(dir string, err error) error {
+	msg := err.Error()
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && len(bytes.TrimSpace(ee.Stderr)) > 0 {
+		msg = strings.TrimSpace(string(ee.Stderr))
+	}
+	return fmt.Errorf("git failed in %s, which is inside a git work tree: %s", dir, msg)
 }
 
 // scanRepo finds every UL.yaml. In git it asks git (tracked or untracked-but-not-ignored);
@@ -71,6 +124,8 @@ func scanRepo(root string) (*scanResult, error) {
 			}
 			res.note(rel)
 		}
+	} else if gitRefused(root, err) {
+		return nil, gitFailure(root, err)
 	} else if err := res.walk(root); err != nil {
 		return nil, err
 	}
