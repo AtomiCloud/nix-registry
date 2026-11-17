@@ -4,12 +4,12 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/AtomiCloud/obs/internal/testfix"
 )
 
-const fixture = "../../../tests/fixtures/gen/good/observability/contract.yaml"
-
 func TestFixtureIsValid(t *testing.T) {
-	c, err := Load(fixture)
+	c, err := Load(testfix.GoodContract(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestStoredNames(t *testing.T) {
 
 // each failure of concept 11.4 is a rule that names the path and the bad token
 func TestFailures(t *testing.T) {
-	base, err := os.ReadFile(fixture)
+	base, err := os.ReadFile(testfix.GoodContract(t))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,5 +85,84 @@ func TestFailures(t *testing.T) {
 func TestUnknownKeyFails(t *testing.T) {
 	if _, err := Parse("c.yaml", []byte("service: x\nmetricz: {}\n")); err == nil {
 		t.Fatal("unknown key accepted")
+	}
+}
+
+func parse(t *testing.T, doc string) *Contract {
+	t.Helper()
+	c, err := Parse("c.yaml", []byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
+}
+
+func hasRule(is []Issue, rule, token string) bool {
+	for _, i := range is {
+		if i.Rule == rule && strings.Contains(i.Path+i.Msg, token) {
+			return true
+		}
+	}
+	return false
+}
+
+// Review of PR 111, finding 2: a log event declares no stream field of its own (concept 3.3).
+func TestBoundedStreamLabelIsRefused(t *testing.T) {
+	c := parse(t, `
+service: s
+types: { provider: { kind: enum, values: [stripe, adyen] } }
+logs: { Failed: { event: a.failed, level: error, stream_labels: { provider: provider } } }
+`)
+	if !hasRule(c.Validate(), "stream-label-declared", "provider") {
+		t.Fatalf("a bounded stream label passed: %v", c.Validate())
+	}
+	if c.StreamFields()["provider"] {
+		t.Fatal("StreamFields lists a per-event stream label")
+	}
+	if got := c.StreamCount(2); got != 2 {
+		t.Fatalf("stream count %d, want landscapes x modules = 2", got)
+	}
+}
+
+// Review finding 8: a product that does not fit in 64 bits is over any budget, not 0.
+func TestOverflowIsOverBudget(t *testing.T) {
+	c := parse(t, `
+service: s
+types: { big: { kind: int, min: 0, max: 2147483647 } }
+metrics: { m: { kind: counter, budget: 1, labels: { a: big, b: big, c: big } } }
+`)
+	if !hasRule(c.Validate(), "over-budget", "m") {
+		t.Fatalf("overflowing worst case passed: %v", c.Validate())
+	}
+	if w, _ := c.WorstCase("m"); w != MaxWorst {
+		t.Fatalf("worst case %d, want saturated %d", w, MaxWorst)
+	}
+	c2 := parse(t, "service: s\ntypes: { huge: { kind: int, min: -9223372036854775808, max: 9223372036854775807 } }\n")
+	if got := c2.Types["huge"].Size(); got != int(MaxWorst) {
+		t.Fatalf("size of the whole int range %d, want saturated", got)
+	}
+}
+
+// Review finding 10: the concept's own example writes `free` without declaring it.
+func TestIntrinsicFreeInSpanAttributes(t *testing.T) {
+	c := parse(t, `
+service: checkout
+types: { provider: { kind: enum, values: [stripe] } }
+spans:
+  checkout.charge: { attributes: { user_id: free, provider: provider } }
+`)
+	if is := c.Validate(); len(is) > 0 {
+		t.Fatalf("the concept 3.1 example is refused: %v", is)
+	}
+	if c.Types["free"].Kind != KindFree {
+		t.Fatal("free was not made")
+	}
+	// ... but still never a metric label.
+	m := parse(t, `
+service: s
+metrics: { m: { kind: counter, budget: 5, labels: { user_id: free } } }
+`)
+	if !hasRule(m.Validate(), "free-metric-label", "user_id") {
+		t.Fatalf("free metric label passed: %v", m.Validate())
 	}
 }

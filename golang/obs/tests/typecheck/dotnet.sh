@@ -4,8 +4,8 @@
 # run; every bad-*.cs must fail and the compiler output must name the error code listed in
 # typecheck/dotnet/expect.
 #   dotnet.sh [--dotnet <dotnet binary>]      (default: dotnet on PATH)
-# Not part of the nix sandbox check: the dotnet SDK is not in the obs test inputs (CI runs it with
-# `nix shell nixpkgs#dotnet-sdk_10 -c tests/typecheck/dotnet.sh`).
+# Runs in the nix check (nixpkgs.dotnet-sdk_10 is an input of the obs-tests derivation); by hand:
+# `nix shell nixpkgs#dotnet-sdk_10 -c tests/typecheck/dotnet.sh`.
 set -euo pipefail
 DOTNET=dotnet
 [ "${1:-}" = "--dotnet" ] && DOTNET="$2"
@@ -54,7 +54,7 @@ cat >"$d/App/App.csproj" <<'XML'
   <ItemGroup><ProjectReference Include="../Signals/Signals.csproj" /></ItemGroup>
 </Project>
 XML
-cp "$g/good.cs" "$d/App/Program.cs"
+cp -f "$g/good.cs" "$d/App/Program.cs"
 if out=$(build "$d/App/App.csproj") && run=$("$DOTNET" "$d/App/bin/Debug/net10.0/App.dll" 2>&1) &&
   grep -q 'label shard=3 valid=True' <<<"$run" &&
   grep -q 'checkout.charges checkout.charge.failed error 2026-11-17 provider,outcome,shard,hour' <<<"$run" &&
@@ -65,7 +65,7 @@ else
   fail=1
 fi
 while read -r f token; do
-  cp "$g/$f" "$d/App/Program.cs"
+  cp -f "$g/$f" "$d/App/Program.cs"
   if out=$(build "$d/App/App.csproj"); then
     echo "FAIL $f compiled but must not"
     fail=1

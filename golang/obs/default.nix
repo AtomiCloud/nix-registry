@@ -22,6 +22,11 @@ let
     # go test: field walker, tree drift against the VictoriaLogs tag, rules, seed shape, and
     # `obs` end to end on temp projects.
     doCheck = true;
+    # The Go tests read the fixture contract and the golden files under tests/ (outside src/): give them
+    # the tests folder next to the source root, where ../../../tests resolves from internal/<pkg>.
+    preCheck = ''
+      cp -r --no-preserve=mode ${./tests} ../tests
+    '';
     postInstall = ''
       # Third-party notices: every LICENSE/NOTICE/COPYING/PATENTS file of the vendored modules,
       # kept under its module path (Apache-2.0 requires NOTICE files to travel with binaries),
@@ -39,10 +44,10 @@ let
   };
 
   # End-to-end run of the built binary in the sandbox (no network): the good fixtures run green, the generated Go and
-  # TypeScript compile (go and tsc are inputs here),
+  # TypeScript, C# and Dart compile (go, tsc, the dotnet SDK and dart are inputs here),
   # every planted failure runs red naming file + rule + token, the vendored tree equals its tag.
   tests = nixpkgs.runCommand "obs-tests"
-    { nativeBuildInputs = [ obs nixpkgs.bash nixpkgs.gnugrep nixpkgs.gnused nixpkgs.coreutils nixpkgs.findutils nixpkgs.diffutils go nixpkgs.typescript ]; }
+    { nativeBuildInputs = [ obs nixpkgs.bash nixpkgs.gnugrep nixpkgs.gnused nixpkgs.coreutils nixpkgs.findutils nixpkgs.diffutils go nixpkgs.typescript nixpkgs.dotnet-sdk_10 nixpkgs.dart ]; }
     ''
       bash ${./tests}/run.sh --obs ${obs}/bin/obs --src ${./src} --out ${obs}
       mkdir -p "$out"
@@ -59,6 +64,8 @@ let
       mkdir -p "build/$name" "$out"
       cp -r --no-preserve=mode ${./src}/. "build/$name/"
       cp -r --no-preserve=mode ${obs.goModules} "build/$name/vendor"
+      # the fixtures and golden files the Go tests and tests/run.sh read (the tests find tests/ in an ancestor)
+      cp -r --no-preserve=mode ${./tests} "build/$name/tests"
       install -Dm444 ${./LICENSE} "build/$name/LICENSE"
       install -Dm444 ${./README.md} "build/$name/README.md"
       tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C build -cf - "$name" \

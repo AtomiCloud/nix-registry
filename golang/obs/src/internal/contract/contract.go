@@ -73,10 +73,15 @@ func (t Type) Size() int {
 	case KindEnum:
 		return len(t.Values)
 	case KindInt:
-		if t.Min == nil || t.Max == nil {
+		if t.Min == nil || t.Max == nil || *t.Max < *t.Min {
 			return 0
 		}
-		return *t.Max - *t.Min + 1
+		// max-min can overflow int: take the difference as unsigned and saturate at MaxWorst.
+		d := uint64(int64(*t.Max)) - uint64(int64(*t.Min))
+		if d >= uint64(MaxWorst) {
+			return int(MaxWorst)
+		}
+		return int(d) + 1
 	case KindTime:
 		if t.Unit == UnitWeekday {
 			return 7
@@ -175,7 +180,41 @@ func Parse(name string, b []byte) (*Contract, error) {
 		c.fillOrder(&root)
 	}
 	c.fillMissingOrder()
+	c.addIntrinsicFree()
 	return c, nil
+}
+
+// addIntrinsicFree makes `free` usable as a type name without declaring it, as the concept's own
+// example writes it (`attributes: { user_id: free }`): a use of an undeclared `free` declares a type
+// named free of kind free (a plain string in every language).
+func (c *Contract) addIntrinsicFree() {
+	if _, declared := c.Types["free"]; declared {
+		return
+	}
+	used := false
+	for _, m := range c.Metrics {
+		for _, t := range m.Labels {
+			used = used || t == "free"
+		}
+	}
+	for _, s := range c.Spans {
+		for _, t := range s.Attributes {
+			used = used || t == "free"
+		}
+	}
+	for _, e := range c.Logs {
+		for _, t := range e.StreamLabels {
+			used = used || t == "free"
+		}
+	}
+	if !used {
+		return
+	}
+	if c.Types == nil {
+		c.Types = map[string]Type{}
+	}
+	c.Types["free"] = Type{Kind: KindFree}
+	c.TypeOrder = append(c.TypeOrder, "free")
 }
 
 // fillOrder records the file order of every map, so generated code is stable and readable.

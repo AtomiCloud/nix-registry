@@ -171,8 +171,8 @@ func (c *Contract) platformHas(name string) bool {
 	return false
 }
 
-// StreamFields is the set of VictoriaLogs stream fields: the bounded where-from set
-// (concept 3.3) plus any bounded stream_labels a log event declares.
+// StreamFields is the set of VictoriaLogs stream fields: only the bounded where-from set (concept 3.3);
+// a log event declares none of its own.
 func (c *Contract) StreamFields() map[string]bool {
 	m := map[string]bool{}
 	for _, l := range PlatformLabels {
@@ -181,11 +181,6 @@ func (c *Contract) StreamFields() map[string]bool {
 			continue
 		}
 		m[l] = true
-	}
-	for _, k := range c.LogOrder {
-		for l := range c.Logs[k].StreamLabels {
-			m[l] = true
-		}
 	}
 	return m
 }
