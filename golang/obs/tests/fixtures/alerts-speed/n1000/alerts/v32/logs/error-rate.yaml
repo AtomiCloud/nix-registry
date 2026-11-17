@@ -22,6 +22,6 @@ spec:
             queryType: stats
         - refId: B
           datasourceUid: __expr__
-          model: { type: math, expression: '$A > 0.65' }
+          model: { type: math, expression: '$A > 0.5' }
       labels: { severity: warning }
       annotations: { summary: 'Error log rate' }

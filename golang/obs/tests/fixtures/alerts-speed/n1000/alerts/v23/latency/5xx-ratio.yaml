@@ -22,6 +22,6 @@ spec:
             instant: true
         - refId: B
           datasourceUid: __expr__
-          model: { type: math, expression: '$A > 0.06' }
+          model: { type: math, expression: '$A > 0.05' }
       labels: { severity: warning }
       annotations: { summary: '5xx ratio' }

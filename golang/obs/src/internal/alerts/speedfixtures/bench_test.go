@@ -52,12 +52,14 @@ func TestSpeedTable(t *testing.T) {
 	type cell struct {
 		secs float64
 		kb   int64
+		bad  bool // a run exited non-zero: the timing is not a measurement
 	}
 	res := map[string]cell{}
 	for _, n := range Sizes {
 		for _, l := range Lengths {
 			var times []float64
 			var peak int64
+			bad := false
 			for r := 0; r < runs; r++ {
 				work, err := os.MkdirTemp(base, "obs-speed-")
 				if err != nil {
@@ -77,7 +79,8 @@ func TestSpeedTable(t *testing.T) {
 				out, err := cmd.CombinedOutput()
 				el := time.Since(t0).Seconds()
 				if err != nil {
-					t.Logf("n=%d %s run %d: %v\n%s", n, l, r, err, tail(out))
+					bad = true
+					t.Errorf("n=%d %s run %d: %v\n%s", n, l, r, err, tail(out))
 				}
 				ru := cmd.ProcessState.SysUsage().(*syscall.Rusage)
 				if ru.Maxrss > peak {
@@ -87,13 +90,19 @@ func TestSpeedTable(t *testing.T) {
 				_ = os.RemoveAll(work)
 			}
 			sort.Float64s(times)
-			res[fmt.Sprintf("%d/%s", n, l)] = cell{times[len(times)/2], peak}
+			res[fmt.Sprintf("%d/%s", n, l)] = cell{times[len(times)/2], peak, bad}
 		}
 	}
 	fmt.Printf("\n| Alerts | %s seed | %s seed | Peak memory %s / %s |\n|---|---|---|---|\n", Lengths[0], Lengths[1], Lengths[0], Lengths[1])
 	for _, n := range Sizes {
 		a, b := res[fmt.Sprintf("%d/%s", n, Lengths[0])], res[fmt.Sprintf("%d/%s", n, Lengths[1])]
-		fmt.Printf("| %s | %.2f s | %.2f s | %.2f / %.2f GB |\n", fmtN(n), a.secs, b.secs, float64(a.kb)/1048576, float64(b.kb)/1048576)
+		show := func(c cell) string {
+			if c.bad {
+				return "FAILED"
+			}
+			return fmt.Sprintf("%.2f s", c.secs)
+		}
+		fmt.Printf("| %s | %s | %s | %.2f / %.2f GB |\n", fmtN(n), show(a), show(b), float64(a.kb)/1048576, float64(b.kb)/1048576)
 	}
 	fmt.Printf("\n(cpus=%s, runs per cell=%d, median time, largest peak)\n", cpus, runs)
 }

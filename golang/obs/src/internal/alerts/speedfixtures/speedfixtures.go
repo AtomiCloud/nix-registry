@@ -4,8 +4,8 @@
 //
 // The 20 base alerts are the prototype's proj20 mix (spike 7), ported from LogQL to
 // LogsQL by the rules in the README section "Fixture porting rules". Bigger sets repeat
-// the 20 alerts as variants (`v2/`, `v3/` ...): a different rollup window and a scaled
-// threshold per variant, so every alert is its own rule with its own query text.
+// the 20 alerts as variants (`v2/`, `v3/` ...): a different rollup window and the same
+// threshold (count thresholds scale with the window), so every alert is its own rule.
 //
 // Everything here is synthetic: the landscape, platform and service names are made up.
 package speedfixtures
@@ -104,7 +104,7 @@ var base = []tmpl{
 		queries: []query{{"A", true, `_time:{W} ` + svc + ` ` + fail + ` | stats by (payment.provider) count() hits`}}, cond: "$A > {T}"},
 	{slug: "logs", file: "error-rate", title: "Error log rate", sev: "warning", forD: "5m", t: 0.5, win: "5m",
 		queries: []query{{"A", true, `_time:{W} ` + svc + ` ` + fail + ` severity_text:="ERROR" | stats rate() per_s`}}, cond: "$A > {T}"},
-	{slug: "logs", file: "slow-unwrap", title: "Warn log lines high (replaces logged duration)", sev: "warning", forD: "5m", t: 100, win: "5m", cnt: 1,
+	{slug: "logs", file: "slow-unwrap", title: "Warn log lines high (replaces logged duration)", sev: "warning", forD: "5m", t: 220, win: "5m", cnt: 1,
 		queries: []query{{"A", true, `_time:{W} ` + svc + ` ` + evt + `"checkout.charge.declined" severity_text:="WARN"` + cnt}}, cond: "$A > {T}"},
 }
 
@@ -125,10 +125,8 @@ func num(v float64) string { return strconv.FormatFloat(v, 'g', 6, 64) }
 
 // render writes one GrafanaAlertRuleGroup CR.
 func render(t tmpl, k int) (rel, doc string) {
-	win, scale := variant(k)
-	if mustFire(t) {
-		scale = 1 // an alert an incident expects to fire keeps its base threshold
-	}
+	win, _ := variant(k)
+	scale := 1.0 // thresholds are not scaled: every variant behaves like its base alert
 	if t.win == "" {
 		win = ""
 	}
@@ -229,12 +227,12 @@ var incidentDefs = []struct {
 	within      string
 }{
 	{"stripe-outage", "story: Stripe returns 502 for 40% of charges for 30 minutes.\nwindow: { start: 90m, duration: 30m }\nchange:\n  - { metric: checkout.charges, where: { payment.provider: stripe, outcome: error }, rate: 1.2/s }\n",
-		[]string{"charge-errors-critical"}, nil, "30m"},
+		[]string{"charge-errors-critical", "charge-errors-warning", "charge-errors-ratio", "charge-errors-increase", "charge-errors-by-provider", "charge-errors-no-window", "metricsql-with-template", "mixed-errors-or-latency", "logs-error-rate", "logs-failed-count", "logs-failed-json", "logs-failed-by-provider"}, nil, "30m"},
 	{"checkout-slow", "story: The charge route gets 6x slower for 40 minutes.\nwindow: { start: 150m, duration: 40m }\nchange:\n  - { metric: http.server.request.duration, where: { http.route: /charge }, latency_x: 6 }\n",
 		[]string{"latency-p95-warning", "latency-p95-critical", "latency-avg", "mixed-errors-or-latency"},
 		[]string{"charge-errors-critical", "charge-errors-warning", "charge-errors-ratio", "logs-failed-count", "logs-error-rate", "declines-adyen-logs", "traffic-low"}, "30m"},
 	{"adyen-declines", "story: Adyen declines a burst of cards for 20 minutes.\nwindow: { start: 60m, duration: 20m }\nchange:\n  - { metric: checkout.charges, where: { payment.provider: adyen, outcome: declined }, rate: 0.8/s }\n",
-		[]string{"declines-adyen-logs", "declines-adyen-metric"},
+		[]string{"declines-adyen-logs", "declines-adyen-metric", "logs-slow-unwrap"},
 		[]string{"charge-errors-critical", "charge-errors-ratio", "latency-p95-warning", "traffic-low"}, "30m"},
 }
 
@@ -254,7 +252,7 @@ func Incidents(n int) map[string]string {
 				id := base[i].slug + "-" + base[i].file
 				if contains(d.fire, id) {
 					fire = append(fire, pre+id)
-				} else if contains(d.quiet, id) {
+				} else {
 					quiet = append(quiet, pre+id)
 				}
 			}
@@ -288,7 +286,7 @@ func Write(out string) error {
 		for name, body := range Incidents(n) {
 			files["incidents/"+name+".yaml"] = body
 		}
-		files["contract.yaml"] = "service: checkout\n"
+		files["contract.yaml"] = contract
 		for _, l := range Lengths {
 			files["seed."+l+".yaml"] = Seed(l)
 		}
@@ -305,11 +303,25 @@ func Write(out string) error {
 	return nil
 }
 
-func mustFire(t tmpl) bool {
-	for _, d := range incidentDefs {
-		if contains(d.fire, t.slug+"-"+t.file) {
-			return true
-		}
-	}
-	return false
-}
+// contract is the checkout contract every set carries (it names every metric label and log
+// event the seed and the alerts use).
+const contract = `service: checkout
+
+types:
+  provider: { kind: enum, values: [stripe, adyen] }
+  outcome: { kind: enum, values: [success, declined, error] }
+
+metrics:
+  checkout.charges:
+    kind: counter
+    budget: 20
+    labels: { payment.provider: provider, outcome: outcome }
+
+logs:
+  ChargeSucceeded: { event: checkout.charge.succeeded, level: info }
+  ChargeDeclined: { event: checkout.charge.declined, level: warn }
+  ChargeFailed: { event: checkout.charge.failed, level: error }
+
+platform_metrics:
+  http.server.request.duration: [http.route, http.response.status_code]
+`

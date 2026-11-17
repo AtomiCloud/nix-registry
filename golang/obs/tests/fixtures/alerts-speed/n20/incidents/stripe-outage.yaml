@@ -3,7 +3,31 @@ window: { start: 90m, duration: 30m }
 change:
   - { metric: checkout.charges, where: { payment.provider: stripe, outcome: error }, rate: 1.2/s }
 expect:
-  fire: [charge-errors-critical]
-  quiet: []
+  fire:
+    [
+      charge-errors-critical,
+      charge-errors-warning,
+      charge-errors-ratio,
+      charge-errors-increase,
+      charge-errors-by-provider,
+      charge-errors-no-window,
+      mixed-errors-or-latency,
+      metricsql-with-template,
+      logs-failed-count,
+      logs-failed-json,
+      logs-failed-by-provider,
+      logs-error-rate,
+    ]
+  quiet:
+    [
+      latency-p95-critical,
+      latency-p95-warning,
+      latency-avg,
+      latency-5xx-ratio,
+      traffic-low,
+      declines-adyen-metric,
+      declines-adyen-logs,
+      logs-slow-unwrap,
+    ]
   fire_within: 30m
   resolve_within: 20m

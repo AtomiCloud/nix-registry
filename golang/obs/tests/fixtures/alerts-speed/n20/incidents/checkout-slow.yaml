@@ -9,10 +9,19 @@ expect:
       charge-errors-critical,
       charge-errors-warning,
       charge-errors-ratio,
+      charge-errors-increase,
+      charge-errors-by-provider,
+      charge-errors-no-window,
+      latency-5xx-ratio,
       traffic-low,
+      metricsql-with-template,
+      declines-adyen-metric,
       declines-adyen-logs,
       logs-failed-count,
+      logs-failed-json,
+      logs-failed-by-provider,
       logs-error-rate,
+      logs-slow-unwrap,
     ]
   fire_within: 30m
   resolve_within: 20m

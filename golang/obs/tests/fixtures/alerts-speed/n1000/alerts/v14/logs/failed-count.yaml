@@ -22,6 +22,6 @@ spec:
             queryType: stats
         - refId: B
           datasourceUid: __expr__
-          model: { type: math, expression: '$A > 88' }
+          model: { type: math, expression: '$A > 80' }
       labels: { severity: warning }
       annotations: { summary: 'Failed charge log lines' }
