@@ -71,6 +71,27 @@ func (s *Seed) traceDefs() ([]TraceDef, error) {
 	return defs, nil
 }
 
+// PruneTraceDefinitions removes definitions whose source metrics will not be
+// generated. Call before replacing Metrics. Retained definitions keep log IDs
+// and typed trace attributes identical to a full seed build.
+func (s *Seed) PruneTraceDefinitions(metrics map[string]MetricDef) error {
+	defs, err := s.traceDefs()
+	if err != nil {
+		return err
+	}
+	var kept []TraceDef
+	for _, d := range defs {
+		if _, ok := metrics[d.From.Metric]; ok {
+			kept = append(kept, d)
+		}
+	}
+	s.Traces = yaml.Node{}
+	if len(kept) > 0 {
+		return s.Traces.Encode(kept)
+	}
+	return nil
+}
+
 func attrValue(v any) (TAttrVal, error) {
 	switch v := v.(type) {
 	case string:

@@ -176,16 +176,14 @@ func Check(o Options, stdout, stderr io.Writer) int {
 		}
 		wantLogs := needsDS(used, "logs")
 		sd := p.Seed
-		// Alerts evaluate metrics/logs. Their pruning may remove a metric used
-		// only by a trace definition; do not build or validate unused traces.
-		sd.Traces = yaml.Node{}
 		if !wantLogs {
 			sd.Logs = nil
+			sd.Traces = yaml.Node{}
 		}
 		// Generate only seed metrics required by metric selectors or seeded log events.
 		names := neededMetricNames(used)
 		if names != nil {
-			sd.Metrics = map[string]seed.MetricDef{}
+			keptMetrics := map[string]seed.MetricDef{}
 			logMetrics := map[string]bool{}
 			for _, l := range sd.Logs {
 				logMetrics[l.From.Metric] = true
@@ -196,11 +194,18 @@ func Check(o Options, stdout, stderr io.Writer) int {
 					needed = needed || names[stored]
 				}
 				if needed {
-					sd.Metrics[name] = def
+					keptMetrics[name] = def
 				} else {
 					pruned += len(def.Series)
 				}
 			}
+			// Trace definitions for kept log sources preserve their linked IDs.
+			// Definitions for pruned metrics must not invalidate this subset.
+			if err := sd.PruneTraceDefinitions(keptMetrics); err != nil {
+				fmt.Fprintln(stderr, "obs alerts:", err)
+				return 2
+			}
+			sd.Metrics = keptMetrics
 		}
 		ds, err := buildRuns(&sd, runs)
 		if err != nil {

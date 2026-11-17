@@ -3,6 +3,7 @@ package seed
 import (
 	"fmt"
 	"gopkg.in/yaml.v3"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -74,6 +75,22 @@ traces:
 	d2, err := Build(&s, d.Start)
 	if err != nil || fmt.Sprint(d.Traces[0].TraceID) != fmt.Sprint(d2.Traces[0].TraceID) {
 		t.Fatal("seed is not deterministic", err)
+	}
+	filtered := s
+	if err := filtered.PruneTraceDefinitions(s.Metrics); err != nil {
+		t.Fatal(err)
+	}
+	d3, err := Build(&filtered, d.Start)
+	if err != nil || !reflect.DeepEqual(d.Traces, d3.Traces) || !reflect.DeepEqual(d.Streams, d3.Streams) {
+		t.Fatalf("retained trace definitions must preserve typed spans and linked log IDs: %v", err)
+	}
+	if err := filtered.PruneTraceDefinitions(map[string]MetricDef{}); err != nil {
+		t.Fatal(err)
+	}
+	filtered.Metrics = map[string]MetricDef{}
+	defs, err := filtered.traceDefs()
+	if err != nil || len(defs) != 0 {
+		t.Fatalf("definitions for pruned metrics must be removed: %v %+v", err, defs)
 	}
 	for _, planted := range []struct{ old, new, token string }{
 		{"server: POST /charge", "unknown: planted", "unknown"},
