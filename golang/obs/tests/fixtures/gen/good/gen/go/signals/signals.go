@@ -111,6 +111,9 @@ type Provider struct{ v string }
 // String is the wire value.
 func (e Provider) String() string { return e.v }
 
+// Valid is false for the zero value Provider{}: a value only this package can make is set.
+func (e Provider) Valid() bool { return e.v != "" }
+
 var (
 	ProviderStripe = Provider{"stripe"}
 	ProviderAdyen  = Provider{"adyen"}
@@ -123,6 +126,9 @@ type Outcome struct{ v string }
 // String is the wire value.
 func (e Outcome) String() string { return e.v }
 
+// Valid is false for the zero value Outcome{}: a value only this package can make is set.
+func (e Outcome) Valid() bool { return e.v != "" }
+
 var (
 	OutcomeOk       = Outcome{"ok"}
 	OutcomeDeclined = Outcome{"declined"}
@@ -130,7 +136,10 @@ var (
 )
 
 // Shard is the bounded number shard, 0..15. NewShard refuses a value outside the range.
-type Shard struct{ v int }
+type Shard struct {
+	v  int
+	ok bool // set by the constructor: a valid 0 is not the zero value
+}
 
 const (
 	ShardMin = 0
@@ -142,14 +151,20 @@ func NewShard(n int) (Shard, error) {
 	if n < ShardMin || n > ShardMax {
 		return Shard{}, durianSignalRange("shard", n, ShardMin, ShardMax)
 	}
-	return Shard{n}, nil
+	return Shard{n, true}, nil
 }
 
 // Int is the number.
 func (b Shard) Int() int { return b.v }
 
+// Valid is false for the zero value Shard{}: only NewShard makes a set value, so 0 is not unset.
+func (b Shard) Valid() bool { return b.ok }
+
 // Lane is the bounded number lane, 1..3. NewLane refuses a value outside the range.
-type Lane struct{ v int }
+type Lane struct {
+	v  int
+	ok bool // set by the constructor: a valid 0 is not the zero value
+}
 
 const (
 	LaneMin = 1
@@ -161,45 +176,60 @@ func NewLane(n int) (Lane, error) {
 	if n < LaneMin || n > LaneMax {
 		return Lane{}, durianSignalRange("lane", n, LaneMin, LaneMax)
 	}
-	return Lane{n}, nil
+	return Lane{n, true}, nil
 }
 
 // Int is the number.
 func (b Lane) Int() int { return b.v }
 
+// Valid is false for the zero value Lane{}: only NewLane makes a set value, so 0 is not unset.
+func (b Lane) Valid() bool { return b.ok }
+
 // Hour is the time bucket hour (hour_of_day, 0..23); it rolls over by itself, so the series count stays flat.
-type Hour struct{ v int }
+type Hour struct {
+	v  int
+	ok bool // set by the constructors: a valid 0 is not the zero value
+}
 
 // NewHour makes a value, or returns an error when n is out of range.
 func NewHour(n int) (Hour, error) {
 	if n < 0 || n > 23 {
 		return Hour{}, durianSignalRange("hour", n, 0, 23)
 	}
-	return Hour{n}, nil
+	return Hour{n, true}, nil
 }
 
 // HourAt is the bucket of a time (always in range).
-func HourAt(t time.Time) Hour { return Hour{t.Hour()} }
+func HourAt(t time.Time) Hour { return Hour{t.Hour(), true} }
 
 // Int is the number.
 func (b Hour) Int() int { return b.v }
 
+// Valid is false for the zero value Hour{}: only NewHour and HourAt make a set value, so 0 is not unset.
+func (b Hour) Valid() bool { return b.ok }
+
 // Day is the time bucket day (weekday, 0..6); it rolls over by itself, so the series count stays flat.
-type Day struct{ v int }
+type Day struct {
+	v  int
+	ok bool // set by the constructors: a valid 0 is not the zero value
+}
 
 // NewDay makes a value, or returns an error when n is out of range.
 func NewDay(n int) (Day, error) {
 	if n < 0 || n > 6 {
 		return Day{}, durianSignalRange("day", n, 0, 6)
 	}
-	return Day{n}, nil
+	return Day{n, true}, nil
 }
 
 // DayAt is the bucket of a time (always in range).
-func DayAt(t time.Time) Day { return Day{int(t.Weekday())} }
+func DayAt(t time.Time) Day { return Day{int(t.Weekday()), true} }
 
 // Int is the number.
 func (b Day) Int() int { return b.v }
+
+// Valid is false for the zero value Day{}: only NewDay and DayAt make a set value, so 0 is not unset.
+func (b Day) Valid() bool { return b.ok }
 
 // BillingDay is the calendar date billing_day: a metric label with 30 values live at once (window_days).
 type BillingDay struct{ v string }
@@ -209,6 +239,9 @@ func NewBillingDay(t time.Time) BillingDay { return BillingDay{t.UTC().Format("2
 
 // String is the wire value.
 func (d BillingDay) String() string { return d.v }
+
+// Valid is false for the zero value BillingDay{}.
+func (d BillingDay) Valid() bool { return d.v != "" }
 
 // ---- metrics ----
 

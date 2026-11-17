@@ -4,8 +4,8 @@
 # writes. For the good repo: good.dart (a consumer) must analyze clean and run; every bad-*.dart must fail
 # analysis and the output must name the diagnostic listed in typecheck/dart/expect.
 #   dart.sh [--dart <dart binary>]      (default: dart on PATH)
-# Not part of the nix sandbox check: the dart SDK is not in the obs test inputs (CI runs it with
-# `nix shell nixpkgs#dart -c tests/typecheck/dart.sh`).
+# Runs in the nix check (nixpkgs.dart is an input of the obs-tests derivation); by hand:
+# `nix shell nixpkgs#dart -c tests/typecheck/dart.sh`.
 set -euo pipefail
 DART=dart
 [ "${1:-}" = "--dart" ] && DART="$2"
@@ -39,7 +39,7 @@ for repo in good stress; do
   fi
 done
 d="$work/good"
-cp "$g/good.dart" "$d/bin/app.dart"
+cp -f "$g/good.dart" "$d/bin/app.dart"
 if out=$(cd "$d" && "$DART" analyze 2>&1) && grep -q 'No issues found' <<<"$out" &&
   run=$(cd "$d" && "$DART" run bin/app.dart 2>&1) &&
   grep -q 'checkout.charges checkout.charge.failed error' <<<"$run" && grep -q '2026-11-17' <<<"$run"; then
@@ -49,7 +49,7 @@ else
   fail=1
 fi
 while read -r f token; do
-  cp "$g/$f" "$d/bad/case.dart"
+  cp -f "$g/$f" "$d/bad/case.dart"
   out=$(cd "$d" && "$DART" analyze bad/case.dart 2>&1) || true
   if ! grep -q ' error ' <<<"$out"; then
     echo "FAIL $f analyzed clean but must not"

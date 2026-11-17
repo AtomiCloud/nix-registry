@@ -1,0 +1,5 @@
+mode: check
+exit: 1
+contains: [stream-label-declared]
+contains: logs.ChargeFailed.stream_labels.provider
+contains: only the bounded where-from set
