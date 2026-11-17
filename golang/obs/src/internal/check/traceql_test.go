@@ -94,14 +94,58 @@ func TestNonTempoTraceDatasourcesStayNotes(t *testing.T) {
 	}
 }
 
-func TestTraceAlertsStayDeferredNotes(t *testing.T) {
-	for _, expr := range []string{"{}", "{span.planted=", "01000000000000000000000000000000"} {
-		q := files.Query{File: "alerts/traces/warning.yaml", Where: "rule traces query A", Kind: files.Traces, Dash: &files.Dashboard{}, IsAlert: true, Expr: expr}
-		r := Static(&files.Set{Alerts: 1, Queries: []files.Query{q}}, Options{})
-		if r.Failures() != 0 || len(r.Findings) != 1 || r.Findings[0].Level != Note || !strings.Contains(r.Findings[0].Msg, "alerts") {
-			t.Fatalf("%s: %+v", expr, r.Findings)
+// Trace alert queries get Grafana's Tempo routing checks, then the same TraceQL parse
+// and contract name checks as dashboards (they were deferred notes before obs alerts
+// evaluated them).
+func TestTraceAlertQueriesAreChecked(t *testing.T) {
+	names := spanNames{"span.provider": true}
+	for _, tc := range []struct {
+		name  string
+		model map[string]any
+		ds    string
+		rule  string // "" = no failure
+	}{
+		{"instant metrics", map[string]any{"queryType": "traceql", "metricsQueryType": "instant", "query": `{span.provider="stripe"} | rate()`}, "", ""},
+		{"undeclared attribute", map[string]any{"queryType": "traceql", "metricsQueryType": "instant", "query": `{span.provder="stripe"} | rate()`}, "", "traceql-attribute"},
+		{"undeclared by attribute", map[string]any{"queryType": "traceql", "metricsQueryType": "instant", "query": `{} | rate() by (span.drifted)`}, "", "traceql-attribute"},
+		{"syntax", map[string]any{"queryType": "traceql", "metricsQueryType": "instant", "query": `{span.provider=} | rate()`}, "", "traceql-syntax"},
+		{"search", map[string]any{"queryType": "traceql", "metricsQueryType": "instant", "query": `{span.provider="stripe"}`}, "", "tempo-alert-search"},
+		{"trace id", map[string]any{"queryType": "traceId", "query": "0123abcd"}, "", "tempo-alert-query-type"},
+		{"range with exemplars", map[string]any{"queryType": "traceql", "query": `{} | rate()`}, "", "tempo-alert-range-exemplars"},
+		{"range without exemplars", map[string]any{"queryType": "traceql", "query": `{} | rate() with (exemplars=false)`, "step": "1m"}, "", ""},
+		{"expr is not the plugin's field", map[string]any{"queryType": "traceql", "metricsQueryType": "instant", "expr": `{} | rate()`}, "", "tempo-alert-query"},
+		{"jaeger", map[string]any{"query": `{} | rate()`}, "jaeger", "tempo-alert-datasource"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q := files.Query{File: "alerts/traces/warning.yaml", Where: "rule traces query A", Kind: files.Traces, IsAlert: true, DSType: tc.ds, Model: tc.model}
+			r := Static(&files.Set{Alerts: 1, Queries: []files.Query{q}}, Options{SpanAttributes: names})
+			text := fmt.Sprint(r.Findings)
+			if tc.rule == "" {
+				if r.Failures() != 0 {
+					t.Fatalf("baseline failed: %s", text)
+				}
+				return
+			}
+			if r.Failures() == 0 || !hasRule(r, tc.rule) || !strings.Contains(text, q.File) || !strings.Contains(text, q.Where) {
+				t.Fatalf("want %s naming file and rule, got %s", tc.rule, text)
+			}
+		})
+	}
+}
+
+type spanNames map[string]bool
+
+func (s spanNames) HasSpanAttribute(scope, name string) bool {
+	return scope != "span" && scope != "" || s["span."+name]
+}
+
+func hasRule(r *Report, rule string) bool {
+	for _, f := range r.Findings {
+		if f.Rule == rule {
+			return true
 		}
 	}
+	return false
 }
 
 func TestTraceQLLiveProjectionAttributeDrift(t *testing.T) {

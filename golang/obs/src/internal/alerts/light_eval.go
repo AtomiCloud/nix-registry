@@ -34,7 +34,8 @@ var (
 
 func (r *cRule) canLight() bool {
 	for _, q := range r.a.Queries {
-		if q.Range != "" {
+		// Tempo answers with series frames; the light path reads numbers only.
+		if q.Range != "" || q.Datasource == "traces" {
 			return false
 		}
 	}

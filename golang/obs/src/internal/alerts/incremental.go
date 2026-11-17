@@ -149,9 +149,14 @@ func affected(p *Project, a *Alert, inc *Incident, recorded map[string]*Alert, d
 					}
 				}
 			}
-		case "logs", "traces":
+		case "logs":
 			return true // conservative: datasource engines can add an incident footprint later
-
+		case "traces":
+			if traceSourcesChanged(p, inc) {
+				return true
+			}
+		default:
+			return true
 		}
 	}
 	return false

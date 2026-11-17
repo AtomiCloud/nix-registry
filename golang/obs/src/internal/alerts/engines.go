@@ -10,8 +10,8 @@ import (
 	"github.com/VictoriaMetrics/metricsql"
 )
 
-// DatasourceEngine is the extension point for a future Tempo alert engine.
-// MetricsQL and LogsQL use it today. Implementations must preserve instance labels.
+// DatasourceEngine is the per-datasource query hook: MetricsQL, LogsQL and TraceQL
+// (traces.go) use it. Implementations must preserve instance labels.
 type DatasourceEngine interface {
 	Instant(Query, time.Time) ([]Result, error)
 }
@@ -162,6 +162,7 @@ func fetchEngine(engine DatasourceEngine, q Query, run Run, interval time.Durati
 		return d
 	}
 	d.perTick, d.tickErr = map[int64][]Result{}, map[int64]error{}
+	_, d.seriesFrames = engine.(seriesFrames)
 	for t := run.Start; !t.After(run.End); t = t.Add(interval) {
 		rs, err := engine.Instant(q, t)
 		if err != nil {

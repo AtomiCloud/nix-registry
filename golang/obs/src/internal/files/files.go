@@ -37,6 +37,9 @@ type Query struct {
 	Problem string
 	DSType  string
 	DSUID   string
+	// Model is an alert query's raw model (nil for dashboards): datasource options the
+	// alert checks need beyond the expression, such as Tempo's metricsQueryType and step.
+	Model map[string]any
 }
 
 // Dashboard is the parts of a dashboard JSON obs needs.
@@ -227,6 +230,7 @@ func (s *Set) readAlert(rel string, b []byte) {
 			qu := Query{
 				File: rel, IsAlert: true, Expr: expr, RangeSecs: q.RelativeTimeRange.From,
 				QueryType: qt, DSType: dsType, DSUID: dsUID,
+				Model: q.Model,
 				Where: fmt.Sprintf("rule %s query %s", id, q.RefID),
 			}
 			kind, err := Classify(dsType, dsUID)

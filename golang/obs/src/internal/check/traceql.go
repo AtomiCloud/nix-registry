@@ -10,6 +10,7 @@ import (
 
 	"github.com/AtomiCloud/obs/internal/engines/tempo"
 	"github.com/AtomiCloud/obs/internal/files"
+	"github.com/AtomiCloud/obs/internal/tempoalert"
 )
 
 // SpanAttributeNames is implemented by the contract package. A nil interface
@@ -20,7 +21,7 @@ type SpanAttributeNames interface{ HasSpanAttribute(scope, name string) bool }
 func staticTraces(r *Report, q *files.Query, o Options) {
 	expr := staticFill(q)
 	if q.IsAlert {
-		r.add(Note, q.File, q.Where, "traces", "trace alerts not checked: await obs alerts integration; query: %s", oneLine(expr))
+		staticTraceAlert(r, q, o)
 		return
 	}
 	if v, ok := traceIDVariable(q); ok {
@@ -42,10 +43,15 @@ func staticTraces(r *Report, q *files.Query, o Options) {
 		}
 		return
 	}
+	staticTraceQL(r, q, o, expr)
+}
+
+// staticTraceQL parses with Tempo and checks every attribute name against the contract.
+func staticTraceQL(r *Report, q *files.Query, o Options, expr string) *tempo.Query {
 	p, err := tempo.Parse(expr)
 	if err != nil {
 		r.add(Fail, q.File, q.Where, "traceql-syntax", "%v; query: %s", err, oneLine(expr))
-		return
+		return nil
 	}
 	if o.Names {
 		r.add(Note, q.File, q.Where, "names", "reads span attributes=%v", p.Attributes)
@@ -54,6 +60,28 @@ func staticTraces(r *Report, q *files.Query, o Options) {
 		if o.SpanAttributes != nil && !o.SpanAttributes.HasSpanAttribute(a.Scope, a.Name) {
 			r.add(Fail, q.File, q.Where, "traceql-attribute", "undeclared attribute %s; query: %s", a, oneLine(expr))
 		}
+	}
+	return p
+}
+
+// staticTraceAlert checks a Tempo alert query the way Grafana 13.3.0 and its Tempo
+// datasource run it (internal/tempoalert): the model's query must be a TraceQL
+// metrics query on the traceql path, a range query must not carry exemplars, and
+// the TraceQL gets the same parse and contract name checks as a dashboard query.
+func staticTraceAlert(r *Report, q *files.Query, o Options) {
+	if t := strings.ToLower(q.DSType); t == "jaeger" || t == "zipkin" {
+		r.add(Fail, q.File, q.Where, "tempo-alert-datasource", "datasource type %q: obs alerts evaluate traces only through the Tempo datasource", q.DSType)
+		return
+	}
+	m := tempoalert.FromModel(q.Model, q.QueryType)
+	if refusal := m.Check(); refusal != nil {
+		r.add(Fail, q.File, q.Where, refusal.Rule, "%s; query: %s", refusal.Reason, oneLine(m.Query))
+		if strings.TrimSpace(m.Query) == "" {
+			return
+		}
+	}
+	if p := staticTraceQL(r, q, o, m.Query); p != nil && !p.Metrics && tempoalert.IsMetricsQuery(m.Query) {
+		r.add(Fail, q.File, q.Where, "tempo-alert-search", "Tempo parses this as a search, not a metrics query; query: %s", oneLine(m.Query))
 	}
 }
 

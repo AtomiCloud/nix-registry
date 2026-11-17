@@ -27,7 +27,7 @@ linked module ship in `share/licenses/obs`. Design: `concepts/observability.md` 
 | `obs version`        | The obs version and every engine pin.                                                                                                                                                 |
 
 Follow-up commands (see the corpus goal): `obs alerts` (evaluating alerts over incidents),
-trace alert evaluation, `obs engines --check-chart`, `obs store move`.
+`obs engines --check-chart`, `obs store move`.
 
 ```text
  1. decide signals        what the service must say: metrics, log events, spans
@@ -753,7 +753,8 @@ replaces this by hand run.
 line per rule and expectation, including its file and incident window, and exits
 1 on a miss. Every rule must stay quiet on the baseline; rules omitted from an
 incident's expectations are also checked for quiet. Metric and LogsQL rules run
-inside VictoriaMetrics v1.156.0 and VictoriaLogs v1.54.0 with no network or containers.
+inside VictoriaMetrics v1.156.0 and VictoriaLogs v1.54.0, TraceQL rules inside Tempo 3.1.1
+(see [TraceQL alert rules](#traceql-alert-rules)), with no network or containers.
 
 ```text
 obs alerts --dir observability
@@ -767,6 +768,11 @@ The seed's `incidents: [spike]` reads `incidents/spike.yaml`. An incident declar
 `window: {start: 10m, duration: 10m}`, `change` entries with a metric, matching
 `where` labels and `rate`, `latency_x` or `share_x`, and
 `expect: {fire: [rule-uid], quiet: [], fire_within: 5m, resolve_within: 5m}`.
+Seeded traces follow the same changes: a `rate` or `share_x` change adds or removes
+requests and so their traces (a series that matches a trace definition's `error_when`
+makes error spans), and `latency_x` stretches the spans of the matching series inside
+the window (counters included). Trace IDs stay deterministic: outside the window every
+trace is byte for byte the baseline's.
 Firing must begin inside the incident and before `fire_within`; it must stop by
 the end plus `resolve_within` (default zero). Use the recovery allowance for the
 query's rollup window and `keepFiringFor`. The time line ends in the past; an
@@ -816,8 +822,100 @@ MEASURED: regression tests cover state transitions, numeric light/full parity,
 event-filter refusals, recording outputs, cache invalidation and planted wrong
 thresholds. NOT TESTED: parity against the live Grafana scheduler and datasource
 in this part PR, notification/persistence behavior, and VictoriaLogs runtime
-timeout/concurrency limits. TraceQL alerts use the `DatasourceEngine` hook in a
-later part. The Grafana AGPL licence ships in `share/licenses/obs/grafana/LICENSE`.
+timeout/concurrency limits. TraceQL rules: see the next section. The Grafana AGPL licence ships in `share/licenses/obs/grafana/LICENSE`.
+
+### TraceQL alert rules
+
+A rule query on the Tempo datasource (`model.datasource.type: tempo`) runs in the
+embedded Tempo 3.1.1 engine through the same `DatasourceEngine` hook, expression port
+and state machine as metric and log rules (reduce, threshold, math, `for`,
+`keepFiringFor`, NoData/Error, missing series).
+
+```yaml
+- refId: A
+  queryType: traceql
+  datasourceUid: traces
+  relativeTimeRange: { from: 60, to: 0 }
+  model:
+    datasource: { type: tempo, uid: traces }
+    queryType: traceql
+    metricsQueryType: instant # the documented alert mode; anything else is a range query
+    query: '{ resource.service.name = "checkout" && status = error } | rate() by (span.outcome)'
+- refId: B
+  datasourceUid: __expr__
+  model: { type: reduce, expression: A, reducer: last }
+```
+
+What Grafana 13.3.0 does with that query, and obs does the same in-process. FROM SOURCE:
+the Tempo datasource left Grafana core (commit `61ec98144cd4`) and Grafana 13.3.0
+preinstalls it (`pkg/setting/setting_plugins.go:43`); the paired plugin release is
+[grafana-tempo-datasource v13.3.0](https://github.com/grafana/grafana-tempo-datasource/tree/v13.3.0)
+(commit `7bbc067f`). The port is `internal/tempoalert` (provenance in its `PROVENANCE.md`).
+
+- **Routing** (`pkg/tempo/tempo.go:106-127`, `traceql_query.go:38-46,221-224`):
+  `queryType` must be `traceql` or `traceqlSearch` (the model's value wins, as ngalert's
+  `AlertQuery.PreSave` copies it, `alert_query.go:297-315`); the TraceQL is read from
+  `model.query` (not `expr`); it must match the plugin's metrics pattern (`| rate(`,
+  `count_over_time(`, `avg/sum/min/max_over_time(`, `quantile_over_time(`,
+  `histogram_over_time(`, `compare(`), else the plugin runs a trace search.
+- **Request** (`traceql_query.go:143-219`): `metricsQueryType: instant` calls
+  `/api/metrics/query`, anything else `/api/metrics/query_range`, with `start`/`end` =
+  the rule's `[now-from, now-to]` in whole seconds and the model's `step` (unset: Tempo's
+  `DefaultQueryRangeStep`, `pkg/api/http.go:685-689`). Tempo's frontend turns an instant
+  query into one range bucket of `end-start` and keeps each series' first sample
+  (`modules/frontend/metrics_query_handler.go:139-151,250-267`); an empty window is
+  Tempo's `end must be greater than start` error (an Error input).
+- **Frames** (`pkg/tempo/traceql/metrics.go:16-142`): every Tempo series is a
+  time + value frame, so Grafana's expression engine reads it as a **series**
+  (`pkg/expr/converter.go:69-118`): reduce it before a threshold, as for range metric
+  queries. Series labels are Tempo's attribute names (`span.outcome`,
+  `resource.service.name`, `p` for quantiles); a string value keeps its double quotes
+  (`span.outcome="\"error\""`), numbers and booleans do not. No series is NoData with
+  `{datasource_uid, ref_id}`.
+  An instant frame's time is the plugin's `time.Now()`; obs uses the evaluation
+  minute. Only math joining two un-reduced instant series could see the difference
+  (NOT TESTED; reduce first, as above).
+- **Refused statically** (`obs query --static` and `obs alerts`, rule ids in brackets):
+  `traceId` and other query types (`tempo-alert-query-type`), an empty `model.query`
+  (`tempo-alert-query`), a search (`tempo-alert-search`), a bad `step`
+  (`tempo-alert-step`), a Jaeger or Zipkin datasource (`tempo-alert-datasource`), and a
+  **range query that would carry exemplars** (`tempo-alert-range-exemplars`): Tempo 3.1.1
+  adds up to 100 exemplars to a range answer by default
+  (`metrics_query_range_handler.go:235-255`), the plugin turns them into extra frames with
+  a `traceId` column (`traceql/exemplars.go:11-38`), and Grafana refuses a frame that is
+  not a wide series (`converter.go:79-90`), so the rule would be in Error in Grafana. Use
+  `metricsQueryType: instant`, or end the query with `with (exemplars=false)`. The TraceQL
+  is parsed by Tempo and every span/resource attribute goes through the contract's span
+  attribute check (`traceql-attribute`), like a dashboard query.
+- Grafana 13.3.0 runs Tempo alert rules only with the experimental `tempoAlerting`
+  feature toggle on (`pkg/services/featuremgmt/registry.go:1708-1714`,
+  `pluginsintegration/pipeline/pipeline.go:46-50`); obs evaluates them as if it were on.
+
+Seed and self-checks: rules that read traces keep every trace definition and its source
+metric (pruning drops traces only when no rule reads them or log trace IDs). The seed
+spans are indexed once for all runs; each series' spans share one attribute map. An
+incident only re-evaluates trace rules when it changes a series that is a trace source,
+so `OBS_VERIFY_SKIP=1` compares the reuse of the others. `OBS_VERIFY_PRUNE=1` compares
+every Tempo answer per minute (the raw query input) between the pruned and the full run.
+`OBS_VERIFY_FAST=1` prints a note and compares nothing for trace rules: they always take
+the full Grafana path (the light path reads numbers; Tempo answers with series).
+
+MEASURED: `tests/alerts.sh` (an instant error-rate rule and an exemplar-free range p90
+rule fire inside the incident window and stay quiet on the baseline; planted: a wrong
+threshold names rule, file, window and value; a rule firing on the baseline; an
+undeclared span attribute; a range query with exemplars), `tests/alerts-verify-prune.sh`
+(planted span durations make the trace inputs differ), Go tests in `internal/tempoalert`,
+`internal/engines/tempo` (`alertapi_test.go`), `internal/alerts` (`traces_test.go`),
+`internal/check`, `internal/seed`; speed in the table below. FROM SOURCE: everything in
+the list above. NOT TESTED: trace alert results against real Grafana and Tempo (the
+parity job has no trace rule yet; adding one is cheap: start the parity Grafana with
+`GF_FEATURE_TOGGLES_ENABLE=tempoAlerting`, provision a Tempo datasource, push the alert
+seed's traces with the parity Tempo test's `loadTempo`, and add one Tempo rule to
+`TestParityAlertEval`, which already compares per-minute states and values with
+`/api/v1/eval`); Tempo's server-side limits (`query_end_cutoff`, `max_duration`,
+`max_intervals`, `max_response_series`; obs's time line ends in the past, so the end
+cutoff never applies); exemplar frames themselves (refused, never produced); `obs query
+--live` for trace alert queries (unchanged: not run).
 
 ### Existing query-check limits
 
@@ -842,6 +940,20 @@ cell, median time, largest peak; peak memory in GiB (`ru_maxrss` KiB / 1048576).
 | 20 | 1.25 s | 5.91 s | 0.55 / 0.85 GiB |
 | 200 | 7.17 s | 42.92 s | 0.63 / 1.97 GiB |
 | 1,000 | 9.24 s | 53.46 s | 0.69 / 1.97 GiB |
+| 1 TraceQL (`t1`) | 0.66 s | 3.54 s | 0.37 / 1.71 GiB |
+| 20 TraceQL (`t20`) | 6.09 s | 42.38 s | 1.08 / 2.02 GiB |
+
+The TraceQL rows (MEASURED 17 Nov 2026, 11:17-11:20 UTC, same box and method, load
+average 12-13, `go test -tags speedbench -run TestTraceSpeedTable`) use the trace-only sets
+`t1`, `t20` below. Memory holds the budget (1.2 GB at 4 h, 6 GB at 24 h); time does not at
+20 rules (5x and 7x the 20-alert metric+log row). CPU profile of `t20` at 4 h on 2 CPUs:
+71 % is Tempo evaluating spans (`tqSetIter.Next`, `BinaryOperation.execute`): every minute
+each rule re-reads its whole window (5 to 10 minutes), so each span is evaluated 5 to 10
+times per rule; TraceQL parsing is 4 %. NOT TESTED proposal: evaluate each rule once per
+run on per-minute buckets and sum them per window (exact for `rate`, `count_over_time`,
+`sum`/`min`/`max_over_time`; quantiles would need the bucket histograms), with a verify
+mode like `OBS_VERIFY_FAST`. Before sharing span attribute maps (same day), one TraceQL rule
+on the 24 h seed took 123 s and 6.8 GB (garbage collection under the 2 GiB soft limit).
 
 Before the fixes (same runner, 1 run per cell, `obs-alerts` evaluator at aa2085a; the
 runner then labelled the same KiB / 1048576 numbers "GB"):
@@ -959,6 +1071,13 @@ verify mode (both paths, compared), like `OBS_VERIFY_FAST`.
   n20 = 80 (19 positive, 61 negative); n200 = 800 (190 / 610); n1,000 = 4,000 (950 / 3,050).
   The expect lists are what the evaluator produced on the 4 h and 24 h seeds, so they are a
   regression baseline, not an independent oracle.
+- `t1`, `t20`: TraceQL-only sets (`speedfixtures/traces.go`): 20 distinct Tempo rules (17
+  instant, 3 exemplar-free range, rate / count / quantile / avg / max / sum, `by (...)`, a
+  structural `>` query, a two-query ratio) on the same seed plus two trace definitions (one
+  trace per charge with a provider client span, one per HTTP request; 4 h: about 86,000
+  traces, 130,000 spans per run; 24 h: six times that) and the same three incidents. Coverage: t1 = 4 (1 positive, 3 negative);
+  t20 = 80 (17 positive, 63 negative). Each rule's expectation was written from the seed's
+  rates first and then confirmed by the evaluator on both seeds (no expectation was changed).
 
 ### Fixture porting rules (prototype LogQL to LogsQL, by hand)
 
@@ -1248,8 +1367,9 @@ TraceQL is parsed and validated by **Tempo 3.1.1**, commit
 non-intrinsic attribute, including those in `select` and metrics grouping. A
 `check.SpanAttributeNames` interface connects the contract's name list; a nil
 adapter leaves name enforcement off. Live checks reject missing attributes even
-in `select(...)` or `by(...)` when the query otherwise returns rows. Trace alerts
-print a note and await the alerts integration.
+in `select(...)` or `by(...)` when the query otherwise returns rows. Trace alert
+queries get the same parse and name checks plus the Tempo alert checks of
+[TraceQL alert rules](#traceql-alert-rules).
 
 **FROM SOURCE:** Grafana v13.3.0's
 [TraceQL editor documentation](https://github.com/grafana/grafana/blob/v13.3.0/docs/sources/shared/datasources/tempo-editor-traceql.md#query-by-traceid)

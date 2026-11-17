@@ -15,6 +15,7 @@ import (
 
 	"github.com/AtomiCloud/obs/internal/files"
 	"github.com/AtomiCloud/obs/internal/seed"
+	"github.com/AtomiCloud/obs/internal/tempoalert"
 	"github.com/VictoriaMetrics/metricsql"
 )
 
@@ -44,6 +45,8 @@ type Query struct {
 	Datasource, UID, Expr, Range string
 	OriginalExpr                 string        // before logevent assumptions are stripped (frontend limits)
 	From, To                     time.Duration // Grafana relativeTimeRange, distinct from metrics range queries
+	// Tempo is the Tempo datasource model of a traces query (query type, instant or range, step).
+	Tempo *tempoalert.Model `json:",omitempty"`
 }
 
 type Project struct {
@@ -130,15 +133,25 @@ func loadProject(dir, seedPath string) (*Project, error) {
 				a.Expressions[q.RefID] = d
 				continue
 			}
-			if kind == files.Loki || kind == files.Traces {
-				return nil, fmt.Errorf("%s rule %s query %s: datasource %s is unavailable in obs alerts (logs use LogsQL; Tempo can plug into DatasourceEngine in a later release)", a.File, id, q.RefID, kind)
+			if kind == files.Loki || (kind == files.Traces && typ != "" && !strings.EqualFold(typ, "tempo")) {
+				return nil, fmt.Errorf("%s rule %s query %s: datasource %s (type %q) is unavailable in obs alerts (logs use LogsQL on VictoriaLogs; traces use TraceQL on Tempo)", a.File, id, q.RefID, kind, typ)
+			}
+			if q.RelativeTimeRange.From < 0 || q.RelativeTimeRange.To < 0 || q.RelativeTimeRange.To > q.RelativeTimeRange.From {
+				return nil, fmt.Errorf("%s rule %s query %s: invalid relativeTimeRange %d..%d", a.File, id, q.RefID, q.RelativeTimeRange.From, q.RelativeTimeRange.To)
+			}
+			if kind == files.Traces {
+				// The Tempo datasource reads model.query (not expr); routing refusals
+				// (search, trace ID, range with exemplars) are reported by the static check.
+				m := tempoalert.FromModel(q.Model, q.QueryType)
+				query := Query{Datasource: kind.String(), UID: uid, Expr: m.Query, OriginalExpr: m.Query, Tempo: &m,
+					From: time.Duration(q.RelativeTimeRange.From) * time.Second, To: time.Duration(q.RelativeTimeRange.To) * time.Second}
+				p.Gap = max(p.Gap, queryLookback(query, mustDur(orDefault(a.Interval, "1m"))))
+				a.Queries[q.RefID] = query
+				continue
 			}
 			expr, _ := q.Model["expr"].(string)
 			if expr == "" {
 				return nil, fmt.Errorf("%s rule %s query %s: model.expr is empty", a.File, id, q.RefID)
-			}
-			if q.RelativeTimeRange.From < 0 || q.RelativeTimeRange.To < 0 || q.RelativeTimeRange.To > q.RelativeTimeRange.From {
-				return nil, fmt.Errorf("%s rule %s query %s: invalid relativeTimeRange %d..%d", a.File, id, q.RefID, q.RelativeTimeRange.From, q.RelativeTimeRange.To)
 			}
 			query := Query{Datasource: kind.String(), UID: uid, Expr: expr, OriginalExpr: expr, From: time.Duration(q.RelativeTimeRange.From) * time.Second, To: time.Duration(q.RelativeTimeRange.To) * time.Second}
 			instant, _ := q.Model["instant"].(bool)
