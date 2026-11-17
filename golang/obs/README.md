@@ -517,10 +517,15 @@ inherits an explicit baseline root when the flag is omitted and refuses a differ
 root (exit 2). A single unanchored source file cannot establish the checkout boundary: obs prints
 a note naming the inferred path and suggesting `--source-root`, without failing the run.
 Declaration line and column are retained only to disambiguate repeated name+file declarations;
-matching uses the nearest available location once per declaration. Chrome's zero-based
+matching sorts each group by line and column and pairs the first declaration with the first,
+second with second, and so on. A unique pair matches regardless of its location. Different
+declaration counts are an error naming the function/file and both counts, suggesting a rename
+or baseline `--update`; no hot row falls back to a note. Cold declarations remain below the
+3% row cutoff, but their count and a hot row's source ordinal are retained for disambiguation.
+Chrome's zero-based
 `lineNumber` and `columnNumber` become one-based; speedscope `line` and `col` are kept, and pprof
 uses `Function.StartLine` rather than instruction lines. This includes separate same-line functions
-in a minified bundle. Baseline format is version 3: regenerate earlier preview baselines from
+in a minified bundle. Baseline format is version 4: regenerate earlier preview baselines from
 three profiles with `--own` and `--update`. **Closures** (never rows): Go `.funcN`,
 `.gowrap`, `-fm`; JS `(anonymous)` and empty names; Dart `<anonymous closure>`; .NET `<>c__`, `>b__`,
 `lambda_method`.

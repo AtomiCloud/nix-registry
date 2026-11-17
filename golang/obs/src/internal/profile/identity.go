@@ -112,56 +112,78 @@ func relativeSource(file, root string) string {
 	return file
 }
 
-// matchFunctions matches name+normalized file. Lines only disambiguate repeated
-// declarations: allocate the nearest available pair first, once per declaration.
-func matchFunctions(base []Row, now []FuncRow) map[int]int {
-	type pair struct {
-		b, n           int
-		distance       uint64
-		columnDistance uint64
+type functionKey struct{ name, file string }
+
+func functionKeyOf(name, file string) functionKey { return functionKey{name, sourceFile(file)} }
+
+func groupedFunctions(functions []FuncRow) map[functionKey][]int {
+	groups := map[functionKey][]int{}
+	for i, f := range functions {
+		k := functionKeyOf(f.Name, f.File)
+		groups[k] = append(groups[k], i)
 	}
-	var pairs []pair
-	for bi, b := range base {
-		for ni, n := range now {
-			if b.Name != n.Name || sourceFile(b.File) != sourceFile(n.File) {
-				continue
+	for _, indices := range groups {
+		sort.SliceStable(indices, func(i, j int) bool {
+			a, b := functions[indices[i]], functions[indices[j]]
+			if a.Line != b.Line {
+				return a.Line < b.Line
 			}
-			d := b.Line - n.Line
-			if d < 0 {
-				d = -d
-			}
-			cd := b.Column - n.Column
-			if cd < 0 {
-				cd = -cd
-			}
-			pairs = append(pairs, pair{bi, ni, uint64(d), uint64(cd)})
-		}
+			return a.Column < b.Column
+		})
 	}
-	sort.SliceStable(pairs, func(i, j int) bool {
-		a, b := pairs[i], pairs[j]
-		if a.distance != b.distance {
-			return a.distance < b.distance
+	return groups
+}
+
+func ambiguousDuplicate(k functionKey, baseline, now int) string {
+	return fmt.Sprintf("ambiguous duplicate %s in %s: %d in baseline, %d now; rename or baseline --update", k.name, k.file, baseline, now)
+}
+
+// matchFunctions never guesses from distance. Equal-size declaration groups
+// match in source order; count changes make every baseline row in that group an
+// error. Cold declarations are counted but do not become comparison rows.
+func matchFunctions(base []Row, now []FuncRow) (map[int]int, map[int]string, map[int]bool) {
+	baseGroups := map[functionKey][]int{}
+	for i, b := range base {
+		k := functionKeyOf(b.Name, b.File)
+		baseGroups[k] = append(baseGroups[k], i)
+	}
+	nowGroups := groupedFunctions(now)
+	matched, ambiguous, blocked := map[int]int{}, map[int]string{}, map[int]bool{}
+	for k, indices := range baseGroups {
+		sort.SliceStable(indices, func(i, j int) bool {
+			a, b := base[indices[i]], base[indices[j]]
+			if a.Line != b.Line {
+				return a.Line < b.Line
+			}
+			return a.Column < b.Column
+		})
+		expected := len(indices)
+		for _, bi := range indices {
+			if base[bi].Declarations > 0 {
+				expected = base[bi].Declarations
+				break
+			}
 		}
-		if a.columnDistance != b.columnDistance {
-			return a.columnDistance < b.columnDistance
-		}
-		if base[a.b].Line != base[b.b].Line {
-			return base[a.b].Line < base[b.b].Line
-		}
-		if now[a.n].Line != now[b.n].Line {
-			return now[a.n].Line < now[b.n].Line
-		}
-		if a.b != b.b {
-			return a.b < b.b
-		}
-		return a.n < b.n
-	})
-	matched, used := map[int]int{}, map[int]bool{}
-	for _, p := range pairs {
-		if _, ok := matched[p.b]; ok || used[p.n] {
+		current := nowGroups[k]
+		if expected != len(current) {
+			for _, bi := range indices {
+				ambiguous[bi] = ambiguousDuplicate(k, expected, len(current))
+			}
+			for _, ni := range current {
+				blocked[ni] = true
+			}
 			continue
 		}
-		matched[p.b], used[p.n] = p.n, true
+		for order, bi := range indices {
+			if base[bi].Declarations > 0 {
+				order = base[bi].SourceOrder
+			}
+			if order < 0 || order >= len(current) {
+				ambiguous[bi] = "invalid declaration order; baseline --update"
+				continue
+			}
+			matched[bi] = current[order]
+		}
 	}
-	return matched
+	return matched, ambiguous, blocked
 }

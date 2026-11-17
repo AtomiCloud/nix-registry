@@ -55,8 +55,7 @@ func Compare(b *Baseline, now *Summary, l *Limits) (rows []Result, extra []strin
 			functions = append(functions, f)
 		}
 	}
-	matched := matchFunctions(b.Functions, functions)
-	used := map[int]bool{}
+	matched, ambiguous, used := matchFunctions(b.Functions, functions)
 	bySpan := map[string]SpanRow{}
 	for _, s := range now.Spans {
 		bySpan[s.Name] = s
@@ -91,6 +90,9 @@ func Compare(b *Baseline, now *Summary, l *Limits) (rows []Result, extra []strin
 			r.Limit = tol
 			r.Faster = false
 			r.Note = "baseline function has no matching samples; inspect the profile and regenerate the baseline with --update if intentional"
+			if reason := ambiguous[bi]; reason != "" {
+				r.Note = reason
+			}
 		} else {
 			r.Limit = Limit(tol, float64(br.N), float64(f.OwnN))
 			r.Slower, r.Faster = r.Change > r.Limit, r.Change < -r.Limit

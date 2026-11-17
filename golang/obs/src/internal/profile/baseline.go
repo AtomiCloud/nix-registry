@@ -11,19 +11,21 @@ import (
 )
 
 // BaselineVersion is the file format version.
-const BaselineVersion = 3
+const BaselineVersion = 4
 
 // MinFunctionShare is the smallest share of the baseline's CPU a function needs to be a row.
 const MinFunctionShare = 0.03
 
 // Row of a baseline: a function or a span with its median share and median sample count.
 type Row struct {
-	Name   string  `json:"name"`
-	File   string  `json:"file,omitempty"`
-	Line   int64   `json:"line,omitempty"`
-	Column int64   `json:"column,omitempty"`
-	Share  float64 `json:"share"`
-	N      int64   `json:"n"`
+	Name         string  `json:"name"`
+	File         string  `json:"file,omitempty"`
+	Line         int64   `json:"line,omitempty"`
+	Column       int64   `json:"column,omitempty"`
+	Declarations int     `json:"declarations,omitempty"` // full group count, including cold declarations
+	SourceOrder  int     `json:"source_order,omitempty"` // ordinal in the full group, sorted by line/column
+	Share        float64 `json:"share"`
+	N            int64   `json:"n"`
 }
 
 // Baseline is e2e/profile-baseline/<service>.<scenario>.json: median of 3 runs, a few KB,
@@ -101,9 +103,10 @@ func BuildBaseline(service, scenario, profiler string, own []string, runs []*Sum
 	if c := median(cpu); c > 0 && cpu[0] > 0 && cpu[1] > 0 && cpu[2] > 0 {
 		b.CPUPerRequestNs = math.Round(c)
 	}
-	// Align declarations across runs; line shifts do not manufacture new functions.
-	var declarations []Row
-	var ownRuns [][]FuncRow
+	// Align equal-size groups in source order across the three runs. A count
+	// change among duplicates cannot be assigned a trustworthy median.
+	declarations := map[functionKey][]FuncRow{}
+	var ownRuns []map[functionKey][]FuncRow
 	for _, r := range runs {
 		var functions []FuncRow
 		for _, f := range r.Functions {
@@ -111,29 +114,16 @@ func BuildBaseline(service, scenario, profiler string, own []string, runs []*Sum
 				functions = append(functions, f)
 			}
 		}
-		matched := matchFunctions(declarations, functions)
-		used := map[int]bool{}
-		for _, ni := range matched {
-			used[ni] = true
-		}
-		for ni, f := range functions {
-			if !used[ni] {
-				declarations = append(declarations, Row{Name: f.Name, File: f.File, Line: f.Line, Column: f.Column})
+		groups := map[functionKey][]FuncRow{}
+		for k, indices := range groupedFunctions(functions) {
+			for _, i := range indices {
+				groups[k] = append(groups[k], functions[i])
+			}
+			if _, ok := declarations[k]; !ok {
+				declarations[k] = groups[k]
 			}
 		}
-		ownRuns = append(ownRuns, functions)
-	}
-	shares, counts := make([][]float64, len(declarations)), make([][]float64, len(declarations))
-	for _, functions := range ownRuns {
-		matched := matchFunctions(declarations, functions)
-		for bi := range declarations {
-			var share, count float64
-			if ni, ok := matched[bi]; ok {
-				share, count = functions[ni].OwnShare, float64(functions[ni].OwnN)
-			}
-			shares[bi] = append(shares[bi], share)
-			counts[bi] = append(counts[bi], count)
-		}
+		ownRuns = append(ownRuns, groups)
 	}
 	sshare := map[string][]float64{}
 	sn := map[string][]float64{}
@@ -149,10 +139,31 @@ func BuildBaseline(service, scenario, profiler string, own []string, runs []*Sum
 		}
 		return xs
 	}
-	for i, f := range declarations {
-		m := median(shares[i])
-		if m >= MinFunctionShare {
-			b.Functions = append(b.Functions, Row{Name: f.Name, File: f.File, Line: f.Line, Column: f.Column, Share: round6(m), N: int64(median(counts[i]) + 0.5)})
+	for k, group := range declarations {
+		for _, r := range ownRuns {
+			if n := len(r[k]); n != len(group) && (n > 1 || len(group) > 1) {
+				return nil, fmt.Errorf("%s across the baseline runs", ambiguousDuplicate(k, len(group), n))
+			}
+		}
+		for order, f := range group {
+			var shares, counts []float64
+			for _, r := range ownRuns {
+				var share, count float64
+				if len(r[k]) == len(group) {
+					share, count = r[k][order].OwnShare, float64(r[k][order].OwnN)
+				}
+				shares = append(shares, share)
+				counts = append(counts, count)
+			}
+			m := median(shares)
+			if m >= MinFunctionShare {
+				row := Row{Name: f.Name, File: f.File, Line: f.Line, Column: f.Column, Share: round6(m), N: int64(median(counts) + .5)}
+				if len(group) > 1 {
+					row.Declarations = len(group)
+					row.SourceOrder = order
+				}
+				b.Functions = append(b.Functions, row)
+			}
 		}
 	}
 	for name, xs := range sshare {

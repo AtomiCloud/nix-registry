@@ -53,13 +53,13 @@ func TestMissingHotBaselineFunctionIsAnError(t *testing.T) {
 	}
 }
 
-func TestDuplicateDeclarationsMatchNearestLineOnce(t *testing.T) {
+func TestDuplicateDeclarationsMatchSourceOrderOnce(t *testing.T) {
 	b := &Baseline{Functions: []Row{{Name: "render", File: "a.js", Line: 10, Share: .2, N: 2000}, {Name: "render", File: "a.js", Line: 50, Share: .3, N: 3000}}}
 	now := &Summary{Functions: []FuncRow{{Name: "render", File: "a.js", Line: 53, Own: true, OwnShare: .3, OwnN: 3000}, {Name: "render", File: "a.js", Line: 13, Own: true, OwnShare: .2, OwnN: 2000}}}
 	rows, _ := Compare(b, now, nil)
 	for _, r := range rows {
 		if r.Missing || r.Change != 0 {
-			t.Fatalf("nearest-line one-to-one match failed: %+v", r)
+			t.Fatalf("source-order one-to-one match failed: %+v", r)
 		}
 	}
 }
