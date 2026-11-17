@@ -56,7 +56,7 @@ func obs(args ...string) (int, string) {
 }
 
 func TestVLSettingsCLI(t *testing.T) {
-	dir := project(t, map[string]string{"logs/warning.yaml": alert("primordial-logs", `_time:5m "durian.cloud/event":="checkout.charge.failed" | stats count() n`, "stats")})
+	dir := project(t, map[string]string{"logs/warning.yaml": alert("fixture-logs", `_time:5m "durian.cloud/event":="checkout.charge.failed" | stats count() n`, "stats")})
 	if rc, out := obs("query", "--live", "--dir", dir); rc != 0 || strings.Count(out, "[vl-settings]") != 1 {
 		t.Fatalf("default note: rc=%d %s", rc, out)
 	}
@@ -86,7 +86,7 @@ spec:
       condition: B
       data:
         - refId: A
-          datasourceUid: primordial-logs
+          datasourceUid: fixture-logs
           relativeTimeRange: {from: 60, to: 0}
           model: {expr: '"durian.cloud/event":="checkout.charge.failed" | stats count() n', queryType: stats}
         - refId: B
@@ -124,8 +124,8 @@ spec:
 
 func TestEndToEnd(t *testing.T) {
 	good := project(t, map[string]string{
-		"a/critical.yaml": alert("primordial-metrics", `sum(rate(checkout_charges_total{outcome="error"}[5m])) > 1`, "instant"),
-		"b/warning.yaml":  alert("primordial-logs", `_time:5m {durian.cloud.service="checkout"} "durian.cloud/event":="checkout.charge.failed" | stats by (outcome) count() n`, "stats"),
+		"a/critical.yaml": alert("fixture-metrics", `sum(rate(checkout_charges_total{outcome="error"}[5m])) > 1`, "instant"),
+		"b/warning.yaml":  alert("fixture-logs", `_time:5m {durian.cloud.service="checkout"} "durian.cloud/event":="checkout.charge.failed" | stats by (outcome) count() n`, "stats"),
 	})
 	for _, mode := range []string{"--static", "--live"} {
 		if rc, out := obs("query", mode, "--dir", good); rc != 0 {
@@ -138,12 +138,12 @@ func TestEndToEnd(t *testing.T) {
 		alerts     map[string]string
 		want       []string
 	}{
-		{"syntax", "--static", map[string]string{"x/critical.yaml": alert("primordial-logs", `_time:5m {a="b" | stats count() c`, "stats")}, []string{"x/critical.yaml", "rule r1 query A", "[logsql-syntax]"}},
-		{"no stats", "--static", map[string]string{"x/critical.yaml": alert("primordial-logs", `_time:5m error`, "stats")}, []string{"[logsql-alert-needs-stats]"}},
+		{"syntax", "--static", map[string]string{"x/critical.yaml": alert("fixture-logs", `_time:5m {a="b" | stats count() c`, "stats")}, []string{"x/critical.yaml", "rule r1 query A", "[logsql-syntax]"}},
+		{"no stats", "--static", map[string]string{"x/critical.yaml": alert("fixture-logs", `_time:5m error`, "stats")}, []string{"[logsql-alert-needs-stats]"}},
 		{"loki", "--static", map[string]string{"x/critical.yaml": alert("loki", `{a="b"}`, "range")}, []string{"[loki-datasource]", `"loki"`}},
-		{"prom-only", "--static", map[string]string{"x/critical.yaml": alert("primordial-metrics", `double_exponential_smoothing(up[5m], 0.5, 0.5)`, "instant")}, []string{"[metricsql-unsupported-function]", `"double_exponential_smoothing"`}},
-		{"no rows", "--live", map[string]string{"x/critical.yaml": alert("primordial-metrics", `sum(rate(nope_total[5m]))`, "instant")}, []string{"[no-rows]", "metric nope_total"}},
-		{"drifted field", "--live", map[string]string{"x/critical.yaml": alert("primordial-logs", `_time:5m severity:ERROR | stats count() n`, "stats")}, []string{"[no-rows]", "log field severity"}},
+		{"prom-only", "--static", map[string]string{"x/critical.yaml": alert("fixture-metrics", `double_exponential_smoothing(up[5m], 0.5, 0.5)`, "instant")}, []string{"[metricsql-unsupported-function]", `"double_exponential_smoothing"`}},
+		{"no rows", "--live", map[string]string{"x/critical.yaml": alert("fixture-metrics", `sum(rate(nope_total[5m]))`, "instant")}, []string{"[no-rows]", "metric nope_total"}},
+		{"drifted field", "--live", map[string]string{"x/critical.yaml": alert("fixture-logs", `_time:5m severity:ERROR | stats count() n`, "stats")}, []string{"[no-rows]", "log field severity"}},
 	}
 	for _, c := range cases {
 		rc, out := obs("query", c.mode, "--dir", project(t, c.alerts))

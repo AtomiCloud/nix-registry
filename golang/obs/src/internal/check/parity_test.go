@@ -366,7 +366,7 @@ func TestParity(t *testing.T) {
 	type run struct{ name, dir, seed string }
 	runs := []run{
 		{"good", fx + "/good/observability", ""},
-		{"charlotte", fx + "/charlotte/observability", ""},
+		{"sample-app", fx + "/sample-app/observability", ""},
 	}
 	for _, n := range []string{"bad-no-rows", "bad-drifted-field", "bad-dashboard-label", "ok-rollup-no-window"} {
 		runs = append(runs, run{n, filepath.Join(fx, n, "observability"), fx + "/shared-seed.yaml"})

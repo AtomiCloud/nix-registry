@@ -107,7 +107,7 @@ func runLive(set *files.Set, o Options, ds *seed.Dataset, m metricsEngine, l log
 	lv.labelNames = labelNameSet(ds)
 	for i := range set.Queries {
 		q := &set.Queries[i]
-		if q.Problem != "" || (q.Kind != files.Metrics && q.Kind != files.Logs && q.Kind != files.Traces) {
+		if q.Problem != "" || (q.Kind != files.Metrics && q.Kind != files.Logs && q.Kind != files.Traces && !(q.IsAlert && q.Kind == files.Loki)) {
 			continue
 		}
 		r.Counts[q.Kind.String()]++
@@ -219,6 +219,10 @@ func (l *liveRun) alert(q *files.Query) {
 		if len(rs) == 0 || allZeroNoBy(rs) {
 			l.noRows(q, q.Expr, fmt.Sprintf("; ran as the datasource does, start=end-%s, end=%s", rng, l.end.Format(time.RFC3339)))
 		}
+	case files.Traces:
+		l.traceAlert(q) // livetrace.go
+	default:
+		l.r.add(Fail, q.File, q.Where, "live-unsupported-query", "datasource kind %s: obs cannot run this alert query live, so it was not run", q.Kind)
 	}
 }
 

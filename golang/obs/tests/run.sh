@@ -65,7 +65,7 @@ run query
 [ "$rc" -eq 2 ] && ok "query without --static/--live is a usage error" || bad "query without mode exit $rc"
 
 # ---- good fixtures: green ------------------------------------------------------------
-for f in good charlotte; do
+for f in good sample-app; do
   for mode in static live; do
     run query "--$mode" --dir "$fx/$f/observability" --base "$base"
     [ "$rc" -eq 0 ] && grep -q "obs query --$mode: ok:" "$work/out.txt" && ok "$f $mode exit 0" || bad "$f $mode exit $rc: $(cat "$work/out.txt")"
@@ -78,19 +78,19 @@ cp "$work/out.txt" "$work/live1.txt"
 run query --live --dir "$fx/good/observability" --base "$base" --names
 cmp -s "$work/live1.txt" "$work/out.txt" && ok "live output is identical on a second run" || bad "live output differs between runs"
 
-# Charlotte has no contract.yaml: the event rule is skipped with one note per log alert.
-run query --static --dir "$fx/charlotte/observability"
+# Sample-app has no contract.yaml: the event rule is skipped with one note per log alert.
+run query --static --dir "$fx/sample-app/observability"
 n=$(grep -c 'event rule skipped: no contract.yaml' "$work/out.txt" || true)
-[ "$n" -eq 1 ] && ok "charlotte: one 'event rule skipped' note for its one log alert" || bad "charlotte event notes: $n"
+[ "$n" -eq 1 ] && ok "sample-app: one 'event rule skipped' note for its one log alert" || bad "sample-app event notes: $n"
 # ... and the rule is switchable: forced on, the same alert (no event filter) fails.
-run query --static --dir "$fx/charlotte/observability" --event-rule on
+run query --static --dir "$fx/sample-app/observability" --event-rule on
 [ "$rc" -eq 1 ] && grep -q '\[logsql-alert-needs-event\]' "$work/out.txt" && ok "--event-rule on fails a log alert with no event filter" || bad "--event-rule on: rc=$rc"
 run query --static --dir "$fx/bad-event-missing/observability" --event-rule off
 [ "$rc" -eq 0 ] && ok "--event-rule off passes the contract-present fixture" || bad "--event-rule off: rc=$rc"
 
-# The charlotte live run must really read the seed: the crash alert's rows come from the seeded panic line.
-run query --live --dir "$fx/charlotte/observability" --base "$base"
-grep -q "pod-crashloop.*threshold-removed" "$work/out.txt" && ok "charlotte: the threshold in the metrics alert is run without its comparison" || bad "threshold note missing"
+# The sample-app live run must really read the seed: the crash alert's rows come from the seeded panic line.
+run query --live --dir "$fx/sample-app/observability" --base "$base"
+grep -q "pod-crashloop.*threshold-removed" "$work/out.txt" && ok "sample-app: the threshold in the metrics alert is run without its comparison" || bad "threshold note missing"
 
 # ---- planted failures: each red, naming file + rule/panel + the bad token ------------
 for d in "$fx"/bad-* "$fx"/ok-*; do

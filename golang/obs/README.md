@@ -93,7 +93,7 @@ the file, the rule or panel, the rule id in `[brackets]` and the offending name 
 `--dir` (default `observability`) holds:
 
 - **`alerts/<slug>/<severity>.yaml`**: one `GrafanaAlertRuleGroup` CR per file (the golden
-  shape in the Primordial observability standard, `alerts.md`). obs reads each rule's `data[]`:
+  shape in the platform's observability standard, `alerts.md`). obs reads each rule's `data[]`:
   `datasourceUid`, `relativeTimeRange.from`, `model.expr`, `model.queryType`, and
   `model.datasource.type` when present. Grafana expression nodes (`datasourceUid: __expr__`)
   are not queries and are skipped. A flat authoring file (`title/datasource/expr`) is refused
@@ -452,7 +452,7 @@ VictoriaMetrics and VictoriaLogs. No check depends on it; it is for looking at t
 - **Ports** are bound to `127.0.0.1` only. `--port-base 18300` moves Grafana to 18300 and the others to
   18301 to 18304 when the defaults are taken.
 - **Data.** The seed's time line ends now, so a "last hours" view has data. Grafana is open to an anonymous
-  viewer (admin/admin for the API). The datasource uids are the ones the dashboards name (`primordial-metrics`
+  viewer (admin/admin for the API). The datasource uids are the ones the dashboards name (`fixture-metrics`
   and so on); a kind no dashboard names gets `obs-metrics`, `obs-logs`, `obs-traces`, `obs-profiles`.
   A second `up` reuses the running stack, loads the dashboards again and keeps the seed (`--reseed` loads it
   again). Traces are not seeded yet: the seed file's `traces` are read by a later command.
@@ -824,8 +824,8 @@ not touched. obs builds with `golang/obs/go.nix`: Go 1.27.4 from the narrow `nix
   (with planted drift), query rules, file readers, seed shape, variable filling and `obs` end to end on
   temp projects.
 - `tests/run.sh` runs the built binary in the sandbox (`nix flake check` runs it as `obs-tests`, `nix build .#obs-tests`):
-  - green: `tests/fixtures/good` (a checkout service, with `contract.yaml`) and `tests/fixtures/charlotte`
-    (Primordial's `crash-logs` and `pod-crashloop` alerts, copied and written as CRs, and a dashboard);
+  - green: `tests/fixtures/good` (a checkout service, with `contract.yaml`) and `tests/fixtures/sample-app`
+    (a made-up platform's `crash-logs` and `pod-crashloop` alerts, copied and written as CRs, and a dashboard);
   - red, each naming file + rule or panel + the bad token: `bad-logsql-syntax`, `bad-metricsql-syntax`,
     `bad-logsql-no-stats`, `bad-prom-only-function`, `bad-loki-datasource`, `bad-flat-alert`,
     `bad-event-missing`, `bad-no-rows` (a metric the seed does not hold), `bad-drifted-field`
@@ -928,11 +928,22 @@ in the message) that production would not. Lower the worker count to avoid it, f
 lets VictoriaLogs use its own parallelism for that query. Do not raise the limits in
 `--vl-settings` to hide a timing refusal: obs would then accept a query production refuses.
 
-MEASURED: regression tests cover state transitions, numeric light/full parity,
+MEASURED offline: regression tests cover state transitions, numeric light/full parity,
 event-filter refusals, recording outputs, cache invalidation and planted wrong
-thresholds. NOT TESTED: parity against the live Grafana scheduler and datasource
-in this release, notification/persistence behavior, and VictoriaLogs runtime
-timeout/concurrency limits. TraceQL rules: see the next section. The Grafana AGPL licence ships in `share/licenses/obs/grafana/LICENSE`.
+thresholds.
+
+MEASURED against real Grafana 13.3.0 and the real stores in the parity job (the green run
+https://github.com/AtomiCloud/nix-registry/actions/runs/44102413229, `TestParityAlertEval`, `TestParityAlertHistory`):
+27 per-minute alert condition states and values of metric and LogsQL rules equal Grafana's
+`/api/v1/eval`; 4 live Grafana scheduler transitions (including pending and
+`keep_firing_for`) equal obs; 10 live Grafana recording-rule points equal obs at 1e-11
+relative. `TestParityGrafanaLogs` and `TestParityHistoricMetrics` passed in the same run
+(LogsQL and MetricsQL alert minutes through Grafana's datasource).
+
+NOT TESTED: parity of trace alert rules against real Grafana and Tempo (the parity job has no
+trace rule), notification and persistence behaviour, how the Grafana UI interpolates a
+query exactly, and VictoriaLogs runtime timeout and concurrency limits on other hardware.
+TraceQL rules: see the next section. The Grafana AGPL licence ships in `share/licenses/obs/grafana/LICENSE`.
 
 ### TraceQL alert rules
 
@@ -1053,15 +1064,23 @@ validation, alignment and `--tempo-config` parsing), `internal/alerts` (`traces_
 the `(t-60s, t]` bucket, the run gap covers two 30m steps, whole-step reuse and cache keys),
 `internal/check`, `internal/seed`; speed in the table below. FROM SOURCE: everything in
 the list above. NOT TESTED: trace alert results against real Grafana and Tempo (the
-parity job has no trace rule yet; adding one is cheap: start the parity Grafana with
+parity job, run https://github.com/AtomiCloud/nix-registry/actions/runs/44102413229, has no trace rule yet; adding one is cheap: start the parity Grafana with
 `GF_FEATURE_TOGGLES_ENABLE=tempoAlerting`, provision a Tempo datasource, push the alert
 seed's traces with the parity Tempo test's `loadTempo`, and add one Tempo rule to
 `TestParityAlertEval`, which already compares per-minute states and values with
 `/api/v1/eval`); Tempo's `max_response_series` and per-tenant `max_metrics_duration`
 overrides (not modelled); whether provisioned Tempo rules evaluate without the
 `tempoAlerting` toggle; a Helm chart's values file for `--tempo-config` (obs reads the
-rendered Tempo config only); exemplar frames themselves (refused, never produced); `obs query
---live` for trace alert queries (unchanged: not run).
+rendered Tempo config only); exemplar frames themselves (refused, never produced).
+MEASURED: `obs query --live` runs every Tempo alert query, as the alert evaluator sends it
+(instant or range, whole seconds, the end cutoff, against the end of the seed's time line):
+`internal/check/livetrace_test.go` (a `{} | rate()` instant rule, an exemplar-free range
+rule and a filtered rule on seeded spans stay green; planted: a filter that matches no span,
+a seed with no span, a `by()` on an attribute the seed lacks, a window inside the end cutoff,
+a search instead of a metrics query, TraceQL that does not parse; each fails naming file, rule
+and query) and `tests/links.sh` (a Tempo alert in the `links` fixture; planted: no-rows and
+`span.drifted`). A query kind obs cannot run live (a Jaeger or Zipkin trace alert, a Loki
+alert) is a FAIL (`live-unsupported-query`), never counted and skipped.
 
 ## Nightly parity
 
@@ -1116,6 +1135,9 @@ TraceQL searches, two range-metric queries and six link checks), and M5 `0257d0b
 and two span CPU shares). These are MEASURED local results. Alerts and TraceQL
 are integrated in this branch, and so is `obs profile`: the parity workflow runs the profile step
 (span to profile compare against Pyroscope) because the command exists.
+The same comparisons passed in CI on the integration branch: every step of the parity workflow was green in
+https://github.com/AtomiCloud/nix-registry/actions/runs/44102413229 (the counts per test are in
+[obs alerts](#obs-alerts) and [obs links](#obs-links)).
 
 VictoriaLogs referee settings found on that run: a recent, disjoint time line per
 fixture; `-retentionPeriod=10y`; explicit insert `/internal/force_flush` before
@@ -1622,7 +1644,10 @@ non-intrinsic attribute, including those in `select` and metrics grouping. A
 adapter leaves name enforcement off. Live checks reject missing attributes even
 in `select(...)` or `by(...)` when the query otherwise returns rows. Trace alert
 queries get the same parse and name checks plus the Tempo alert checks of
-[TraceQL alert rules](#traceql-alert-rules).
+[TraceQL alert rules](#traceql-alert-rules), and `--live` runs them on the embedded Tempo
+(an instant or range metrics query over `[end-from, end-to]`, no-rows and run errors reported
+like a metric or log alert query). An alert query of a kind obs cannot run live fails with
+`live-unsupported-query`.
 
 **FROM SOURCE:** Grafana v13.3.0's
 [TraceQL editor documentation](https://github.com/grafana/grafana/blob/v13.3.0/docs/sources/shared/datasources/tempo-editor-traceql.md#query-by-traceid)
@@ -1697,7 +1722,11 @@ future alert evaluator. **MEASURED offline:** structural operators, typed
 comparisons, metrics counts/rates/quantiles, both dashboard query modes and all
 three links. `tests/links.sh` plants syntax, attribute, log-link, trace-link and
 profile-label failures; every failure names the file, query/route/series and bad
-attribute or value. Real-store parity remains **NOT TESTED** here.
+attribute or value. **MEASURED against real Tempo, VictoriaLogs and Pyroscope** in the parity job
+(green run https://github.com/AtomiCloud/nix-registry/actions/runs/44102413229): `TestParityTraceQL` (7 TraceQL searches and 2 range-metric queries across
+6 seeded traces equal real Tempo), `TestParityLinks` (the link queries equal real VictoriaLogs and
+Tempo: trace-to-logs 2, metric-to-traces 2, span-to-profile 2) and `TestParityProfiles`
+(12 function self/inclusive shares and 2 span CPU shares equal real Pyroscope).
 
 ## Not tested
 
@@ -1720,7 +1749,6 @@ source) where its section says so.
 - Variable filling for LogsQL panels against the Grafana VictoriaLogs datasource: it reuses the Prometheus macros, and this exact query and time range through a real Grafana/VictoriaLogs UI is not run (the parity job is the referee) ([obs query --live](#obs-query---live)).
 - Seeded log rows against a real VictoriaLogs fed through Alloy: the field names are FROM SOURCE.
 - Annotation queries are not checked.
-- Real-store parity of the TraceQL, links and profile-label checks ([obs links](#obs-links)).
 - Trace-ID routing: a trace ID typed in a TraceQL panel is routed by obs as the last core Tempo datasource did; parity with the separately shipped Tempo plugin is untested ([obs links](#obs-links)).
 
 **Generated code**
@@ -1731,9 +1759,9 @@ source) where its section says so.
 
 **Alerts**
 
-- Parity against the live Grafana scheduler and datasource, and notification and persistence behaviour ([obs alerts](#obs-alerts)).
+- Notification and persistence behaviour, and exact UI interpolation of a query ([obs alerts](#obs-alerts)). Parity of metric and LogsQL alert evaluations and of the scheduler's transitions against real Grafana is MEASURED, not listed here: parity run https://github.com/AtomiCloud/nix-registry/actions/runs/44102413229 (`TestParityAlertEval`, `TestParityAlertHistory`).
 - VictoriaLogs runtime timeout and concurrency equivalence on different hardware (this includes the timing refusal on a very slow runner described under `obs alerts`).
-- Trace alert results against real Grafana and Tempo: the parity job has no trace rule yet. Also not modelled or run: Tempo's `max_response_series` and per-tenant `max_metrics_duration` overrides; whether provisioned Tempo rules evaluate without the Grafana `tempoAlerting` toggle; math joining two un-reduced instant series (the frame time differs from obs's evaluation minute); a Helm chart's values file for `--tempo-config` (obs reads the rendered Tempo config only); `obs query --live` for trace alert queries (not run); exemplar frames themselves (refused by obs, never produced); the proposal to evaluate each trace rule once per run on per-minute buckets ([TraceQL alert rules](#traceql-alert-rules)).
+- Trace alert results against real Grafana and Tempo: the parity job (run https://github.com/AtomiCloud/nix-registry/actions/runs/44102413229) has no trace rule yet. Also not modelled or run: Tempo's `max_response_series` and per-tenant `max_metrics_duration` overrides; whether provisioned Tempo rules evaluate without the Grafana `tempoAlerting` toggle; math joining two un-reduced instant series (the frame time differs from obs's evaluation minute); a Helm chart's values file for `--tempo-config` (obs reads the rendered Tempo config only); exemplar frames themselves (refused by obs, never produced); the proposal to evaluate each trace rule once per run on per-minute buckets ([TraceQL alert rules](#traceql-alert-rules)).
 - The §11.1.1 speed table was measured on a shared, loaded box, not a quiet one; the cache-hit rows were not re-measured, and the "what would close the time gap" proposal is untried ([speed](#obs-alerts-speed-concept-1111-re-measured-with-victorialogs)).
 
 **Evidence and stores**

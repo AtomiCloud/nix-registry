@@ -1,20 +1,20 @@
-# Charlotte-shaped seed: the Primordial box platform. The stream fields are cluster and
+# Sample-app seed: a made-up platform. The stream fields are cluster and
 # service (this platform's own log stream labels), on top of the bounded where-from set.
 length: 2h
 random_seed: 7
 resource:
-  cluster: primordial
+  cluster: fixture-cluster
   platform: box
-  service: charlotte
+  service: sample-app
 stream_fields: [cluster, service]
 traffic: { requests: 2/s, shape: flat }
 metrics:
   kube_pod_container_status_restarts:
     type: counter
     series:
-      - { where: { namespace: charlotte, pod: charlotte-0 }, share: 0.02 }
-      - { where: { namespace: charlotte, pod: charlotte-1 }, share: 0.01 }
-  charlotte.requests:
+      - { where: { namespace: sample-app, pod: sample-app-0 }, share: 0.02 }
+      - { where: { namespace: sample-app, pod: sample-app-1 }, share: 0.01 }
+  sample_app.requests:
     type: counter
     series:
       - { where: { outcome: ok }, share: 0.9 }
@@ -23,8 +23,8 @@ logs:
   - event: platform.crash
     level: error
     line: 'panic: runtime error: invalid memory address or nil pointer dereference'
-    from: { metric: kube_pod_container_status_restarts, where: { pod: charlotte-0 } }
-  - event: charlotte.request.failed
+    from: { metric: kube_pod_container_status_restarts, where: { pod: sample-app-0 } }
+  - event: sample_app.request.failed
     level: error
     line: request failed
-    from: { metric: charlotte.requests, where: { outcome: error } }
+    from: { metric: sample_app.requests, where: { outcome: error } }
