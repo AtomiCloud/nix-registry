@@ -7,7 +7,7 @@
 stub="$work/sandbox-stub"
 mkdir -p "$stub"
 cat >"$stub/docker" <<'STUB'
-#!/usr/bin/env bash
+#!/bin/sh
 echo "$*" >>"$STUB_LOG"
 case "$1" in
 ps) printf '%s\n' obs-sandbox-demo-vm obs-sandbox-demo-grafana reels-worker ;;
@@ -40,7 +40,7 @@ grep -q 'skipping container reels-worker' "$work/out.txt" && ok "down names what
 # ---- up refuses a container with another image tag, before it starts anything --------
 mkdir -p "$stub/old"
 cat >"$stub/old/docker" <<'STUB'
-#!/usr/bin/env bash
+#!/bin/sh
 echo "$*" >>"$STUB_LOG"
 [ "$1" = ps ] && echo 'obs-sandbox-demo-vm|victoriametrics/victoria-metrics:v1.111.0|running'
 exit 0
