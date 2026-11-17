@@ -180,3 +180,9 @@ func WithoutTrailingFilters(qs string, at time.Time) (string, error) {
 	out, _ := q.q.ObsWithoutTrailingFilters()
 	return out.String(), nil
 }
+
+// FieldFilter is one filter on a single field of a parsed query (see ObsFieldFilters).
+type FieldFilter = logstorage.ObsFieldFilter
+
+// FieldFilters returns every filter on field before the first pipe.
+func (q *Query) FieldFilters(field string) []FieldFilter { return q.q.ObsFieldFilters(field) }
