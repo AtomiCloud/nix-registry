@@ -145,4 +145,5 @@ if [ -n "${OUT:-}" ]; then
 fi
 
 echo "obs tests: $pass passed, $fail failed"
+bash "$here/alerts.sh" "$OBS"
 [ "$fail" -eq 0 ]

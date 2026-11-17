@@ -92,7 +92,10 @@ func loadProject(dir, seedPath string) (*Project, error) {
 		r := rr.Definition
 		id := r.UID
 		if id == "" {
-			return nil, fmt.Errorf("%s rule %q: uid is required", rr.File, r.Title)
+			id = rr.Name
+		} // same fallback identity as the shared query reader
+		if id == "" {
+			return nil, fmt.Errorf("%s rule %q: uid or metadata.name is required", rr.File, r.Title)
 		}
 		if ids[id] {
 			return nil, fmt.Errorf("%s rule %s: duplicate uid", rr.File, id)
@@ -137,8 +140,9 @@ func loadProject(dir, seedPath string) (*Project, error) {
 			}
 			query := Query{Datasource: kind.String(), UID: uid, Expr: expr, From: time.Duration(q.RelativeTimeRange.From) * time.Second, To: time.Duration(q.RelativeTimeRange.To) * time.Second}
 			instant, _ := q.Model["instant"].(bool)
+			rangeQuery, _ := q.Model["range"].(bool)
 			qt, _ := q.Model["queryType"].(string)
-			if kind == files.Metrics && !instant && (qt == "range" || q.QueryType == "range") {
+			if kind == files.Metrics && !instant && (rangeQuery || qt == "range" || q.QueryType == "range") {
 				query.Range = (query.From - query.To).String()
 			}
 			if query.From > p.Gap {

@@ -14,7 +14,7 @@ let
     pname = "obs";
     inherit version;
     src = ./src;
-    vendorHash = "sha256-E+SO5TfljE7KgJr3l0l/WmzeWbLHYkmVqkkOUSerOw4=";
+    vendorHash = "sha256-kwsnm1nF4JbVz+c2TZwljNfFSKUTDsCnS5WqJLlAv98=";
     env.CGO_ENABLED = "0";
     ldflags = [ "-w" "-s" "-X main.version=${version}" ];
     # third_party/VictoriaLogs is its own Go module (wired by a go.mod replace), not part of this one.
@@ -30,6 +30,7 @@ let
         -exec install -Dm444 {} "$out/share/licenses/obs/{}" \;)
       install -Dm444 vendor/modules.txt "$out/share/licenses/obs/modules.txt"
       install -Dm444 ${./LICENSE} "$out/share/licenses/obs/LICENSE"
+      install -Dm444 ${./src/internal/alerts/gfexpr/LICENSE-grafana-AGPL} "$out/share/licenses/obs/grafana/LICENSE"
     '';
     meta = {
       mainProgram = "obs";

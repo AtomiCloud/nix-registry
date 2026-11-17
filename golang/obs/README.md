@@ -247,7 +247,65 @@ OBS_PARITY_VM=http://127.0.0.1:<port> OBS_PARITY_VL=http://127.0.0.1:<port> \
 Use fresh containers for every run (VictoriaLogs keeps duplicate rows). The nightly parity job (a later release)
 replaces this by hand run.
 
-## Not tested yet
+## obs alerts
+
+`obs alerts --dir observability` evaluates the `GrafanaAlertRuleGroup` CRs in
+`alerts/<slug>/<severity>.yaml` on the seed and each named incident. It prints one
+line per rule and expectation, including its file and incident window, and exits
+1 on a miss. Every rule must stay quiet on the baseline; rules omitted from an
+incident's expectations are also checked for quiet. Metric and LogsQL rules run
+inside VictoriaMetrics v1.156.0 and VictoriaLogs v1.54.0 with no network or containers.
+
+```text
+obs alerts --dir observability
+OBS_VERIFY_FAST=1 OBS_VERIFY_SKIP=1 obs alerts --dir observability
+OBS_CACHE_DIR=.cache/obs obs alerts --dir observability
+obs alerts --dir observability --steps steps.json --recorded recorded.json
+```
+
+The seed's `incidents: [spike]` reads `incidents/spike.yaml`. An incident declares
+`window: {start: 10m, duration: 10m}`, `change` entries with a metric, matching
+`where` labels and `rate`, `latency_x` or `share_x`, and
+`expect: {fire: [rule-uid], quiet: [], fire_within: 5m, resolve_within: 5m}`.
+Firing must begin inside the incident and before `fire_within`; it must stop by
+the end plus `resolve_within` (default zero). Use the recovery allowance for the
+query's rollup window and `keepFiringFor`. The time line ends in the past; an
+explicit `--base` whose complete time line reaches the future is refused.
+
+The Grafana 13.3.0 expression port supports math, reduce (including non-number
+mapping), threshold and recovery thresholds, `for`, `keepFiringFor`, missing
+series, `noDataState` and `execErrState`. Source functions are cited alongside
+each state transition. Recording rules use the same CR reader with
+`record: {metric: fixture_recorded, from: A}`; dependent recording rules execute
+first and their samples are appended to the embedded metric store before alerts.
+`--recorded` writes `{labels, timestamps, values}` rows; `--steps` writes each
+minute's evaluation and state. Both exports bypass the persistent result cache.
+
+LogsQL queries use each rule's `relativeTimeRange.from/to`, parse at the resulting
+end time and add the exclusive `[start, end)` range. Final `stats by (...)` fields
+are instance labels. With a contract, `durian.cloud/event` filters are checked
+against its event list. Other field-value filters are printed as assumptions and
+removed from the parsed AST; event filters in `_stream` or `or`, unknown events
+and stats reading field values are refused. Seed events must be declared too.
+Without a contract, one event-rule-skipped note is printed for each log query.
+
+The numeric light path is checked against the vendored Grafana dataframe path
+with `OBS_VERIFY_FAST=1`; unchanged incident inputs are compared with their
+baseline reuse by `OBS_VERIFY_SKIP=1`. Any mismatch fails the command. The result
+cache includes the binary, seed, incidents, recording rules, contract and each
+alert's normalized CR definition. Time-derived queries also include the base
+timestamp and do not reuse shifted baseline results. Storage uses `OBS_TMPDIR`,
+otherwise `/dev/shm` when available; VictoriaMetrics caches are capped at 512 MiB.
+Unused metric series are omitted and VictoriaLogs starts only when needed.
+
+MEASURED: regression tests cover state transitions, numeric light/full parity,
+event-filter refusals, recording outputs, cache invalidation and planted wrong
+thresholds. NOT TESTED: parity against the live Grafana scheduler and datasource
+in this part PR, notification/persistence behavior, and VictoriaLogs runtime
+timeout/concurrency limits. TraceQL alerts use the `DatasourceEngine` hook in a
+later part. The Grafana AGPL licence ships in `share/licenses/obs/grafana/LICENSE`.
+
+### Existing query-check limits
 
 - Variable filling for LogsQL panels against the Grafana VictoriaLogs datasource (it reuses the Prometheus macros).
 - Seeded log rows against a real VictoriaLogs fed through Alloy (field names are FROM SOURCE).

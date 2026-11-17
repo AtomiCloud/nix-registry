@@ -19,6 +19,11 @@ type RangeDatasourceEngine interface {
 	Range(Query, time.Time, time.Time, time.Duration) ([]Result, error)
 }
 
+// QueryGuard is implemented by the chart-derived VictoriaLogs limits adapter.
+type QueryGuard interface {
+	Check(string, time.Time, time.Time) error
+}
+
 type Engines struct {
 	Metrics     *vm.Engine // recording-rule sink
 	Datasources map[string]DatasourceEngine
@@ -56,12 +61,20 @@ func sampleResults(ss []*Series, shift time.Duration) []Result {
 	return out
 }
 
-type logsEngine struct{ e *vl.Engine }
+type logsEngine struct {
+	e     *vl.Engine
+	guard QueryGuard
+}
 
 func (l logsEngine) Instant(q Query, at time.Time) ([]Result, error) {
 	from := q.From
 	if from <= 0 {
 		from = 10 * time.Minute
+	}
+	if l.guard != nil {
+		if err := l.guard.Check(q.Expr, at.Add(-from), at.Add(-q.To)); err != nil {
+			return nil, err
+		}
 	}
 	rs, err := l.e.Stats(q.Expr, at.Add(-from), at.Add(-q.To), false)
 	if err != nil {

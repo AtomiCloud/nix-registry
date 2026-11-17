@@ -52,6 +52,17 @@ func stripThresholds(e metricsql.Expr) (metricsql.Expr, int) {
 			for i := range t.Args {
 				t.Args[i] = walk(t.Args[i])
 			}
+			// Absence is a threshold: judge its underlying data on a quiet seed.
+			if len(t.Args) == 1 {
+				switch strings.ToLower(t.Name) {
+				case "absent":
+					n++
+					return t.Args[0]
+				case "absent_over_time":
+					n++
+					t.Name = "count_over_time"
+				}
+			}
 		case *metricsql.AggrFuncExpr:
 			for i := range t.Args {
 				t.Args[i] = walk(t.Args[i])

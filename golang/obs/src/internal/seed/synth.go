@@ -340,7 +340,10 @@ func BuildIncident(s *Seed, start time.Time, incident *Incident) (*Dataset, erro
 				}
 				tsNs := start.Add(at).UnixNano() + int64(frac*1e9)
 				for _, ld := range a.logs {
-					stream.Rows = append(stream.Rows, makeRow(ld, g.where, resourceFields, tsNs, r))
+					// Log IDs use an independent stream: lazy log loading must not
+					// change histogram values or timestamps of the same metric seed.
+					rowRng := newRnd(s.RandomSeed, g.k+":log:"+ld.Event, sec*1_000_000+int64(e))
+					stream.Rows = append(stream.Rows, makeRow(ld, g.where, resourceFields, tsNs, rowRng))
 				}
 			}
 		}

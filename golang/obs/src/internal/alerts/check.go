@@ -11,18 +11,19 @@ import (
 	"time"
 
 	"github.com/AtomiCloud/obs/internal/check"
+	"github.com/AtomiCloud/obs/internal/contract"
 	"github.com/AtomiCloud/obs/internal/engines/vl"
 	"github.com/AtomiCloud/obs/internal/engines/vm"
 	"github.com/AtomiCloud/obs/internal/files"
+	"github.com/AtomiCloud/obs/internal/logevent"
 	"github.com/AtomiCloud/obs/internal/seed"
 )
 
-const GrafanaPin = "13.3.0 (commit 752e3462)"
-
 type Options struct {
-	Dir, SeedPath, Out, Steps string
-	Base                      int64
-	Workers                   int
+	Dir, SeedPath, Out, Steps, Recorded string
+	Base                                int64
+	Workers                             int
+	LogsGuard                           QueryGuard
 }
 
 // Check evaluates each rule at every minute on the baseline and each incident.
@@ -43,6 +44,32 @@ func Check(o Options, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "obs alerts:", err)
 		return 2
 	}
+	var events logevent.Events
+	contractPath := filepath.Join(o.Dir, "contract.yaml")
+	if _, err := os.Stat(contractPath); err == nil {
+		c, err := contract.Load(contractPath)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 2
+		}
+		if issues := c.Validate(); len(issues) > 0 {
+			fmt.Fprintf(stderr, "%s: %v\n", contractPath, issues)
+			return 2
+		}
+		events = c
+		p.Files["contract.yaml"], _ = os.ReadFile(contractPath)
+	} else if !os.IsNotExist(err) {
+		fmt.Fprintln(stderr, err)
+		return 2
+	}
+	var seedEvents []string
+	for _, l := range p.Seed.Logs {
+		seedEvents = append(seedEvents, l.Event)
+	}
+	if err := logevent.ValidateSeed(seedEvents, events); err != nil {
+		fmt.Fprintf(stderr, "%s/seed.yaml: %v\n", o.Dir, err)
+		return 1
+	}
 	// The shared reader and static checker enforce the same language and event rules.
 	set, err := files.Load(o.Dir)
 	if err != nil {
@@ -61,6 +88,22 @@ func Check(o Options, stdout, stderr io.Writer) int {
 	if rep.Failures() > 0 {
 		return 1
 	}
+	for _, group := range [][]Alert{p.Alerts, p.Records} {
+		for i := range group {
+			for ref, q := range group[i].Queries {
+				if q.Datasource != "logs" {
+					continue
+				}
+				analysis, err := logevent.Analyze(q.Expr, events)
+				if err != nil {
+					fmt.Fprintf(stderr, "%s rule %s query %s: %v\n", group[i].File, group[i].ID, ref, err)
+					return 1
+				}
+				q.Expr = analysis.Expr
+				group[i].Queries[ref] = q
+			}
+		}
+	}
 	for _, a := range append(append([]Alert{}, p.Records...), p.Alerts...) {
 		if _, err := compileRule(&a); err != nil {
 			fmt.Fprintf(stderr, "%s rule %s: %v\n", a.File, a.ID, err)
@@ -77,7 +120,7 @@ func Check(o Options, stdout, stderr io.Writer) int {
 		return 2
 	}
 	cacheDir := os.Getenv("OBS_CACHE_DIR")
-	if verifyFast || verifySkip || o.Steps != "" {
+	if verifyFast || verifySkip || o.Steps != "" || o.Recorded != "" {
 		cacheDir = ""
 	}
 	allAlerts := p.Alerts
@@ -87,6 +130,13 @@ func Check(o Options, stdout, stderr io.Writer) int {
 		var misses []Alert
 		for _, a := range allAlerts {
 			k := ruleCacheKey(p, &a, buildID())
+			sensitive := timeSensitive(&a)
+			for i := range p.Records {
+				sensitive = sensitive || timeSensitive(&p.Records[i])
+			}
+			if sensitive {
+				k = fmt.Sprintf("%s-%d", k, base.UnixMilli())
+			}
 			keys[a.ID] = k
 			if ars, ok := cacheGet(cacheDir, k, base.UnixMilli()); ok && len(ars) == len(runs) {
 				cached = append(cached, ars...)
@@ -97,6 +147,7 @@ func Check(o Options, stdout, stderr io.Writer) int {
 		p.Alerts = misses
 	}
 	var ars []AlertRun
+	var recordedSeries []*Series
 	pruned, recorded := 0, 0
 	if len(p.Alerts) > 0 || len(allAlerts) == 0 {
 		var used []*Alert
@@ -156,10 +207,10 @@ func Check(o Options, stdout, stderr io.Writer) int {
 				return 2
 			}
 			defer l.Close()
-			eng.Datasources["logs"] = logsEngine{l}
+			eng.Datasources["logs"] = logsEngine{e: l, guard: o.LogsGuard}
 		}
 		cache := &queryCache{m: map[qKey]*qEntry{}}
-		recorded, err = runRecording(p, runs, eng, cache, nil)
+		recorded, err = runRecording(p, runs, eng, cache, &recordedSeries)
 		if err != nil {
 			fmt.Fprintln(stderr, "obs alerts:", err)
 			return 1
@@ -215,6 +266,20 @@ func Check(o Options, stdout, stderr io.Writer) int {
 	}
 	if o.Steps != "" {
 		if err := writeJSON(o.Steps, ars); err != nil {
+			fmt.Fprintln(stderr, err)
+			return 2
+		}
+	}
+	if o.Recorded != "" {
+		var rows []map[string]any
+		for _, s := range recordedSeries {
+			labels := map[string]string{}
+			for _, l := range s.Labels {
+				labels[l.Name] = l.Value
+			}
+			rows = append(rows, map[string]any{"labels": labels, "timestamps": s.Ts, "values": s.Vals})
+		}
+		if err := writeJSON(o.Recorded, rows); err != nil {
 			fmt.Fprintln(stderr, err)
 			return 2
 		}

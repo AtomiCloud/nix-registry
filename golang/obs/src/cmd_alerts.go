@@ -17,6 +17,7 @@ func runAlerts(args []string, stdout, stderr io.Writer) int {
 	fs.IntVar(&o.Workers, "workers", 0, "evaluation workers (default all CPUs)")
 	fs.StringVar(&o.Out, "out", "", "write JSON results")
 	fs.StringVar(&o.Steps, "steps", "", "write per-minute JSON results; bypasses the result cache")
+	fs.StringVar(&o.Recorded, "recorded", "", "write recording-rule samples as JSON; bypasses the result cache")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}

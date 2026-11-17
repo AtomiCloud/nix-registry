@@ -338,12 +338,13 @@ type qTick struct {
 }
 
 type evalResult struct {
-	labels data.Labels
-	key    string
-	state  int // stNormal, stAlerting, stNoData, stError
-	err    string
-	value  float64
-	hasVal bool
+	labels   data.Labels
+	key      string
+	state    int // stNormal, stAlerting, stNoData, stError
+	err      string
+	value    float64
+	hasVal   bool
+	resultFP string // query labels before rule-label overrides (hysteresis identity)
 }
 
 func lblKey(l data.Labels) string {
@@ -658,6 +659,22 @@ func fmtState(s int, reason string) string {
 // Manager.setNextStateForRule maps whole-rule NoData/Error to existing instances.
 func (rs *ruleStates) process(t time.Time, results []evalResult) []Transition {
 	r := rs.r
+	if len(r.a.Labels) > 0 {
+		decorated := make([]evalResult, len(results))
+		for i, res := range results {
+			res.resultFP = res.key
+			labels := data.Labels{}
+			for k, v := range res.labels {
+				labels[k] = v
+			}
+			for k, v := range r.a.Labels {
+				labels[k] = v
+			}
+			res.labels, res.key = labels, lblKey(labels)
+			decorated[i] = res
+		}
+		results = decorated
+	}
 	var trs []Transition
 	allNoData := true
 	allErr := len(results) > 0
@@ -725,6 +742,9 @@ func (rs *ruleStates) transition(s *instState, t time.Time, res evalResult) []Tr
 	r := rs.r
 	s.lastEval = t
 	s.resultFP = res.key
+	if res.resultFP != "" {
+		s.resultFP = res.resultFP
+	}
 	old, oldR := s.state, s.reason
 	switch res.state {
 	case stNormal:

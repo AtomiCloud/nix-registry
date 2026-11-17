@@ -118,6 +118,9 @@ func selectorHits(s selector, fp footprint) bool {
 
 // affected reports whether the incident can change any input of the alert.
 func affected(p *Project, a *Alert, inc *Incident, recorded map[string]*Alert, depth int) bool {
+	if timeSensitive(a) {
+		return true
+	}
 	if depth > 5 {
 		return true
 	}
@@ -149,6 +152,41 @@ func affected(p *Project, a *Alert, inc *Incident, recorded map[string]*Alert, d
 		case "logs", "traces":
 			return true // conservative: datasource engines can add an incident footprint later
 
+		}
+	}
+	return false
+}
+
+// Absolute timestamps and time-derived functions do not shift with the seed.
+// Such rules must execute independently for each incident and every cache base.
+func timeSensitive(a *Alert) bool {
+	for _, q := range a.Queries {
+		if q.Datasource == "logs" && strings.Contains(q.Expr, "_time") {
+			return true
+		}
+		if q.Datasource != "metrics" {
+			continue
+		}
+		e, err := metricsql.Parse(q.Expr)
+		if err != nil {
+			return true
+		}
+		found := false
+		metricsql.VisitAll(e, func(x metricsql.Expr) {
+			switch t := x.(type) {
+			case *metricsql.FuncExpr:
+				switch strings.ToLower(t.Name) {
+				case "time", "now", "start", "end", "hour", "minute", "month", "year", "day_of_week", "day_of_month", "day_of_year", "days_in_month":
+					found = true
+				}
+			case *metricsql.RollupExpr:
+				if t.At != nil {
+					found = true
+				}
+			}
+		})
+		if found {
+			return true
 		}
 	}
 	return false
