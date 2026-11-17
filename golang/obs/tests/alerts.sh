@@ -33,10 +33,11 @@ expect() {
 }
 
 # Full engine run, pending/recovery/no-data/error paths, and exported recording samples.
-OBS_VERIFY_FAST=1 OBS_VERIFY_SKIP=1 run alerts --dir "$o" --steps "$work/steps.json" --recorded "$work/recorded.json"
+OBS_VERIFY_FAST=1 OBS_VERIFY_SKIP=1 OBS_VERIFY_PRUNE=1 run alerts --dir "$o" --steps "$work/steps.json" --recorded "$work/recorded.json"
 expect 0 'failed=0' 'mismatches=0' 'assumed true (free-form fields)' 'events=[fixture.failed]'
 grep -qE 'verify fast: compared=[1-9][0-9]* mismatches=0' "$work/out"
 grep -qE 'verify skip: compared=[1-9][0-9]* mismatches=0' "$work/out"
+grep -qE 'verify prune: base=[0-9]+ compared=[1-9][0-9]* query_inputs=[0-9]+ mismatches=0' "$work/out"
 for state in Pending Recovering NoData Error; do grep -qF "$state" "$work/steps.json"; done
 grep -qF '"__name__":"fixture_recorded"' "$work/recorded.json"
 
@@ -129,4 +130,5 @@ expect 0 'absence check(s)' 'obs query --live: ok'
 run alerts --dir "$here/fixtures/alerts/features" --base "$(($(date +%s) + 86400))"
 expect 2 'time line ends in the future'
 
+bash "$here/alerts-verify-prune.sh" "$OBS"
 echo 'obs alerts tests: baseline and 7 planted failures passed'
