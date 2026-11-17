@@ -1,0 +1,50 @@
+{
+  "title": "TraceQL",
+  "time": {
+    "from": "now-3m",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "provider",
+        "type": "custom",
+        "query": "stripe,adyen",
+        "multi": true,
+        "current": {
+          "value": "stripe"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 7,
+      "title": "Trace search",
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "{resource.service.name=\"checkout\" && span.provider=~\"$provider\" && span.http.response.status_code=200}"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Span counts",
+      "datasource": {
+        "type": "tempo",
+        "uid": "tempo"
+      },
+      "targets": [
+        {
+          "refId": "B",
+          "query": "{span.cached=true} | count_over_time() by (span.provider)"
+        }
+      ]
+    }
+  ]
+}
