@@ -276,7 +276,7 @@ consumers (the Bun stub has an `index.js`, run with the `node` that nixpkgs `tsc
 - compiles and RUNS a good consumer: every valid call returns Ok and nothing is dropped;
 - requires every planted `bad-*` consumer to fail to compile with the expected diagnostic;
 - requires every planted `forge-*` consumer to compile, run without throwing, and show the port's refusal
-  (`dropped.unknown_event`, `unknown_metric`, `unknown_key`, `unknown_value` or `register`, counted once).
+  (`dropped.unknown_event`, `unknown_metric`, `unknown_key`, `unknown_value`, `register` or `poisoned`).
 
 The same stubs support the 36 name-fuzz contract/language cases. The .NET harness builds three separate
 assemblies, Obs, Signals and App; only Signals has access to the library's internal constructors.
@@ -297,9 +297,14 @@ an app can make its own carrier in Go (exported constructors) and Dart (`extends
    labels type (Go, Dart), the allowed values of each enum label and the min..max of each bounded label.
    The port refuses a name not in its table, a kind or level that differs, a labels value of another type
    (even with the same keys), keys that are not the name's keys, and a value outside the allowed values or
-   range. Go `Register` and Dart `install` work once per process: the generated code runs first, a later
-   call is refused and counted (`dropped.register`), never merged; the tables are deep-copied, so editing
-   the exported generated tables later changes nothing. The port counts `dropped.<reason>`, returns an
+   range. Registration is once per process: Go `Register` (called by the generated `init()`) and Dart
+   `install` (called by the generated `installSignals()`). Nothing guarantees the generated call comes
+   first (an independent Go package's `init()`, or app code before `installSignals()`, can register a
+   forged table earlier), so a competing registration, earlier or later, poisons the port: it is refused
+   and counted (`dropped.register`), and from then on the port refuses every signal (`dropped.poisoned`)
+   until restart. A forged table is never used silently; it is a loud telemetry failure, never an app
+   failure. The lint rule forbids `obs.Register` and `DurianSignalPort.install` outside generated files.
+   The tables are deep-copied, so editing the exported generated tables later changes nothing. The port counts `dropped.<reason>`, returns an
    error and never throws or panics (the type is checked before any field is read; a panic or exception
    is recovered and counted as a last resort).
 3. A lint rule in the template's CI (documented here, NOT TESTED; the lint config lives in the templates).
@@ -352,10 +357,10 @@ in the last column is assumed, not in the goal; the interfaces nodes reconcile t
 
 | Language | Default `interfaces` | In the goal | Assumed, not in goal |
 | -------- | -------------------- | ----------- | -------------------- |
-| Go | `github.com/ProtoDurian/diene.go-interfaces/obs` | module `ProtoDurian/diene.go-interfaces`; `obs.Add`, `obs.Int[Spec]`, `obs.NewInt`, `obs.AtTime` with an error return; `obs.Error(ctx, Event[Error], ...)` | the `/obs` package path; `IntSpec` `Name/Min/Max/Unit` (int64); `Int.Valid`; `Level` and the six markers; `NewEvent/NewCounter/NewHistogram/NewGauge/NewSpan`; `DurianSignal*` carriers and info rows (`Labels`, `Values`, `Ranges`); `Field`; `Record/Set/Warn/Info`; one-shot `Register` returning an error, `DurianSignalTables`, `Dropped` |
+| Go | `github.com/ProtoDurian/diene.go-interfaces/obs` | module `ProtoDurian/diene.go-interfaces`; `obs.Add`, `obs.Int[Spec]`, `obs.NewInt`, `obs.AtTime` with an error return; `obs.Error(ctx, Event[Error], ...)` | the `/obs` package path; `IntSpec` `Name/Min/Max/Unit` (int64); `Int.Valid`; `Level` and the six markers; `NewEvent/NewCounter/NewHistogram/NewGauge/NewSpan`; `DurianSignal*` carriers and info rows (`Labels`, `Values`, `Ranges`); `Field`; `Record/Set/Warn/Info`; one-shot `Register` returning an error (a second one poisons the port), `DurianSignalTables`, `Dropped` |
 | Bun | `@atomicloud/diene.interfaces` | `counter(name, labels)`; `log.error(ev, fields?, err?)`; `bounded(spec, n): Result`; `Tracer`/`Span`, `DurianSignalSpanTable` | `metrics(table)`, `histogram/gauge`, `MetricTable` (with `values`, `ranges`); `logger(eventTable)`, `EventTable`, `Level`; `dropped()`; `tracer(table)`; `Bounded<N>`; a synchronous `{ok, value}` Result (the published Result is promise-based) |
 | .NET | `AtomiCloud.Diene.Interfaces` | `Port.Add(Names.X, new XLabels(...))`; `Int<Spec>.Of(n)` returning a `Result` (package `AtomiCloud.Diene.Result`: struct `Result<T, E>`, `Ok/Err`, `IsSuccess`); `Log.Error(Event<ErrorLevel>, ...)`; internal carrier constructors | namespace `AtomiCloud.Diene.Result` and `Value/Error`; `IDurianSignal*` interfaces, `Valid/Wire`; `AtTime`; `DurianSignalDate`; label attribute and info rows; `Port.Record/Set/Install/Dropped`; info row `Values`/`Ranges`; `Log.Warn` |
-| Dart | `diene_interfaces` | `checkoutCharges.add(XLabels(...))`; `error(Event<ErrorLevel>, ...)`; enums; extension types; `shardSpec.of(n)` returning a `Result`; `entries` getter | barrel `diene_interfaces.dart`; `DurianSignalWire/Labels/Metric`, carrier bases and constructors; `DurianSignalBoundSpec` and `atTime`; sealed level markers; `DurianSignalPort` (one-shot `install` returning a Result, `add/record/set/dropped`); generated `installSignals()`; `warn/info`; info rows (`labels` Type, `values`, `ranges`); local `Result/DurianSignalOk/DurianSignalErr` in place of `diene_result` |
+| Dart | `diene_interfaces` | `checkoutCharges.add(XLabels(...))`; `error(Event<ErrorLevel>, ...)`; enums; extension types; `shardSpec.of(n)` returning a `Result`; `entries` getter | barrel `diene_interfaces.dart`; `DurianSignalWire/Labels/Metric`, carrier bases and constructors; `DurianSignalBoundSpec` and `atTime`; sealed level markers; `DurianSignalPort` (one-shot `install` returning a Result, a second one poisons the port, `add/record/set/dropped`); generated `installSignals()`; `warn/info`; info rows (`labels` Type, `values`, `ranges`); local `Result/DurianSignalOk/DurianSignalErr` in place of `diene_result` |
 
 The compile fixtures model Result locally and do not validate integration with the separately published
 result libraries. .NET name constructors require the real library to grant friend access to the

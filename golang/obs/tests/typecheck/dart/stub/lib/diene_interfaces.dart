@@ -224,17 +224,20 @@ final class DurianSignalPort {
   static DurianSignalPort? _current;
 
   /// Builds the port from the generated tables, once per process. The generated installSignals() calls
-  /// it; the lint rule forbids calling it anywhere else. A second call is refused and counted in
-  /// dropped.register; the first tables stay. The tables are copied.
+  /// it; the lint rule forbids calling it anywhere else. Nothing guarantees installSignals() runs first,
+  /// so a second install, whichever came first, POISONS the port: it is refused and counted in
+  /// dropped.register, and from then on every signal is refused and counted in dropped.poisoned until
+  /// restart. A forged first table is never used silently. The tables are copied.
   static Result<DurianSignalPort> install({
     required Map<String, DurianSignalMetricInfo> metrics,
     required Map<String, String> events,
   }) {
     final p = _current;
     if (p != null) {
+      p._poisoned = true;
       p.dropped['register'] = p.dropped['register']! + 1;
       return const DurianSignalErr(
-        'dropped.register: the port is already installed (installSignals runs once per process)',
+        'dropped.register: the port is already installed once in this process; it is now poisoned and refuses every signal until restart',
       );
     }
     return DurianSignalOk(
@@ -244,14 +247,16 @@ final class DurianSignalPort {
 
   final Map<String, DurianSignalMetricInfo> _metrics;
   final Map<String, String> _events;
+  bool _poisoned = false;
 
-  /// dropped.<reason>: unknown_event, unknown_metric, unknown_key, unknown_value, register, guard_error.
+  /// dropped.<reason>: unknown_event, unknown_metric, unknown_key, unknown_value, register, poisoned, guard_error.
   final Map<String, int> dropped = {
     'unknown_event': 0,
     'unknown_metric': 0,
     'unknown_key': 0,
     'unknown_value': 0,
     'register': 0,
+    'poisoned': 0,
     'guard_error': 0,
   };
 
@@ -295,6 +300,12 @@ final class DurianSignalPort {
 
   Result<bool> _check(String kind, String name, DurianSignalLabels labels) {
     final p = this;
+    if (_poisoned) {
+      return _drop(
+        'poisoned',
+        'metric "$name": the port is poisoned (a second install was refused); every signal is refused until restart',
+      );
+    }
     final info = p._metrics[name];
     if (info == null) {
       return p._drop(
@@ -346,6 +357,12 @@ final class DurianSignalPort {
   static Result<bool> _log(String level, Event<DurianSignalLevel> event) {
     final p = _current;
     if (p == null) return const DurianSignalErr('no port installed');
+    if (p._poisoned) {
+      return p._drop(
+        'poisoned',
+        'event "${event.name}": the port is poisoned (a second install was refused); every signal is refused until restart',
+      );
+    }
     final want = p._events[event.name];
     if (want == null) {
       return p._drop(

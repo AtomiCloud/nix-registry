@@ -652,7 +652,8 @@ func (g *emitter) render() string {
 	x.mapLit("const eventTable = <String, String>", evs)
 	x.blank()
 	x.line("/// Builds the telemetry port from this contract's tables, once per process (call it at")
-	x.line("/// start-up; a second install is refused).")
+	x.line("/// start-up). Any other install, earlier or later, poisons the port: it refuses every")
+	x.line("/// signal until restart.")
 	x.line("Result<DurianSignalPort> installSignals() =>")
 	x.line("    DurianSignalPort.install(metrics: metricTable, events: eventTable);")
 

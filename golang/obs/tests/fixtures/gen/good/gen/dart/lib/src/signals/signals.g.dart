@@ -494,7 +494,8 @@ const eventTable = <String, String>{
 };
 
 /// Builds the telemetry port from this contract's tables, once per process (call it at
-/// start-up; a second install is refused).
+/// start-up). Any other install, earlier or later, poisons the port: it refuses every
+/// signal until restart.
 Result<DurianSignalPort> installSignals() =>
     DurianSignalPort.install(metrics: metricTable, events: eventTable);
 

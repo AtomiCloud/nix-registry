@@ -293,9 +293,9 @@ var SpanTable = map[string]obs.DurianSignalSpanInfo{
 	"checkout.queue.consume": {Kind: "consumer", Keys: []string{"order_id"}},
 }
 
-// init registers the tables with the port, once per process (it runs before any code of a package that
-// imports this one; a later Register is refused). The port refuses names, kinds, levels, label types,
-// keys and values not in them.
+// init registers the tables with the port, once per process. Any competing registration (earlier or later)
+// poisons the port: it then refuses every signal until restart. The port refuses names, kinds, levels,
+// label types, keys and values not in the tables.
 func init() {
 	_ = obs.Register(obs.DurianSignalTables{Metrics: MetricTable, Events: EventTable, Spans: SpanTable})
 }

@@ -81,6 +81,9 @@ func Info(_ context.Context, ev Event[InfoLevel], fields ...Field) error   { ret
 func logEvent[L Level](ev Event[L], _ []Field) error {
 	mu.Lock()
 	defer mu.Unlock()
+	if poisoned {
+		return dropLocked("poisoned", "event %q: the port is poisoned (a second registration was refused); every signal is refused until restart", ev.name)
+	}
 	if ev.name == "" {
 		return dropLocked("unknown_event", "unset event (zero Event{})")
 	}
@@ -139,6 +142,9 @@ func emit(kind, name string, labels any) (err error) {
 			err = dropLocked("guard_panic", "metric %q: %v", name, r)
 		}
 	}()
+	if poisoned {
+		return dropLocked("poisoned", "metric %q: the port is poisoned (a second registration was refused); every signal is refused until restart", name)
+	}
 	if name == "" {
 		return dropLocked("unknown_metric", "unset metric name")
 	}
@@ -209,19 +215,24 @@ type DurianSignalTables struct {
 var (
 	mu         sync.Mutex
 	registered bool
+	poisoned   bool
 	tables     = DurianSignalTables{Metrics: map[string]DurianSignalMetricInfo{}, Events: map[string]string{}, Spans: map[string]DurianSignalSpanInfo{}}
 	dropped    = map[string]int64{}
 )
 
-// Register installs the generated tables, once per process: the generated init() calls it before any
-// app code runs (the app imports the generated package). A later call is refused and counted in
-// dropped.register, never merged. The tables are deep-copied, so writing to the exported generated
-// maps and slices later changes nothing.
+// Register installs the generated tables, once per process (the generated init() calls it; the lint rule
+// forbids calls anywhere else). Go cannot promise the generated init runs first: an independent app package
+// whose init registers a forged table can run earlier. So a second registration, whichever came first,
+// POISONS the port: it is refused and counted in dropped.register, and from then on every signal is
+// refused and counted in dropped.poisoned until restart. A forged first table is never used silently; it
+// becomes a loud telemetry failure, never an app failure. The tables are deep-copied, so writing to the
+// exported generated maps and slices later changes nothing.
 func Register(t DurianSignalTables) error {
 	mu.Lock()
 	defer mu.Unlock()
 	if registered {
-		return dropLocked("register", "the tables are already registered (the generated init registers them once per process)")
+		poisoned = true
+		return dropLocked("register", "the tables are already registered once in this process; the port is now poisoned and refuses every signal until restart")
 	}
 	registered = true
 	for k, m := range t.Metrics {
@@ -243,7 +254,7 @@ func Register(t DurianSignalTables) error {
 }
 
 // Dropped is the dropped.<reason> counter (unknown_event, unknown_metric, unknown_key, unknown_value,
-// unset_label, register, guard_panic).
+// unset_label, register, poisoned, guard_panic).
 func Dropped(reason string) int64 {
 	mu.Lock()
 	defer mu.Unlock()

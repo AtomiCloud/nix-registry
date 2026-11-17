@@ -159,9 +159,9 @@ func (w *writer) render(pkg string) string {
 		w.f("\t%q: {Kind: %q, Keys: %s},\n", n, spanKind(s), strList(s.AttrOrder))
 	}
 	w.f("}\n")
-	w.f("\n// init registers the tables with the port, once per process (it runs before any code of a package that\n")
-	w.f("// imports this one; a later Register is refused). The port refuses names, kinds, levels, label types,\n")
-	w.f("// keys and values not in them.\n")
+	w.f("\n// init registers the tables with the port, once per process. Any competing registration (earlier or later)\n")
+	w.f("// poisons the port: it then refuses every signal until restart. The port refuses names, kinds, levels,\n")
+	w.f("// label types, keys and values not in the tables.\n")
 	w.f("func init() {\n\t_ = obs.Register(obs.DurianSignalTables{Metrics: MetricTable, Events: EventTable, Spans: SpanTable})\n}\n")
 	return w.String()
 }
