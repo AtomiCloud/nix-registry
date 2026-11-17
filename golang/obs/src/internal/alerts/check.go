@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -29,6 +30,18 @@ type Options struct {
 // Check evaluates each rule at every minute on the baseline and each incident.
 func Check(o Options, stdout, stderr io.Writer) int {
 	started := time.Now()
+	// The embedded VictoriaLogs allocates fresh per-query buffers (64 KiB chunks) for
+	// every stats query, while the data kept alive stays small: with Go's default
+	// GOGC=100 the collector runs (and assists) far more often than that live heap
+	// needs. GOGC 400 measured about 30 % faster at the same result; a 2 GiB soft
+	// limit keeps long seeds from growing the heap 5x (24 h seed: 3 GB without it).
+	// An explicit GOGC / GOMEMLIMIT wins.
+	if os.Getenv("GOGC") == "" {
+		defer debug.SetGCPercent(debug.SetGCPercent(400))
+	}
+	if os.Getenv("GOMEMLIMIT") == "" {
+		defer debug.SetMemoryLimit(debug.SetMemoryLimit(2 << 30))
+	}
 	verifyFast = os.Getenv("OBS_VERIFY_FAST") == "1"
 	noFast = os.Getenv("OBS_NO_FAST") == "1"
 	verifySkip = os.Getenv("OBS_VERIFY_SKIP") == "1"
