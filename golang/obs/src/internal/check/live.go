@@ -68,6 +68,7 @@ func Live(set *files.Set, o Options) (*Report, error) {
 	}
 	var m metricsEngine
 	var l logsEngine
+	var settingsNote string
 	if needVM {
 		e, err := vm.New(ds)
 		if err != nil {
@@ -77,14 +78,23 @@ func Live(set *files.Set, o Options) (*Report, error) {
 		m = e
 	}
 	if needVL {
-		e, err := vl.New(ds)
+		limits, note, err := vl.LoadLimits(o.Dir, o.VLSettings)
+		if err != nil {
+			return nil, err
+		}
+		settingsNote = note
+		e, err := vl.NewWithLimits(ds, limits)
 		if err != nil {
 			return nil, err
 		}
 		defer e.Close()
 		l = e
 	}
-	return runLive(set, o, ds, m, l), nil
+	r := runLive(set, o, ds, m, l)
+	if settingsNote != "" {
+		r.add(Note, "", "", "vl-settings", "%s", settingsNote)
+	}
+	return r, nil
 }
 
 // runLive runs every query of set on the given engines.
@@ -305,6 +315,12 @@ func (l *liveRun) runPanel(q *files.Query, res vars.Result, start, end time.Time
 		if step <= 0 {
 			step = 15 * time.Second
 		}
+		// Grafana's Prometheus backend aligns range endpoints to the step's
+		// Unix-time grid. Evaluating at the unaligned seed end shifts rollup
+		// windows and can change panel values even with identical samples.
+		grid := step.Milliseconds()
+		start = time.UnixMilli(start.UnixMilli() / grid * grid)
+		end = time.UnixMilli(end.UnixMilli() / grid * grid)
 		rs, err := l.vm.Range(res.Expr, start, end, step)
 		return len(rs) > 0, err
 	default:

@@ -8,20 +8,16 @@ import (
 	"io"
 	"os"
 	"runtime/debug"
+	"sort"
 
 	"github.com/AtomiCloud/obs/internal/check"
 	"github.com/AtomiCloud/obs/internal/files"
+	"github.com/AtomiCloud/obs/internal/pins"
 	"github.com/AtomiCloud/obs/internal/sandbox"
 )
 
 // version is set by the nix build (-X main.version=...).
 var version = "dev"
-
-// Engine pins: each equals the version in the charts (concept section 1).
-const (
-	pinVictoriaMetrics = "v1.156.0"
-	pinVictoriaLogs    = "v1.54.0 (tag commit 6433dae5, vendored in third_party/VictoriaLogs)"
-)
 
 const usage = `obs: the observability check tool
 
@@ -92,12 +88,38 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func printVersion(w io.Writer) {
 	fmt.Fprintf(w, "obs %s\n", version)
-	fmt.Fprintln(w, "engine Tempo 3.1.1 (commit 9db7df79d2af, TraceQL)")
-	fmt.Fprintf(w, "engine VictoriaMetrics %s (MetricsQL)\n", pinVictoriaMetrics)
-	fmt.Fprintf(w, "engine VictoriaLogs %s (LogsQL)\n", pinVictoriaLogs)
-	fmt.Fprintln(w, "engine Grafana 13.3.0 (commit 752e3462; alert math and state machine)")
-	for _, l := range sandbox.PinLines() {
-		fmt.Fprintln(w, l)
+	p := pins.All()
+	var names []string
+	for name := range p {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	// Built-in engines and what each evaluates; every other pin is a reference
+	// (sandbox / parity containers only).
+	roles := map[string]string{
+		"VictoriaMetrics": "MetricsQL",
+		"VictoriaLogs":    "LogsQL, vendored in third_party/VictoriaLogs",
+		"Tempo":           "TraceQL",
+		"Grafana":         "alert math and state machine",
+	}
+	for _, name := range names {
+		kind := "reference"
+		if roles[name] != "" {
+			kind = "engine"
+		}
+		fmt.Fprintf(w, "%s %s %s", kind, name, p[name].Version)
+		switch {
+		case p[name].Commit != "" && roles[name] != "":
+			fmt.Fprintf(w, " (tag commit %s; %s)", p[name].Commit, roles[name])
+		case p[name].Commit != "":
+			fmt.Fprintf(w, " (tag commit %s)", p[name].Commit)
+		case roles[name] != "":
+			fmt.Fprintf(w, " (%s)", roles[name])
+		}
+		fmt.Fprintln(w)
+	}
+	for _, line := range sandbox.PinLines() {
+		fmt.Fprintln(w, line)
 	}
 	fmt.Fprintln(w, "licence AGPL-3.0-only; source: https://github.com/AtomiCloud/nix-registry/tree/main/golang/obs (each release also attaches a source and vendored-modules tarball)")
 	if bi, ok := debug.ReadBuildInfo(); ok {
@@ -112,6 +134,7 @@ func runQuery(args []string, stdout, stderr io.Writer) int {
 	live := fs.Bool("live", false, "run every alert and dashboard query on the seed; each must return rows")
 	dir := fs.String("dir", "observability", "the observability folder")
 	seedPath := fs.String("seed", "", "seed file (default <dir>/seed.yaml)")
+	vlSettings := fs.String("vl-settings", "", "VictoriaLogs chart args YAML (default <dir>/victorialogs-settings.yaml, else pinned defaults)")
 	base := fs.Int64("base", 0, "unix seconds of the seed's start (default: ends in the past)")
 	names := fs.Bool("names", false, "print the names each query reads")
 	eventRule := fs.String("event-rule", "auto", "a LogsQL alert must name a contract event: auto (only when <dir>/contract.yaml exists), on, off")
@@ -128,7 +151,7 @@ func runQuery(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "obs query: --event-rule %q: want auto, on or off\n", *eventRule)
 		return 2
 	}
-	o := check.Options{Dir: *dir, SeedPath: *seedPath, Base: *base, Names: *names, EventRule: *eventRule, Out: stdout}
+	o := check.Options{Dir: *dir, SeedPath: *seedPath, VLSettings: *vlSettings, Base: *base, Names: *names, EventRule: *eventRule, Out: stdout}
 	set, err := files.Load(*dir)
 	if err != nil {
 		fmt.Fprintf(stderr, "obs query: %v\n", err)

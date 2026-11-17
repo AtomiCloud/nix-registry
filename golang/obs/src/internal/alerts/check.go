@@ -24,7 +24,7 @@ import (
 )
 
 type Options struct {
-	Dir, SeedPath, Out, Steps, Recorded string
+	Dir, SeedPath, Out, Steps, Recorded, VLSettings string
 	// TempoConfig is a Tempo config file whose query_frontend settings (end
 	// cutoff, metrics max_duration and max_intervals) trace rules run under;
 	// empty means Tempo 3.1.1's defaults.
@@ -129,6 +129,24 @@ func Check(o Options, stdout, stderr io.Writer) int {
 	rep.Print(stdout)
 	if rep.Failures() > 0 {
 		return 1
+	}
+	limits := vl.DefaultLimits()
+	hasLogs := false
+	for _, q := range queries {
+		hasLogs = hasLogs || q.Kind == files.Logs
+	}
+	if hasLogs || o.VLSettings != "" {
+		var note string
+		limits, note, err = vl.LoadLimits(o.Dir, o.VLSettings)
+		if err != nil {
+			fmt.Fprintln(stderr, "obs alerts:", err)
+			return 2
+		}
+		if note != "" && hasLogs {
+			fmt.Fprintln(stdout, "note: [vl-settings]", note)
+		}
+		// Include effective settings, not unrelated chart/auth args, in cache keys.
+		p.Files["victorialogs-query-limits"] = []byte(fmt.Sprintf("%#v", limits))
 	}
 	logEvents := logEventSets{}
 	for _, group := range [][]Alert{p.Alerts, p.Records} {
@@ -258,6 +276,25 @@ func Check(o Options, stdout, stderr io.Writer) int {
 		}
 		pruned += pruneMetrics(ds, used)
 		eng := Engines{Datasources: map[string]DatasourceEngine{}}
+		var refused sync.Map
+		refusalKey := func(q Query) qKey {
+			return qKey{ds: q.Datasource, uid: q.UID, original: q.OriginalExpr, from: q.From, to: q.To}
+		}
+		onRefusal := func(q Query, err error) { refused.Store(refusalKey(q), err) }
+		reportRefusals := func() bool {
+			failed := false
+			for _, group := range [][]Alert{p.Alerts, p.Records} {
+				for _, a := range group {
+					for ref, q := range a.Queries {
+						if err, ok := refused.Load(refusalKey(q)); ok {
+							fmt.Fprintf(stdout, "FAIL %s rule %s query %s: %v\n", a.File, a.ID, ref, err)
+							failed = true
+						}
+					}
+				}
+			}
+			return failed
+		}
 		// VM process globals allow one instance. Evaluation inside it is parallel.
 		if needsDS(used, "metrics") || len(p.Records) > 0 {
 			m, err := vm.New(ds)
@@ -270,7 +307,7 @@ func Check(o Options, stdout, stderr io.Writer) int {
 			eng.Datasources["metrics"] = metricEngine{m}
 		}
 		if wantLogs {
-			l, err := vl.New(ds)
+			l, err := vl.NewWithLimits(ds, limits)
 			if err != nil {
 				fmt.Fprintln(stderr, "obs alerts VL:", err)
 				return 2
@@ -281,7 +318,7 @@ func Check(o Options, stdout, stderr io.Writer) int {
 			if o.Workers != 1 {
 				l.SetQueryConcurrency(1)
 			}
-			eng.Datasources["logs"] = logsEngine{e: l, guard: o.LogsGuard}
+			eng.Datasources["logs"] = logsEngine{e: l, guard: checkedLogsGuard{limits, o.LogsGuard}, onRefusal: onRefusal}
 		}
 		if wantTraces {
 			te := tempo.NewTempoEngine(ds.Traces)
@@ -298,10 +335,14 @@ func Check(o Options, stdout, stderr io.Writer) int {
 		cache := &queryCache{m: map[qKey]*qEntry{}}
 		recorded, err = runRecording(p, runs, eng, cache, &recordedSeries)
 		if err != nil {
+			reportRefusals()
 			fmt.Fprintln(stderr, "obs alerts:", err)
 			return 1
 		}
 		ars, _ = evaluateAll(p, runs, eng, cache, o.Workers, o.Steps != "", skipPlan(p, runs))
+		if reportRefusals() {
+			return 1
+		}
 		cache.capturePruneSnapshot("alerts")
 		pruneInputs = cache.pruneHistory
 		if cacheDir != "" {
@@ -387,6 +428,21 @@ func Check(o Options, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+type checkedLogsGuard struct {
+	limits vl.Limits
+	extra  QueryGuard
+}
+
+func (g checkedLogsGuard) Check(expr string, start, end time.Time) error {
+	if err := g.limits.Check(expr, start, end); err != nil {
+		return err
+	}
+	if g.extra != nil {
+		return g.extra.Check(expr, start, end)
+	}
+	return nil
 }
 
 func buildRuns(sd *seed.Seed, runs []Run) (*Dataset, error) {

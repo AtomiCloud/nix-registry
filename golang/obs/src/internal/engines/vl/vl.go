@@ -64,6 +64,8 @@ type Result struct {
 type Engine struct {
 	dir         string
 	s           *logstorage.Storage
+	limits      Limits
+	slots       chan struct{}
 	concurrency uint // 0 = VictoriaLogs' default (all CPUs)
 }
 
@@ -74,6 +76,14 @@ func (e *Engine) SetQueryConcurrency(n uint) { e.concurrency = n }
 
 // New opens a storage in a temp dir and loads every stream of ds.
 func New(ds *seed.Dataset) (*Engine, error) {
+	return NewWithLimits(ds, DefaultLimits())
+}
+
+// NewWithLimits opens the store with the consumer's deployed query limits.
+func NewWithLimits(ds *seed.Dataset, limits Limits) (*Engine, error) {
+	if limits.MaxConcurrentRequests < 0 {
+		return nil, fmt.Errorf("-search.maxConcurrentRequests must be nonnegative")
+	}
 	engines.Init()
 	dir, err := os.MkdirTemp(engines.TmpBase(), "obs-vl-")
 	if err != nil {
@@ -84,7 +94,10 @@ func New(ds *seed.Dataset) (*Engine, error) {
 		FutureRetention: 2 * 24 * time.Hour,
 		MaxBackfillAge:  100 * 365 * 24 * time.Hour,
 	})
-	e := &Engine{dir: dir, s: s}
+	e := &Engine{dir: dir, s: s, limits: limits}
+	if limits.runtimeSet || limits.MaxConcurrentRequests > 0 {
+		e.slots = make(chan struct{}, limits.MaxConcurrentRequests)
+	}
 	tenant := logstorage.TenantID{}
 	for _, st := range ds.Streams {
 		streamFields := make([]string, 0, len(st.Fields))
@@ -127,6 +140,9 @@ func (e *Engine) Close() {
 // pkg/plugin/query.go:179-205, VictoriaLogs app/vlselect/logsql/logsql.go:1509-1570):
 // the query is parsed at end, end is exclusive, and _time:[start, end) is added.
 func (e *Engine) Stats(qs string, start, end time.Time, withoutTrailingFilters bool) ([]Result, error) {
+	if err := e.limits.Check(qs, start, end); err != nil {
+		return nil, err
+	}
 	q, err := logstorage.ParseQueryAtTimestamp(qs, end.UnixNano())
 	if err != nil {
 		return nil, err
@@ -145,6 +161,9 @@ func (e *Engine) Stats(qs string, start, end time.Time, withoutTrailingFilters b
 
 // Rows runs a log query (no `stats` pipe needed) over [start, end) and returns the rows.
 func (e *Engine) Rows(qs string, start, end time.Time) ([]Result, error) {
+	if err := e.limits.Check(qs, start, end); err != nil {
+		return nil, err
+	}
 	q, err := logstorage.ParseQueryAtTimestamp(qs, end.UnixNano())
 	if err != nil {
 		return nil, err
@@ -156,6 +175,11 @@ func (e *Engine) Rows(qs string, start, end time.Time) ([]Result, error) {
 // run executes q. group is the stats labels when the caller already read them from
 // the same query (each read clones the query, a per-tick cost for alerts).
 func (e *Engine) run(q *logstorage.Query, stats bool, group []string) ([]Result, error) {
+	ctx, release, err := e.queryContext()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if e.concurrency > 0 {
 		q.ObsSetConcurrency(e.concurrency)
 	}
@@ -214,14 +238,50 @@ func (e *Engine) run(q *logstorage.Query, stats bool, group []string) ([]Result,
 		}
 	}
 	var qs logstorage.QueryStats
-	qctx := logstorage.NewQueryContext(context.Background(), &qs, []logstorage.TenantID{{}}, q, false, nil)
+	qctx := logstorage.NewQueryContext(ctx, &qs, []logstorage.TenantID{{}}, q, false, nil)
 	if err := e.s.RunQuery(qctx, write); err != nil {
+		if ctx.Err() != nil {
+			return nil, e.timeoutError()
+		}
 		return nil, err
+	}
+	if ctx.Err() != nil {
+		return nil, e.timeoutError()
 	}
 	sort.Slice(out, func(i, j int) bool {
 		return out[i].Name+fmt.Sprint(out[i].Labels) < out[j].Name+fmt.Sprint(out[j].Labels)
 	})
 	return out, nil
+}
+
+func (e *Engine) timeoutError() error {
+	return refusal("query exceeded -search.maxQueryDuration=%s", e.limits.MaxQueryDuration)
+}
+
+// The server starts its execution deadline before waiting for a concurrency slot.
+func (e *Engine) queryContext() (context.Context, func(), error) {
+	ctx := context.Background()
+	cancel := func() {}
+	if e.limits.runtimeSet || e.limits.MaxQueryDuration > 0 {
+		ctx, cancel = context.WithTimeout(ctx, e.limits.MaxQueryDuration)
+	}
+	if e.slots == nil {
+		return ctx, cancel, nil
+	}
+	select {
+	case e.slots <- struct{}{}:
+		return ctx, func() { <-e.slots; cancel() }, nil
+	default:
+	}
+	queue, cancelQueue := context.WithTimeout(ctx, e.limits.MaxQueueDuration)
+	defer cancelQueue()
+	select {
+	case e.slots <- struct{}{}:
+		return ctx, func() { <-e.slots; cancel() }, nil
+	case <-queue.Done():
+		cancel()
+		return nil, nil, refusal("query refused: -search.maxConcurrentRequests=%d reached; -search.maxQueueDuration=%s; -search.maxQueryDuration=%s", e.limits.MaxConcurrentRequests, e.limits.MaxQueueDuration, e.limits.MaxQueryDuration)
+	}
 }
 
 // Float parses a stats result value.
