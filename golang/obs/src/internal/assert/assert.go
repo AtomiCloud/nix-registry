@@ -125,8 +125,8 @@ func Check(c *contract.Contract, series []Series, o Options) *Result {
 			cnt.Worst = w
 			if int64(cnt.Series) > w {
 				res.Findings = append(res.Findings, overFinding(c, g, cnt, o.Pods))
-				res.Findings = append(res.Findings, holes(c, g)...)
 			}
+			res.Findings = append(res.Findings, holes(c, g)...)
 		}
 		res.Counts = append(res.Counts, cnt)
 	}
@@ -175,7 +175,7 @@ func overFinding(c *contract.Contract, g *group, cnt Count, pods int) Finding {
 			cnt.Series, where, strings.Join(cnt.Stored, ", "), cnt.Worst, mult, budget)}
 }
 
-// holes explains an over-count: labels the contract does not give the metric, pod labels on a
+// holes checks every business series, regardless of count: undeclared labels, pod labels on a
 // metric without per_pod, and label values outside the type.
 func holes(c *contract.Contract, g *group) []Finding {
 	var out []Finding

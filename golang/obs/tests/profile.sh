@@ -25,6 +25,8 @@ run() {
   set -e
 }
 has() { grep -qF -- "$1" "$work/out.txt"; }
+# A function frame also contains its span name. Match only rows after the span-table header.
+has_span() { awk '/^share[[:space:]]+samples[[:space:]]+span$/ { spans=1; next } spans && $1 ~ /%$/ { print }' "$work/out.txt" | grep -qE -- "[[:space:]]$1$"; }
 # expect <rc> <what> <needle>...: exit code and every needle in the output
 expect() {
   local want=$1 what=$2 miss=""
@@ -45,8 +47,10 @@ run profile summarize --format pprof "${own[@]}" --json "$fx/base-1.pb.gz"
 expect 0 "summarize pprof --json" '"cpu_per_request_ns": 1000000' '"name": "GET /browse"'
 run profile summarize --format cpuprofile --own '/app/src/' "$fx/base.cpuprofile"
 expect 0 "summarize cpuprofile: Bun span__ frame becomes a span, idle is not CPU" "orders_list" "4700 samples" "handleOrders"
+has_span orders_list && ok "Bun orders_list has a span table row" || bad "Bun span table row missing"
 run profile summarize --format speedscope --own '^app/' "$fx/base.speedscope.json"
 expect 0 "summarize speedscope: Dart UserTag frame becomes a span" "checkout_page" "500 samples" "render"
+has_span checkout_page && ok "synthetic Dart checkout_page has a span table row" || bad "Dart span table row missing"
 run profile summarize --format pprof "$fx/base.cpuprofile"
 expect 2 "summarize: a .cpuprofile read as pprof is an input error naming the file" "base.cpuprofile" "not a pprof profile"
 run profile summarize --format pprof
@@ -55,6 +59,8 @@ expect 2 "summarize without a file is a usage error"
 # ---- baseline: median of 3, deterministic, small, changed only with --update ------------------
 b="$work/baseline"
 base_args=(--format pprof --service checkout --scenario browse "${own[@]}" --dir "$b")
+run profile baseline --format pprof --service checkout --scenario browse --dir "$b" "$fx/base-1.pb.gz" "$fx/base-2.pb.gz" "$fx/base-3.pb.gz"
+expect 2 "baseline refuses all-code default: --own required" "--own" "service's own code"
 run profile baseline "${base_args[@]}" "$fx/base-1.pb.gz" "$fx/base-2.pb.gz" "$fx/base-3.pb.gz"
 expect 0 "baseline from 3 runs" "checkout.browse.json" "median of 3 runs" "5 functions, 2 spans"
 cp "$b/checkout.browse.json" "$work/first.json"
@@ -69,6 +75,17 @@ expect 2 "baseline of 2 runs is refused" "exactly 3 runs"
 grep -q '"name": "svc/render.Page"' "$b/checkout.browse.json" && ! grep -q 'rare.Thing\|func1\|json.Marshal' "$b/checkout.browse.json" &&
   ok "baseline rows: functions >= 3 % in own code, no closure, no library, no function under 3 %" || bad "baseline rows wrong"
 bl="$b/checkout.browse.json"
+
+# TraceEvent's dotnet-trace export is evented, with wait intervals removed by obs.
+dn_event="$work/dotnet-evented"
+run profile summarize --format speedscope --own '^App\.' "$fx/dotnet-base.speedscope.json.gz"
+expect 0 "dotnet evented open time read; huge wait interval dropped" "1000 samples" "App.Render" "20.0%"
+run profile baseline --format speedscope --service dotnet --scenario load --own '^App\.' --profiler dotnet-trace --dir "$dn_event" "$fx/dotnet-base.speedscope.json.gz" "$fx/dotnet-base.speedscope.json.gz" "$fx/dotnet-base.speedscope.json.gz"
+expect 0 "dotnet evented baseline" "3 functions"
+run profile compare --format speedscope --baseline "$dn_event/dotnet.load.json" "$fx/dotnet-base.speedscope.json.gz"
+expect 0 "dotnet evented green control" "none slower than its limit"
+run profile compare --format speedscope --baseline "$dn_event/dotnet.load.json" "$fx/dotnet-slow.speedscope.json.gz"
+expect 1 "dotnet evented red twin: render +50%, limit 30%" "FAIL $dn_event/dotnet.load.json function \"App.Render\"" "20.0% -> 30.0%" "+50.0%" "limit of 30.0%"
 
 # ---- compare: green and red ------------------------------------------------------------------
 cmpr() { run profile compare --format pprof --baseline "$bl" "$@"; }

@@ -216,6 +216,28 @@ func TestUnknownMetric(t *testing.T) {
 	}
 }
 
+func TestUnderfilledExportsStillCheckLabels(t *testing.T) {
+	c := loadC(t)
+	if r := Check(c, []Series{sr("checkout_charges_total", "payment_provider", "stripe")}, Options{}); r.Failures() != 0 {
+		t.Fatalf("green underfilled export: %+v", r.Findings)
+	}
+	for _, tc := range []struct{ label, value, rule string }{
+		{"k8s_pod_name", "review-pod", "pod-label-on-business-metric"},
+		{"user_id", "review-user", "label-not-in-contract"},
+		{"payment_provider", "review-provider", "label-value-outside-type"},
+	} {
+		t.Run(tc.rule, func(t *testing.T) {
+			r := Check(c, []Series{sr("checkout_charges_total", tc.label, tc.value)}, Options{})
+			if find(r, "series-over-worst-case") != nil {
+				t.Fatal("fixture must stay under capacity")
+			}
+			if f := find(r, tc.rule); f == nil || !strings.Contains(f.Msg, tc.label) {
+				t.Fatalf("underfilled export must fail %s: %+v", tc.rule, r.Findings)
+			}
+		})
+	}
+}
+
 func TestReadSeriesBothForms(t *testing.T) {
 	dir := t.TempDir()
 	w := func(n, body string) string {

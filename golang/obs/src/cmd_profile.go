@@ -14,7 +14,7 @@ import (
 
 const profileUsage = `usage:
   obs profile summarize --format pprof|cpuprofile|speedscope [--own REGEX]... [--run run.json] [--top N] [--json] FILE
-  obs profile baseline  --format F --service S --scenario N [--profiler P] [--own REGEX]... [--dir e2e/profile-baseline] [--update] RUN1 RUN2 RUN3
+  obs profile baseline  --format F --service S --scenario N --own REGEX [--own REGEX]... [--profiler P] [--dir e2e/profile-baseline] [--update] RUN1 RUN2 RUN3
   obs profile compare   --format F (--baseline FILE | --service S --scenario N [--dir DIR]) [--limits e2e/profile-limits.yaml] [--run run.json] FILE
 
 A run's OS CPU and runner signal come from <FILE>.run.json next to the profile (or --run).
@@ -139,6 +139,10 @@ func runProfileBaseline(args []string, stdout, stderr io.Writer) int {
 	}
 	if len(pos) != 3 {
 		fmt.Fprintf(stderr, "obs profile baseline: a baseline is the median of exactly 3 runs; got %d profile files\n", len(pos))
+		return 2
+	}
+	if len(own) == 0 {
+		fmt.Fprintln(stderr, "obs profile baseline: give at least one --own expression for the service's own code")
 		return 2
 	}
 	if strings.ContainsAny(*service+*scenario, "/\\") {

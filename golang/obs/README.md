@@ -328,7 +328,8 @@ obs assert --series FILE [--dir observability] [--pods n] [--unknown warn|fail|i
   from the landscape config). Fails with `series-over-worst-case`, naming the series file, the metric, the count,
   the stored names and the worst case. Platform metrics (`platform_metrics:`) are counted and printed, with no
   limit.
-- **Why it is over.** When a metric is over, extra lines name the hole: `label-not-in-contract` (a label the contract
+- **Label checks run on every business series, even below the worst case.** Findings name the hole:
+  `label-not-in-contract` (a label the contract
   does not give the metric, with example values), `pod-label-on-business-metric` (a pod key on a metric without
   `per_pod`), `label-value-outside-type` (a value outside an enum, int or time type).
 - **Metrics outside the contract** (neither a contract metric nor in `platform_metrics`; runtime and process metrics
@@ -344,7 +345,7 @@ stored baseline. Files only: no network.
 
 ```text
 obs profile summarize --format pprof|cpuprofile|speedscope [--own REGEX]... [--run run.json] [--top N] [--json] FILE
-obs profile baseline  --format F --service S --scenario N [--profiler P] [--own REGEX]... [--dir e2e/profile-baseline] [--update] RUN1 RUN2 RUN3
+obs profile baseline  --format F --service S --scenario N --own REGEX [--own REGEX]... [--profiler P] [--dir e2e/profile-baseline] [--update] RUN1 RUN2 RUN3
 obs profile compare   --format F (--baseline FILE | --service S --scenario N [--dir DIR]) [--limits e2e/profile-limits.yaml] [--run run.json] FILE
 ```
 
@@ -352,13 +353,30 @@ Exit 0 when no row is slower than its limit, 1 when one is, 2 on a usage or inpu
 
 **Formats.** `pprof` (Go, gzip or raw; value types `samples` for the count and `cpu` for the weight),
 Chrome `.cpuprofile` (Bun, Flutter web; `samples[]` or `hitCount`; `(idle)` is not CPU) and `speedscope`
-(`sampled` profiles; `evented` is refused with a pointer to speedscope's importer).
+(`sampled` and `evented` profiles). Evented O/C stacks are weighted by elapsed open time per
+thread, with time units normalized before combining threads. _FROM SOURCE:
+[TraceEvent's SpeedScopeStackSourceWriter](https://github.com/microsoft/perfview/blob/main/src/TraceEvent/Stacks/SpeedScopeStackSourceWriter.cs)
+writes dotnet-trace's export as evented O/C profiles per thread._
+_FROM SOURCE: dotnet-trace's
+[TraceFileFormatConverter](https://github.com/dotnet/diagnostics/blob/main/src/Tools/dotnet-trace/TraceFileFormatConverter.cs)
+calls that writer after constructing thread-time stacks._
+obs drops stacks containing `(idle)`, `BLOCKED_TIME`, `AWAIT_TIME` or `UNMANAGED_CODE_TIME`.
+_FROM SOURCE:
+[SampleProfilerThreadTimeComputer](https://github.com/microsoft/perfview/blob/main/src/TraceEvent/Computers/SampleProfilerThreadTimeComputer.cs)
+uses the latter two pseudo-frames for await/native thread time._ Native time can be blocked or
+running; dropping it is conservative, and does not identify every possible wait in arbitrary
+speedscope inputs. For evented input the sampling count is the number of positive CPU stack
+intervals, not milliseconds; an exporter may coalesce original samples, so its original sample
+count cannot be recovered. Noise uses this conservative interval count. _MEASURED: a
+dotnet-trace-shaped fixture and planted regression; real dotnet-trace collection NOT TESTED._
 
 **Spans.** A sample is in a span when it has the pprof label `span_name` (Go, `otel-profiling-go`), or
 when its stack holds a frame `span__<name>` (Bun) or `UserTag:<name>` (Dart). Spans count
 children (a sample in two nested spans is in both). A span with no sample has no row (concept §8.2:
-short spans are often empty). _FROM SOURCE: the Dart `UserTag:` spelling is the name the profile
-converter must give the frame; it is not yet checked against real `getCpuSamples` output (NOT TESTED)._
+short spans are often empty). _NOT TESTED: `UserTag:<name>` is obs's own converter convention,
+not a native Dart frame spelling. The dart template's CI step must write the converter from
+`vm_service.getCpuSamples`, inserting these frames for UserTag spans. That converter does not
+exist here; this has only been tested on synthetic frames._
 
 **OS CPU per request.** The profile cannot know it, so the load run writes `<profile>.run.json` next to
 it (or pass `--run`): `{"requests": 600, "os_cpu_ns": 6e8, "wall_ns": 20e9, "cores": 2, "steal_ns": 1e6,
@@ -372,8 +390,14 @@ attributed to the function: its own samples plus the samples of callees that are
 code (a library or runtime frame called from it). Each sample goes to the nearest frame, going from the
 leaf, that is own code, not a closure and not a span frame; so a closure's time belongs to the function that
 contains it, and the `own` shares add up to at most 100 %. **Own code** is what `--own` says (a regular
-expression matched against the function name and file; repeatable; default: every frame is own code).
-`baseline` stores the patterns and `compare` uses the baseline's. **Closures** (never rows): Go `.funcN`,
+expression matched against the function name and file; repeatable). `summarize` defaults to all
+code for inspection. **`baseline` requires at least one `--own`** (exit 2 when absent), stores
+the patterns, and `compare` uses the baseline's. Function identity is name + file + declaration
+start line when available (pprof `Function.StartLine`, Chrome's zero-based `lineNumber` converted
+to one-based, speedscope `line`). Instruction/sample lines are not function identities. The
+identity is retained in summaries, baselines, recursion deduplication and comparison output;
+same-name declarations have separate rows. Baseline format is version 2: regenerate version 1
+baselines from three profiles with `--own` and `--update`. **Closures** (never rows): Go `.funcN`,
 `.gowrap`, `-fm`; JS `(anonymous)` and empty names; Dart `<anonymous closure>`; .NET `<>c__`, `>b__`,
 `lambda_method`.
 
@@ -405,11 +429,14 @@ slower than its limit. For a function or span row the change is `now share / bas
       scenario: browse # optional: every scenario when absent
       kind: function # optional: function | span | total
       name: svc/render.Page # optional: one row
+      file: /src/render.go # optional: exact function file; requires kind: function
+      line: 12 # optional: one-based declaration line; requires kind: function
       limit: 0.10 # a fraction: 0.10 = 10 %
       why: the page template is being rewritten # required
   ```
 
-  The most specific matching override wins. A failure names the source of the limit.
+  The most specific matching override wins. A name alone intentionally covers all functions
+  with that name; use file and line to select a single declaration. A failure names the source of the limit.
 
 - **Faster is reported, never failed.** A row with no samples now is shown as faster. A function that is
   ≥ 3 % of this run, own code, and has no baseline row is printed as a note.

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"sort"
 
@@ -96,7 +97,7 @@ func readPprof(path string, data []byte) (*Profile, error) {
 				if ln.Function == nil {
 					continue
 				}
-				sm.Stack = append(sm.Stack, Frame{Name: ln.Function.Name, File: ln.Function.Filename})
+				sm.Stack = append(sm.Stack, Frame{Name: ln.Function.Name, File: ln.Function.Filename, Line: ln.Function.StartLine})
 			}
 		}
 		out.Samples = append(out.Samples, sm)
@@ -115,6 +116,7 @@ type cpuProfileDoc struct {
 		CallFrame struct {
 			FunctionName string `json:"functionName"`
 			URL          string `json:"url"`
+			LineNumber   *int64 `json:"lineNumber"` // Chrome uses zero-based declaration lines
 		} `json:"callFrame"`
 		HitCount int   `json:"hitCount"`
 		Children []int `json:"children"`
@@ -151,7 +153,11 @@ func readCPUProfile(path string, data []byte) (*Profile, error) {
 			}
 			cf := doc.Nodes[i].CallFrame
 			if cf.FunctionName != "(root)" {
-				st = append(st, Frame{Name: cf.FunctionName, File: cf.URL})
+				var line int64
+				if cf.LineNumber != nil && *cf.LineNumber >= 0 {
+					line = *cf.LineNumber + 1
+				}
+				st = append(st, Frame{Name: cf.FunctionName, File: cf.URL, Line: line})
 			}
 			p, ok := parent[id]
 			if !ok {
@@ -200,15 +206,37 @@ type speedscopeDoc struct {
 		Frames []struct {
 			Name string `json:"name"`
 			File string `json:"file"`
+			Line int64  `json:"line"`
 		} `json:"frames"`
 	} `json:"shared"`
-	Profiles []struct {
-		Type    string      `json:"type"`
-		Name    string      `json:"name"`
-		Samples [][]int     `json:"samples"`
-		Weights []float64   `json:"weights"`
-		Events  interface{} `json:"events"`
-	} `json:"profiles"`
+	Profiles []speedscopeProfile `json:"profiles"`
+}
+
+type speedscopeProfile struct {
+	Type       string    `json:"type"`
+	Name       string    `json:"name"`
+	Unit       string    `json:"unit"`
+	StartValue float64   `json:"startValue"`
+	EndValue   float64   `json:"endValue"`
+	Samples    [][]int   `json:"samples"`
+	Weights    []float64 `json:"weights"`
+	Events     []struct {
+		Type  string  `json:"type"`
+		Frame int     `json:"frame"`
+		At    float64 `json:"at"`
+	} `json:"events"`
+}
+
+// TraceEvent's thread-time export uses these pseudo-frames for off-CPU or uncertain
+// native time. Do not classify arbitrary application methods named Wait as blocked.
+func waitStack(stack []Frame) bool {
+	for _, f := range stack {
+		switch f.Name {
+		case "(idle)", "BLOCKED_TIME", "AWAIT_TIME", "UNMANAGED_CODE_TIME":
+			return true
+		}
+	}
+	return false
 }
 
 func readSpeedscope(path string, data []byte) (*Profile, error) {
@@ -221,8 +249,74 @@ func readSpeedscope(path string, data []byte) (*Profile, error) {
 	}
 	out := &Profile{}
 	for pi, pr := range doc.Profiles {
+		// Normalize time units before combining threads. Empty units occur in older
+		// sampled fixtures; "none" retains speedscope's arbitrary weight units.
+		scale := 1.0
+		switch pr.Unit {
+		case "nanoseconds":
+			scale = 1e-9
+		case "microseconds":
+			scale = 1e-6
+		case "milliseconds":
+			scale = 1e-3
+		case "", "none", "seconds":
+		default:
+			return nil, inputErr(path, "profiles[%d]: unsupported CPU unit %q", pi, pr.Unit)
+		}
+		stackFrames := func(stack []int) ([]Frame, error) {
+			var frames []Frame
+			for i := len(stack) - 1; i >= 0; i-- {
+				fi := stack[i]
+				if fi < 0 || fi >= len(doc.Shared.Frames) {
+					return nil, inputErr(path, "profiles[%d] names frame %d, but there are %d frames", pi, fi, len(doc.Shared.Frames))
+				}
+				f := doc.Shared.Frames[fi]
+				frames = append(frames, Frame{Name: f.Name, File: f.File, Line: f.Line})
+			}
+			return frames, nil
+		}
+		if pr.Type == "evented" {
+			if len(pr.Events) == 0 {
+				return nil, inputErr(path, "profiles[%d] evented profile has no events", pi)
+			}
+			stack := []int{}
+			last := pr.StartValue
+			for ei, ev := range pr.Events {
+				if math.IsInf(ev.At, 0) || ev.At < last || ev.At > pr.EndValue {
+					return nil, inputErr(path, "profiles[%d] event %d: invalid time %g (previous %g, end %g)", pi, ei, ev.At, last, pr.EndValue)
+				}
+				frames, err := stackFrames(stack)
+				if err != nil {
+					return nil, err
+				}
+				// Every positive interval is charged to the stack open during it,
+				// never once per frame: nested frames must not double count CPU.
+				if ev.At > last && len(frames) > 0 && !waitStack(frames) {
+					out.Samples = append(out.Samples, Sample{Stack: frames, Count: 1, Weight: (ev.At - last) * scale})
+				}
+				if ev.Frame < 0 || ev.Frame >= len(doc.Shared.Frames) {
+					return nil, inputErr(path, "profiles[%d] event %d: invalid frame %d", pi, ei, ev.Frame)
+				}
+				switch ev.Type {
+				case "O":
+					stack = append(stack, ev.Frame)
+				case "C":
+					if len(stack) == 0 || stack[len(stack)-1] != ev.Frame {
+						return nil, inputErr(path, "profiles[%d] event %d: closing frame %d does not match the open stack", pi, ei, ev.Frame)
+					}
+					stack = stack[:len(stack)-1]
+				default:
+					return nil, inputErr(path, "profiles[%d] event %d: type %q, want O or C", pi, ei, ev.Type)
+				}
+				last = ev.At
+			}
+			if len(stack) != 0 {
+				return nil, inputErr(path, "profiles[%d] evented profile has unclosed frames", pi)
+			}
+			continue
+		}
 		if pr.Type != "sampled" {
-			return nil, inputErr(path, "profiles[%d] has type %q: only sampled profiles are read (convert evented ones with speedscope's own importer)", pi, pr.Type)
+			return nil, inputErr(path, "profiles[%d] has type %q: want sampled or evented speedscope profiles", pi, pr.Type)
 		}
 		if len(pr.Weights) != 0 && len(pr.Weights) != len(pr.Samples) {
 			return nil, inputErr(path, "profiles[%d]: %d samples but %d weights", pi, len(pr.Samples), len(pr.Weights))
@@ -235,17 +329,14 @@ func readSpeedscope(path string, data []byte) (*Profile, error) {
 			if w <= 0 || len(stack) == 0 {
 				continue
 			}
-			sm := Sample{Count: 1, Weight: w}
+			sm := Sample{Count: 1, Weight: w * scale}
 			// speedscope stacks are root first: reverse to leaf first.
-			for i := len(stack) - 1; i >= 0; i-- {
-				fi := stack[i]
-				if fi < 0 || fi >= len(doc.Shared.Frames) {
-					return nil, inputErr(path, "profiles[%d] sample %d names frame %d, but there are %d frames", pi, si, fi, len(doc.Shared.Frames))
-				}
-				f := doc.Shared.Frames[fi]
-				sm.Stack = append(sm.Stack, Frame{Name: f.Name, File: f.File})
+			var err error
+			sm.Stack, err = stackFrames(stack)
+			if err != nil {
+				return nil, err
 			}
-			if sm.Stack[0].Name == "(idle)" {
+			if waitStack(sm.Stack) {
 				continue
 			}
 			out.Samples = append(out.Samples, sm)

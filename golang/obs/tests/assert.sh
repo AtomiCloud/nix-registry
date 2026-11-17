@@ -36,6 +36,20 @@ expect() {
 }
 s="$fx/series"
 
+# Underfilled exports must enforce labels independently of the worst-case count.
+printf '%s\n' '{"status":"success","data":[{"__name__":"checkout_charges_total","payment_provider":"stripe","outcome":"success"}]}' >"$work/sparse-ok.json"
+run --series "$work/sparse-ok.json"
+expect 0 "underfilled green control (1 of 6 series)" "1 series, worst case 6: ok"
+sed 's/"outcome":"success"/"outcome":"success","k8s_pod_name":"review-pod"/' "$work/sparse-ok.json" >"$work/sparse-pod.json"
+run --series "$work/sparse-pod.json"
+expect 1 "RED underfilled: business pod key" "FAIL $work/sparse-pod.json metric checkout.charges: [pod-label-on-business-metric]" '"k8s_pod_name"'
+sed 's/"outcome":"success"/"outcome":"success","user_id":"review-user"/' "$work/sparse-ok.json" >"$work/sparse-label.json"
+run --series "$work/sparse-label.json"
+expect 1 "RED underfilled: undeclared label" "FAIL $work/sparse-label.json metric checkout.charges: [label-not-in-contract]" '"user_id"'
+sed 's/stripe/review-provider/' "$work/sparse-ok.json" >"$work/sparse-value.json"
+run --series "$work/sparse-value.json"
+expect 1 "RED underfilled: enum value outside type" "FAIL $work/sparse-value.json metric checkout.charges: [label-value-outside-type]" '"review-provider"'
+
 run --series "$s/series-ok.json" --pods 2
 expect 0 "/api/v1/series within the worst case (counter 6, histogram 3 x 14 = 42, per-pod gauge 2 pods, platform metric)" \
   "metric checkout.charges [landscape lab]: 6 series, worst case 6: ok" "metric checkout.charge.duration [landscape lab]: 42 series, worst case 42: ok" \

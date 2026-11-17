@@ -27,6 +27,8 @@ type Override struct {
 	Scenario string  `yaml:"scenario"` // empty: every scenario of the service
 	Kind     string  `yaml:"kind"`     // function, span or total; empty: every kind
 	Name     string  `yaml:"name"`     // function or span name; empty: every row of the kind
+	File     string  `yaml:"file"`     // optional function source file (exact match)
+	Line     int64   `yaml:"line"`     // optional one-based function declaration line
 	Limit    float64 `yaml:"limit"`    // the tolerance, as a fraction (0.10 = 10 %)
 	Why      string  `yaml:"why"`      // required
 }
@@ -66,6 +68,9 @@ func LoadLimits(path string) (*Limits, error) {
 		default:
 			return nil, inputErr(path, "%s: kind %q: want function, span or total", where, o.Kind)
 		}
+		if o.Line < 0 || ((o.File != "" || o.Line != 0) && o.Kind != "function") {
+			return nil, inputErr(path, "%s: file/line selectors require kind: function and a nonnegative line", where)
+		}
 	}
 	return &l, nil
 }
@@ -73,6 +78,14 @@ func LoadLimits(path string) (*Limits, error) {
 // tolerance picks the tolerance of one row: the most specific override, else the default.
 // why is the override's reason (empty for a default).
 func (l *Limits) tolerance(b *Baseline, kind, name string) (tol float64, why string) {
+	return l.rowTolerance(b, kind, name, "", 0)
+}
+
+func (l *Limits) functionTolerance(b *Baseline, r Row) (float64, string) {
+	return l.rowTolerance(b, "function", r.Name, r.File, r.Line)
+}
+
+func (l *Limits) rowTolerance(b *Baseline, kind, name, file string, line int64) (tol float64, why string) {
 	tol = TolFunction
 	switch kind {
 	case "total":
@@ -89,7 +102,8 @@ func (l *Limits) tolerance(b *Baseline, kind, name string) (tol float64, why str
 	}
 	for _, o := range l.Overrides {
 		if o.Service != b.Service || (o.Scenario != "" && o.Scenario != b.Scenario) ||
-			(o.Kind != "" && o.Kind != kind) || (o.Name != "" && o.Name != name) {
+			(o.Kind != "" && o.Kind != kind) || (o.Name != "" && o.Name != name) ||
+			(o.File != "" && o.File != file) || (o.Line != 0 && o.Line != line) {
 			continue
 		}
 		spec := 0
@@ -100,6 +114,12 @@ func (l *Limits) tolerance(b *Baseline, kind, name string) (tol float64, why str
 			spec++
 		}
 		if o.Name != "" {
+			spec++
+		}
+		if o.File != "" {
+			spec++
+		}
+		if o.Line != 0 {
 			spec++
 		}
 		if spec > best {

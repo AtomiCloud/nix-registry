@@ -22,6 +22,8 @@ func Limit(tol, nBase, nNow float64) float64 { return math.Max(tol, 3*Noise(nBas
 type Result struct {
 	Kind    string // function, span, total
 	Name    string
+	File    string
+	Line    int64
 	Base    float64 // share, or ns per request for total
 	Now     float64
 	Change  float64 // now / base - 1
@@ -40,10 +42,10 @@ func (r Result) Failed() bool { return r.Slower && r.Enforce }
 // Compare checks a new run against the baseline. Rows are the baseline's rows only; functions
 // that are new in this run are listed as notes in Extra.
 func Compare(b *Baseline, now *Summary, l *Limits) (rows []Result, extra []string) {
-	byFn := map[string]FuncRow{}
+	byFn := map[Frame]FuncRow{}
 	for _, f := range now.Functions {
 		if f.Own {
-			byFn[f.Name] = f
+			byFn[Frame{Name: f.Name, File: f.File, Line: f.Line}] = f
 		}
 	}
 	bySpan := map[string]SpanRow{}
@@ -67,8 +69,18 @@ func Compare(b *Baseline, now *Summary, l *Limits) (rows []Result, extra []strin
 		return r
 	}
 	for _, br := range b.Functions {
-		f := byFn[br.Name]
-		rows = append(rows, mk("function", br.Name, br.Share, f.OwnShare, br.N, f.OwnN))
+		f := byFn[Frame{Name: br.Name, File: br.File, Line: br.Line}]
+		r := mk("function", br.Name, br.Share, f.OwnShare, br.N, f.OwnN)
+		// Function-specific overrides can select file and declaration line as well as name.
+		tol, why := l.functionTolerance(b, br)
+		r.File, r.Line, r.Why = br.File, br.Line, why
+		if r.Missing {
+			r.Limit = tol
+		} else {
+			r.Limit = Limit(tol, float64(br.N), float64(f.OwnN))
+			r.Slower, r.Faster = r.Change > r.Limit, r.Change < -r.Limit
+		}
+		rows = append(rows, r)
 	}
 	for _, br := range b.Spans {
 		s := bySpan[br.Name]
@@ -100,19 +112,31 @@ func Compare(b *Baseline, now *Summary, l *Limits) (rows []Result, extra []strin
 		rows = append(rows, r)
 	}
 	// Own functions that are hot now but are not rows of the baseline.
-	inBase := map[string]bool{}
+	inBase := map[Frame]bool{}
 	for _, br := range b.Functions {
-		inBase[br.Name] = true
+		inBase[Frame{Name: br.Name, File: br.File, Line: br.Line}] = true
 	}
 	var newer []FuncRow
 	for _, f := range now.Functions {
-		if f.Own && f.OwnShare >= MinFunctionShare && !inBase[f.Name] {
+		if f.Own && f.OwnShare >= MinFunctionShare && !inBase[Frame{Name: f.Name, File: f.File, Line: f.Line}] {
 			newer = append(newer, f)
 		}
 	}
-	sort.Slice(newer, func(i, j int) bool { return newer[i].OwnShare > newer[j].OwnShare })
+	sort.Slice(newer, func(i, j int) bool {
+		a, b := newer[i], newer[j]
+		if a.OwnShare != b.OwnShare {
+			return a.OwnShare > b.OwnShare
+		}
+		if a.Name != b.Name {
+			return a.Name < b.Name
+		}
+		if a.File != b.File {
+			return a.File < b.File
+		}
+		return a.Line < b.Line
+	})
 	for _, f := range newer {
-		extra = append(extra, fmt.Sprintf("function %s is %s of CPU now and has no row in the baseline", f.Name, pct(f.OwnShare)))
+		extra = append(extra, fmt.Sprintf("function %s is %s of CPU now and has no row in the baseline", functionName(f.Name, f.File, f.Line), pct(f.OwnShare)))
 	}
 	return rows, extra
 }
@@ -139,7 +163,7 @@ func PrintCompare(w io.Writer, file string, rows []Result, extra []string) int {
 		if r.Missing {
 			verdict = "  faster (no samples now)"
 		}
-		fmt.Fprintf(w, "%-9s %-44s %10s %10s  %+.1f%% (%.1f%%)%s\n", r.Kind, trunc(r.Name, 44), base, now, r.Change*100, r.Limit*100, verdict)
+		fmt.Fprintf(w, "%-9s %-44s %10s %10s  %+.1f%% (%.1f%%)%s\n", r.Kind, functionName(r.Name, r.File, r.Line), base, now, r.Change*100, r.Limit*100, verdict)
 	}
 	for _, r := range rows {
 		if r.Kind == "total" && r.Note != "" && !r.Slower {
@@ -161,14 +185,11 @@ func PrintCompare(w io.Writer, file string, rows []Result, extra []string) int {
 			fmt.Fprintf(w, "FAIL %s %s: %s -> %s, %+.1f%% is above the limit of %.1f%%%s; %s\n", file, r.Name, fmtNs(r.Base), fmtNs(r.Now), r.Change*100, r.Limit*100, why, r.Note)
 			continue
 		}
-		fmt.Fprintf(w, "FAIL %s %s %q: share %s -> %s, %+.1f%% is above the limit of %.1f%%%s\n", file, r.Kind, r.Name, pct(r.Base), pct(r.Now), r.Change*100, r.Limit*100, why)
+		location := ""
+		if r.File != "" || r.Line != 0 {
+			location = "; source " + functionName(r.Name, r.File, r.Line)
+		}
+		fmt.Fprintf(w, "FAIL %s %s %q: share %s -> %s, %+.1f%% is above the limit of %.1f%%%s%s\n", file, r.Kind, r.Name, pct(r.Base), pct(r.Now), r.Change*100, r.Limit*100, why, location)
 	}
 	return failed
-}
-
-func trunc(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n-1] + "~"
 }

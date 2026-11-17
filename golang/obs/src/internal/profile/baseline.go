@@ -10,7 +10,7 @@ import (
 )
 
 // BaselineVersion is the file format version.
-const BaselineVersion = 1
+const BaselineVersion = 2
 
 // MinFunctionShare is the smallest share of the baseline's CPU a function needs to be a row.
 const MinFunctionShare = 0.03
@@ -18,6 +18,8 @@ const MinFunctionShare = 0.03
 // Row of a baseline: a function or a span with its median share and median sample count.
 type Row struct {
 	Name  string  `json:"name"`
+	File  string  `json:"file,omitempty"`
+	Line  int64   `json:"line,omitempty"`
 	Share float64 `json:"share"`
 	N     int64   `json:"n"`
 }
@@ -59,6 +61,9 @@ func BuildBaseline(service, scenario, profiler string, own []string, runs []*Sum
 	if len(runs) != 3 {
 		return nil, fmt.Errorf("a baseline is the median of exactly 3 runs; got %d", len(runs))
 	}
+	if len(own) == 0 {
+		return nil, fmt.Errorf("a baseline requires at least one --own expression for the service's own code")
+	}
 	b := &Baseline{Version: BaselineVersion, Service: service, Scenario: scenario, Format: runs[0].Format,
 		Profiler: profiler, Runs: 3, Own: own, Functions: []Row{}, Spans: []Row{}}
 	for _, r := range runs {
@@ -82,24 +87,22 @@ func BuildBaseline(service, scenario, profiler string, own []string, runs []*Sum
 		b.CPUPerRequestNs = math.Round(c)
 	}
 	// Functions: own share per run, absent = 0.
-	fshare := map[string][]float64{}
-	fn := map[string][]float64{}
+	fshare := map[Frame][]float64{}
+	fn := map[Frame][]float64{}
 	sshare := map[string][]float64{}
 	sn := map[string][]float64{}
 	for _, r := range runs {
-		seenF, seenS := map[string]bool{}, map[string]bool{}
 		for _, f := range r.Functions {
 			if !f.Own || f.OwnShare <= 0 {
 				continue
 			}
-			fshare[f.Name] = append(fshare[f.Name], f.OwnShare)
-			fn[f.Name] = append(fn[f.Name], float64(f.OwnN))
-			seenF[f.Name] = true
+			key := Frame{Name: f.Name, File: f.File, Line: f.Line}
+			fshare[key] = append(fshare[key], f.OwnShare)
+			fn[key] = append(fn[key], float64(f.OwnN))
 		}
 		for _, s := range r.Spans {
 			sshare[s.Name] = append(sshare[s.Name], s.Share)
 			sn[s.Name] = append(sn[s.Name], float64(s.N))
-			seenS[s.Name] = true
 		}
 	}
 	pad := func(xs []float64) []float64 {
@@ -108,10 +111,10 @@ func BuildBaseline(service, scenario, profiler string, own []string, runs []*Sum
 		}
 		return xs
 	}
-	for name, xs := range fshare {
+	for f, xs := range fshare {
 		m := median(pad(xs))
 		if m >= MinFunctionShare {
-			b.Functions = append(b.Functions, Row{Name: name, Share: round6(m), N: int64(median(pad(fn[name])) + 0.5)})
+			b.Functions = append(b.Functions, Row{Name: f.Name, File: f.File, Line: f.Line, Share: round6(m), N: int64(median(pad(fn[f])) + 0.5)})
 		}
 	}
 	for name, xs := range sshare {
@@ -131,7 +134,13 @@ func sortRows(r []Row) {
 		if r[i].Share != r[j].Share {
 			return r[i].Share > r[j].Share
 		}
-		return r[i].Name < r[j].Name
+		if r[i].Name != r[j].Name {
+			return r[i].Name < r[j].Name
+		}
+		if r[i].File != r[j].File {
+			return r[i].File < r[j].File
+		}
+		return r[i].Line < r[j].Line
 	})
 }
 
@@ -163,7 +172,7 @@ func LoadBaseline(path string) (*Baseline, error) {
 		return nil, inputErr(path, "baseline: %v", err)
 	}
 	if b.Version != BaselineVersion {
-		return nil, inputErr(path, "baseline version %d: this obs reads version %d", b.Version, BaselineVersion)
+		return nil, inputErr(path, "baseline version %d: this obs reads version %d; regenerate from 3 profiles with --own and --update", b.Version, BaselineVersion)
 	}
 	if b.Service == "" || b.Scenario == "" {
 		return nil, inputErr(path, "baseline has no service or scenario")

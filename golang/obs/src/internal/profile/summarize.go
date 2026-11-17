@@ -63,6 +63,7 @@ func ReadRunMeta(path string) (m RunMeta, ok bool, err error) {
 type FuncRow struct {
 	Name      string  `json:"name"`
 	File      string  `json:"file,omitempty"`
+	Line      int64   `json:"line,omitempty"`
 	SelfShare float64 `json:"self"`
 	InclShare float64 `json:"inclusive"`
 	// OwnShare is the CPU attributed to the function: its own time plus the time of callees
@@ -127,7 +128,6 @@ func (m *ownMatcher) match(f Frame) bool {
 type acc struct {
 	self, incl, own float64
 	ownN            float64
-	file            string
 	isOwn           bool
 }
 
@@ -138,14 +138,14 @@ func Summarize(p *Profile, meta *RunMeta, o Options) (*Summary, error) {
 		return nil, err
 	}
 	var total, totalN float64
-	fn := map[string]*acc{}
+	fn := map[Frame]*acc{}
 	spanW := map[string]float64{}
 	spanN := map[string]float64{}
 	get := func(f Frame) *acc {
-		a := fn[f.Name]
+		a := fn[f]
 		if a == nil {
-			a = &acc{file: f.File}
-			fn[f.Name] = a
+			a = &acc{}
+			fn[f] = a
 		}
 		return a
 	}
@@ -157,14 +157,14 @@ func Summarize(p *Profile, meta *RunMeta, o Options) (*Summary, error) {
 		totalN += s.Count
 		// Self: the leaf. Inclusive: every distinct function on the stack once (recursion counts once).
 		get(s.Stack[0]).self += s.Weight
-		seen := map[string]bool{}
+		seen := map[Frame]bool{}
 		spans := map[string]bool{}
 		if s.Span != "" {
 			spans[s.Span] = true
 		}
 		for _, f := range s.Stack {
-			if !seen[f.Name] {
-				seen[f.Name] = true
+			if !seen[f] {
+				seen[f] = true
 				get(f).incl += s.Weight
 			}
 			if sp, ok := spanOfFrame(f.Name); ok {
@@ -191,9 +191,9 @@ func Summarize(p *Profile, meta *RunMeta, o Options) (*Summary, error) {
 		return nil, fmt.Errorf("the profile has no CPU weight")
 	}
 	sum := &Summary{Format: p.Format, Samples: int64(totalN + 0.5), Run: meta}
-	for name, a := range fn {
+	for f, a := range fn {
 		sum.Functions = append(sum.Functions, FuncRow{
-			Name: name, File: a.file, SelfShare: a.self / total, InclShare: a.incl / total,
+			Name: f.Name, File: f.File, Line: f.Line, SelfShare: a.self / total, InclShare: a.incl / total,
 			OwnShare: a.own / total, OwnN: int64(a.ownN + 0.5), Own: a.isOwn,
 		})
 	}
@@ -205,7 +205,13 @@ func Summarize(p *Profile, meta *RunMeta, o Options) (*Summary, error) {
 		if a.SelfShare != b.SelfShare {
 			return a.SelfShare > b.SelfShare
 		}
-		return a.Name < b.Name
+		if a.Name != b.Name {
+			return a.Name < b.Name
+		}
+		if a.File != b.File {
+			return a.File < b.File
+		}
+		return a.Line < b.Line
 	})
 	for name, w := range spanW {
 		sum.Spans = append(sum.Spans, SpanRow{Name: name, Share: w / total, N: int64(spanN[name] + 0.5)})
@@ -240,7 +246,7 @@ func (s *Summary) Print(w io.Writer, top int) {
 		if f.Own {
 			own = pct(f.OwnShare)
 		}
-		fmt.Fprintf(w, "%-8s %-9s %-9s  %s\n", pct(f.SelfShare), pct(f.InclShare), own, f.Name)
+		fmt.Fprintf(w, "%-8s %-9s %-9s  %s\n", pct(f.SelfShare), pct(f.InclShare), own, functionName(f.Name, f.File, f.Line))
 	}
 	if len(s.Spans) > 0 {
 		fmt.Fprintf(w, "\n%-8s %-8s  %s\n", "share", "samples", "span")

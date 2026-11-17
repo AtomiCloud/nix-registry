@@ -2,6 +2,7 @@ package profile
 
 import (
 	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -214,6 +215,15 @@ func TestWriteFixtures(t *testing.T) {
 	w("now-slow.cpuprofile", cpuProfileJSON(3000, 3000, 400))
 	w("base.speedscope.json", speedscopeJSON(240, 200, 60))
 	w("now-slow.speedscope.json", speedscopeJSON(480, 200, 60))
+	for name, slow := range map[string]bool{"dotnet-base.speedscope.json.gz": false, "dotnet-slow.speedscope.json.gz": true} {
+		var buf bytes.Buffer
+		zw := gzip.NewWriter(&buf)
+		_, _ = zw.Write([]byte(dotnetEventedJSON(slow)))
+		if err := zw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		w(name, buf.String())
+	}
 }
 
 // quick structural check that the JSON fixtures are valid JSON.

@@ -12,10 +12,22 @@ import (
 type Frame struct {
 	Name string
 	File string
+	Line int64 // declaration's start line (one based); 0 when unavailable
+}
+
+func functionName(name, file string, line int64) string {
+	if file == "" && line == 0 {
+		return name
+	}
+	if line > 0 {
+		return fmt.Sprintf("%s (%s:%d)", name, file, line)
+	}
+	return fmt.Sprintf("%s (%s)", name, file)
 }
 
 // Sample is one CPU sample. Stack is leaf first, root last. Count is the number of samples
-// the entry stands for (1 for .cpuprofile and speedscope, the "samples" value for pprof);
+// the entry stands for (1 for a speedscope sample or positive evented stack interval;
+// hit counts for .cpuprofile, the "samples" value for pprof);
 // Weight is the CPU weight (nanoseconds for pprof, 1 per sample or the speedscope weight).
 // Span is set when the reader found a span label on the sample (pprof label span_name).
 type Sample struct {
@@ -39,7 +51,8 @@ const (
 )
 
 // Span frames: Bun runs each span body inside a generated function span__<name>; Dart uses
-// one UserTag per span (frame named UserTag:<name>). Both end up as frames in the profile.
+// one UserTag per span. UserTag:<name> is obs's unverified converter convention, not a
+// native Dart frame: the dart template's CI converter must insert these frames.
 const (
 	spanFramePrefix = "span__"
 	userTagPrefix   = "UserTag:"
