@@ -22,8 +22,8 @@ const (
 	StorageRoute     Step = "add storageNode endpoints and roll insert/select"
 	Writes           Step = "require received counter rising and send errors flat (no drain)"
 	RestoreRoute     Step = "remove new storageNode endpoints and roll insert/select; retain new PVCs and pods"
-	Restore          Step = "restore isolated single Ready and undo drain controls"
-	ReverseRoles     Step = "activate single roles then clear scaled pod and template roles"
+	Restore          Step = "restore single with role templates active before scale-up, wait Ready and undo drain controls"
+	ReverseRoles     Step = "confirm single pod roles, then clear scaled pod and template roles"
 	ReverseReconnect Step = "roll Alloy and require every scaled received counter flat"
 )
 

@@ -12,12 +12,16 @@ import (
 )
 
 type fakeCluster struct {
-	calls []Step
-	fail  Step
+	calls  []Step
+	fail   Step
+	onStep func(Step) // runs when a step is executed, before any planted failure
 }
 
 func (f *fakeCluster) Execute(_ context.Context, s Step, _ string, _ Config) error {
 	f.calls = append(f.calls, s)
+	if f.onStep != nil {
+		f.onStep(s)
+	}
 	if f.fail == s {
 		return errors.New("planted readiness failure")
 	}
@@ -26,6 +30,7 @@ func (f *fakeCluster) Execute(_ context.Context, s Step, _ string, _ Config) err
 
 type fakeMetrics struct {
 	counters map[string][]float64
+	last     map[string]float64 // value most recently returned per counter
 	calls    []string
 	counts   int
 	corrupt  bool
@@ -42,6 +47,10 @@ func (f *fakeMetrics) Counter(_ context.Context, _ string, name string) (float64
 	if len(vs) > 1 {
 		f.counters[name] = vs[1:]
 	}
+	if f.last == nil {
+		f.last = map[string]float64{}
+	}
+	f.last[name] = v
 	return v, nil
 }
 func (f *fakeMetrics) Counts(_ context.Context, _ string, _ Config, end time.Time) ([]float64, error) {
@@ -145,11 +154,26 @@ func TestMetricsFailures(t *testing.T) {
 func TestDrainWaitsForAllFlushes(t *testing.T) {
 	c := &fakeCluster{}
 	m := &fakeMetrics{counters: map[string][]float64{received("tempo"): {1, 1}, "tempo_live_store_blocks_completed_total": {5, 7, 7}, "tempo_live_store_local_blocks_flushed_total": {5, 6, 7}}}
+	// The proof is the state at the moment the single is stopped: the last flushed
+	// value read must already have caught up to the last completed value read.
+	// (Round 2: the old assertion looked at how many fake values were left, which
+	// stays true when the g>=b check is deleted.)
+	stopped := false
+	c.onStep = func(s Step) {
+		if s != Step("stop single") {
+			return
+		}
+		stopped = true
+		const completed, flushed = "tempo_live_store_blocks_completed_total", "tempo_live_store_local_blocks_flushed_total"
+		if m.last[flushed] < m.last[completed] || m.last[flushed] != 7 {
+			t.Errorf("single stopped before all completed blocks flushed: completed %g flushed %g", m.last[completed], m.last[flushed])
+		}
+	}
 	if err := runFake(c, m).Run(context.Background(), "tempo", config(), false, false); err != nil {
 		t.Fatal(err)
 	}
-	if len(m.counters["tempo_live_store_local_blocks_flushed_total"]) != 1 {
-		t.Fatal("stopped before all completed blocks flushed")
+	if !stopped {
+		t.Fatal("single never stopped")
 	}
 }
 func TestNoFlushDoesNotStop(t *testing.T) {

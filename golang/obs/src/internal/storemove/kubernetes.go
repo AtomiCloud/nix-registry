@@ -33,6 +33,51 @@ func (k Kubernetes) call(ctx context.Context, c Config, args ...string) error {
 	_, err := k.command(ctx, c, args...)
 	return err
 }
+
+// workloadStatus is the controller-specific replica picture: Deployment and
+// StatefulSet report spec.replicas/status.readyReplicas, a DaemonSet (the concept
+// 10.3 multi-node Alloy form) reports desiredNumberScheduled/numberReady/
+// updatedNumberScheduled and has no spec.replicas at all.
+type workloadStatus struct {
+	kind                   string
+	desired, ready, update int
+}
+
+func (k Kubernetes) status(ctx context.Context, c Config, w string) (workloadStatus, error) {
+	b, err := k.command(ctx, c, "get", w, "-o", "json")
+	if err != nil {
+		return workloadStatus{}, err
+	}
+	var obj struct {
+		Kind string
+		Spec struct {
+			Replicas *int `json:"replicas"`
+		}
+		Status struct {
+			Ready     int `json:"readyReplicas"`
+			Desired   int `json:"desiredNumberScheduled"`
+			NumReady  int `json:"numberReady"`
+			Scheduled int `json:"updatedNumberScheduled"`
+		}
+	}
+	if err = json.Unmarshal(b, &obj); err != nil {
+		return workloadStatus{}, fmt.Errorf("%s: %w", w, err)
+	}
+	kind, _, _ := strings.Cut(canonicalResource(w), "/")
+	if kind == "" || !strings.Contains(w, "/") {
+		kind = canonicalKind(obj.Kind)
+	}
+	switch kind {
+	case "daemonset":
+		return workloadStatus{kind, obj.Status.Desired, obj.Status.NumReady, obj.Status.Scheduled}, nil
+	case "deployment", "statefulset":
+		if obj.Spec.Replicas == nil {
+			return workloadStatus{kind, 0, obj.Status.Ready, 0}, nil
+		}
+		return workloadStatus{kind, *obj.Spec.Replicas, obj.Status.Ready, *obj.Spec.Replicas}, nil
+	}
+	return workloadStatus{}, fmt.Errorf("%s: unsupported workload kind %q (want deployment, statefulset or daemonset)", w, kind)
+}
 func (k Kubernetes) ready(ctx context.Context, c Config, resources []string) error {
 	timeout := k.Timeout
 	if timeout <= 0 {
@@ -42,23 +87,12 @@ func (k Kubernetes) ready(ctx context.Context, c Config, resources []string) err
 		if err := k.call(ctx, c, "rollout", "status", w, "--timeout="+timeout.String()); err != nil {
 			return err
 		}
-		b, err := k.command(ctx, c, "get", w, "-o", "json")
+		st, err := k.status(ctx, c, w)
 		if err != nil {
 			return err
 		}
-		var obj struct {
-			Spec struct {
-				Replicas *int `json:"replicas"`
-			}
-			Status struct {
-				Ready int `json:"readyReplicas"`
-			}
-		}
-		if err = json.Unmarshal(b, &obj); err != nil {
-			return err
-		}
-		if obj.Spec.Replicas == nil || *obj.Spec.Replicas < 1 || obj.Status.Ready < *obj.Spec.Replicas {
-			return fmt.Errorf("%s: want all nonzero desired replicas Ready", w)
+		if st.desired < 1 || st.ready < st.desired || st.update < st.desired {
+			return fmt.Errorf("%s: want all nonzero desired replicas Ready and updated (%s desired %d, ready %d, updated %d)", w, st.kind, st.desired, st.ready, st.update)
 		}
 	}
 	return nil
@@ -167,6 +201,12 @@ func (k Kubernetes) roles(ctx context.Context, c Config, reverse bool) error {
 		if err = k.labels(ctx, c, selector, roles, "true"); err != nil {
 			return err
 		}
+		if reverse {
+			// The single's template already carries the roles (Restore patched it
+			// before scale-up); patching it again now would restart a pod that has
+			// just taken traffic.
+			continue
+		}
 		labels := map[string]string{}
 		for _, role := range c.RoleLabels {
 			labels[role] = "false"
@@ -241,16 +281,19 @@ func (k Kubernetes) Execute(ctx context.Context, s Step, store string, c Config)
 	case Route:
 		return k.roles(ctx, c, false)
 	case Reconnect:
-		b, err := k.command(ctx, c, "get", c.Alloy, "-o", "jsonpath={.spec.replicas}")
+		st, err := k.status(ctx, c, c.Alloy)
 		if err != nil {
 			return err
 		}
-		n, err := strconv.Atoi(string(b))
-		if err != nil || n < 2 {
-			return fmt.Errorf("%s: Alloy must have at least 2 replicas, got %q", c.Alloy, b)
+		if st.desired < 2 {
+			return fmt.Errorf("%s: Alloy must have at least 2 replicas (DaemonSet: 2 scheduled nodes), got %d", c.Alloy, st.desired)
 		}
 		return k.roll(ctx, c, []string{c.Alloy})
 	case StorageRoute, RestoreRoute:
+		// Both manifests are checked before either is applied.
+		if err := validateRoutingManifests(c); err != nil {
+			return err
+		}
 		file := c.RoutingManifest
 		if s == RestoreRoute {
 			file = c.OriginalRoutingManifest
@@ -287,6 +330,11 @@ func (k Kubernetes) Execute(ctx context.Context, s Step, store string, c Config)
 			return err
 		}
 		if err := k.apply(ctx, c, c.SingleManifest); err != nil {
+			return err
+		}
+		// Roles go true in the template while the single has no pods, so the first
+		// Ready pod already carries them and nothing restarts after it takes traffic.
+		if err := k.templateRoles(ctx, c, c.Single, c.RoleLabels); err != nil {
 			return err
 		}
 		if err := k.scale(ctx, c, c.Single, 1); err != nil {

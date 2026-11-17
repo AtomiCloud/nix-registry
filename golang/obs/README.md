@@ -305,7 +305,9 @@ New roles become active and Ready before old roles are removed, so Services do n
 The old single is never rolled by changing its template before its drain. Suspend external GitOps
 reconciliation of these workloads while moving so it cannot undo a step.
 
-Alloy must have at least two replicas. Tempo requires a verified compaction-control adapter
+Alloy must have at least two replicas (a Deployment/StatefulSet with `spec.replicas` >= 2, or a
+DaemonSet scheduled on at least two nodes; a DaemonSet is Ready when `numberReady` and
+`updatedNumberScheduled` reach `desiredNumberScheduled`). Tempo requires a verified compaction-control adapter
 (`kubectl exec` with argv, no local shell), or a **separate** `compactor: deployment/backend-worker`
 that can safely scale to zero (also set its original positive `compactor_replicas` for rollback). Using the old single itself as `compactor` is refused. Its drain
 waits for `tempo_live_store_blocks_completed_total` and
@@ -324,16 +326,19 @@ its PVC and stable raft identity; no drain or deletion occurs. Set `profile_type
 The metastore manifest must contain no active read/write labels; the tool explicitly persists
 false labels on its pod template after conversion so a restart cannot rejoin those Services.
 
-Tempo/Pyroscope rollback restores an isolated single and waits for Ready, activates its roles,
-clears both scaled pod and template roles, rolls Alloy, checks scaled receive counters stay flat,
+Tempo/Pyroscope rollback applies the single manifest, sets the single's template roles to true while
+it has no pods, scales it up (so the first Ready pod already has the roles and never restarts after
+taking traffic), waits for Ready, clears both scaled pod and template roles, rolls Alloy, checks scaled receive counters stay flat,
 then verifies the data window. Provide `scaled_metrics_urls` for every scaled receiver pod, or
 `metrics_url` for an endpoint aggregating the whole scaled receive tier. A receiving scaled pod
 or counter reset stops rollback; scaled data/PVCs remain intact.
 
 For VictoriaLogs and VictoriaMetrics omit the single/Alloy/role fields. Provide `scaled` storage
 workloads, `routers` insert/select workloads, `routing_manifest`, `original_routing_manifest`,
-and `metrics_url` (the insert-side `/metrics`). Routing manifests change only the `-storageNode`
-lists (plus `-dedup.minScrapeInterval=1ms` for VM copies) and keep the first node. There is no drain,
+and `metrics_url` (the insert-side `/metrics`). Routing manifests may contain ONLY the declared `routers` and change only their `-storageNode`
+lists (plus `-dedup.minScrapeInterval=1ms` for VM copies); every original endpoint must stay.
+Alloy or app workloads, Services and any other field change are refused before anything is applied,
+in both directions (move and rollback). There is no drain,
 rebalance, PVC deletion, or Alloy restart. VL checks the OTLP received counter rising and remote
 send errors flat; VM checks inserted rows rising. Read URLs end in `/select/logsql/stats_query_range`
 (VL) or `/select/0/prometheus/api/v1/query_range` (VM). Supply a query counting the known dataset

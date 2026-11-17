@@ -6,6 +6,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"io"
 	"os"
+	"reflect"
 	"strings"
 )
 
@@ -201,6 +202,157 @@ func validateScaledManifest(c Config) error {
 	for _, w := range c.Scaled {
 		if !seen[w] {
 			return fmt.Errorf("%s: scaled workload %s is missing", c.ScaledManifest, w)
+		}
+	}
+	return nil
+}
+
+// rawObjects decodes a manifest without schema loss (Lists flattened) so a routing
+// change can be compared field by field.
+func rawObjects(file string) (map[string]map[string]any, error) {
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return nil, err
+	}
+	dec := yaml.NewDecoder(bytes.NewReader(b))
+	out := map[string]map[string]any{}
+	var add func(map[string]any) error
+	add = func(o map[string]any) error {
+		kind, _ := o["kind"].(string)
+		if canonicalKind(kind) == "list" {
+			items, _ := o["items"].([]any)
+			for _, item := range items {
+				if m, ok := item.(map[string]any); ok {
+					if err := add(m); err != nil {
+						return err
+					}
+				}
+			}
+			return nil
+		}
+		if kind == "" {
+			return nil
+		}
+		meta, _ := o["metadata"].(map[string]any)
+		name, _ := meta["name"].(string)
+		key := canonicalKind(kind) + "/" + name
+		if _, dup := out[key]; dup {
+			return fmt.Errorf("%s: %s appears twice", file, key)
+		}
+		out[key] = o
+		return nil
+	}
+	for {
+		var obj map[string]any
+		if err = dec.Decode(&obj); err == io.EOF {
+			return out, nil
+		}
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", file, err)
+		}
+		if obj != nil {
+			if err = add(obj); err != nil {
+				return nil, err
+			}
+		}
+	}
+}
+
+// stripStorageNodes removes every -storageNode flag from every container of a
+// workload (in place) and returns the endpoints it held, so the rest of the object
+// can be compared for equality.
+func stripStorageNodes(o map[string]any) map[string]bool {
+	nodes := map[string]bool{}
+	spec, _ := o["spec"].(map[string]any)
+	tpl, _ := spec["template"].(map[string]any)
+	pod, _ := tpl["spec"].(map[string]any)
+	for _, group := range []string{"containers", "initContainers"} {
+		containers, _ := pod[group].([]any)
+		for _, c := range containers {
+			container, _ := c.(map[string]any)
+			for _, field := range []string{"args", "command"} {
+				args, ok := container[field].([]any)
+				if !ok {
+					continue
+				}
+				var rest []any
+				for i := 0; i < len(args); i++ {
+					s, isString := args[i].(string)
+					flag := strings.TrimLeft(s, "-")
+					switch {
+					case isString && flag == "storageNode" && i+1 < len(args):
+						i++
+						s, _ = args[i].(string)
+						for _, n := range strings.Split(s, ",") {
+							nodes[strings.TrimSpace(n)] = true
+						}
+					case isString && (flag == "dedup.minScrapeInterval" || strings.HasPrefix(flag, "dedup.minScrapeInterval=")):
+						// The one other documented routing change (VM copies); its value is free.
+						if flag == "dedup.minScrapeInterval" && i+1 < len(args) {
+							i++
+						}
+					case isString && strings.HasPrefix(flag, "storageNode="):
+						for _, n := range strings.Split(strings.TrimPrefix(flag, "storageNode="), ",") {
+							nodes[strings.TrimSpace(n)] = true
+						}
+					default:
+						rest = append(rest, args[i])
+					}
+				}
+				if len(rest) == 0 {
+					delete(container, field)
+				} else {
+					container[field] = rest
+				}
+			}
+		}
+	}
+	return nodes
+}
+
+// validateRoutingManifests lets the two storage routing manifests (add endpoints and
+// the original) mutate ONLY the declared insert/select routers, and within those only
+// the -storageNode list; every original endpoint must survive in the new list. Alloy,
+// app workloads, Services and anything else are refused before any apply.
+func validateRoutingManifests(c Config) error {
+	// The stable Service/endpoint/Alloy-config refusal comes first (clearest message).
+	for _, file := range []string{c.RoutingManifest, c.OriginalRoutingManifest} {
+		if err := validateProtectedManifest(file, c); err != nil {
+			return err
+		}
+	}
+	declared := map[string]bool{}
+	for _, r := range c.Routers {
+		declared[canonicalResource(r)] = true
+	}
+	newObjs, err := rawObjects(c.RoutingManifest)
+	if err != nil {
+		return err
+	}
+	oldObjs, err := rawObjects(c.OriginalRoutingManifest)
+	if err != nil {
+		return err
+	}
+	for file, objs := range map[string]map[string]map[string]any{c.RoutingManifest: newObjs, c.OriginalRoutingManifest: oldObjs} {
+		for key := range objs {
+			if !declared[key] {
+				return fmt.Errorf("%s: %s is not a declared router (%s); routing manifests may only change the insert/select routers' -storageNode list", file, key, strings.Join(c.Routers, ", "))
+			}
+		}
+	}
+	for key, n := range newObjs {
+		o, ok := oldObjs[key]
+		if !ok {
+			return fmt.Errorf("%s: router %s has no original in %s; cannot show that only -storageNode changes", c.RoutingManifest, key, c.OriginalRoutingManifest)
+		}
+		newNodes, oldNodes := stripStorageNodes(n), stripStorageNodes(o)
+		for node := range oldNodes {
+			if !newNodes[node] {
+				return fmt.Errorf("%s: router %s drops original storage endpoint %q", c.RoutingManifest, key, node)
+			}
+		}
+		if !reflect.DeepEqual(n, o) {
+			return fmt.Errorf("%s: router %s changes more than its -storageNode list compared with %s", c.RoutingManifest, key, c.OriginalRoutingManifest)
 		}
 	}
 	return nil
