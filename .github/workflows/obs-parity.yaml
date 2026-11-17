@@ -1,0 +1,89 @@
+name: Obs parity
+
+on:
+  schedule:
+    - cron: '23 2 * * *'
+  workflow_dispatch:
+  push:
+    paths:
+      - 'golang/obs/src/internal/pins/**'
+      - 'golang/obs/src/go.mod'
+      - 'golang/obs/src/go.sum'
+      - 'golang/obs/src/third_party/VictoriaLogs/**'
+      - 'golang/obs/src/internal/alerts/gfexpr/**'
+      - 'golang/obs/parity/images.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: obs-parity-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  parity:
+    # Public repository, standard GitHub runner: no paid runner or external spend.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      OBS_PARITY_STATE: /tmp/obs-parity-${{ github.run_id }}-${{ github.run_attempt }}
+      GOMAXPROCS: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Refuse drift before starting stores
+        run: bash golang/obs/parity/check-pins.sh
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.4'
+          cache-dependency-path: golang/obs/src/go.sum
+      - name: Build obs and detect commands
+        id: commands
+        working-directory: golang/obs/src
+        run: |
+          mkdir -p "$OBS_PARITY_STATE"
+          go build -o "$OBS_PARITY_STATE/obs" .
+          "$OBS_PARITY_STATE/obs" version | tee "$OBS_PARITY_STATE/version.txt"
+          for command in alerts links profile; do
+            if test -f "cmd_$command.go"; then
+              echo "$command=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "$command=false" >> "$GITHUB_OUTPUT"
+            fi
+          done
+      - name: Start real pinned stores and Grafana datasource
+        run: bash golang/obs/parity/stack.sh up
+      - name: Fixture and panel query parity (VM relative tolerance 1e-11)
+        run: bash golang/obs/parity/step.sh TestParity
+      - name: Historic per-minute datasource evaluation
+        run: bash golang/obs/parity/step.sh TestParityHistoricMetrics
+      - name: LogsQL alert parity through Grafana VictoriaLogs datasource
+        run: bash golang/obs/parity/step.sh TestParityGrafanaLogs
+      - name: VictoriaLogs limits
+        run: bash golang/obs/parity/step.sh TestParityVictoriaLogsLimits
+      - name: Historic Grafana alert expressions
+        if: steps.commands.outputs.alerts == 'true'
+        run: bash golang/obs/parity/step.sh TestParityAlertEval
+      - name: Live Grafana scheduler state history and recorded series
+        if: steps.commands.outputs.alerts == 'true'
+        run: bash golang/obs/parity/step.sh TestParityAlertHistory
+      - name: TraceQL compare with Tempo
+        if: steps.commands.outputs.links == 'true'
+        run: bash golang/obs/parity/step.sh TestParityTraceQL
+      - name: Link queries
+        if: steps.commands.outputs.links == 'true'
+        run: bash golang/obs/parity/step.sh TestParityLinks
+      - name: Span to profile compare with Pyroscope
+        if: steps.commands.outputs.profile == 'true'
+        run: bash golang/obs/parity/step.sh TestParityProfiles
+      - name: Store logs and remove only this run's containers
+        if: always()
+        run: |
+          if test -f "$OBS_PARITY_STATE/name"; then
+            bash golang/obs/parity/stack.sh logs
+            bash golang/obs/parity/stack.sh down
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: obs-parity-${{ github.run_id }}
+          path: ${{ env.OBS_PARITY_STATE }}
