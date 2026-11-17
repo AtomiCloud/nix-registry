@@ -455,6 +455,7 @@ inside VictoriaMetrics v1.156.0 and VictoriaLogs v1.54.0 with no network or cont
 ```text
 obs alerts --dir observability
 OBS_VERIFY_FAST=1 OBS_VERIFY_SKIP=1 obs alerts --dir observability
+OBS_VERIFY_PRUNE=1 obs alerts --dir observability
 OBS_CACHE_DIR=.cache/obs obs alerts --dir observability
 obs alerts --dir observability --steps steps.json --recorded recorded.json
 ```
@@ -488,7 +489,14 @@ Without a contract, one event-rule-skipped note is printed for each log query.
 
 The numeric light path is checked against the vendored Grafana dataframe path
 with `OBS_VERIFY_FAST=1`; unchanged incident inputs are compared with their
-baseline reuse by `OBS_VERIFY_SKIP=1`. Any mismatch fails the command. The result
+baseline reuse by `OBS_VERIFY_SKIP=1`. Both compare over the same already-pruned
+input, so a third check, `OBS_VERIFY_PRUNE=1`, evaluates the whole project twice in
+two isolated child processes on one fixed base with the result cache bypassed: once
+with lazy log/metric/trace pruning and once with `OBS_NO_PRUNE=1`. It compares
+every per-minute value (exact; NaN = NaN, Inf exact), instance label, state, error,
+verdict, recording sample and the raw datasource result per query input, and exits 1
+naming the alert, rule file and query, run and minute of each difference. Any mismatch
+fails the command. The result
 cache includes the binary, seed, incidents, recording rules, contract and each
 alert's normalized CR definition. Time-derived queries (including sample
 timestamps) also include the base timestamp and do not reuse shifted baseline
