@@ -1,0 +1,11 @@
+service: checkout
+types:
+  provider: { kind: enum, values: [stripe, adyen, paypal] }
+  outcome: { kind: enum, values: [ok, declined, error] }
+  shard: { kind: int, min: 0, max: 15 }
+  hour: { kind: time, unit: hour_of_day }
+metrics:
+  checkout.charges:
+    kind: counter
+    budget: 3000
+    labels: { provider: provider, outcome: outcome, shard: shard, hour: hour }

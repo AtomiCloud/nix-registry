@@ -97,3 +97,70 @@ func (q *Query) ObsWithoutTrailingFilters() (qOut *Query, dropped int) {
 	qc.pipes = qc.pipes[:idx+1]
 	return qc, n
 }
+
+// ObsFieldFilter is one filter on a single field, as ObsFieldFilters reports it.
+type ObsFieldFilter struct {
+	Op       string   // "exact" (`:=`), "phrase" (`:"x"`), "prefix" (`:x*` or `:=x*`), "in" (`in(...)`), "regexp" (`:~`) or "other"
+	Values   []string // exact and phrase: the one value; prefix: the prefix; in: its values
+	Pattern  string   // regexp: the pattern
+	Negated  bool     // under an odd number of `not` / `-`
+	UnderOr  bool     // inside an `or` that has other branches
+	InStream bool     // the field is a `_stream:{...}` tag, not a field filter
+}
+
+// ObsFieldFilters returns every filter on field before the first pipe. A stream filter that
+// names field as a tag contributes one entry with InStream set.
+func (q *Query) ObsFieldFilters(field string) []ObsFieldFilter {
+	var out []ObsFieldFilter
+	var walk func(f filter, neg, underOr bool)
+	walk = func(f filter, neg, underOr bool) {
+		switch t := f.(type) {
+		case nil:
+		case *filterAnd:
+			for _, c := range t.filters {
+				walk(c, neg, underOr)
+			}
+		case *filterOr:
+			many := underOr || len(t.filters) > 1
+			for _, c := range t.filters {
+				walk(c, neg, many)
+			}
+		case *filterNot:
+			walk(t.f, !neg, underOr)
+		case *filterStream:
+			if t.f == nil {
+				return
+			}
+			for _, af := range t.f.orFilters {
+				for _, tf := range af.tagFilters {
+					if tf.tagName == field {
+						out = append(out, ObsFieldFilter{Op: "other", Negated: neg, UnderOr: underOr, InStream: true})
+					}
+				}
+			}
+		case *filterGeneric:
+			if t.fieldName != field {
+				return
+			}
+			ff := ObsFieldFilter{Op: "other", Negated: neg, UnderOr: underOr}
+			switch x := t.f.(type) {
+			case *filterExact:
+				ff.Op, ff.Values = "exact", []string{x.value}
+			case *filterIn:
+				ff.Op, ff.Values = "in", append([]string(nil), x.values.values...)
+			case *filterPhrase:
+				ff.Op, ff.Values = "phrase", []string{x.phrase}
+			case *filterPrefix:
+				ff.Op, ff.Values = "prefix", []string{x.prefix}
+			case *filterExactPrefix:
+				ff.Op, ff.Values = "prefix", []string{x.prefix}
+			case *filterRegexp:
+				ff.Op, ff.Pattern = "regexp", x.re.String()
+			}
+			out = append(out, ff)
+		}
+	}
+	walk(q.opts.globalFilter, false, false)
+	walk(q.f, false, false)
+	return out
+}

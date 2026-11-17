@@ -1,0 +1,29 @@
+# Types named like core types of the four languages: each generator refuses before writing, or the code compiles.
+service: fuzz
+types:
+  string: { kind: enum, values: [a] }
+  error: { kind: enum, values: [a] }
+  object: { kind: enum, values: [a] }
+  record: { kind: enum, values: [a] }
+  date_time: { kind: enum, values: [a] }
+  type: { kind: enum, values: [a, type, func, chan, range, interface, struct, map, go, select] }
+metrics:
+  func: { kind: counter, budget: 10, labels: { type: type } }
+  chan: { kind: gauge, across_pods: sum }
+  range: { kind: histogram }
+  interface: { kind: counter }
+  struct: { kind: counter }
+  map: { kind: counter }
+  nil: { kind: counter }
+  any: { kind: counter }
+  len: { kind: counter }
+  attribute: { kind: counter }
+  exception: { kind: counter }
+  array: { kind: counter }
+  symbol: { kind: counter }
+spans: { trace: { attributes: { string: string, error: error, object: object } } }
+generate:
+  - { lang: go, out: gen/go }
+  - { lang: dotnet, out: gen/dotnet, namespace: Fuzz.Signals }
+  - { lang: dart, out: gen/dart, package: fuzz_signals }
+  - { lang: bun, out: gen/bun }

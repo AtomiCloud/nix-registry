@@ -1,0 +1,24 @@
+# Signals, labels and span attributes named like keywords and core types of the four languages.
+service: fuzz
+types:
+  kind_t: { kind: enum, values: [a, type, func, chan, range, interface, struct, map, go, select] }
+metrics:
+  func: { kind: counter, budget: 10, labels: { type: kind_t } }
+  chan: { kind: gauge, across_pods: sum }
+  range: { kind: histogram }
+  interface: { kind: counter }
+  struct: { kind: counter }
+  map: { kind: counter }
+  nil: { kind: counter }
+  any: { kind: counter }
+  len: { kind: counter }
+  attribute: { kind: counter }
+  exception: { kind: counter }
+  array: { kind: counter }
+  symbol: { kind: counter }
+spans: { trace: { attributes: { type: kind_t } } }
+generate:
+  - { lang: go, out: gen/go }
+  - { lang: dotnet, out: gen/dotnet, namespace: Fuzz.Signals }
+  - { lang: dart, out: gen/dart, package: fuzz_signals }
+  - { lang: bun, out: gen/bun }

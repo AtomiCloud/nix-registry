@@ -1,0 +1,5 @@
+mode: static
+exit: 1
+contains: [contract-undeclared-event]
+contains: checkout.charge.faild
+contains: did you mean "checkout.charge.failed"

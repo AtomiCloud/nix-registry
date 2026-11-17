@@ -28,6 +28,8 @@ const usage = `obs: the observability check tool
 usage:
   obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
   obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names]
+  obs check [--dir observability] [--pods n] [--landscapes n]
+  obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
   obs sandbox up|down|status [--dir observability] [--project name] [--port-base n]
   obs scrape --target <url> [--label name=value] [--interval 15s] [--once]
   obs look [--base origin/main] [--all] [--json]
@@ -61,6 +63,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runLinks(args[1:], stdout, stderr)
 	case "query":
 		return runQuery(args[1:], stdout, stderr)
+	case "check":
+		return runCheck(args[1:], stdout, stderr)
+	case "gen":
+		return runGen(args[1:], stdout, stderr)
 	case "store":
 		return runStore(args[1:], stdout, stderr)
 	case "symbols":

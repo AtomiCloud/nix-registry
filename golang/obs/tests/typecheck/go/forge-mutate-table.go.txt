@@ -1,0 +1,26 @@
+// planted forging (review round 5): app code edits the generated tables after init (they are exported vars).
+// Register deep-copied them: the guard must not change.
+package main
+
+import (
+	"context"
+	"fmt"
+
+	"example.com/app/signals"
+	obs "github.com/ProtoDurian/diene.go-interfaces/obs"
+)
+
+func main() {
+	signals.EventTable["checkout.chrage.faild"] = "error"
+	keys := signals.MetricTable["checkout.charges"].Keys
+	keys[0], keys[1], keys[2], keys[3] = "a", "b", "c", "d"
+	fmt.Println("result:", obs.Error(context.Background(), obs.NewEvent[obs.ErrorLevel]("checkout.chrage.faild")))
+	if obs.Dropped("unknown_event") != 1 {
+		panic("the refusal was not counted in dropped.unknown_event")
+	}
+	shard, _ := obs.NewInt[signals.ShardSpec](3)
+	hour, _ := obs.NewInt[signals.HourSpec](4)
+	if err := obs.Add(context.Background(), signals.CheckoutCharges, signals.CheckoutChargesLabels{Provider: signals.ProviderStripe, Outcome: signals.OutcomeOk, Shard: shard, Hour: hour}); err != nil {
+		panic("editing the exported table changed the guard: " + err.Error())
+	}
+}

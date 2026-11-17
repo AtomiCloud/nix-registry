@@ -1,0 +1,8 @@
+service: checkout
+types:
+  user_id: { kind: free }
+metrics:
+  checkout.charges:
+    kind: counter
+    budget: 100
+    labels: { user_id: user_id }

@@ -1,0 +1,23 @@
+// planted forging (review round 6): an app package registers a forged table before the generated init runs
+// (see forge-register-first.early.go.txt). The generated init's Register is then the second registration:
+// it poisons the port, which refuses every signal from then on, the forged one and the real one alike.
+package main
+
+import (
+	"context"
+	"fmt"
+
+	_ "example.com/app/early"
+	"example.com/app/signals"
+	obs "github.com/ProtoDurian/diene.go-interfaces/obs"
+)
+
+func main() {
+	forged := obs.Error(context.Background(), obs.NewEvent[obs.ErrorLevel]("checkout.chrage.faild"))
+	real := obs.Error(context.Background(), signals.ChargeFailed)
+	fmt.Println("result:", forged)
+	fmt.Println("real:", real)
+	if forged == nil || real == nil || obs.Dropped("register") != 1 || obs.Dropped("poisoned") != 2 {
+		panic("a registration that ran first was used silently")
+	}
+}

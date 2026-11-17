@@ -1,0 +1,78 @@
+# Fixture contract for `obs gen`: every label type of concept 3.1, every metric kind, log
+# events and span attributes. The golden files of each language are generated from this file.
+service: checkout
+modules: [api, worker]
+pod_keys: [k8s.pod.name, k8s.pod.uid, k8s.node.name, service.instance.id]
+interval: 30s
+
+types:
+  provider: { kind: enum, values: [stripe, adyen, paypal] }
+  outcome: { kind: enum, values: [ok, declined, error] }
+  shard: { kind: int, min: 0, max: 15 }
+  sequence: { kind: int, min: 0, max: 9999 } # large bounded number: library brand + bounded(spec,n)
+  lane: { kind: int, min: 1, max: 3 } # small bounded number: Bun makes it a literal union
+  hour: { kind: time, unit: hour_of_day }
+  day: { kind: time, unit: weekday }
+  billing_day: { kind: date, window_days: 30 }
+  user_id: { kind: free } # log fields and span attributes only
+  order_id: { kind: free }
+
+metrics:
+  checkout.charges:
+    kind: counter
+    budget: 5000
+    labels: { provider: provider, outcome: outcome, shard: shard, hour: hour } # 3*3*16*24 = 3456
+  checkout.charge.duration:
+    kind: histogram
+    unit: seconds
+    budget: 200
+    buckets: 12
+    labels: { provider: provider, outcome: outcome } # 3*3*(12+2) = 126
+  checkout.invoices:
+    kind: counter
+    budget: 400
+    labels: { billing_day: billing_day, provider: provider } # 30*3 = 90
+  checkout.queue.depth:
+    kind: gauge
+    across_pods: sum
+    budget: 10
+    labels: { lane: lane }
+  checkout.worker.lag:
+    kind: gauge
+    across_pods: max
+    unit: seconds
+  checkout.config.generation:
+    kind: gauge
+    across_pods: last
+  checkout.cache.entries:
+    kind: gauge
+    across_pods: avg
+    budget: 20
+    labels: { day: day }
+  checkout.runtime.memory:
+    kind: gauge
+    per_pod: true
+    unit: bytes
+
+logs:
+  ChargeSucceeded: { event: checkout.charge.succeeded, level: info }
+  ChargeDeclined: { event: checkout.charge.declined, level: warn }
+  ChargeFailed: { event: checkout.charge.failed, level: error }
+  WorkerStarted: { event: checkout.worker.started, level: debug }
+
+spans:
+  checkout.charge:
+    kind: internal
+    attributes: { user_id: user_id, provider: provider, shard: shard }
+  checkout.provider.call:
+    kind: client
+    attributes: { provider: provider, order_id: order_id, lane: lane, hour: hour }
+  checkout.queue.consume:
+    kind: consumer
+    attributes: { order_id: order_id }
+
+generate:
+  - { lang: go, out: gen/go/signals, package: signals }
+  - { lang: dotnet, out: gen/dotnet/Signals, namespace: Checkout.Signals }
+  - { lang: dart, out: gen/dart/lib/src/signals, package: checkout_signals }
+  - { lang: bun, out: gen/bun/src/signals }

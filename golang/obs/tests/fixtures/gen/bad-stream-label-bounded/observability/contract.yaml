@@ -1,0 +1,5 @@
+service: checkout
+types:
+  provider: { kind: enum, values: [stripe, adyen] }
+logs:
+  ChargeFailed: { event: checkout.charge.failed, level: error, stream_labels: { provider: provider } }

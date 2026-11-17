@@ -55,6 +55,8 @@ This branch also ships step 6's `obs links`; the final release version is set wh
 ```text
 obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
 obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names]
+obs check [--dir observability] [--pods n] [--landscapes n]
+obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
 obs sandbox up|down|status [--dir observability] [--project name] [--port-base n]
 obs look   [--base origin/main] [--all] [--json]
 obs scrape --target <url> [--label name=value] [--interval 15s] [--once]
@@ -79,8 +81,7 @@ the file, the rule or panel, the rule id in `[brackets]` and the offending name 
 - **`dashboards/**/\*.json`**: dashboard JSON. Panels (also inside collapsed rows), `targets[].expr`,
 `templating.list`, `time.from/to` are read. Annotation queries are not checked in 0.1.0.
 - **`seed.yaml`** (`--live` only; `--seed` overrides the path): see below.
-- **`contract.yaml`**: only its presence matters in 0.1.0 (the event rule, below). Its schema is
-  read from obs 0.2.
+- **`contract.yaml`**: the contract (see "The contract" below); its presence switches on the contract name checks and the event rule.
 
 **Which datasource speaks what.** The plugin type decides (`prometheus`,
 `victoriametrics-metrics-datasource` = MetricsQL; `victoriametrics-logs-datasource` = LogsQL;
@@ -184,6 +185,209 @@ e.g. `ERROR`) and `severity_number`, `trace_id`, `span_id`. Stream fields are th
 `durian.cloud.*` keys, when set), plus `stream_fields`. `service.name`, `service.namespace` and
 `deployment.environment.name` are filled from the `durian.cloud.*` keys, as Alloy does.
 
+## The contract (`observability/contract.yaml`)
+
+Written by hand (concept §3). Unknown keys fail. `obs check` and `obs gen` refuse an invalid contract.
+
+```yaml
+service: checkout
+modules: [api, worker] # the log stream count uses it
+pod_keys: [k8s.pod.name, k8s.pod.uid, k8s.node.name, service.instance.id] # default shown
+interval: 30s # aggregation interval (default 30s)
+types:
+  provider: { kind: enum, values: [stripe, adyen, paypal] }
+  shard: { kind: int, min: 0, max: 15 }
+  hour: { kind: time, unit: hour_of_day } # or weekday
+  billing_day: { kind: date, window_days: 30 } # a metric label only
+  user_id: { kind: free } # log fields and span attributes only
+metrics:
+  checkout.charges:
+    kind: counter # counter | histogram | gauge
+    budget: 5000
+    labels: { provider: provider, shard: shard, hour: hour }
+  checkout.queue.depth: { kind: gauge, across_pods: sum } # sum | avg | max | last, or per_pod: true
+logs:
+  ChargeFailed: { event: checkout.charge.failed, level: error }
+spans:
+  checkout.charge: { kind: internal, attributes: { user_id: user_id, provider: provider } }
+platform_metrics: # metrics the platform makes (OTel auto instrumentation), with their labels
+  http.server.request.duration: [http.route, http.response.status_code]
+generate: # `obs gen` targets, `out` relative to the folder that holds observability/
+  - { lang: go, out: internal/signals/generated, package: signals }
+```
+
+Two keys go beyond the concept's examples: `platform_metrics` (so a query on a metric the platform
+makes is not "undeclared") and `modules` (the module count of the stream formula). `free` may be
+written without declaring it (`attributes: { user_id: free }`, as concept 3.1 does). The VictoriaLogs
+stream fields are only the bounded where-from set (concept 3.3): a log event declares none, so a
+`stream_labels` entry is refused (`stream-label-declared`; with `free-stream-label` or `date-stream-label`
+when its type is free or a date).
+
+## `obs check`
+
+```text
+obs check [--dir observability] [--pods n] [--landscapes n]
+```
+
+Prints the worst-case series per metric (the product of its label sizes, times buckets + 2 for a
+histogram: 14 for the default 12 buckets), the worst case times `--pods` for a `per_pod` metric, the
+log stream count (modules x `--landscapes`, times any declared stream label; log events add no
+streams) and `events=[...]`. It fails (exit 1, `FAIL <file> <yaml path>: [rule] ...`) on:
+
+- `free-metric-label`: `free` on a metric label;
+- `stream-label-declared` (with `free-stream-label`, `date-stream-label`): a log event declares a stream field, or a free or date one;
+- `date-no-window`: a calendar date type without `window_days`;
+- `over-budget`, `budget-missing`: a metric over its budget, or with labels and no budget;
+- `gauge-pods`: a gauge with neither `across_pods` nor `per_pod` (or both);
+- `metric-kind`: no kind or an unknown kind; and the schema rules (`label-type`, `enum-empty`, `int-bounds`, `event-level`, ...).
+
+The after-start pod-key check of §4.1 is not here (it needs a running store: `obs assert`).
+
+## `obs gen`
+
+```text
+obs gen [--dir observability] [--lang go,dotnet,dart,bun]
+obs gen --check [--dir observability]
+```
+
+Writes, for a valid contract: one set of **types and constants** per `generate:` target (concept
+§3.4: label value types, one labels type per metric and span, a name carrier per signal, the
+allowed-keys table; no per-metric functions). Shared port/value base types come from the
+language's interfaces library rather than being redefined in each generated file. Also writes
+`<dir>/contract/events.json` (event names, read by the log-alert event check) and
+`<dir>/contract/aggregation.yaml` (the §4.1 VictoriaMetrics stream-aggregation file: counters and
+histogram parts get `total`; gauges get `sum_samples`, `avg`, `max` or `last` with `dedup_interval`;
+`without` = `pod_keys`; `per_pod` metrics and unlisted metrics are in no match).
+Output is deterministic and formatted. Every file starts with `Code generated by obs gen. DO NOT EDIT.`
+and `contract-hash: sha256:<hash of the contract file>`.
+
+`--check` regenerates into a temp dir and compares with the committed files: a file that differs is
+`[gen-edited]` when its header hash equals the contract's (a hand edit) and `[gen-stale]` when it does
+not (the contract changed and nobody regenerated); a missing file is `[gen-missing]`.
+A header-marked file absent from the output plan is `[gen-orphan]`, including files left after
+dropping a target. Each header names the contract's repository-relative path, so generated files
+owned by another contract in a monorepo are ignored. The check scans from the Git root (or the project
+folder outside Git) without following symlinks or entering dependency/cache directories. `--lang` checks only the selected languages.
+Golden files: `tests/fixtures/gen/good` is a consumer repo with its generated files committed; the
+Go unit tests and `obs gen --check` compare against it (`OBS_UPDATE_GOLDEN=1 go test ./internal/gen/...`
+rewrites them). The tests find `tests/` in an ancestor of the package (or `OBS_TESTS_DIR`); a build from `src/` alone skips them, and the nix check copies `tests/` next to the source root.
+
+**Each language compiles and runs against a stub written from the goal; NOT TESTED against the real library.**
+`tests/typecheck/<lang>/stub/` holds a minimal assumed interfaces API with just enough body to run the
+consumers (the Bun stub has an `index.js`, run with the `node` that nixpkgs `tsc` wraps). The nix check:
+
+- compiles and RUNS a good consumer: every valid call returns Ok and nothing is dropped;
+- requires every planted `bad-*` consumer to fail to compile with the expected diagnostic;
+- requires every planted `forge-*` consumer to compile, run without throwing, and show the port's refusal
+  (`dropped.unknown_event`, `unknown_metric`, `unknown_key`, `unknown_value`, `register` or `poisoned`).
+
+The same stubs support the 36 name-fuzz contract/language cases. The .NET harness builds three separate
+assemblies, Obs, Signals and App; only Signals has access to the library's internal constructors.
+
+**Forging: three layers (concept §3.4 "one hole per language").** With shared carriers in the library,
+an app can make its own carrier in Go (exported constructors) and Dart (`extends` of a library base).
+
+1. The type hole is kept small. Go carriers have unexported fields; only the constructors are exported.
+   Dart bases are `abstract base class` (an app cannot `implements` them) or sealed (level markers), the
+   level of `Event<L>` comes from `L`, the bound spec class is abstract (only the generated subclass is
+   made), and the bases have no generic `add/record/set`: each generated metric class has its own method
+   typed to its own labels class, so an upcast cannot reach a covariant check that throws. .NET is closed
+   at compile time (internal constructors, friend access for Signals only).
+2. A run-time guard in all four, which checks everything against the generated tables. Go's generated
+   `init()` calls `obs.Register`; Bun's generated `signals.ts` calls `register(...)` when it loads, and
+   `metrics(...)`, `logger(...)` and `tracer(...)` accept only those same table objects (any other table
+   poisons the port, see below); Dart's generated `installSignals()` calls `DurianSignalPort.install`;
+   .NET calls `Port.Install(SignalTables.Metrics, SignalTables.EventLevels)` (no one-shot rule there: .NET
+   carriers cannot be forged, so a foreign table could only drop real signals, never admit a forged one). Each metric row carries its generated
+   labels type (Go, Dart), the allowed values of each enum label and the min..max of each bounded label.
+   The port refuses a name not in its table, a kind or level that differs, a labels value of another type
+   (even with the same keys), keys that are not the name's keys, and a value outside the allowed values or
+   range. Registration is once per process: Go `Register` (called by the generated `init()`), Bun
+   `register` (called by the generated `signals.ts` when it loads) and Dart `install` (called by the
+   generated `installSignals()`). Nothing guarantees the generated call comes first (an independent Go
+   package's `init()`, a Bun module loaded before `signals.ts`, or app code before `installSignals()` can
+   register a forged table earlier), so a competing registration, earlier or later, poisons the port (in
+   Bun also a table passed to `metrics/logger/tracer` that is not the registered object): it is refused
+   and counted (`dropped.register`), and from then on the port refuses every signal (`dropped.poisoned`)
+   until restart. A forged table is never used silently; it is a loud telemetry failure, never an app
+   failure. The lint rule forbids `obs.Register`, Bun `register` and `DurianSignalPort.install` outside
+   generated files.
+   The tables are deep-copied at registration (in Bun also frozen; the guard reads only that copy), so
+   editing the exported generated tables later changes nothing. The port counts `dropped.<reason>`, returns an
+   error and never throws or panics (the type is checked before any field is read; a panic or exception
+   is recovered and counted as a last resort).
+3. A lint rule in the template's CI (documented here, NOT TESTED; the lint config lives in the templates).
+
+| Language | Hole the compiler leaves | Run-time guard (tested) | Lint rule (NOT TESTED) |
+| -------- | ------------------------ | ----------------------- | ---------------------- |
+| Go | `obs.New(Event\|Counter\|...)` from app code; zero enum, unset number | `Register`ed tables; empty/unset refused | `forbidigo` (below) |
+| Bun | hand-written `{name, level}`; widened object with an extra key; `as` cast; a foreign table | tables registered by `signals.ts`; any other table poisons | no `as <generated type>`; no event object literal |
+| .NET | `default` bounded number, `null!` enum | `Port.Install` tables; both refused | Roslyn analyzer for `default(Int<...>)` |
+| Dart | app class `extends` a library base; non-const `Shard(n)` | `DurianSignalPort.install` tables | no `extends` of library bases; no non-const `Shard(...)` |
+
+Lint rule text per language (to copy into the templates):
+
+- **Go** (golangci-lint v2; generated files are skipped because of their header):
+
+  ```yaml
+  linters:
+    enable: [forbidigo]
+    settings:
+      forbidigo:
+        analyze-types: true
+        forbid:
+          - pattern: ^obs\.(New(Event|Counter|Histogram|Gauge|Span)|Register)$
+            pkg: ^github\.com/ProtoDurian/diene\.go-interfaces/obs$
+            msg: only obs gen output makes signal carriers; use the generated signals package
+    exclusions:
+      generated: strict
+  ```
+
+  Assigning to a generated exported variable stays a `forbidigo`/`gocritic` rule as in concept §3.4, and
+  `depguard` denies `unsafe` in app packages (an unsafe-made enum value is refused at run time anyway).
+- **Dart**: one analyzer-plugin rule (`analysis_server_plugin`): in a file whose first line is not
+  `// Code generated by obs gen. DO NOT EDIT.`, flag `extends`, `implements` or `with` of any
+  `package:diene_interfaces` type named `Event` or `DurianSignal*`, and any call of
+  `DurianSignalPort.install/add/record/set`; also flag a non-const `Shard(...)` of a generated extension type.
+- **Bun**: in files without the header, flag `as <generated type>`, an object literal passed where an
+  `Event<...>` is expected (use the generated constant), any call of `register`, and a `metrics/logger/tracer`
+  argument that is not the generated `metricTable`/`eventTable`/`spanTable`.
+- **.NET**: a Roslyn analyzer for `default(Int<...>)`, `null!` of a generated enum class, and reflection
+  on generated types (a reflection-made enum value is refused at run time by the allowed values).
+
+**`out:` and orphans.** In a Git repository `out:` may point anywhere under the Git root (for example
+`../shared/bun`); headers name the contract's repository-relative path and the orphan walk starts at the
+Git root. An `out:` that leaves the Git root, or is absolute, is refused before anything is written; the
+check is made on the written path and on its resolved path, so a symlink in `out:` cannot lead outside.
+With no `.git`, `out:` may not use `..` or a symlink that leads out of the project folder, and the header's contract path is relative to the folder that holds
+`observability/`, whatever the working directory (so `--check` from another folder sees the same headers).
+
+Each `generate:` target accepts optional `interfaces:` to override its dependency import. Every name
+in the last column is assumed, not in the goal; the interfaces nodes reconcile them:
+
+| Language | Default `interfaces` | In the goal | Assumed, not in goal |
+| -------- | -------------------- | ----------- | -------------------- |
+| Go | `github.com/ProtoDurian/diene.go-interfaces/obs` | module `ProtoDurian/diene.go-interfaces`; `obs.Add`, `obs.Int[Spec]`, `obs.NewInt`, `obs.AtTime` with an error return; `obs.Error(ctx, Event[Error], ...)` | the `/obs` package path; `IntSpec` `Name/Min/Max/Unit` (int64); `Int.Valid`; `Level` and the six markers; `NewEvent/NewCounter/NewHistogram/NewGauge/NewSpan`; `DurianSignal*` carriers and info rows (`Labels`, `Values`, `Ranges`); `Field`; `Record/Set/Warn/Info`; one-shot `Register` returning an error (a second one poisons the port), `DurianSignalTables`, `Dropped` |
+| Bun | `@atomicloud/diene.interfaces` | `counter(name, labels)`; `log.error(ev, fields?, err?)`; `bounded(spec, n): Result`; `Tracer`/`Span`, `DurianSignalSpanTable` | `register(tables)` (one-shot; a second one or a foreign table poisons the port); `metrics(table)`, `histogram/gauge`, `MetricTable` (with `values`, `ranges`); `logger(eventTable)`, `EventTable`, `Level`; `dropped()`; `tracer(table)`; `Bounded<N>`; a synchronous `{ok, value}` Result (the published Result is promise-based) |
+| .NET | `AtomiCloud.Diene.Interfaces` | `Port.Add(Names.X, new XLabels(...))`; `Int<Spec>.Of(n)` returning a `Result` (package `AtomiCloud.Diene.Result`: struct `Result<T, E>`, `Ok/Err`, `IsSuccess`); `Log.Error(Event<ErrorLevel>, ...)`; internal carrier constructors | namespace `AtomiCloud.Diene.Result` and `Value/Error`; `IDurianSignal*` interfaces, `Valid/Wire`; `AtTime`; `DurianSignalDate`; label attribute and info rows; `Port.Record/Set/Install/Dropped`; info row `Values`/`Ranges`; `Log.Warn` |
+| Dart | `diene_interfaces` | `checkoutCharges.add(XLabels(...))`; `error(Event<ErrorLevel>, ...)`; enums; extension types; `shardSpec.of(n)` returning a `Result`; `entries` getter | barrel `diene_interfaces.dart`; `DurianSignalWire/Labels/Metric`, carrier bases and constructors; `DurianSignalBoundSpec` and `atTime`; sealed level markers; `DurianSignalPort` (one-shot `install` returning a Result, a second one poisons the port, `add/record/set/dropped`); generated `installSignals()`; `warn/info`; info rows (`labels` Type, `values`, `ranges`); local `Result/DurianSignalOk/DurianSignalErr` in place of `diene_result` |
+
+The compile fixtures model Result locally and do not validate integration with the separately published
+result libraries. .NET name constructors require the real library to grant friend access to the
+consumer's generated assembly. No real adapter, runtime sink or published package compatibility is claimed.
+
+## Contract name checks in `obs query --static`
+
+When `<dir>/contract.yaml` exists, every name a query reads must be in the contract or in the platform
+label list (concept §2): `contract-undeclared-metric` (stored name, with "did you mean"),
+`contract-undeclared-label` (selector and `by`/`on` labels; a label of another metric fails),
+`contract-bad-enum-value` (an equality or plain `a|b` value that is not an enum value or is outside a
+bounded number; a value that holds a dashboard variable is not judged),
+`contract-pod-label` (a pod key on a business metric, §4.1), `contract-undeclared-event` and
+`contract-undeclared-stream-field` (a stream tag outside the where-from set). Regex metric names (`{__name__=~"..."}`) are matched against the known names and a regex that matches none is
+undeclared; regex label values must match an allowed value; label functions (`label_replace`, ...) must read
+labels their input has. Names compare with dots
+and underscores equal. Other log fields are free-form (§6): not judged.
 ## `obs sandbox`: the local stack, for people
 
 ```text

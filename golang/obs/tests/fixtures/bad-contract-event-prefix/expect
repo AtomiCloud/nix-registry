@@ -1,0 +1,5 @@
+mode: static
+exit: 1
+contains: alerts/logs/warning.yaml
+contains: [contract-undeclared-event]
+contains: checkout.chrge*

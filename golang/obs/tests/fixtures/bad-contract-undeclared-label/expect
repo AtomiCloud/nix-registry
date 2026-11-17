@@ -1,0 +1,5 @@
+mode: static
+exit: 1
+contains: alerts/undeclared-label/critical.yaml
+contains: [contract-undeclared-label]
+contains: result

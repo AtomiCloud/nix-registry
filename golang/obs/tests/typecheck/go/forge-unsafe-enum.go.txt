@@ -1,0 +1,24 @@
+// planted forging (review round 5): a generated enum value made with unsafe ("visa" is not a provider). The
+// port checks each value against the allowed values the generated table carries.
+package main
+
+import (
+	"context"
+	"fmt"
+	"unsafe"
+
+	"example.com/app/signals"
+	obs "github.com/ProtoDurian/diene.go-interfaces/obs"
+)
+
+func main() {
+	visa := "visa"
+	p := *(*signals.Provider)(unsafe.Pointer(&visa))
+	shard, _ := obs.NewInt[signals.ShardSpec](3)
+	hour, _ := obs.NewInt[signals.HourSpec](4)
+	l := signals.CheckoutChargesLabels{Provider: p, Outcome: signals.OutcomeOk, Shard: shard, Hour: hour}
+	fmt.Println("result:", obs.Add(context.Background(), signals.CheckoutCharges, l))
+	if obs.Dropped("unknown_value") != 1 {
+		panic("the refusal was not counted in dropped.unknown_value")
+	}
+}
