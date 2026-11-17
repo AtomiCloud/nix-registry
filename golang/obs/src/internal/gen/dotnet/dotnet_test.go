@@ -166,3 +166,66 @@ func TestCollisionsNamed(t *testing.T) {
 		})
 	}
 }
+
+func render(t *testing.T, doc string) string {
+	t.Helper()
+	c, err := contract.Parse("c.yaml", []byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if is := c.Validate(); len(is) > 0 {
+		t.Fatal(is)
+	}
+	fs, err := gen.Generate("dotnet", c, gen.Options{Namespace: "Fuzz.Signals"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(fs[0].Content)
+}
+
+// Round 2, finding 4: a member can not take the name of its enclosing type (CS0542).
+func TestMembersAvoidTheirEnclosingType(t *testing.T) {
+	out := render(t, `
+service: s
+types: { t: { kind: enum, values: [x] } }
+metrics:
+  names: { kind: counter }
+  m: { kind: counter, budget: 1, labels: { m_labels: t } }
+logs: { Events: { event: s.events, level: info } }
+spans: { spans: { attributes: { spans_attributes: t } } }
+`)
+	for _, want := range []string{
+		"public sealed record MLabels(", "MLabels_",
+		"public static readonly DurianSignalCounter<NamesLabels> Names_ =",
+		"public static readonly DurianSignalEvent<DurianSignalLevelInfo> Events_ =",
+		"public static readonly DurianSignalSpan<SpansAttributes> Spans_ =",
+		"SpansAttributes_",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("generated C# lacks %q", want)
+		}
+	}
+	for _, bad := range []string{" MLabels,", " MLabels\n", " Names =", " Events ="} {
+		if strings.Contains(out, bad) {
+			t.Errorf("generated C# has a member named like its type: %q", bad)
+		}
+	}
+}
+
+// Round 2, finding 7: a bound outside Int32 makes the numbers long; a normal contract stays int.
+func TestWideBoundsUseLong(t *testing.T) {
+	wide := render(t, `
+service: s
+types: { shard: { kind: int, min: -2147483649, max: 2147483648 } }
+metrics: { m: { kind: counter, budget: 5000000000, labels: { shard: shard } } }
+`)
+	for _, want := range []string{"static abstract long Min", "public static long Max => 2147483648;", "private readonly long _value;", "DurianSignalResult<DurianSignalInt<TSpec>> Of(long n)", "    long Budget,"} {
+		if !strings.Contains(wide, want) {
+			t.Errorf("wide contract: generated C# lacks %q", want)
+		}
+	}
+	narrow := render(t, "service: s\ntypes: { shard: { kind: int, min: 0, max: 15 } }\n")
+	if strings.Contains(narrow, "long") || !strings.Contains(narrow, "public static int Max => 15;") {
+		t.Error("an Int32 contract must keep int")
+	}
+}

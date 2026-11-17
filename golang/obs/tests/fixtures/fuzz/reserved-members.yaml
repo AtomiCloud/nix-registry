@@ -1,0 +1,18 @@
+# Member names that are close to what a generated class already has (Wire, All, Valid, ToString, Equals, ...), none equal after case conversion.
+service: fuzz
+types:
+  t:
+    {
+      kind: enum,
+      values: [Wire, All, Valid, hash_code, get_type, equals, name, min, max, index, values, entries, length],
+    }
+  u: { kind: enum, values: [to_string, a-b, c1, c_2] }
+metrics:
+  one: { kind: counter, budget: 40000, labels: { wire: t, valid: u, all: t, entries: t, name: u } }
+  two: { kind: counter, budget: 40000, labels: { hash_code: t, equals: u, get_type: t, to_string: u } }
+spans: { s: { attributes: { wire: t, valid: u, to_string: u, equals: t } } }
+generate:
+  - { lang: go, out: gen/go }
+  - { lang: dotnet, out: gen/dotnet, namespace: Fuzz.Signals }
+  - { lang: dart, out: gen/dart, package: fuzz_signals }
+  - { lang: bun, out: gen/bun }

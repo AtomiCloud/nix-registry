@@ -25,11 +25,11 @@ func Static(set *files.Set, o Options) *Report {
 		r.add(Fail, o.Dir, "", "empty", "no alerts/**/*.yaml and no dashboards/**/*.json found")
 	}
 	c, problems := loadContract(&o)
-	if o.SpanAttributes == nil && c != nil {
-		o.SpanAttributes = c
-	}
 	for _, p := range problems {
 		r.add(Fail, o.contractPath(), "", "contract", "%s", p)
+	}
+	if c != nil && o.SpanAttributes == nil {
+		o.SpanAttributes = c // the contract names the span attributes a TraceQL query may read
 	}
 	eventOn := o.eventRuleOn()
 	for i := range set.Queries {

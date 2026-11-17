@@ -166,3 +166,49 @@ metrics: { m: { kind: counter, budget: 5, labels: { user_id: free } } }
 		t.Fatalf("free metric label passed: %v", m.Validate())
 	}
 }
+
+// Round 2, finding 8: buckets + 2 saturates before it is multiplied.
+func TestHistogramBucketsOverflow(t *testing.T) {
+	c := parse(t, `
+service: s
+metrics: { h: { kind: histogram, buckets: 9223372036854775807, budget: 1 } }
+`)
+	if w, _ := c.WorstCase("h"); w != MaxWorst {
+		t.Fatalf("worst case %d, want saturated %d", w, MaxWorst)
+	}
+	if !hasRule(c.Validate(), "over-budget", "h") {
+		t.Fatalf("a histogram with MaxInt64 buckets passed: %v", c.Validate())
+	}
+}
+
+// Round 2, finding 10: the stored series names must not intersect, not only the dotted base names.
+func TestStoredNamesDoNotIntersect(t *testing.T) {
+	for name, doc := range map[string]string{
+		"counter + gauge": `
+service: s
+metrics:
+  requests: { kind: counter }
+  requests_total: { kind: gauge, per_pod: true }
+`,
+		"histogram + unit gauge": `
+service: s
+metrics:
+  d: { kind: histogram, unit: seconds }
+  d_seconds_bucket: { kind: gauge, across_pods: max }
+`,
+		"histogram sum": `
+service: s
+metrics:
+  d: { kind: histogram }
+  d_sum: { kind: gauge, across_pods: max }
+`,
+	} {
+		if is := parse(t, doc).Validate(); !hasRule(is, "metric-duplicate", "stored as the series") {
+			t.Errorf("%s: colliding stored names passed: %v", name, is)
+		}
+	}
+	// distinct stored names stay fine
+	if is := parse(t, "service: s\nmetrics:\n  a: { kind: counter }\n  b: { kind: gauge, across_pods: max }\n").Validate(); len(is) > 0 {
+		t.Fatalf("distinct metrics refused: %v", is)
+	}
+}

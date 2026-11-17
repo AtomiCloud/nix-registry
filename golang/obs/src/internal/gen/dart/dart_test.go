@@ -160,3 +160,56 @@ func TestCollisionsNamed(t *testing.T) {
 		})
 	}
 }
+
+func render(t *testing.T, doc string) string {
+	t.Helper()
+	c, err := contract.Parse("c.yaml", []byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if is := c.Validate(); len(is) > 0 {
+		t.Fatal(is)
+	}
+	fs, err := gen.Generate("dart", c, gen.Options{Package: "fuzz_signals"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(fs[0].Content)
+}
+
+// Round 2, finding 5: a top-level constant is never a keyword or a name dart:core uses.
+func TestTopLevelConstantsAreSafe(t *testing.T) {
+	out := render(t, `
+service: s
+metrics:
+  default: { kind: counter }
+  int: { kind: counter }
+  override: { kind: counter }
+  checkout: { kind: counter }
+`)
+	for _, want := range []string{"const default_ = DefaultMetric._();", "const int_ = IntMetric._();", "const override_ = OverrideMetric._();", "const checkout = CheckoutMetric._();"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("generated Dart lacks %q", want)
+		}
+	}
+	for _, bad := range []string{"const default =", "const int =", "const override ="} {
+		if strings.Contains(out, bad) {
+			t.Errorf("generated Dart declares %q", bad)
+		}
+	}
+}
+
+// Round 2, finding 6: the private date helper exists only when a date type uses it.
+func TestDateHelperOnlyWithADate(t *testing.T) {
+	if out := render(t, "service: s\nmetrics: { requests: { kind: counter } }\n"); strings.Contains(out, "_durianSignalDate") {
+		t.Error("a contract with no date type emits the unused date helper")
+	}
+	out := render(t, `
+service: s
+types: { day: { kind: date, window_days: 30 } }
+metrics: { m: { kind: counter, budget: 30, labels: { day: day } } }
+`)
+	if strings.Count(out, "_durianSignalDate") < 2 {
+		t.Error("a contract with a date type lost its date helper")
+	}
+}

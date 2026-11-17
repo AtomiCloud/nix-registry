@@ -1,0 +1,14 @@
+# Values and names with digits and punctuation.
+service: fuzz
+types:
+  {
+    t1: { kind: enum, values: [1xx, 2xx, '3 xx', "it's", 'a$b', 'q"x', "back\\slash"] },
+    n: { kind: int, min: -3, max: 3 },
+  }
+metrics: { m1: { kind: counter, budget: 49, labels: { t1: t1, n: n } }, m2.3d: { kind: gauge, across_pods: max } }
+logs: { E1: { event: fuzz.e1, level: warn } }
+generate:
+  - { lang: go, out: gen/go }
+  - { lang: dotnet, out: gen/dotnet, namespace: Fuzz.Signals }
+  - { lang: dart, out: gen/dart, package: fuzz_signals }
+  - { lang: bun, out: gen/bun }

@@ -115,6 +115,15 @@ for tc in "$here"/typecheck/*.sh; do
   fi
 done
 
+# Generator fuzz: tricky names (keywords, core types, case collisions, wide numbers) must be refused before any
+# write, or generate code that compiles. A language whose compiler is not on PATH is skipped (fuzz.sh says which).
+if bash "$here/fuzz.sh" --obs "$OBS" >"$work/fuzz.txt" 2>&1 && ! grep -q '^FAIL' "$work/fuzz.txt"; then
+  ok "generator fuzz: every tricky contract is refused before writing or compiles ($(grep -c '^PASS' "$work/fuzz.txt") checks, $(grep -c '^SKIP' "$work/fuzz.txt") skipped)"
+else
+  bad "generator fuzz"
+  grep -v '^PASS' "$work/fuzz.txt" | sed 's/^/  | /'
+fi
+
 # The concept 3.1 example verbatim: `user_id: free` on a span attribute, with no `free` type declared.
 run check --dir "$fx/gen/ok-concept-example/observability"
 [ "$rc" -eq 0 ] && ok "obs check accepts the concept 3.1 span example (free without a declaration)" || bad "concept 3.1 example: rc=$rc $(cat "$work/out.txt")"

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AtomiCloud/obs/internal/contract"
 	"github.com/AtomiCloud/obs/internal/gen"
@@ -114,5 +115,33 @@ func TestIntrinsicFreeIsString(t *testing.T) {
 	}
 	if !strings.Contains(s, "export type Free = string;") || !strings.Contains(s, "user_id?: Free") {
 		t.Fatalf("free attribute not generated as a string:\n%s", s)
+	}
+}
+
+// Round 2, finding 9: a singleton range at MaxInt64 is one value, not a wrapped loop.
+func TestSingletonMaxIntFinishes(t *testing.T) {
+	c, err := contract.Parse("c.yaml", []byte(`
+service: s
+types: { n: { kind: int, min: 9223372036854775807, max: 9223372036854775807 } }
+metrics: { m: { kind: counter, budget: 1, labels: { n: n } } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan string, 1)
+	go func() {
+		s, err := Render(c)
+		if err != nil {
+			s = "ERR " + err.Error()
+		}
+		done <- s
+	}()
+	select {
+	case s := <-done:
+		if !strings.Contains(s, "export type N = 9223372036854775807;") {
+			t.Fatalf("singleton union: %s", s)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Render did not finish on a singleton range at MaxInt64")
 	}
 }
