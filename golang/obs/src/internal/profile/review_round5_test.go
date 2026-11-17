@@ -33,3 +33,18 @@ func TestR5ShiftColdCollision(t *testing.T) {
 		t.Error("FALSE GREEN: cold member collision steals the hot row")
 	}
 }
+
+func TestUniformShiftCollisionUsesSourceOrder(t *testing.T) {
+	b := duplicateBaseline(t, duplicateSummary(declared(10, .2), declared(20, .3)))
+	rows, _ := Compare(b, duplicateSummary(declared(20, .2), declared(30, .3)), nil)
+	for _, r := range rows {
+		if r.Failed() || r.Change != 0 {
+			t.Fatalf("uniform +10 shift must be unchanged: %+v", r)
+		}
+	}
+	rows, extra := Compare(b, duplicateSummary(declared(20, .3), declared(30, .2)), nil)
+	var out strings.Builder
+	if PrintCompare(&out, "shift-collision.json", rows, extra) != 1 || !strings.Contains(out.String(), "+50.0%") {
+		t.Fatalf("uniform +10 shift must retain the first member's +50%%: %s", out.String())
+	}
+}

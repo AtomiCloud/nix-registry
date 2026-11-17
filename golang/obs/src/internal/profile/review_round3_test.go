@@ -145,8 +145,12 @@ func TestThresholdCrossingCannotMoveAnExactHotDeclaration(t *testing.T) {
 func TestBaselineThresholdCrossingKeepsExactDeclarationMedian(t *testing.T) {
 	a := duplicateSummary(declared(10, .016), declared(20, .2), declared(30, .014))
 	c := duplicateSummary(declared(10, .014), declared(20, .3), declared(30, .016))
+	a.Functions[1].Column, c.Functions[1].Column = 9, 9
 	b, err := BuildBaseline("s", "n", "", []string{"render"}, []*Summary{a, c, c})
 	if err != nil || len(b.Functions) != 1 || b.Functions[0].Share != .3 {
 		t.Fatalf("exact hot member median must be 30%%: baseline=%+v err=%v", b, err)
+	}
+	if f := b.Functions[0]; f.Line != 20 || f.Column != 9 || f.SourceOrder != 1 {
+		t.Fatalf("30%% median must retain the hot declaration's identity: %+v", f)
 	}
 }
