@@ -23,20 +23,24 @@ const usage = `obs: the observability check tool
 
 usage:
   obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
-  obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names]
-  obs alerts [--dir observability] [--seed seed.yaml] [--base unix] [--out results.json] [--tempo-config tempo.yaml]
+  obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names] [--vl-settings victorialogs-settings.yaml]
+  obs alerts [--dir observability] [--seed seed.yaml] [--base unix] [--out results.json] [--vl-settings victorialogs-settings.yaml] [--tempo-config tempo.yaml]
+              [--workers n] [--steps steps.json] [--recorded recorded.json]
   obs assert --series FILE [--dir observability] [--pods n] [--unknown warn|fail|ignore]
   obs profile summarize|baseline|compare   (obs profile help)
   obs check [--dir observability] [--pods n] [--landscapes n]
   obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
-  obs sandbox up|down|status [--dir observability] [--project name] [--port-base n]
-  obs scrape --target <url> [--label name=value] [--interval 15s] [--once]
-  obs look [--base origin/main] [--all] [--json]
+  obs sandbox up [--dir observability] [--seed seed.yaml] [--project name] [--port-base n] [--runtime docker|podman] [--reseed]
+  obs sandbox down|status [--dir observability] [--project name] [--runtime docker|podman]
+  obs scrape --target <url> [--label name=value] [--interval 15s] [--once] [--job name] [--vm-url url] [--dir observability] [--project name]
+  obs look   [--base origin/main] [--all] [--json] [--file dashboards/x.json] [--checklist file.md] [--out obs-look] [--width 1600] [--height 1000]
+           [--dir observability] [--seed seed.yaml] [--project name] [--port-base n] [--runtime docker|podman] [--reseed]
   obs links [--dir observability] [--seed seed.yaml] [--base unix]
   obs version
   obs store move <store> --config move.yaml [--dry-run] [--rollback]
   obs symbols put|decode --store <dir> --file <file> [options]
   obs size --req-per-second <n> --services <n> --pods <n> --profiled-pods <n>
+  obs engines --check-chart <chart folder>
 
 exit 0 when clean, 1 when a check failed, 2 on a usage or input error.
 `
@@ -78,6 +82,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runSymbols(args[1:], stdout, stderr)
 	case "size":
 		return runSize(args[1:], stdout, stderr)
+	case "engines":
+		return runEngines(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
 		return 0

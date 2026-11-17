@@ -1,6 +1,8 @@
 package speedfixtures
 
 import (
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -63,7 +65,7 @@ func TestVariantsDiffer(t *testing.T) {
 }
 
 func TestNoRealNames(t *testing.T) {
-	for _, bad := range []string{"pichu", "charlotte", "primordial"} {
+	for _, bad := range []string{realLandscape, "charlotte", "primordial"} {
 		if strings.Contains(strings.ToLower(Seed("4h")), bad) {
 			t.Errorf("seed names %q", bad)
 		}
@@ -117,5 +119,51 @@ func TestTraceSetsLoadAndPassStaticChecks(t *testing.T) {
 	}
 	if quiet != 3 {
 		t.Fatalf("%d always-quiet trace rules, want 3 (traffic-low, refund-errors, slow-provider-calls)", quiet)
+	}
+}
+
+// realLandscape is a real landscape name; fixtures, tests and the README use made-up ones.
+// (Built from two halves so this file does not contain the word.)
+var realLandscape = "pi" + "chu"
+
+// TestNoRealLandscapeAnywhere scans every fixture, every Go test and the README, not only the
+// speed-fixture seed.
+func TestNoRealLandscapeAnywhere(t *testing.T) {
+	roots := []string{"../../..", "../../../../tests"} // the source root and the tests folder beside it
+	var scanned int
+	for _, root := range roots {
+		if _, err := os.Stat(root); err != nil {
+			continue // a build from src/ alone has no tests/ folder
+		}
+		filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			if d.IsDir() {
+				if d.Name() == "third_party" || d.Name() == "vendor" {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			inTests := strings.Contains(filepath.ToSlash(p), "/tests/") || strings.HasSuffix(root, "tests")
+			if !inTests && !strings.HasSuffix(p, "_test.go") {
+				return nil
+			}
+			b, err := os.ReadFile(p)
+			if err != nil {
+				return nil
+			}
+			scanned++
+			if strings.Contains(strings.ToLower(string(b)), realLandscape) {
+				t.Errorf("%s names the real landscape %q: use a made-up one such as fixture-dev", p, realLandscape)
+			}
+			return nil
+		})
+	}
+	if scanned == 0 {
+		t.Fatal("scanned no files")
+	}
+	if b, err := os.ReadFile("../../../../README.md"); err == nil && strings.Contains(strings.ToLower(string(b)), realLandscape) {
+		t.Errorf("README.md names the real landscape %q", realLandscape)
 	}
 }

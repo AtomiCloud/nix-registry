@@ -1,0 +1,6 @@
+apiVersion: v2
+name: o
+version: 1.0.0
+dependencies:
+  - name: grafana
+    version: 9.0.0

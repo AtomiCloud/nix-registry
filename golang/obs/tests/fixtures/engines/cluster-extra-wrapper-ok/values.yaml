@@ -1,0 +1,8 @@
+victoria-metrics-cluster:
+  vmstorage:
+    image:
+      tag: v1.156.0
+  vmselect:
+    image:
+      image:
+        tag: v1.156.0

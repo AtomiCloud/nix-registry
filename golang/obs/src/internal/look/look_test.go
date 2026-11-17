@@ -37,7 +37,7 @@ const checklistMD = `# Standards
 const seedYAML = `length: 30m
 random_seed: 7
 resource:
-  durian.cloud.landscape: pichu
+  durian.cloud.landscape: fixture-dev
   durian.cloud.platform: payments
   durian.cloud.service: checkout
   durian.cloud.module: api

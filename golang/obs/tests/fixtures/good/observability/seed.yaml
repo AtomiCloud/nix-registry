@@ -1,7 +1,7 @@
 length: 4h
 random_seed: 42
 resource:
-  durian.cloud.landscape: pichu
+  durian.cloud.landscape: fixture-dev
   durian.cloud.platform: payments
   durian.cloud.service: checkout
   durian.cloud.module: api

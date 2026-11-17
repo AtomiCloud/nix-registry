@@ -78,3 +78,12 @@ func TestGrafanaPortProvenance(t *testing.T) {
 		t.Fatalf("alerts/gfexpr/PROVENANCE.md differs from Grafana source pin %s (%s)", p.Version, p.Commit)
 	}
 }
+
+func TestEveryEngineImageHasADigest(t *testing.T) {
+	for _, name := range []string{"VictoriaMetrics", "VictoriaLogs", "Tempo", "Grafana", "Pyroscope"} {
+		d := All()[name].Digest
+		if len(d) != len("sha256:")+64 || !strings.HasPrefix(d, "sha256:") {
+			t.Fatalf("pins.json: %s digest %q is not sha256:<64 hex>", name, d)
+		}
+	}
+}

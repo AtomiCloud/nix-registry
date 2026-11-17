@@ -12,22 +12,29 @@ linked module ship in `share/licenses/obs`. Design: `concepts/observability.md` 
 
 ## Available commands
 
-| Command              | What it does                                                                                                                                                                          |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `obs query --static` | Parses every MetricsQL, LogsQL and TraceQL query in the alerts and dashboards with the real parsers and applies the rules below.                                                      |
-| `obs query --live`   | Makes the seed, loads it into the embedded VictoriaMetrics, VictoriaLogs and Tempo, runs every alert and dashboard query on it. Each must return rows. Also applies the static rules. |
-| `obs links`          | Checks trace → logs, metric → traces and backend span → profile labels on the seed.                                                                                                   |
-| `obs check`          | Checks the contract, worst-case metric series and log stream count. |
-| `obs gen`            | Generates bounded types, event constants and aggregation rules; `--check` detects drift. |
-| `obs assert`         | Checks real metric series counts, labels and values against the contract. |
-| `obs profile`        | Summarizes CPU profiles, builds a median baseline and compares function/span shares. |
-| `obs sandbox`        | Starts, stops or inspects the local stack for people. |
-| `obs look`           | Sets up dashboard views and prints the screenshot review prompt. |
-| `obs scrape`         | Scrapes an app's metrics into the sandbox. |
-| `obs version`        | The obs version and every engine pin.                                                                                                                                                 |
+| Command                                     | What it does                                                                                                                                  |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `obs gen`                                   | Writes bounded types, event constants, `contract/events.json` and the aggregation file for bun, go, dotnet and dart from the contract.        |
+| `obs gen --check`                           | Regenerates into a temp folder and diffs; fails on a hand edit or a stale generate.                                                           |
+| `obs check`                                 | Checks the contract rules, worst-case metric series, budgets and log stream count.                                                            |
+| `obs query --static`                        | Parses every MetricsQL, LogsQL and TraceQL query in the alerts and dashboards with the real parsers and applies the rules below.              |
+| `obs query --live`                          | Loads the seed into the embedded VictoriaMetrics, VictoriaLogs and Tempo and runs every alert and dashboard query; each must return rows.     |
+| `obs alerts`                                | Evaluates every alert at every minute of the seed and each incident; must fire inside incident windows and stay quiet outside them.           |
+| `obs links`                                 | Checks trace → logs, metric → traces and backend span → profile links on the seed.                                                            |
+| `obs assert`                                | Checks real metric series counts, labels and values from an e2e series export against the contract.                                           |
+| `obs profile summarize\|baseline\|compare`  | Summarizes CPU profiles, builds a median baseline and compares function and span shares against it.                                           |
+| `obs store move <store>`                    | Runs the single → scaled store move steps in order, none skipped, with `--dry-run` and `--rollback`.                                          |
+| `obs sandbox up`                            | Starts, stops or inspects (`down`, `status`) the local stack for people; no check needs it.                                                   |
+| `obs look`                                  | Sets up the sandbox with the changed dashboards and prints the screenshot review prompt for the calling agent; never fails CI.                |
+| `obs scrape`                                | Scrapes an app's own metrics into the sandbox.                                                                                                |
+| `obs symbols put\|decode`                   | The symbol store: stores debug symbol files by build id and decodes a stack trace with them.                                                  |
+| `obs size`                                  | The sizing command: traffic cores, memory, series and storage per day for a given load.                                                       |
+| `obs engines --check-chart <dir>`           | Compares the engine versions in a Helm chart folder with the pins; exit 1 on any drift. See [obs engines](#obs-engines---check-chart).        |
+| `obs version`                               | The obs version and every engine pin.                                                                                                         |
 
-Follow-up commands (see the corpus goal): `obs alerts` (evaluating alerts over incidents),
-`obs engines --check-chart`, `obs store move`.
+Not tested items are collected in [Not tested](#not-tested), at the end of this file.
+
+## Developer workflow
 
 ```text
  1. decide signals        what the service must say: metrics, log events, spans
@@ -53,21 +60,28 @@ Follow-up commands (see the corpus goal): `obs alerts` (evaluating alerts over i
  7. e2e                   obs assert, obs profile compare
 ```
 
-This branch also ships step 6's `obs links`; the final release version is set when obs-full lands.
-
 ## Usage
 
 ```text
 obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
-obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names]
-obs alerts [--dir observability] [--seed seed.yaml] [--base unix] [--out results.json] [--vl-settings victorialogs-settings.yaml]
+obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names] [--vl-settings victorialogs-settings.yaml]
+obs alerts [--dir observability] [--seed seed.yaml] [--base unix] [--out results.json] [--vl-settings victorialogs-settings.yaml] [--tempo-config tempo.yaml]
+            [--workers n] [--steps steps.json] [--recorded recorded.json]
+obs assert --series FILE [--dir observability] [--pods n] [--unknown warn|fail|ignore]
+obs profile summarize|baseline|compare   (obs profile help)
 obs check [--dir observability] [--pods n] [--landscapes n]
 obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
-obs sandbox up|down|status [--dir observability] [--project name] [--port-base n]
-obs look   [--base origin/main] [--all] [--json]
-obs scrape --target <url> [--label name=value] [--interval 15s] [--once]
+obs sandbox up [--dir observability] [--seed seed.yaml] [--project name] [--port-base n] [--runtime docker|podman] [--reseed]
+obs sandbox down|status [--dir observability] [--project name] [--runtime docker|podman]
+obs scrape --target <url> [--label name=value] [--interval 15s] [--once] [--job name] [--vm-url url] [--dir observability] [--project name]
+obs look   [--base origin/main] [--all] [--json] [--file dashboards/x.json] [--checklist file.md] [--out obs-look] [--width 1600] [--height 1000]
+         [--dir observability] [--seed seed.yaml] [--project name] [--port-base n] [--runtime docker|podman] [--reseed]
 obs links [--dir observability] [--seed seed.yaml] [--base unix]
 obs version
+obs store move <store> --config move.yaml [--dry-run] [--rollback]
+obs symbols put|decode --store <dir> --file <file> [options]
+obs size --req-per-second <n> --services <n> --pods <n> --profiled-pods <n>
+obs engines --check-chart <chart folder>
 ```
 
 Exit 0 when clean, 1 when a check failed, 2 on a usage or input error. Every failure line names
@@ -85,7 +99,7 @@ the file, the rule or panel, the rule id in `[brackets]` and the offending name 
   are not queries and are skipped. A flat authoring file (`title/datasource/expr`) is refused
   with a pointer to the CR. More than one YAML document in a file is refused.
 - **`dashboards/**/\*.json`**: dashboard JSON. Panels (also inside collapsed rows), `targets[].expr`,
-`templating.list`, `time.from/to` are read. Annotation queries are not checked in 0.1.0.
+`templating.list`, `time.from/to` are read. Annotation queries are not checked.
 - **`seed.yaml`** (`--live` only; `--seed` overrides the path): see below.
 - **`contract.yaml`**: the contract (see "The contract" below); its presence switches on the contract name checks and the event rule.
 
@@ -154,7 +168,7 @@ rule skipped: no contract.yaml`. When it is present, the alert must filter on th
 length: 4h # how much time to make
 random_seed: 42 # the same file gives the same data
 resource: # resource attributes, dots kept; become metric labels (dots -> _) and log fields
-  durian.cloud.landscape: pichu
+  durian.cloud.landscape: fixture-dev
   durian.cloud.platform: payments
   durian.cloud.service: checkout
   durian.cloud.module: api
@@ -491,13 +505,101 @@ scrape.
 
 ## Engines and pins
 
-| Signal  | Engine                                               | Version                        |
-| ------- | ---------------------------------------------------- | ------------------------------ |
-| metrics | VictoriaMetrics (`metricsql`, storage and evaluator) | v1.156.0                       |
-| logs    | VictoriaLogs `lib/logstorage`                        | v1.54.0, tag commit `6433dae5` |
+| Signal   | Engine or reference                                         | Version                          |
+| -------- | ----------------------------------------------------------- | -------------------------------- |
+| metrics  | VictoriaMetrics (`metricsql`, storage and evaluator)        | v1.156.0                         |
+| logs     | VictoriaLogs `lib/logstorage`                               | v1.54.0, tag commit `6433dae5`   |
+| traces   | Tempo (TraceQL parser, evaluator and frontend rules)        | 3.1.1, tag commit `9db7df79d2af` |
+| alerts   | Grafana (alert math and state machine, ported)              | 13.3.0, tag commit `752e3462`    |
+| profiles | Pyroscope (reference: sandbox and parity only, not linked)  | 2.4.3                            |
+| logs UI  | VictoriaLogs Grafana datasource (reference, parity only)    | v0.34.0                          |
+
+The first four are engines linked into the binary; the last two are references only.
+`obs version` prints every pin, with `engine` or `reference` in front of it, and
+`obs engines --check-chart` compares the charts with them.
 
 Each equals the version in the charts (concept §1). `obs version` prints them.
 No Loki module is in `go.mod`.
+
+## obs engines --check-chart
+
+```text
+obs engines --check-chart <chart folder>
+```
+
+Compares a Helm chart folder with the pins in `src/internal/pins/pins.json` (the same ones
+`obs version` prints), so a pin that moves without the chart, or a chart that moves without
+the pin, is a red check instead of a silent difference. It reads two files and never touches
+the network.
+
+`values.yaml`: every image of an engine, anywhere in the file, in these shapes:
+
+- a map with `repository` and `tag` and/or `digest`; the engine is chosen by the last path
+  segment of the repository: `victoria-metrics`, `vmstorage`, `vminsert`, `vmselect`,
+  `vmagent`, `vmalert`, `vmauth` (VictoriaMetrics), `victoria-logs` (VictoriaLogs), `tempo`,
+  `grafana` and `pyroscope`; other images (such as `grafana-image-renderer`, or a sidecar
+  inside the Grafana values) are ignored;
+- one of the engine's own `image` maps with no repository beside it, inside the values of a
+  `Chart.yaml` dependency that is an engine chart, found by its `alias`, else its `name`
+  (`victoria-logs-single.server.image.tag`). Only these paths below the dependency key count
+  (`internal/chartcheck` `ownImage`): `image` (grafana, victoria-metrics-agent, and tempo and
+  pyroscope beside `tempo.image` / `pyroscope.image`), `tempo` for the tempo chart (its image is
+  `tempo.repository` and `tempo.tag` upstream, grafana-community/helm-charts `charts/tempo/values.yaml`
+  lines 26-30, so a dependency named tempo is checked at `tempo.tempo.tag`), `server.image` (victoria-metrics-single
+  and -alert, victoria-logs-single), `vmstorage.image`, `vmselect.image`, `vminsert.image`
+  (victoria-metrics-cluster), `vlstorage.image`, `vlselect.image`, `vlinsert.image`
+  (victoria-logs-cluster) and the `vmcluster`, `vmsingle`, `vmagent`, `vmalert` `spec` images
+  of victoria-metrics-k8s-stack. Any other image map with no repository (`grafana.sidecar.image.tag`,
+  a renderer, an init container) is not the engine and is never compared; with a repository
+  that is not an engine it is ignored the same way;
+- one string under an `image` key: `repo[:tag][@sha256:...]`. The tag starts after the last
+  `:` that follows the last `/`, so a registry port (`myreg.io:5000/grafana/pyroscope:2.4.3`)
+  is not a tag.
+
+`Chart.yaml`: which engine charts the folder depends on, and `appVersion` when the chart
+itself is an engine chart. A dependency's `version` is a chart version, not an application
+version, so it is never compared with a pin.
+
+A leading `v` is not a difference (`v1.156.0` and `1.156.0` are equal), and VictoriaMetrics'
+`-cluster` image suffix is accepted. A digest is compared with the digest recorded for the
+engine in `pins.json` (the same digests as `parity/images.json`, which `parity/check-pins.sh`
+keeps equal): a container runtime pulls the digest when there is one, so a different digest is
+drift even behind the right tag. An image pinned **by digest only** is accepted only when it
+equals the recorded digest; with no digest recorded for that engine it fails with `pinned by
+digest only; cannot prove version <pin>`. A tag together with a digest compares both.
+
+Proof is per dependency and per image: two aliases of one engine each need their own resolved
+version, and every engine image map or string (each component of a cluster chart that the
+values set) must itself give a tag or a digest, so one matched occurrence never hides another
+unresolved one. A component the values do not set at all falls back to the chart default and is
+not checked. Only the dependency's own engine image proves it: an image of another engine (a Tempo
+image in a Grafana sidecar) is compared with its own pin but does not prove the dependency. At an
+own image path the path decides: an empty string, `null` or `{}` fails, and a mirror repository
+name is still the engine's image.
+A map at an own path that holds a nested `image` and no tag, digest or repository of its own (the
+tempo wrapper `tempo.tempo.image.tag`) is a wrapper, not an unresolved image: the nested image is
+the one checked.
+The nested `image` of an own path is own at any depth (`vmselect.image.image.tag`), so a wrapper is
+skipped only because its child is itself checked.
+
+
+Exit 0 when every version and digest found equals its pin. Exit 1 on any failure, one line each
+naming file, line, key, the chart value and the pin: `values.yaml:18 tempo.tempo.tag: chart
+3.1.0, pin Tempo 3.1.1 [engine-pin-drift]`. These also exit 1, never a note: an engine the
+chart uses (a dependency, or an engine chart's own name) whose version cannot be read, because
+the dependency has no image tag, the tag is empty or missing (the chart default is not
+checked), or the image string has no tag or digest (`[engine-pin-missing]`). Exit 2 when the
+folder is missing or holds no engine at all (no engine dependency and no engine image).
+Pyroscope and any engine the chart does not use are not required. `--pins FILE` compares with
+another pins file instead of the built-in one (it exists so the digest-less case can be tested).
+
+MEASURED: unit tests (`src/internal/chartcheck`) and `tests/engines.sh` with the fixture charts
+in `tests/fixtures/engines` (`matching` exit 0; `drifted`, `digest-drift`, `tag-no-repository`,
+`missing-tag`, `registry-port`, `two-aliases-missing`, `cluster-missing` and `digest-only-no-pin` exit 1; `digest-ok`, `two-aliases-ok`, `cluster-ok` and `sidecar-tag`, `tempo-chart-tag-ok` exit 0 (`tempo-chart-tag-drift`, `foreign-sidecar`, `empty-string`, `tempo-nested-image-drift` and `tempo-nested-image-empty` and `cluster-extra-wrapper` exit 1; `tempo-nested-image` and `cluster-extra-wrapper-ok` exit 0); `none`
+exit 2). **NOT TESTED:** the real chart's location in the chart registry is not specified, so
+wiring this command into a consumer's CI is not tested; the fixtures follow the common upstream
+value shapes, and an umbrella chart that keeps its image tags outside `values.yaml` (for
+example in a template or a separate values file) is not read (see [Not tested](#not-tested)).
 
 ### `src/third_party/VictoriaLogs`
 
@@ -814,10 +916,22 @@ otherwise a writable `/dev/shm` with at least 1 GiB free (else the system temp
 directory); VictoriaMetrics caches are capped at 512 MiB.
 Unused metric series are omitted and VictoriaLogs starts only when needed.
 
+**Parallel evaluation shares the VictoriaLogs server limits.** Rules are evaluated in parallel,
+`--workers` of them (default: all CPUs), and every LogsQL query goes through the one embedded
+VictoriaLogs engine, which applies the server's limits as production does: `min(CPUs,16)`
+concurrent slots (twice the CPUs up to four CPUs), a 10 s `-search.maxQueueDuration` wait for a
+slot and a 30 s `-search.maxQueryDuration` per query. obs runs the engine and every worker on the
+runner's own CPUs, while production's VictoriaLogs has its own, so a very slow or heavily shared
+runner can see a timing refusal (`-search.maxQueueDuration` or `-search.maxQueryDuration`, named
+in the message) that production would not. Lower the worker count to avoid it, for example
+`obs alerts --dir observability --workers 2`; `--workers 1` evaluates one rule at a time and
+lets VictoriaLogs use its own parallelism for that query. Do not raise the limits in
+`--vl-settings` to hide a timing refusal: obs would then accept a query production refuses.
+
 MEASURED: regression tests cover state transitions, numeric light/full parity,
 event-filter refusals, recording outputs, cache invalidation and planted wrong
 thresholds. NOT TESTED: parity against the live Grafana scheduler and datasource
-in this part PR, notification/persistence behavior, and VictoriaLogs runtime
+in this release, notification/persistence behavior, and VictoriaLogs runtime
 timeout/concurrency limits. TraceQL rules: see the next section. The Grafana AGPL licence ships in `share/licenses/obs/grafana/LICENSE`.
 
 ### TraceQL alert rules
@@ -949,14 +1063,6 @@ overrides (not modelled); whether provisioned Tempo rules evaluate without the
 rendered Tempo config only); exemplar frames themselves (refused, never produced); `obs query
 --live` for trace alert queries (unchanged: not run).
 
-### Existing query-check limits
-
-- `obs sandbox up` on aarch64 and macOS, and with podman (the box that ran it has docker only); Tempo and Pyroscope take no data from the seed yet.
-- `obs look` with a pull request on GitHub (the agent posts the comment; obs only prints the prompt).
-- Variable filling for LogsQL panels against the Grafana VictoriaLogs datasource (it reuses the Prometheus macros).
-- Seeded log rows against a real VictoriaLogs fed through Alloy (field names are FROM SOURCE).
-- aarch64 and macOS builds are in CI; only x86_64 Linux was run by hand.
-
 ## Nightly parity
 
 The `Obs parity` workflow runs nightly and on changes to engine pins, and can be
@@ -1008,7 +1114,8 @@ Advanced adapters were also run against the parallel part branches: M3
 live scheduler transitions and ten recording-rule points), M4 `e462cb4` (seven
 TraceQL searches, two range-metric queries and six link checks), and M5 `0257d0b` (12 function CPU shares
 and two span CPU shares). These are MEASURED local results. Alerts and TraceQL
-are now integrated in this branch; the profile step switches on when its command lands.
+are integrated in this branch, and so is `obs profile`: the parity workflow runs the profile step
+(span to profile compare against Pyroscope) because the command exists.
 
 VictoriaLogs referee settings found on that run: a recent, disjoint time line per
 fixture; `-retentionPeriod=10y`; explicit insert `/internal/force_flush` before
@@ -1591,3 +1698,46 @@ comparisons, metrics counts/rates/quantiles, both dashboard query modes and all
 three links. `tests/links.sh` plants syntax, attribute, log-link, trace-link and
 profile-label failures; every failure names the file, query/route/series and bad
 attribute or value. Real-store parity remains **NOT TESTED** here.
+
+## Not tested
+
+Everything in this tool that no test, measurement or real run has proven, in one place. Each
+item says what is missing; the section it came from has the detail. Everything not listed here
+is MEASURED (a test or a run in this repository) or FROM SOURCE (read in the pinned upstream
+source) where its section says so.
+
+**Commands and builds**
+
+- `obs engines --check-chart` wired into a consumer's CI: the real chart's location in the chart registry is not specified, so the command is tested only on fixture charts ([obs engines --check-chart](#obs-engines---check-chart)). Chart pins in the nightly parity job are in the same position.
+- `obs engines --check-chart` does not check a component whose image the values never set (it uses the chart default), and reads only the image paths listed under its section.
+- `obs engines --check-chart` reads `Chart.yaml` and `values.yaml` only: an engine image set in a template or in another values file is not read, and a digest is compared with the recorded image digest, not resolved against a registry.
+- `obs sandbox up` on aarch64 and macOS, and with podman (the box that ran it has docker only); Tempo and Pyroscope take no data from the seed yet ([`obs sandbox`](#obs-sandbox-the-local-stack-for-people)).
+- `obs look` with a pull request on GitHub: the agent posts the comment; obs only prints the prompt ([`obs look`](#obs-look-dashboard-screenshots-reviewed-by-the-calling-agent)).
+- aarch64 and macOS builds run in CI; only x86_64 Linux was run by hand.
+
+**Queries and data**
+
+- Variable filling for LogsQL panels against the Grafana VictoriaLogs datasource: it reuses the Prometheus macros, and this exact query and time range through a real Grafana/VictoriaLogs UI is not run (the parity job is the referee) ([obs query --live](#obs-query---live)).
+- Seeded log rows against a real VictoriaLogs fed through Alloy: the field names are FROM SOURCE.
+- Annotation queries are not checked.
+- Real-store parity of the TraceQL, links and profile-label checks ([obs links](#obs-links)).
+- Trace-ID routing: a trace ID typed in a TraceQL panel is routed by obs as the last core Tempo datasource did; parity with the separately shipped Tempo plugin is untested ([obs links](#obs-links)).
+
+**Generated code**
+
+- Each language's generated types compile and run against a stub written from the goal, not the real interfaces library ([obs gen](#obs-gen)).
+- The per-language lint rules (`forbidigo` and the others in the table) are documented here; the lint config lives in the templates and is not run by obs.
+- Actual NativeAOT or Flutter release artifacts, and a compiler-produced .NET PDB ([obs symbols](#obs-symbols)). Not checked: a Portable PDB carries no module MVID, so the uploader supplies it; obfuscation-map provenance comes from the build.
+
+**Alerts**
+
+- Parity against the live Grafana scheduler and datasource, and notification and persistence behaviour ([obs alerts](#obs-alerts)).
+- VictoriaLogs runtime timeout and concurrency equivalence on different hardware (this includes the timing refusal on a very slow runner described under `obs alerts`).
+- Trace alert results against real Grafana and Tempo: the parity job has no trace rule yet. Also not modelled or run: Tempo's `max_response_series` and per-tenant `max_metrics_duration` overrides; whether provisioned Tempo rules evaluate without the Grafana `tempoAlerting` toggle; math joining two un-reduced instant series (the frame time differs from obs's evaluation minute); a Helm chart's values file for `--tempo-config` (obs reads the rendered Tempo config only); `obs query --live` for trace alert queries (not run); exemplar frames themselves (refused by obs, never produced); the proposal to evaluate each trace rule once per run on per-minute buckets ([TraceQL alert rules](#traceql-alert-rules)).
+- The §11.1.1 speed table was measured on a shared, loaded box, not a quiet one; the cache-hit rows were not re-measured, and the "what would close the time gap" proposal is untried ([speed](#obs-alerts-speed-concept-1111-re-measured-with-victorialogs)).
+
+**Evidence and stores**
+
+- `obs assert` against a real VictoriaMetrics export: the two accepted forms follow the documented API ([`obs assert`](#obs-assert)).
+- Real `dotnet-trace` collection, and Dart `UserTag` spans: `UserTag:<name>` is obs's own converter convention, and the dart template must write the converter ([obs profile](#obs-profile-summarizebaselinecompare)).
+- `obs store move` against a real cluster: moves and rollback (API-server patch and admission behaviour), chart compaction adapters, Tempo and Pyroscope drain durability, live store HTTP endpoints ([obs store](#obs-store)).

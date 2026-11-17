@@ -10,6 +10,7 @@ for mutation in \
   '.VictoriaLogs.commit="badcommit"' \
   '.Grafana.image="grafana/grafana:wrong"' \
   '.Grafana.digest="sha256:wrong"' \
+  '.Pyroscope.digest="sha256:0000000000000000000000000000000000000000000000000000000000000000"' \
   '.VictoriaLogsDatasource.plugin="victoriametrics-logs-datasource@wrong"' \
   'del(.Tempo)' \
   '.Unknown={version:"1"}'; do
@@ -19,4 +20,13 @@ for mutation in \
     exit 1
   fi
   echo "MEASURED rejected images.json planted drift: $mutation"
+done
+# The same check from the pins side: a pin that records no digest, or another one, is rejected.
+for mutation in 'del(.Pyroscope.digest)' '.Tempo.digest="sha256:0000000000000000000000000000000000000000000000000000000000000000"'; do
+  jq "$mutation" "$pins" >"$scratch/pins.json"
+  if bash "$here/check-pins.sh" "$scratch/pins.json" "$here/images.json" >"$scratch/output" 2>&1; then
+    echo "pins.json: planted bad pin accepted: $mutation" >&2
+    exit 1
+  fi
+  echo "MEASURED rejected pins.json planted drift: $mutation"
 done

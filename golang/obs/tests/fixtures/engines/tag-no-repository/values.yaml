@@ -1,0 +1,4 @@
+victoria-logs-single:
+  server:
+    image:
+      tag: v1.50.0

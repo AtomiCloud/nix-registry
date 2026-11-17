@@ -15,6 +15,14 @@ run() {
   rc=$?
   set -e
 }
+# The cache invocations below must not inherit the self-check variables: exporting OBS_VERIFY_PRUNE=1
+# for the whole script would bypass the result cache they count hits on.
+run_cached() {
+  set +e
+  env -u OBS_VERIFY_FAST -u OBS_VERIFY_SKIP -u OBS_VERIFY_PRUNE "$OBS" "$@" >"$work/out" 2>&1
+  rc=$?
+  set -e
+}
 expect() {
   local want=$1
   shift
@@ -42,15 +50,15 @@ for state in Pending Recovering NoData Error; do grep -qF "$state" "$work/steps.
 grep -qF '"__name__":"fixture_recorded"' "$work/recorded.json"
 
 # Persistent result cache: all ten rules hit on the second invocation.
-OBS_CACHE_DIR="$work/cache" run alerts --dir "$o"
+OBS_CACHE_DIR="$work/cache" run_cached alerts --dir "$o"
 expect 0 'cached=0' 'failed=0'
-OBS_CACHE_DIR="$work/cache" run alerts --dir "$o"
+OBS_CACHE_DIR="$work/cache" run_cached alerts --dir "$o"
 expect 0 'cached=10' 'failed=0'
 
 # Only a changed rule is invalidated; its siblings reuse their own normalized CR inputs.
 cp "$o/alerts/metric/critical.yaml" "$work/metric"
 sed -i 's/\$A > 0.5/\$A > 0.6/' "$o/alerts/metric/critical.yaml"
-OBS_CACHE_DIR="$work/cache" run alerts --dir "$o"
+OBS_CACHE_DIR="$work/cache" run_cached alerts --dir "$o"
 expect 0 'cached=9' 'failed=0'
 cp "$work/metric" "$o/alerts/metric/critical.yaml"
 
