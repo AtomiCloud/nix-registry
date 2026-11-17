@@ -221,12 +221,12 @@ func (k Kubernetes) stableRoutes(ctx context.Context, c Config, store string, si
 			if key == role {
 				continue
 			}
-			if singleTpl[key] != sel[key] {
+			if !hasLabel(singleTpl, key, sel[key]) {
 				return fmt.Errorf("stable Service %s selector term %s=%s is not on the pod template of %s; the Service would not route to the single", name, key, sel[key], c.Single)
 			}
 			for _, w := range roleWorkloads(c) {
 				for _, r := range c.RoleWorkloads[w] {
-					if r == role && templates[w][key] != sel[key] {
+					if r == role && !hasLabel(templates[w], key, sel[key]) {
 						return fmt.Errorf("stable Service %s selector term %s=%s is not on the pod template of %s, which receives %s; after the flip the Service would select none of its pods (a stable Service selects only the role and terms every serving pod carries)", name, key, sel[key], w, role)
 					}
 				}

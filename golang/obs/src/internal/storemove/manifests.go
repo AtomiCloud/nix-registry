@@ -263,6 +263,14 @@ func selectorString(labels map[string]string) string {
 	return strings.Join(parts, ",")
 }
 
+// hasLabel is one label selector term: the key must exist with exactly that value. A
+// missing label never matches, not even a term with the empty value (Kubernetes label
+// selector semantics: tenant="" requires the tenant key).
+func hasLabel(labels map[string]string, key, value string) bool {
+	v, ok := labels[key]
+	return ok && v == value
+}
+
 // disjoint reports whether no pod can match both selectors (some key differs).
 func disjoint(a, b map[string]string) bool {
 	for k, v := range a {
@@ -468,7 +476,7 @@ func storageNodes(c Config, objs []object) ([]storageNode, error) {
 			return nil, fmt.Errorf("%s: Service/%s needs a selector for %s's pods", file, svc, w)
 		}
 		for k, v := range sel {
-			if tpl[k] != v {
+			if !hasLabel(tpl, k, v) {
 				return nil, fmt.Errorf("%s: Service/%s selector %s=%s does not select %s's pods", file, svc, k, v, w)
 			}
 		}

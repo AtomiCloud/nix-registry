@@ -130,7 +130,7 @@ func (f *fakeKube) reconcile(res string) {
 func matches(labels map[string]string, sel string) bool {
 	for _, pair := range strings.Split(sel, ",") {
 		k, v, _ := strings.Cut(pair, "=")
-		if labels[k] != v {
+		if got, ok := labels[k]; !ok || got != v { // a missing label never matches, not even ""
 			return false
 		}
 	}
