@@ -111,11 +111,12 @@ type scan struct {
 }
 
 // ownImage lists, per engine chart, the paths (below the dependency's values key) of the engine's
-// own `image` maps. Everything else with an image map (sidecars, renderers, init containers) is
-// not the engine.
+// own image maps: `image`, or `tempo` for the tempo chart, whose image is tempo.repository and
+// tempo.tag (grafana-community/helm-charts charts/tempo/values.yaml lines 26-30). Everything else
+// with an image map (sidecars, renderers, init containers) is not the engine.
 var ownImage = map[string][]string{
 	"grafana":                    {"image"},
-	"tempo":                      {"image", "tempo.image"},
+	"tempo":                      {"image", "tempo.image", "tempo"}, // "tempo": the chart's own tempo.repository / tempo.tag
 	"tempo-distributed":          {"image", "tempo.image"},
 	"pyroscope":                  {"image", "pyroscope.image"},
 	"victoria-metrics-single":    {"server.image"},
@@ -293,7 +294,7 @@ func (s *scan) imageMap(n *yaml.Node, path []string, ctx, parent string) {
 		if e, ok = engineOfRepo(repo.Value); !ok {
 			return // some other image
 		}
-	case parent == "image" && ctx != "" && isOwnImage(s.deps[ctx].name, path[1:]):
+	case ctx != "" && isOwnImage(s.deps[ctx].name, path[1:]):
 		e = s.deps[ctx].engine
 	default:
 		return

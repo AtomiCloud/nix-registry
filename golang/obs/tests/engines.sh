@@ -73,6 +73,11 @@ run engines --check-chart "$fx/cluster-ok"
 expect 0 'ok: 3 match(es)'
 run engines --check-chart "$fx/cluster-missing"
 expect 1 'values.yaml:' 'victoria-metrics-cluster.vmselect.image' '[engine-pin-missing]' 'cannot prove version v1.156.0'
+# The upstream tempo chart keeps its image at tempo.tag, so as a dependency it is tempo.tempo.tag.
+run engines --check-chart "$fx/tempo-chart-tag-ok"
+expect 0 'tempo.tempo.tag' 'ok: 1 match(es)'
+run engines --check-chart "$fx/tempo-chart-tag-drift"
+expect 1 'values.yaml:3 tempo.tempo.tag' 'chart 3.1.0' 'Tempo 3.1.1'
 # Only the engine's own image keys count: a sidecar or renderer tag is never compared as Grafana.
 run engines --check-chart "$fx/sidecar-tag"
 expect 0 'ok: 1 match(es)'

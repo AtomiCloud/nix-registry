@@ -543,7 +543,9 @@ the network.
   `Chart.yaml` dependency that is an engine chart, found by its `alias`, else its `name`
   (`victoria-logs-single.server.image.tag`). Only these paths below the dependency key count
   (`internal/chartcheck` `ownImage`): `image` (grafana, victoria-metrics-agent, and tempo and
-  pyroscope beside `tempo.image` / `pyroscope.image`), `server.image` (victoria-metrics-single
+  pyroscope beside `tempo.image` / `pyroscope.image`), `tempo` for the tempo chart (its image is
+  `tempo.repository` and `tempo.tag` upstream, grafana-community/helm-charts `charts/tempo/values.yaml`
+  lines 26-30, so a dependency named tempo is checked at `tempo.tempo.tag`), `server.image` (victoria-metrics-single
   and -alert, victoria-logs-single), `vmstorage.image`, `vmselect.image`, `vminsert.image`
   (victoria-metrics-cluster), `vlstorage.image`, `vlselect.image`, `vlinsert.image`
   (victoria-logs-cluster) and the `vmcluster`, `vmsingle`, `vmagent`, `vmalert` `spec` images
@@ -584,7 +586,7 @@ another pins file instead of the built-in one (it exists so the digest-less case
 
 MEASURED: unit tests (`src/internal/chartcheck`) and `tests/engines.sh` with the fixture charts
 in `tests/fixtures/engines` (`matching` exit 0; `drifted`, `digest-drift`, `tag-no-repository`,
-`missing-tag`, `registry-port`, `two-aliases-missing`, `cluster-missing` and `digest-only-no-pin` exit 1; `digest-ok`, `two-aliases-ok`, `cluster-ok` and `sidecar-tag` exit 0; `none`
+`missing-tag`, `registry-port`, `two-aliases-missing`, `cluster-missing` and `digest-only-no-pin` exit 1; `digest-ok`, `two-aliases-ok`, `cluster-ok` and `sidecar-tag`, `tempo-chart-tag-ok` exit 0 (`tempo-chart-tag-drift` exit 1); `none`
 exit 2). **NOT TESTED:** the real chart's location in the chart registry is not specified, so
 wiring this command into a consumer's CI is not tested; the fixtures follow the common upstream
 value shapes, and an umbrella chart that keeps its image tags outside `values.yaml` (for

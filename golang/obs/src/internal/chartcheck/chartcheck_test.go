@@ -452,3 +452,19 @@ func TestOnlyTheEnginesOwnImageKeysCount(t *testing.T) {
 		t.Fatalf("a sidecar tag must not prove the Grafana version: %v %+v", err, res)
 	}
 }
+
+// The upstream tempo chart keeps its image at tempo.repository / tempo.tag
+// (grafana-community/helm-charts charts/tempo/values.yaml lines 26-30 at cb18e3d4), so as a
+// dependency named tempo the engine's own image is tempo.tempo.tag.
+func TestTempoChartTagOverrideAtTempoTempo(t *testing.T) {
+	dep := "  - name: tempo\n    version: 1.30.0\n"
+	p := pins.All()["Tempo"]
+	res, err := Check(depChart(t, dep, "tempo:\n  tempo:\n    tag: \""+p.Version+"\"\n"), pins.All())
+	if err != nil || len(res.Findings) != 0 || len(res.Matches) != 1 || !strings.Contains(res.Matches[0], "tempo.tempo.tag") {
+		t.Fatalf("a correct tag-only override is not a false red: %v %+v", err, res)
+	}
+	res, err = Check(depChart(t, dep, "tempo:\n  tempo:\n    tag: 3.1.0\n"), pins.All())
+	if err != nil || len(res.Findings) != 1 || res.Findings[0].Key != "tempo.tempo.tag" || res.Findings[0].ChartValue != "3.1.0" || res.Findings[0].PinValue != p.Version {
+		t.Fatalf("a drifted tag-only override must name tempo.tempo.tag: %v %+v", err, res)
+	}
+}
