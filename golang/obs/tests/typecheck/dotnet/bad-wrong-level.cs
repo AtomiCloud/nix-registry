@@ -1,2 +1,3 @@
 using Checkout.Signals;
-DurianSignalEvent<DurianSignalLevelWarn> e = Events.ChargeFailed;
+using AtomiCloud.Diene.Interfaces;
+Event<WarnLevel> e = Events.ChargeFailed;

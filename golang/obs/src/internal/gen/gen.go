@@ -22,8 +22,9 @@ type File struct {
 
 // Options carry the per-target settings of the contract's `generate:` entry.
 type Options struct {
-	Package   string // go package name, dart library name
-	Namespace string // .NET namespace
+	Package    string // go package name, dart library name
+	Namespace  string // .NET namespace
+	Interfaces string // dependency import/module/namespace (defaults to the published package)
 }
 
 // Generator writes the typed signals of one language.

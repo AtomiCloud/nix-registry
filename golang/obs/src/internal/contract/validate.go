@@ -23,6 +23,9 @@ var (
 	keyRe = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
 )
 
+// Units a metric may state: none, or one that adds its suffix to the stored name (concept 11.2).
+var Units = []string{"", "s", "seconds", "By", "bytes"}
+
 // Known languages (the registry in internal/gen decides which have a generator).
 var Languages = []string{"go", "dotnet", "dart", "bun"}
 
@@ -121,6 +124,9 @@ func (c *Contract) Validate() []Issue {
 			} else if !dup {
 				seenStored[sn] = n
 			}
+		}
+		if !in(Units, m.Unit) {
+			add(p, "metric-unit", "metric %q: unit %q is not one the stored name supports (%s); other units would store a name no OTLP to VictoriaMetrics path produces", n, m.Unit, strings.Join(Units[1:], ", "))
 		}
 		switch m.Kind {
 		case MetricCounter, MetricHistogram, MetricGauge:

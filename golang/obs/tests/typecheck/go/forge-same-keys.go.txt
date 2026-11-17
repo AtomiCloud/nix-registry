@@ -1,0 +1,26 @@
+// planted forging (review round 5): a hand-made labels struct with the exact keys of checkout.charges but free
+// string values, on a counter that names the declared metric. It compiles; the port must refuse its type.
+package main
+
+import (
+	"context"
+	"fmt"
+
+	_ "example.com/app/signals"
+	obs "github.com/ProtoDurian/diene.go-interfaces/obs"
+)
+
+type Raw struct {
+	Provider string `obs:"provider"`
+	Outcome  string `obs:"outcome"`
+	Shard    int    `obs:"shard"`
+	Hour     int    `obs:"hour"`
+}
+
+func main() {
+	n := obs.NewCounter[Raw]("checkout.charges")
+	fmt.Println("result:", obs.Add(context.Background(), n, Raw{"visa", "ok", 999999, 4}))
+	if obs.Dropped("unknown_key") != 1 {
+		panic("the refusal was not counted in dropped.unknown_key")
+	}
+}

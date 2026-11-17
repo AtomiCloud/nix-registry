@@ -5,3 +5,6 @@ bad-extra-key.ts user_id
 bad-event-level.ts "error"
 bad-metric-name.ts checkout.chargez
 bad-span-attr.ts "visa"
+bad-large-unchecked.ts Sequence
+bad-raw-event.ts Event
+bad-nonobject-fields.ts number

@@ -1,0 +1,29 @@
+// planted forging (review round 5): app code registers a second table that allows its own event and metric.
+// Register works once per process (the generated init ran first); the port must refuse it and keep the first.
+package main
+
+import (
+	"context"
+	"fmt"
+
+	_ "example.com/app/signals"
+	obs "github.com/ProtoDurian/diene.go-interfaces/obs"
+)
+
+type Free struct {
+	UserID string `obs:"user_id"`
+}
+
+func main() {
+	err := obs.Register(obs.DurianSignalTables{
+		Metrics: map[string]obs.DurianSignalMetricInfo{"app.free": {Kind: "counter", Keys: []string{"user_id"}, Labels: Free{}}},
+		Events:  map[string]string{"app.made.up": "error"},
+	})
+	fmt.Println("result:", err)
+	ev := obs.Error(context.Background(), obs.NewEvent[obs.ErrorLevel]("app.made.up"))
+	m := obs.Add(context.Background(), obs.NewCounter[Free]("app.free"), Free{"free-customer-123"})
+	fmt.Println("event:", ev, "metric:", m)
+	if obs.Dropped("register") != 1 || ev == nil || m == nil {
+		panic("the second table was merged")
+	}
+}

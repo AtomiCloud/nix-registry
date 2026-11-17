@@ -4,8 +4,14 @@ bad-raw-int-for-bounded.dart argument_type_not_assignable
 bad-raw-string-for-enum.dart argument_type_not_assignable
 bad-missing-label.dart missing_required_argument
 bad-wrong-level.dart invalid_assignment
-bad-wrong-labels-for-name.dart invalid_assignment
+bad-wrong-labels-for-name.dart argument_type_not_assignable
 bad-name-made-outside.dart undefined_constructor
 bad-event-made-outside.dart no_default_super_constructor
-bad-labels-made-outside.dart no_default_super_constructor
-bad-bound-spec-made-outside.dart undefined_constructor
+bad-labels-made-outside.dart invalid_use_of_type_outside_library
+bad-bound-spec-made-outside.dart instantiate_abstract_class
+bad-raw-event.dart argument_type_not_assignable
+bad-nonobject-fields.dart argument_type_not_assignable
+bad-event-implements-outside.dart can't be implemented outside of its library because it's a base class
+bad-counter-implements-outside.dart can't be implemented outside of its library because it's a base class
+bad-upcast-add.dart undefined_method
+bad-level-made-outside.dart outside of its library because it's a sealed class

@@ -34,6 +34,28 @@ func rawValue(v string) string {
 			return u
 		}
 	}
+	if len(v) >= 2 && v[0] == '\'' {
+		// single-quoted: the same escapes as double-quoted, plus \'
+		inner := strings.ReplaceAll(v[1:len(v)-1], "\\'", "'")
+		var b strings.Builder
+		for i := 0; i < len(inner); i++ {
+			if inner[i] == '\\' && i+1 < len(inner) {
+				b.WriteByte(inner[i])
+				i++
+				b.WriteByte(inner[i])
+				continue
+			}
+			if inner[i] == '"' {
+				b.WriteString("\\\"")
+				continue
+			}
+			b.WriteByte(inner[i])
+		}
+		if u, err := strconv.Unquote("\"" + b.String() + "\""); err == nil {
+			return u
+		}
+		return inner
+	}
 	if len(v) >= 2 {
 		return v[1 : len(v)-1]
 	}
@@ -42,7 +64,23 @@ func rawValue(v string) string {
 
 // scanMatchers reads the matchers of the unfilled query text. Keys use the label as the parser
 // reports it (a quoted name without its quotes).
-func scanMatchers(raw string) matcherVars {
+// varToken finds a real dashboard variable in a value: $name, ${name}, ${name:fmt} or [[name]]. A bare $
+// is a regex end anchor, not a variable.
+var varToken = regexp.MustCompile("\\$([A-Za-z_][A-Za-z0-9_]*)|\\$\\{([A-Za-z_][A-Za-z0-9_]*)[^}]*\\}|\\[\\[([A-Za-z_][A-Za-z0-9_]*)[^\\]]*\\]\\]")
+
+// holdsVariable reports whether a raw matcher value holds a variable; declared (when the query is
+// a dashboard's) lists the dashboard's variables, and a token naming none of them is plain text.
+func holdsVariable(v string, declared map[string]bool, dash bool) bool {
+	for _, g := range varToken.FindAllStringSubmatch(v, -1) {
+		name := g[1] + g[2] + g[3]
+		if !dash || declared[name] {
+			return true
+		}
+	}
+	return false
+}
+
+func scanMatchers(raw string, declared map[string]bool, dash bool) matcherVars {
 	m := matcherVars{vars: map[string]bool{}, fixed: map[string]bool{}}
 	for _, g := range valueMatcher.FindAllStringSubmatch(raw, -1) {
 		name := g[1]
@@ -51,7 +89,7 @@ func scanMatchers(raw string) matcherVars {
 				name = u
 			}
 		}
-		if strings.Contains(g[3], "$") || strings.Contains(g[3], "[[") {
+		if holdsVariable(g[3], declared, dash) {
 			m.vars[matcherKey(name, g[2])] = true
 			continue
 		}
@@ -117,7 +155,7 @@ type metricChecker struct {
 // (exact or by regex), each label of each selector, each label a label function or a grouping
 // reads, and the value of an enum or bounded label.
 func contractMetrics(r *Report, q *files.Query, e metricsql.Expr, c *contract.Contract) {
-	mc := &metricChecker{r: r, q: q, c: c, mv: scanMatchers(q.Expr), seen: map[string]bool{}, names: storedNames(c)}
+	mc := &metricChecker{r: r, q: q, c: c, mv: scanMatchers(q.Expr, dashVars(q), q.Dash != nil), seen: map[string]bool{}, names: storedNames(c)}
 	mc.walk(e)
 }
 
@@ -392,7 +430,11 @@ func (mc *metricChecker) valueCheck(matched []contract.StoredMetric, metric stri
 	var ts []contract.Type
 	for _, sm := range matched {
 		if sm.Platform {
-			return
+			// a platform metric that carries the label takes any value; one that does not is not selected by it
+			if sm.Labels[contract.Norm(lf.Label)] {
+				return
+			}
+			continue
 		}
 		t, ok := mc.c.LabelType(sm.Metric, contract.Norm(lf.Label))
 		if !ok {
@@ -562,4 +604,15 @@ func has(a []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// dashVars is the set of the dashboard's variable names.
+func dashVars(q *files.Query) map[string]bool {
+	m := map[string]bool{}
+	if q.Dash != nil {
+		for _, v := range q.Dash.Vars {
+			m[v.Name] = true
+		}
+	}
+	return m
 }

@@ -53,12 +53,23 @@ func contractLogs(r *Report, q *files.Query, parsed *vl.Query, c *contract.Contr
 			continue // the event inside _stream:{} is refused by the logevent rules, not here
 		}
 		switch ff.Op {
-		case "exact", "in":
+		case "exact", "in", "phrase":
 			for _, v := range ff.Values {
 				if !has(events, v) {
 					r.add(Fail, q.File, q.Where, "contract-undeclared-event",
 						"event %q is not in the contract (contract/events.json: %s)%s", v, strings.Join(events, ", "), eventHint(v, events))
 				}
+			}
+		case "prefix":
+			ok := false
+			for _, e := range events {
+				if strings.HasPrefix(e, ff.Values[0]) {
+					ok = true
+				}
+			}
+			if !ok {
+				r.add(Fail, q.File, q.Where, "contract-undeclared-event",
+					"event prefix %q matches no contract event (contract/events.json: %s)%s", ff.Values[0]+"*", strings.Join(events, ", "), eventHint(ff.Values[0], events))
 			}
 		case "regexp":
 			re, err := regexp.Compile(ff.Pattern)
@@ -75,6 +86,9 @@ func contractLogs(r *Report, q *files.Query, parsed *vl.Query, c *contract.Contr
 				r.add(Fail, q.File, q.Where, "contract-event-regexp-no-match",
 					"event regex %q matches no contract event (%s)", ff.Pattern, strings.Join(events, ", "))
 			}
+		default:
+			r.add(Fail, q.File, q.Where, "contract-event-filter-form",
+				"event filter form not checkable: write the event with :=, a quoted phrase, a prefix (name*), in(...) or :~ so its names can be checked against the contract (%s)", strings.Join(events, ", "))
 		}
 	}
 }
