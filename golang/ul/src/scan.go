@@ -32,7 +32,7 @@ func resolveRoot(flagRoot, cwd string) (string, error) {
 	if flagRoot != "" {
 		abs := flagRoot
 		if !filepath.IsAbs(abs) {
-			abs = filepath.Join(cwd, abs)
+			abs = filepath.Join(realPath(cwd), abs) // the kernel resolves .. on the real path
 		}
 		abs = filepath.Clean(abs)
 		st, err := os.Stat(abs)
@@ -46,6 +46,7 @@ func resolveRoot(flagRoot, cwd string) (string, error) {
 	}
 	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
 	cmd.Dir = cwd
+	cmd.Env = gitEnv()
 	out, err := cmd.Output()
 	if err == nil {
 		if top := strings.TrimSpace(string(out)); top != "" {
@@ -112,7 +113,7 @@ func scanRepo(root string) (*scanResult, error) {
 	cmd := exec.Command("git", "ls-files", "-co", "--exclude-standard", "-z", "--",
 		":(glob)**/"+yamlName, ":(glob)**/"+mdName)
 	cmd.Dir = root
-	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
+	cmd.Env = append(gitEnv(), "GIT_OPTIONAL_LOCKS=0")
 	if out, err := cmd.Output(); err == nil {
 		for _, p := range bytes.Split(out, []byte{0}) {
 			rel := string(p)
@@ -162,4 +163,10 @@ func (r *scanResult) walk(root string) error {
 		}
 		return nil
 	})
+}
+
+// gitEnv runs git in the C locale: gitRefused reads git's English "not a git repository", and a
+// translated git (nix git ships gettext) would otherwise turn a plain folder into an error.
+func gitEnv() []string {
+	return append(os.Environ(), "LC_ALL=C", "LANGUAGE=")
 }

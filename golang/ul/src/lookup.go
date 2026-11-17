@@ -70,7 +70,7 @@ func matchesName(fe *FEntry, name string) int {
 func fromParts(root, cwd, p string) ([]string, bool) {
 	abs := p
 	if !filepath.IsAbs(abs) {
-		abs = filepath.Join(cwd, abs)
+		abs = filepath.Join(realPath(cwd), abs) // the kernel resolves .. on the real path
 	}
 	abs = filepath.Clean(abs)
 	if st, err := os.Stat(abs); err != nil || !st.IsDir() {

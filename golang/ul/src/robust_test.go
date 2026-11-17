@@ -105,3 +105,53 @@ func TestUnreadableFileIsAProblem(t *testing.T) {
 		t.Fatalf("all problems: %+v", r.Problems)
 	}
 }
+
+// git runs in the C locale: a translated "not a git repository" must still mean "walk", or a
+// plain folder holding an empty .git dir becomes an error for a German-speaking user.
+func TestGitMessageUnderAnotherLocale(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{"a/UL.yaml": ulYAML("ex.org/a", "Ay")})
+	if err := os.Mkdir(filepath.Join(dir, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LC_ALL", "de_DE.UTF-8")
+	t.Setenv("LANGUAGE", "de")
+	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Dir(dir))
+	probe := exec.Command("git", "rev-parse", "--show-toplevel")
+	probe.Dir = dir
+	out, _ := probe.CombinedOutput()
+	t.Logf("git says, translated: %v (%s)", !strings.Contains(string(out), "not a git repository"), strings.TrimSpace(string(out)))
+	if code, stdout, errs := newEnv(t, dir).ul("check"); code != 0 {
+		t.Fatalf("plain folder under a German locale: exit %d\n%s%s", code, stdout, errs)
+	}
+}
+
+// A relative --from from a symlinked cwd resolves ".." on the real path, as the kernel does.
+func TestRelativeFromInSymlinkedCwd(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	base := t.TempDir()
+	g := filepath.Join(base, "g")
+	writeTree(t, g, map[string]string{
+		"a/UL.yaml":  ulYAML("ex.org/a", "A"),
+		"b/UL.yaml":  ulYAML("ex.org/b", "A"),
+		"zz/UL.yaml": ulYAML("ex.org/zz", "A"),
+		"zz/x.go":    "package x\n",
+	})
+	gitIn(t, g, "init", "-q")
+	if err := os.MkdirAll(filepath.Join(base, "else"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	blink := filepath.Join(base, "else", "blink")
+	if err := os.Symlink(filepath.Join(g, "b"), blink); err != nil {
+		t.Skip("no symlinks here")
+	}
+	got := newEnv(t, blink).lookupIDs("A", "--from", "../zz/x.go")
+	if len(got) == 0 || got[0] != "ex.org/zz#A" {
+		t.Fatalf("--from ../zz/x.go from a symlinked b: %v, want ex.org/zz#A first", got)
+	}
+}

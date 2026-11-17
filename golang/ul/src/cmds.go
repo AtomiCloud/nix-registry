@@ -24,7 +24,10 @@ type loaded struct {
 func load(g *globals, e *env) (*loaded, error) {
 	root, err := resolveRoot(g.root, e.cwd)
 	if err != nil {
-		return nil, usageErr{"--root: " + err.Error()}
+		if g.root != "" {
+			return nil, usageErr{"--root: " + err.Error()}
+		}
+		return nil, err
 	}
 	l := &loaded{root: root}
 	if l.scan, err = scanRepo(root); err != nil {
