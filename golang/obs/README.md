@@ -355,6 +355,258 @@ replaces this by hand run.
 - LogsQL `_time:[start, end)` handling against real Grafana (the nightly parity job, a later release).
 - aarch64 and macOS builds are in CI; only x86_64 Linux was run by hand.
 
+## obs store
+
+`obs store move <tempo|pyroscope|victorialogs|victoriametrics> --config move.yaml --dry-run`
+runs every static check and prints the mandatory steps (and, for VictoriaLogs/VictoriaMetrics, the
+derived storage endpoints) without commands or HTTP requests. Remove `--dry-run` to execute;
+`--rollback` undoes the move. Kubernetes access uses `kubectl` on PATH with the explicit context
+and namespace from the config. Nothing runs automatically after a failed step; inspect the
+reported state and re-run (it resumes) or roll back explicitly. There is no skip option.
+
+### How obs changes the cluster
+
+- **New objects** (the scaled workloads or new storage nodes and their headless Services,
+  ConfigMaps, Pyroscope discovery RBAC) come from one hand-written `scaled_manifest`. obs creates
+  them with `kubectl create` (never `apply`), so the API server refuses any object that already
+  exists. obs writes the objects it checked to its own file (Lists flattened, namespace set) and adds
+  to each the label `obs.diene/store-move: <store>` and the annotation
+  `obs.diene/store-move-digest` (a hash of that manifest object). Before creating, it reads live:
+  every object must be absent (or carry exactly that label and digest: a re-run), every claim a
+  StatefulSet's `volumeClaimTemplates` would bind (`<template>-<statefulset>-<ordinal>` for every
+  ordinal from `spec.ordinals.start`, default 0) must be absent, and no live pod may match a new workload's selector, so nothing existing
+  is adopted.
+- **Existing objects** (the single, a separate Tempo compactor, the insert/select routers,
+  vmstorage) are never described by hand. obs builds each change itself from the live object as a
+  JSON patch (`kubectl patch --type=json`). Every patch obs sends starts with `test` operations of
+  the object's uid, its whole `spec` and its annotations as obs read them, then of every old value
+  the change relies on; the API server refuses the whole patch if anything changed since obs read
+  it (an appended `-replicationFactor=1`, a duplicate `-storageNode`, a retention policy set where
+  none was). The inverse patch (also with `test` operations) is stored on the object in the
+  annotation `obs.diene/store-move-inverse`, and `obs.diene/store-move-origin` records a digest of
+  the uid and of the old value at every path the change writes. The rollback replays the inverse on
+  a copy of the live object, requires the restored values to match that digest, rebuilds the
+  forward patch from the result and applies the stored inverse only when everything matches
+  exactly, so a hand-edited inverse (for example the compactor's replicas 1 to 7), another config or
+  a pinned value changed after the move is refused. Both annotations live on the object itself: they
+  catch an edited inverse, not someone who rewrites both with the same access that could change the
+  workload directly. A single must run exactly one replica, so its restored count never depends on
+  them. It undoes only obs's own change; other fields stay as they are.
+
+| Store | Change obs makes to existing objects |
+|---|---|
+| Tempo | single: `spec.replicas` N to 0 and every template role `true` to `false`, in one patch, after the drain; compactor (if separate): replicas N to 0 |
+| Pyroscope | single: `-target=all` to `-target=metastore` (same spelling) and every template role to `false`; replicas, claims, raft id and all else untouched |
+| VictoriaLogs, VictoriaMetrics | each router: the one `-storageNode` flag gains the derived endpoints (same spelling, existing endpoints kept in order) |
+| VictoriaMetrics, `copies: 2` | vminsert also gains `-replicationFactor=2`; vmselect gains `-dedup.minScrapeInterval=1ms` (VictoriaMetrics v1.156.0 docs: required on vmselect when replication is enabled); every listed existing vmstorage gains `-dedup.minScrapeInterval=1ms` at the front of its args (concept 10.5) |
+
+Role labels change only on pods a workload's controller owns by uid (StatefulSet pods, or
+Deployment pods whose ReplicaSet the Deployment owns), one JSON patch per pod by name with `test`
+operations of its uid, owner references and old labels; a pod that merely matches the selector is
+refused, never relabelled, and only workloads obs created receive roles (make before break: new
+pods and templates get their roles and are Ready before the single's pods lose theirs). Alloy is rolled with
+`kubectl rollout restart`. Nothing else is changed: no app, Alloy config or stable Service.
+
+### One check up front, then resume
+
+Before step 1 obs checks everything, static and live: the manifest allow-list, every object, claim
+and pod above, the stable Services (`tempo-distributor`/`tempo-query`,
+`pyroscope-write`/`pyroscope-query` must each select exactly one role label `true`, and every
+other selector term must be on the single's pod template and on the pod template of every scaled
+workload that receives that role, so the Service routes to the scaled pods after the flip; obs
+never changes these Services and re-reads them at the role step and right before the single
+stops), Alloy (at least
+two replicas, or a DaemonSet on at least two nodes), and that every change obs will make to an
+existing object can be built from its live state now (so a Pyroscope single without exactly one
+`-target=all`, a single whose template lacks its roles, a live `persistentVolumeClaimRetentionPolicy`
+of `Delete`, a single with more than one replica, or a malformed `-storageNode` fails before anything
+changes). The same check reads
+which step the live state shows and starts there (printed as `already live; resuming`): created but
+not routed restarts at step 1 (creating only absent objects, then waiting), routed restarts at the
+Alloy roll, a stopped/converted single goes to verification. It never redoes a finished step and
+never touches the roles of pods that already serve. Before the first step a resumed run executes, it
+waits again for every scaled workload or new storage node (and the routers and storage workloads)
+to be Ready, because the skipped steps' readiness may no longer hold. A state the move cannot produce (for example
+the single's pods without roles while no scaled workload has them) is refused.
+
+### Tempo and Pyroscope
+
+```yaml
+context: fixture-only
+namespace: observability-fixture
+scaled_manifest: scaled.yaml
+scaled:
+  - deployment/tempo-distributor
+  - deployment/tempo-query
+  - statefulset/tempo-live-store
+  - statefulset/redpanda
+single: statefulset/tempo
+alloy: deployment/alloy
+role_labels: [obs.diene/tempo-write, obs.diene/tempo-read]
+role_workloads:
+  deployment/tempo-distributor: [obs.diene/tempo-write]
+  deployment/tempo-query: [obs.diene/tempo-read]
+# Provide the actual verified adapter executable and argv in the single pod.
+stop_compaction: [operator-control, stop-compaction]
+resume_compaction: [operator-control, resume-compaction]
+single_metrics_url: http://tempo-single.fixture.invalid:3200/metrics
+read_url: http://tempo-query.fixture.invalid:3200/api/metrics/query_range
+query: '{} | count_over_time()' # known immutable dataset; aggregate to one series
+```
+
+The scaled manifest holds every listed workload (StatefulSet or Deployment, positive explicit
+replicas, a `matchLabels` selector without role labels and disjoint from the single's and from each
+other's) and nothing that routes yet (no role label `true`). Supporting objects must carry a scaled
+workload's or the single's name, alone or followed by `-` (`tempo-live-store-headless`):
+headless Services (`clusterIP: None`; Tempo also `publishNotReadyAddresses: true`; no external IPs,
+load balancer or node ports), ConfigMaps and, for Pyroscope's `kubernetes:///` metastore discovery
+only, a ServiceAccount, a Role limited to get/list/watch on pods, endpoints and endpointslices, and a
+RoleBinding of that Role to that ServiceAccount. Refused: other kinds (Secret, PVC, Endpoints,
+DaemonSet, ClusterRole, ...), the eight stable Services, Alloy ConfigMaps (also custom names in
+`alloy_config_objects`), the single/Alloy/compactor/routers themselves, `persistentVolumeClaim` or
+`hostPath` volumes, `hostNetwork`/`hostPID`/`hostIPC`, a `serviceAccountName` the manifest does not
+create, the owner/digest/inverse annotations written by hand, Kind aliases or another apiVersion
+(`sts`, a CRD reusing a Kind), `items` on any kind but `List`, typed lists, another namespace,
+`generateName`, the same object twice. Each assigned role goes only to its workload (Kafka is never
+labelled). Suspend external GitOps reconciliation of these workloads while moving.
+
+Tempo requires a verified compaction-control adapter (`kubectl exec` with argv, no local shell),
+or a **separate** `compactor: deployment/backend-worker` (not the single, Alloy or a new workload);
+obs stores its replica count in the inverse. The drain waits for
+`tempo_live_store_blocks_completed_total` and `tempo_live_store_local_blocks_flushed_total` to rise
+and for flushed blocks to catch up with completed blocks before the stop patch. No `/flush` endpoint
+is assumed. Source: Tempo 3.1.1 `modules/livestore/complete_block_lifecycle.go:18–22`; its
+downscale routes in `cmd/tempo/app/modules.go:725–730` only change ring/shutdown state
+(`modules/livestore/downscale.go:130–234`), so they do not replace this durability check. An idle
+store that produces no new completed block times out safely; feed a known dataset before moving.
+
+For Pyroscope use `obs.diene/pyroscope-write` and `obs.diene/pyroscope-query`, set `profile_type`
+(for example `process_cpu:cpu:nanoseconds:cpu:nanoseconds`) and a label selector in `query`;
+`read_url` ends in `/querier.v1.QuerierService/SelectSeries`. The single must be a StatefulSet: it
+becomes the v2 metastore in place (same PVC, same raft id) and keeps running.
+
+Rollback reads the live single first. A single obs stopped or converted comes back through its
+verified inverse: replicas and template roles (and Pyroscope's `-target=all`) in one patch, so the
+first Ready pod already serves; Tempo's compaction then resumes. A single that is still running (the
+move stopped before the drain) is never scaled down: only its pods get their roles back. A single at
+0 replicas without obs's inverse is refused. Then the scaled pods and templates lose their roles,
+Alloy is rolled, and every scaled receive counter (`scaled_metrics_urls`, or `metrics_url` for the
+whole tier) must stay flat. Scaled pods, data and PVCs remain. Rolling back when nothing was moved
+is refused.
+
+### VictoriaLogs and VictoriaMetrics
+
+```yaml
+context: fixture-only
+namespace: observability-fixture
+scaled_manifest: vm-scaled.yaml   # new vmstorage StatefulSet + its headless Service
+scaled: [statefulset/vmstorage-b]
+routers:
+  - {workload: deployment/vminsert, role: insert, port: 8400}
+  - {workload: deployment/vmselect, role: select, port: 8401}
+# copies: 2                       # VictoriaMetrics two copies (concept 10.5)
+# storage_workloads: [statefulset/vmstorage]   # with copies 2: existing vmstorage gains dedup
+metrics_url: http://vminsert.fixture.invalid:8480/metrics
+read_url: http://vm-select.fixture.invalid:8481/select/0/prometheus/api/v1/query_range
+query: 'sum(count_over_time(fixture_known_total[1m]))'
+```
+
+New storage nodes are new StatefulSets. Their endpoints are derived, never typed:
+`<statefulset>-<i>.<serviceName>.<namespace>.svc.<cluster_domain>:<router port>` for every pod
+ordinal `i` from `spec.ordinals.start` (default 0) on (`cluster_domain` defaults to
+`cluster.local`). `serviceName` must name a headless Service of the
+same manifest that selects the pods, and every router port must be a `containerPort` of the pods.
+VictoriaLogs routers dial 9491. With `copies: 2` every new vmstorage container must carry exactly
+`-dedup.minScrapeInterval=1ms`; a live router with another `-replicationFactor`, a live vmselect or
+vmstorage with another dedup value is refused, one that already has exactly the value is left alone (and the
+rollback keeps it). obs extends only one well-formed `-storageNode` per router, read with Go flag
+syntax as the stores read it (`lib/envflag`): one or two leading dashes, `=` or the next argument as
+value, nothing read after `--` or a positional argument; a value after another flag without `=` is
+that flag's value (the router is running, so its arguments already parse). Positional
+`storageNode=…`, `---storageNode=…`, a missing value, an empty or `%{ENV}` endpoint, two
+`-storageNode` flags, or a derived endpoint already listed without obs's inverse are refused. obs
+inserts dedup only into the front of an existing, nonempty args list of a single-container
+vmstorage. Steps: create and wait Ready; patch storage side (two copies) then routers, wait for the
+rollouts; VL checks the OTLP received counter rising and remote send errors flat, VM checks inserted
+rows rising; verify. There is no drain, rebalance, PVC deletion or Alloy restart. Rollback applies
+the verified inverses (routers, then vmstorage) and **retains the new pods and PVCs**; data written
+there is unreadable until the endpoints are added back.
+
+### Verification and limits
+
+Verification takes one fixed, closed 60-minute window before the move and queries the same
+window through the read Service afterward. Missing minutes, empty/all-zero baselines, errors,
+and unequal counts fail. `tenant` optionally sets `X-Scope-OrgID` on range queries. Query
+responses use each store's real format: Tempo `series[].samples[].timestampMs/value`,
+Pyroscope `series[].points[]`, and Victoria stores' Prometheus matrices.
+Counter endpoints must expose only the intended old single or insert tier; absent/reset counters fail.
+`--interval` defaults to 15s and `--timeout` to 15m. Unit tests drive the real implementation
+against a stateful fake kubectl (objects, pods, `create` refusing existing objects, JSON patches with
+`test` semantics) and fake HTTP; they never contact a real cluster. **NOT TESTED:** real cluster
+moves/rollback (API-server patch and admission behaviour), chart compaction adapters,
+Tempo/Pyroscope drain durability, live store HTTP endpoints, ReplicaSet/ControllerRevision
+adoption by new workloads (only pods are checked), and claims of replicas added after the move.
+
+## obs symbols
+
+```text
+obs symbols put --store .obs/symbols --kind native --build-id <gnu-id> --app service --file service.dbg
+obs symbols put --store .obs/symbols --kind jit --build-id <module-MVID> --app service --file service.pdb
+obs symbols put --store .obs/symbols --kind dart --build-id <id> --file app.symbols --obfuscation-map map.json
+obs symbols decode --store .obs/symbols --file stack.txt
+```
+
+Native keys are `<gnu-build-id>/<app>.dbg`, JIT keys `<module-MVID>/<app>.pdb`, and Dart keys
+`<build_id>.symbols` with `<build_id>.obfuscation-map.json`. IDs are normalized to lowercase.
+Keys are immutable: uploading identical bytes is idempotent; different bytes under an existing
+key fail. Native/Dart uploads must be ELF files whose `.note.gnu.build-id` equals `--build-id`;
+mismatched identities and non-ELF files are refused. **NOT CHECKED:** a Portable PDB does not
+carry the assembly's module MVID, so its MVID key is supplied by the uploader; obfuscation-map
+provenance likewise comes from the build. Keep this private directory and symbols for as long as
+that release can send data. An exported `Backend` interface supports object-store adapters;
+no object-store implementation or remote bucket is claimed as tested.
+
+The native decoder recognizes `at <module>+0x<offset>` frames with a `build-id: <id>` footer.
+Dart/Flutter uses `build_id: '<hex>'` and frames such as
+`#00 abs 00007f1234567890 virt 0000000000123456 _kDartIsolateSnapshotInstructions+0x22`;
+the decoder resolves the **virt** address, not the symbol-relative `+0x22`.
+then runs stock `llvm-symbolizer` found on PATH (`--symbolizer` or `OBS_SYMBOLIZER` can override it).
+LLVM is a test-only dependency, not part of the obs runtime closure. If it is unavailable, decoding
+prints one note to stderr, preserves native/Dart frames and keeps exit status zero; JIT decoding still works.
+The development shell includes LLVM. A manual Go test skips the ELF proof clearly if LLVM is
+missing; Nix checks set `OBS_REQUIRE_LLVM=1`, making absence a failure rather than a skipped proof.
+Unknown identities and unresolved addresses are preserved. Decode cause stacks with different
+build identities separately; ambiguous conflicting footers are refused. Split-debug ELF files
+retain real Dart names; the obfuscation map is stored for other consumers, not applied as a text
+substitution over stack traces.
+
+JIT frames use `at <module>!0x06000001+0x<IL-offset> mvid:<module-MVID>`. The decoder reads
+Portable PDB Document and MethodDebugInformation sequence points directly and appends `file:line`.
+The exporter must supply an IL offset, never a raw JIT native PC. Unknown MVIDs pass through;
+Windows/MSF PDBs are explicitly refused. **MEASURED:** a Go-built ELF resolves to function plus
+source line using LLVM; a small Portable PDB fixture resolves IL offsets and rejects corruption.
+**NOT TESTED:** actual NativeAOT/Flutter release artifacts or a compiler-produced .NET PDB.
+
+## obs size
+
+`obs size --req-per-second 1000 --services 30 --pods 90 --profiled-pods 30` prints deterministic
+JSON: incremental traffic cores/GiB, pod-index MiB, typical stored series, metrics ingest memory
+and disk GB/day, bucket GB/day and Class A/B requests/day. For that input: 0.27 traffic cores,
+0.3 GiB, 81,000 series, 8.7 GB/day to the bucket and 8.3 GB/day of VictoriaLogs disk.
+Idle base memory, query peaks, applications
+and the control plane are excluded; these components are deliberately reported separately.
+
+Traffic CPU/RAM and Class A/B retain the concept §10.7 **Loki-era reference costs**.
+Current bucket storage includes only traces (4 GB/day per 1,000 req/s) and profiles
+(4.7 GB/day per 30 profiled pods). `loki_logs_reference_gb_per_day` reports the historical
+16.6 GB/day log figure separately; it is excluded from the bucket total. VictoriaLogs disk uses
+8.3 GB/day per 1,000 req/s (concept §10.4, line 1440 in the 17 Nov corpus; spike 6, 28 B/line).
+Class A/B are 17k/28k per 1,000 req/s as a historical write-path reference, not a measurement of
+the current VictoriaLogs setup. Series use §3.2 (2,520/service + 60/pod), and metrics RAM/disk use §10.4
+(0.6–1.1 KB/series; 5.3 GB/day/M series at 30s). Profile operations and interactive object reads
+have no measured unit cost. Three checked-in golden cases cover idle, typical and busy shapes;
+invalid, non-finite and negative inputs fail.
+
 ## obs links
 
 `obs query --static` and `--live` also check Tempo dashboard targets (`query`, `expr`

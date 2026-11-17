@@ -1,0 +1,14 @@
+context: fixture-only
+namespace: observability-fixture
+scaled_manifest: scaled.yaml
+scaled: [statefulset/tempo-live-store]
+single: statefulset/tempo
+alloy: deployment/alloy
+role_labels: [obs.diene/tempo-read]
+single_metrics_url: http://single.fixture.invalid/metrics
+read_url: http://tempo-query.fixture.invalid:3200/api/metrics/query_range
+query: '{} | count_over_time()'
+# Planted omission: stop_compaction and resume_compaction.
+
+role_workloads:
+  statefulset/tempo-live-store: [obs.diene/tempo-read]

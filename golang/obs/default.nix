@@ -16,6 +16,8 @@ let
     src = ./src;
     vendorHash = "sha256-cLU+c85kO/LPTBEtDGLbFfKg0EJx0KpeqEGvNfHKjvY=";
     env.CGO_ENABLED = "0";
+    env.OBS_REQUIRE_LLVM = "1";
+    nativeCheckInputs = [ nixpkgs.llvmPackages.llvm ];
     ldflags = [ "-w" "-s" "-X main.version=${version}" ];
     # third_party/VictoriaLogs is its own Go module (wired by a go.mod replace), not part of this one.
     excludedPackages = [ "third_party" ];
@@ -41,9 +43,9 @@ let
   # End-to-end run of the built binary in the sandbox (no network): the good fixtures run green,
   # every planted failure runs red naming file + rule + token, the vendored tree equals its tag.
   tests = nixpkgs.runCommand "obs-tests"
-    { nativeBuildInputs = [ obs nixpkgs.bash nixpkgs.gnugrep nixpkgs.gnused nixpkgs.coreutils nixpkgs.findutils nixpkgs.diffutils ]; }
+    { nativeBuildInputs = [ obs nixpkgs.bash nixpkgs.gnugrep nixpkgs.gnused nixpkgs.coreutils nixpkgs.findutils nixpkgs.diffutils nixpkgs.llvmPackages.llvm ]; }
     ''
-      bash ${./tests}/run.sh --obs ${obs}/bin/obs --src ${./src} --out ${obs}
+      OBS_REQUIRE_LLVM=1 bash ${./tests}/run.sh --obs ${obs}/bin/obs --src ${./src} --out ${obs}
       mkdir -p "$out"
     '';
 
