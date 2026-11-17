@@ -208,6 +208,91 @@ The engines run in-process; obs marks the global flag set parsed before the firs
 (VictoriaMetrics' `lib/memory` panics otherwise) and caps VictoriaMetrics' cache at 512 MiB
 (it takes 60 % of host memory by default).
 
+## `obs profile summarize|baseline|compare`
+
+Step 7 of the workflow (concept §11.6). An e2e run sends a fixed number of requests, takes a CPU
+profile of the load window and compares each function's and each span's **share** of CPU with a
+stored baseline. Files only: no network.
+
+```text
+obs profile summarize --format pprof|cpuprofile|speedscope [--own REGEX]... [--run run.json] [--top N] [--json] FILE
+obs profile baseline  --format F --service S --scenario N [--profiler P] [--own REGEX]... [--dir e2e/profile-baseline] [--update] RUN1 RUN2 RUN3
+obs profile compare   --format F (--baseline FILE | --service S --scenario N [--dir DIR]) [--limits e2e/profile-limits.yaml] [--run run.json] FILE
+```
+
+Exit 0 when no row is slower than its limit, 1 when one is, 2 on a usage or input error.
+
+**Formats.** `pprof` (Go, gzip or raw; value types `samples` for the count and `cpu` for the weight),
+Chrome `.cpuprofile` (Bun, Flutter web; `samples[]` or `hitCount`; `(idle)` is not CPU) and `speedscope`
+(`sampled` profiles; `evented` is refused with a pointer to speedscope's importer).
+
+**Spans.** A sample is in a span when it has the pprof label `span_name` (Go, `otel-profiling-go`), or
+when its stack holds a frame `span__<name>` (Bun) or `UserTag:<name>` (Dart). Spans count
+children (a sample in two nested spans is in both). A span with no sample has no row (concept §8.2:
+short spans are often empty). _FROM SOURCE: the Dart `UserTag:` spelling is the name the profile
+converter must give the frame; it is not yet checked against real `getCpuSamples` output (NOT TESTED)._
+
+**OS CPU per request.** The profile cannot know it, so the load run writes `<profile>.run.json` next to
+it (or pass `--run`): `{"requests": 600, "os_cpu_ns": 6e8, "wall_ns": 20e9, "cores": 2, "steal_ns": 1e6,
+"throttled_ns": 0}`. `os_cpu_ns` is the process's user + system CPU over the load window (cgroup `cpu.stat`
+`usage_usec` delta × 1000, or `/proc/<pid>/stat` utime + stime); `steal_ns` is the `steal` column of
+`/proc/stat` over the window, summed over the pinned cores; `throttled_ns` is the cgroup `cpu.stat`
+`throttled_usec` delta × 1000. Unknown fields are refused.
+
+**Function rows.** `summarize` prints, per function, `self`, `inclusive` and `own`. `own` is the CPU
+attributed to the function: its own samples plus the samples of callees that are not the service's own
+code (a library or runtime frame called from it). Each sample goes to the nearest frame, going from the
+leaf, that is own code, not a closure and not a span frame; so a closure's time belongs to the function that
+contains it, and the `own` shares add up to at most 100 %. **Own code** is what `--own` says (a regular
+expression matched against the function name and file; repeatable; default: every frame is own code).
+`baseline` stores the patterns and `compare` uses the baseline's. **Closures** (never rows): Go `.funcN`,
+`.gowrap`, `-fm`; JS `(anonymous)` and empty names; Dart `<anonymous closure>`; .NET `<>c__`, `>b__`,
+`lambda_method`.
+
+**Baseline** = median of exactly 3 runs → `e2e/profile-baseline/<service>.<scenario>.json` (about 1 KB;
+no times, sorted rows, shares rounded to 6 places, so two runs give byte-identical files). Rows:
+functions whose median own share is ≥ 3 %, every span with samples in at least 2 of the 3 runs, the median
+samples and the median OS CPU per request. An existing baseline is replaced only with `--update`
+(baselines change only through a PR). `--profiler dotnet-trace` is stored and gives every row 30 %.
+
+**Compare** prints `what / baseline / now / change (limit)` for every baseline row and exits 1 when a row is
+slower than its limit. For a function or span row the change is `now share / baseline share − 1`.
+
+- **limit = max(tolerance, 3 × noise)**, noise = sqrt(1/n_base + 1/n_now). _FROM SOURCE: the concept does not say
+  what n counts; obs uses the **row's own** sample count (own samples of the function, samples inside
+  the span) in the baseline (median) and in this run, so small rows get wider limits. For the total-CPU row
+  n is the total sample count of each run._
+- **Tolerances:** 5 % for a function and a span, 15 % for total OS CPU per request, 30 % for every row of
+  a baseline made with `--profiler dotnet-trace`.
+- **Total CPU per request fails only on a quiet runner.** Quiet = during the load window the pinned cores
+  lost at most 1 % of their time: `(steal_ns + throttled_ns) / (wall_ns × cores) ≤ 1 %`. A noisy runner, or
+  a run meta without those four fields, still prints the row (`slower`, with the reason) but does not fail it.
+  A run with no `os_cpu_ns` and `requests` has no total row; a note says so.
+- **Overrides only in config**, `e2e/profile-limits.yaml` (`--limits`; none when the file is absent); each one
+  needs a `why`, otherwise obs exits 2 naming the file:
+
+  ```yaml
+  overrides:
+    - service: checkout # required
+      scenario: browse # optional: every scenario when absent
+      kind: function # optional: function | span | total
+      name: svc/render.Page # optional: one row
+      limit: 0.10 # a fraction: 0.10 = 10 %
+      why: the page template is being rewritten # required
+  ```
+
+  The most specific matching override wins. A failure names the source of the limit.
+
+- **Faster is reported, never failed.** A row with no samples now is shown as faster. A function that is
+  ≥ 3 % of this run, own code, and has no baseline row is printed as a note.
+
+**What a share can and cannot see.** Rows are shares of one run's CPU, so a large win in one function raises
+every sibling's share (a function at 40 % that halves lifts the others by about 25 %, which is over a 5 %
+tolerance). Update the baseline in the same PR as such a change. The total-CPU row is the one that sees a
+whole-service slowdown that leaves the shares alone.
+
+A flag on a re-run is still a flag; raw profiles of every CI run are kept as CI artefacts (CI job, not obs).
+
 ## Toolchain
 
 obs needs Go ≥ 1.27.4 (VictoriaLogs v1.54.0's `go.mod`). The registry's exported `go` is 1.26.10 and is

@@ -136,6 +136,9 @@ echo "// tamper" >>"$work/tp/lib/logstorage/parser.go"
 (cd "$work/tp" && grep -v ' lib/logstorage/obs_fieldnames.go$' "$SRC/third_party/VictoriaLogs.sha256" | sha256sum -c --quiet >/dev/null 2>&1) &&
   bad "a tampered tree passed the drift check" || ok "a tampered third_party tree fails the drift check"
 
+# ---- obs profile: summarize, baseline, compare (tests/profile.sh) --------------------------
+bash "$here/profile.sh" "$OBS" "$fx/profile" && ok "profile tests (tests/profile.sh)" || bad "profile tests (tests/profile.sh)"
+
 # ---- licences ship with the binary --------------------------------------------------
 if [ -n "${OUT:-}" ]; then
   lic="$OUT/share/licenses/obs"

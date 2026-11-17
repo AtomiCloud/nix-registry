@@ -1,0 +1,11 @@
+{
+  "nodes": [
+    {"id": 1, "callFrame": {"functionName": "(root)", "url": ""}, "children": [2, 3]},
+    {"id": 2, "callFrame": {"functionName": "(idle)", "url": ""}, "hitCount": 400},
+    {"id": 3, "callFrame": {"functionName": "handleOrders", "url": "file:///app/src/orders.ts"}, "hitCount": 3000, "children": [4, 6, 7]},
+    {"id": 4, "callFrame": {"functionName": "span__orders_list", "url": "file:///app/src/orders.ts"}, "hitCount": 0, "children": [5]},
+    {"id": 5, "callFrame": {"functionName": "dbQuery", "url": "file:///app/src/db.ts"}, "hitCount": 1500},
+    {"id": 6, "callFrame": {"functionName": "JSON.stringify", "url": ""}, "hitCount": 100},
+    {"id": 7, "callFrame": {"functionName": "", "url": "file:///app/src/orders.ts"}, "hitCount": 100}
+  ]
+}
