@@ -14,6 +14,7 @@ import (
 	"reflect"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -35,12 +36,19 @@ type parityAlertRun struct {
 
 func requireCommand(t *testing.T, command string) string {
 	t.Helper()
-	if _, err := os.Stat("../../cmd_" + command + ".go"); os.IsNotExist(err) {
-		t.Skip("obs " + command + " has not landed")
-	}
 	binary := os.Getenv("OBS_PARITY_OBS")
 	if binary == "" {
+		if _, err := os.Stat("../../cmd_" + command + ".go"); os.IsNotExist(err) {
+			t.Skip("obs " + command + " has not landed")
+		}
 		t.Fatal("OBS_PARITY_OBS must point to the freshly built obs binary")
+	}
+	help, err := exec.Command(binary, "help").CombinedOutput()
+	if err != nil {
+		t.Fatalf("obs help: %v: %s", err, help)
+	}
+	if !strings.Contains(string(help), "obs "+command+" ") {
+		t.Skip("obs " + command + " has not landed in the tested binary")
 	}
 	return binary
 }
@@ -110,8 +118,22 @@ func TestParityAlertEval(t *testing.T) {
 		{"uid": "parity-math", "title": "parity math", "condition": "C", "for": "1m", "data": instantAlertData("vector(time() % 240)", "$A > 120")},
 		{"uid": "parity-normal", "title": "parity normal", "condition": "C", "for": "0s", "data": instantAlertData("vector(1)", "$A > 2")},
 	}
+	logData := instantAlertData(`"durian.cloud/event":="parity.failed" | stats by (outcome) count() n`, "$A > 1")
+	logQuery := logData[0].(map[string]any)
+	logQuery["datasourceUid"] = "parity-logs"
+	model := logQuery["model"].(map[string]any)
+	model["datasource"] = map[string]string{"type": "victoriametrics-logs-datasource", "uid": "parity-logs"}
+	model["queryType"] = "stats"
+	delete(model, "instant")
+	delete(model, "range")
+	rules = append(rules, map[string]any{"uid": "parity-log-alert", "title": "parity log alert", "condition": "C", "for": "1m", "data": logData})
 	dir := alertProject(t, "8m", "1m", rules)
 	base := time.Now().UTC().Truncate(time.Minute).Add(-66 * time.Hour).Unix()
+	ds, err := makeData(Options{Dir: dir, Base: base})
+	if err != nil {
+		t.Fatal(err)
+	}
+	loadReal(t, os.Getenv("OBS_PARITY_VM"), os.Getenv("OBS_PARITY_VL"), ds)
 	runs := obsAlertSteps(t, binary, dir, base)
 	byUID := map[string]map[string]any{}
 	for _, rule := range rules {
@@ -141,6 +163,12 @@ func TestParityAlertEval(t *testing.T) {
 			}
 			expectedStates := map[string]string{}
 			expectedValues := map[string][]float64{}
+			source := result.Results["A"]
+			if len(source.Frames) == 0 || (len(source.Frames) == 1 && len(source.Frames[0].Schema.Fields) == 0) {
+				datasource := rule["data"].([]any)[0].(map[string]any)["datasourceUid"].(string)
+				key, _ := json.Marshal(map[string]string{"datasource_uid": datasource, "ref_id": "A"})
+				expectedStates[string(key)] = "NoData"
+			}
 			for _, frame := range condition.Frames {
 				for i, field := range frame.Schema.Fields {
 					if field.Type != "number" {

@@ -10,7 +10,8 @@ cd "$here/../src"
 # A newly available command must not silently turn a missing adapter green.
 tags=parity
 case "$test" in TestParityTraceQL | TestParityLinks) tags=parity,parity_tempo ;; esac
-"${GO:-go}" test -tags "$tags" -list "^$test\$" ./internal/check | command grep -qx "$test" || {
+listed=$("${GO:-go}" test -tags "$tags" -list "^$test\$" ./internal/check)
+command grep -qx "$test" <<<"$listed" || {
   echo "parity adapter $test is missing for an available obs command" >&2
   exit 1
 }

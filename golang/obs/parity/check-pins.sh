@@ -13,7 +13,8 @@ jq -en --slurpfile pins "$pins" --slurpfile images "$images" '
     (if $key == "VictoriaLogsDatasource" then
       $job.plugin == ("victoriametrics-logs-datasource@" + ($pin.version | ltrimstr("v")))
     else
-      ($job.image | split(":") | last) == $pin.version
+      ($job.image | split(":") | last) == $pin.version and
+      ($job.digest | test("^sha256:[a-f0-9]{64}$"))
     end))
 ' >/dev/null || {
   echo "parity images.json: engine version, commit, image tag or datasource plugin differs from obs pins.json" >&2

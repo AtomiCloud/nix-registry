@@ -266,8 +266,13 @@ plugin version. The job starts VictoriaMetrics v1.156.0, VictoriaLogs v1.54.0,
 Tempo 3.1.1, Pyroscope 2.4.3 and Grafana 13.3.0 with VictoriaLogs datasource
 v0.34.0. **Chart pins are NOT TESTED:** their location in the chart registry has
 not been specified. Recorded image digests establish which binaries ran; the
-manifest's source commit fields describe the embedded source provenance, not a
-proof that an image tag was built from that commit.
+manifest's source commit fields describe the embedded source provenance. Every
+image is pinned by tag and digest: the current tag must still resolve to that
+digest before anything starts, and the containers run by digest. Grafana's
+reported image build commit is also checked against its separate pin. The public
+v13.3.0 source commit is `752e3462`; the image build commit is
+`6f8ce3c693b493043ebcd4787566d2b6b118b0f0`. The source commit cannot be proven
+from the released image.
 
 Each comparison is a separate workflow step: fixture and panel queries, historic
 per-minute datasource values, LogsQL alert values through Grafana's `/api/ds/query`,
