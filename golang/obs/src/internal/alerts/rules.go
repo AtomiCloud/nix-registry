@@ -397,7 +397,9 @@ func (r *cRule) evalTick(t time.Time, qd map[string]qTick, loaded map[string]boo
 		} else {
 			for _, s := range q.nums {
 				n := mathexp.NewNumber(ref, s.labels)
-				n.SetValue(f64p(s.v))
+				if !s.null {
+					n.SetValue(f64p(s.v))
+				}
 				vals = append(vals, n)
 			}
 		}
@@ -468,7 +470,9 @@ func (r *cRule) evalTick(t time.Time, qd map[string]qTick, loaded map[string]boo
 		case mathexp.NoData:
 			er.state = stNoData
 		case mathexp.Series:
-			er.labels = x.GetLabels()
+			// Grafana v13.3.0 pkg/services/ngalert/eval/eval.go:
+			// evaluateExecutionResult -> NewResultFromError has nil labels.
+			// Multiple unreduced frames then dedupe to one Error {} below.
 			er.state = stError
 			er.err = "looks like time series data, only reduced data can be alerted on."
 		default:
@@ -621,6 +625,7 @@ type ruleStates struct {
 	states map[string]*instState
 }
 
+// Grafana v13.3.0 pkg/services/ngalert/state/state.go: newState starts Normal.
 func newRuleStates(r *cRule) *ruleStates { return &ruleStates{r: r, states: map[string]*instState{}} }
 
 // loaded: result fingerprints of Alerting/Pending states with no reason (hysteresis reader).
@@ -660,6 +665,9 @@ func fmtState(s int, reason string) string {
 func (rs *ruleStates) process(t time.Time, results []evalResult) []Transition {
 	r := rs.r
 	if len(r.a.Labels) > 0 {
+		// Grafana v13.3.0 pkg/services/ngalert/state/cache.go:
+		// expandAnnotationsAndLabels gives static rule labels precedence over
+		// query labels, while synthetic Error origin labels remain reserved.
 		decorated := make([]evalResult, len(results))
 		for i, res := range results {
 			res.resultFP = res.key
@@ -668,6 +676,11 @@ func (rs *ruleStates) process(t time.Time, results []evalResult) []Transition {
 				labels[k] = v
 			}
 			for k, v := range r.a.Labels {
+				if res.state == stError && r.execErr == "Error" && (k == "ref_id" || k == "datasource_uid") {
+					if _, ok := res.labels[k]; ok {
+						continue
+					}
+				}
 				labels[k] = v
 			}
 			res.labels, res.key = labels, lblKey(labels)
@@ -871,4 +884,5 @@ func resultKeepLast(s *instState, r *cRule, t time.Time) {
 type instVal struct {
 	labels data.Labels
 	v      float64
+	null   bool
 }

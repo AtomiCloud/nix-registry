@@ -175,8 +175,16 @@ func timeSensitive(a *Alert) bool {
 		metricsql.VisitAll(e, func(x metricsql.Expr) {
 			switch t := x.(type) {
 			case *metricsql.FuncExpr:
-				switch strings.ToLower(t.Name) {
-				case "time", "now", "start", "end", "hour", "minute", "month", "year", "day_of_week", "day_of_month", "day_of_year", "days_in_month":
+				name := strings.ToLower(t.Name)
+				// VictoriaMetrics v1.156.0 app/vmselect/promql/rollup.go:
+				// rollupTfirst/Tlast/Tmin/Tmax/TlastChange return absolute seconds.
+				// Include timestamp aliases and conservatively cover the t*_over_time
+				// family so new aliases cannot silently reuse a shifted condition.
+				if strings.Contains(name, "timestamp") || (strings.HasPrefix(name, "t") && strings.HasSuffix(name, "_over_time")) || strings.HasPrefix(name, "ts_of_") || strings.HasPrefix(name, "rand") {
+					found = true
+				}
+				switch name {
+				case "time", "now", "start", "end", "hour", "minute", "month", "year", "day_of_week", "day_of_month", "day_of_year", "days_in_month", "timezone_offset":
 					found = true
 				}
 			case *metricsql.RollupExpr:
@@ -190,6 +198,46 @@ func timeSensitive(a *Alert) bool {
 		}
 	}
 	return false
+}
+
+// resultCacheKey includes the base for every time-valued input, including
+// recording rules. Wall-clock/random queries cannot be restored even at a fixed
+// base. Unknown guard implementations are also uncached by Check.
+func resultCacheKey(p *Project, a *Alert, binaryID string, base time.Time) (string, bool) {
+	rules := append([]*Alert{a}, make([]*Alert, len(p.Records))...)
+	for i := range p.Records {
+		rules[i+1] = &p.Records[i]
+	}
+	sensitive := false
+	for _, rule := range rules {
+		sensitive = sensitive || timeSensitive(rule)
+		for _, q := range rule.Queries {
+			if q.Datasource != "metrics" {
+				continue
+			}
+			e, err := metricsql.Parse(q.Expr)
+			if err != nil {
+				return "", false
+			}
+			volatile := false
+			metricsql.VisitAll(e, func(x metricsql.Expr) {
+				if f, ok := x.(*metricsql.FuncExpr); ok {
+					name := strings.ToLower(f.Name)
+					if name == "now" || strings.HasPrefix(name, "rand") {
+						volatile = true
+					}
+				}
+			})
+			if volatile {
+				return "", false
+			}
+		}
+	}
+	k := ruleCacheKey(p, a, binaryID)
+	if sensitive {
+		k = fmt.Sprintf("%s-%d", k, base.UnixMilli())
+	}
+	return k, true
 }
 
 func wheresCompatible(a, b map[string]string) bool {

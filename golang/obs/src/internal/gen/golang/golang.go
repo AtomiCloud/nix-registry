@@ -152,6 +152,9 @@ func durianSignalRange(name string, n, lo, hi int) error {
 var _ = time.Time{}
 `)
 	w.decl("DurianSignalNoLabels", "base type")
+	for _, id := range []string{"DurianSignalEvent", "DurianSignalCounter", "DurianSignalHistogram", "DurianSignalGauge", "DurianSignalSpan", "DurianSignalMetricInfo", "DurianSignalSpanInfo", "MetricTable", "SpanTable", "Events"} {
+		w.decl(id, "generated name")
+	}
 
 	// ---- label value types
 	w.f("\n// ---- label value types ----\n")
@@ -220,6 +223,7 @@ func (w *writer) typeDecl(n string, t contract.Type) {
 		w.f("\n// %s is the enum %s. The field is unexported: only this package can make a value.\n", id, n)
 		w.f("type %s struct{ v string }\n\n", id)
 		w.f("// String is the wire value.\nfunc (e %s) String() string { return e.v }\n\n", id)
+		w.f("// Valid is false for the zero value %s{}: a value only this package can make is set.\nfunc (e %s) Valid() bool { return e.v != \"\" }\n\n", id, id)
 		w.f("var (\n")
 		for _, v := range t.Values {
 			vid := id + gen.Pascal(v)
@@ -229,27 +233,36 @@ func (w *writer) typeDecl(n string, t contract.Type) {
 		w.f(")\n")
 	case contract.KindInt:
 		w.f("\n// %s is the bounded number %s, %d..%d. New%s refuses a value outside the range.\n", id, n, *t.Min, *t.Max, id)
-		w.f("type %s struct{ v int }\n\n", id)
+		w.decl("New"+id, "constructor of type "+n)
+		w.decl(id+"Min", "bound of type "+n)
+		w.decl(id+"Max", "bound of type "+n)
+		w.f("type %s struct {\n\tv  int\n\tok bool // set by the constructor: a valid 0 is not the zero value\n}\n\n", id)
 		w.f("const (\n\t%sMin = %d\n\t%sMax = %d\n)\n\n", id, *t.Min, id, *t.Max)
 		w.f("// New%s makes a value, or returns an error when n is out of range.\n", id)
-		w.f("func New%s(n int) (%s, error) {\n\tif n < %sMin || n > %sMax {\n\t\treturn %s{}, durianSignalRange(%q, n, %sMin, %sMax)\n\t}\n\treturn %s{n}, nil\n}\n\n", id, id, id, id, id, n, id, id, id)
-		w.f("// Int is the number.\nfunc (b %s) Int() int { return b.v }\n", id)
+		w.f("func New%s(n int) (%s, error) {\n\tif n < %sMin || n > %sMax {\n\t\treturn %s{}, durianSignalRange(%q, n, %sMin, %sMax)\n\t}\n\treturn %s{n, true}, nil\n}\n\n", id, id, id, id, id, n, id, id, id)
+		w.f("// Int is the number.\nfunc (b %s) Int() int { return b.v }\n\n", id)
+		w.f("// Valid is false for the zero value %s{}: only New%s makes a set value, so 0 is not unset.\nfunc (b %s) Valid() bool { return b.ok }\n", id, id, id)
 	case contract.KindTime:
 		lo, hi, from := 0, 23, "t.Hour()"
 		if t.Unit == contract.UnitWeekday {
 			hi, from = 6, "int(t.Weekday())"
 		}
 		w.f("\n// %s is the time bucket %s (%s, %d..%d); it rolls over by itself, so the series count stays flat.\n", id, n, t.Unit, lo, hi)
-		w.f("type %s struct{ v int }\n\n", id)
+		w.decl("New"+id, "constructor of type "+n)
+		w.decl(id+"At", "constructor of type "+n)
+		w.f("type %s struct {\n\tv  int\n\tok bool // set by the constructors: a valid 0 is not the zero value\n}\n\n", id)
 		w.f("// New%s makes a value, or returns an error when n is out of range.\n", id)
-		w.f("func New%s(n int) (%s, error) {\n\tif n < %d || n > %d {\n\t\treturn %s{}, durianSignalRange(%q, n, %d, %d)\n\t}\n\treturn %s{n}, nil\n}\n\n", id, id, lo, hi, id, n, lo, hi, id)
-		w.f("// %sAt is the bucket of a time (always in range).\nfunc %sAt(t time.Time) %s { return %s{%s} }\n\n", id, id, id, id, from)
-		w.f("// Int is the number.\nfunc (b %s) Int() int { return b.v }\n", id)
+		w.f("func New%s(n int) (%s, error) {\n\tif n < %d || n > %d {\n\t\treturn %s{}, durianSignalRange(%q, n, %d, %d)\n\t}\n\treturn %s{n, true}, nil\n}\n\n", id, id, lo, hi, id, n, lo, hi, id)
+		w.f("// %sAt is the bucket of a time (always in range).\nfunc %sAt(t time.Time) %s { return %s{%s, true} }\n\n", id, id, id, id, from)
+		w.f("// Int is the number.\nfunc (b %s) Int() int { return b.v }\n\n", id)
+		w.f("// Valid is false for the zero value %s{}: only New%s and %sAt make a set value, so 0 is not unset.\nfunc (b %s) Valid() bool { return b.ok }\n", id, id, id, id)
 	case contract.KindDate:
 		w.f("\n// %s is the calendar date %s: a metric label with %d values live at once (window_days).\n", id, n, t.WindowDays)
+		w.decl("New"+id, "constructor of type "+n)
 		w.f("type %s struct{ v string }\n\n", id)
 		w.f("// New%s makes a value from a time (its UTC calendar date, YYYY-MM-DD).\nfunc New%s(t time.Time) %s { return %s{t.UTC().Format(\"2006-01-02\")} }\n\n", id, id, id, id)
-		w.f("// String is the wire value.\nfunc (d %s) String() string { return d.v }\n", id)
+		w.f("// String is the wire value.\nfunc (d %s) String() string { return d.v }\n\n", id)
+		w.f("// Valid is false for the zero value %s{}.\nfunc (d %s) Valid() bool { return d.v != \"\" }\n", id, id)
 	case contract.KindFree:
 		// free is a plain string at use sites; no type is generated
 		delete(w.declared, id)

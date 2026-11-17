@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/AtomiCloud/obs/internal/contract"
+	"github.com/AtomiCloud/obs/internal/gen"
 	"github.com/AtomiCloud/obs/internal/gen/gentest"
 )
 
@@ -82,5 +83,36 @@ func TestSpanAndMetricAreTypeAliases(t *testing.T) {
 	s, _ := Render(load(t))
 	if strings.Contains(s, "export interface ") {
 		t.Fatal("generated code must not use interface")
+	}
+}
+
+// Review of PR 111, finding 9: every symbol the file emits is in the collision registry.
+func TestFixedNamesAreReserved(t *testing.T) {
+	for _, id := range []string{"metric_labels", "span_attrs"} {
+		c, err := contract.Parse("c.yaml", []byte("service: s\ntypes: { "+id+": { kind: free } }\nmetrics: { m: { kind: counter } }\nspans: { a: {} }\n"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Render(c); err == nil || !strings.Contains(err.Error(), gen.Pascal(id)) {
+			t.Fatalf("type %s: want a refusal naming %s, got %v", id, gen.Pascal(id), err)
+		}
+	}
+}
+
+// Review finding 10: the concept's example (free without a declaration) generates a string.
+func TestIntrinsicFreeIsString(t *testing.T) {
+	c, err := contract.Parse("c.yaml", []byte("service: s\nspans: { checkout.charge: { attributes: { user_id: free } } }\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if is := c.Validate(); len(is) > 0 {
+		t.Fatal(is)
+	}
+	s, err := Render(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s, "export type Free = string;") || !strings.Contains(s, "user_id?: Free") {
+		t.Fatalf("free attribute not generated as a string:\n%s", s)
 	}
 }

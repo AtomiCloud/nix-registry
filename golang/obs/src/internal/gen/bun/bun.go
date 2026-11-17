@@ -196,6 +196,10 @@ func (n *names) claim(ident, what string) error {
 // Render returns the text of signals.ts for a valid contract.
 func Render(c *contract.Contract) (string, error) {
 	nm := &names{seen: map[string]string{}}
+	// Names the file declares itself: a contract name that becomes one of them is a collision.
+	for _, id := range []string{"MetricLabels", "SpanAttrs"} {
+		nm.seen[id] = "the generated " + id + " map"
+	}
 	var b strings.Builder
 	b.WriteString(gen.Header(c, "// "))
 

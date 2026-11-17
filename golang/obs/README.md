@@ -212,9 +212,11 @@ generate: # `obs gen` targets, `out` relative to the folder that holds observabi
 ```
 
 Two keys go beyond the concept's examples: `platform_metrics` (so a query on a metric the platform
-makes is not "undeclared") and `stream_labels` on a log event (the only way to declare a VictoriaLogs
-stream field, so that "free on a stream label" can be refused; the stream fields are otherwise the
-bounded where-from set). `modules` is the module count of the stream formula.
+makes is not "undeclared") and `modules` (the module count of the stream formula). `free` may be
+written without declaring it (`attributes: { user_id: free }`, as concept 3.1 does). The VictoriaLogs
+stream fields are only the bounded where-from set (concept 3.3): a log event declares none, so a
+`stream_labels` entry is refused (`stream-label-declared`; with `free-stream-label` or `date-stream-label`
+when its type is free or a date).
 
 ## `obs check`
 
@@ -228,7 +230,7 @@ log stream count (modules x `--landscapes`, times any declared stream label; log
 streams) and `events=[...]`. It fails (exit 1, `FAIL <file> <yaml path>: [rule] ...`) on:
 
 - `free-metric-label`: `free` on a metric label;
-- `free-stream-label`, `date-stream-label`: `free` or a calendar date on a stream label;
+- `stream-label-declared` (with `free-stream-label`, `date-stream-label`): a log event declares a stream field, or a free or date one;
 - `date-no-window`: a calendar date type without `window_days`;
 - `over-budget`, `budget-missing`: a metric over its budget, or with labels and no budget;
 - `gauge-pods`: a gauge with neither `across_pods` nor `per_pod` (or both);
@@ -258,7 +260,7 @@ and `contract-hash: sha256:<hash of the contract file>`.
 not (the contract changed and nobody regenerated); a missing file is `[gen-missing]`.
 Golden files: `tests/fixtures/gen/good` is a consumer repo with its generated files committed; the
 Go unit tests and `obs gen --check` compare against it (`OBS_UPDATE_GOLDEN=1 go test ./internal/gen/...`
-rewrites them). The generated code compiles: `tests/typecheck/<lang>.sh` builds a consumer against it and
+rewrites them). The tests find `tests/` in an ancestor of the package (or `OBS_TESTS_DIR`); a build from `src/` alone skips them, and the nix check copies `tests/` next to the source root. The generated code compiles: `tests/typecheck/<lang>.sh` builds a consumer against it and
 runs planted bad consumers that must not compile.
 
 ## Contract name checks in `obs query --static`
@@ -269,7 +271,9 @@ label list (concept §2): `contract-undeclared-metric` (stored name, with "did y
 `contract-bad-enum-value` (an equality or plain `a|b` value that is not an enum value or is outside a
 bounded number; a value that holds a dashboard variable is not judged),
 `contract-pod-label` (a pod key on a business metric, §4.1), `contract-undeclared-event` and
-`contract-undeclared-stream-field` (a stream tag outside the where-from set). Names compare with dots
+`contract-undeclared-stream-field` (a stream tag outside the where-from set). Regex metric names (`{__name__=~"..."}`) are matched against the known names and a regex that matches none is
+undeclared; regex label values must match an allowed value; label functions (`label_replace`, ...) must read
+labels their input has. Names compare with dots
 and underscores equal. Other log fields are free-form (§6): not judged.
 
 ## Engines and pins
@@ -376,7 +380,8 @@ minute's evaluation and state. Both exports bypass the persistent result cache.
 
 LogsQL queries use each rule's `relativeTimeRange.from/to`, parse at the resulting
 end time and add the exclusive `[start, end)` range. Final `stats by (...)` fields
-are instance labels. With a contract, `durian.cloud/event` filters are checked
+are instance labels, alongside `__name__` for each stats output column. A numeric
+null keeps that instance's labels and evaluates as NoData. With a contract, `durian.cloud/event` filters are checked
 against its event list. Other field-value filters are printed as assumptions and
 removed from the parsed AST; event filters in `_stream` or `or`, unknown events
 and stats reading field values are refused. Seed events must be declared too.
@@ -386,8 +391,10 @@ The numeric light path is checked against the vendored Grafana dataframe path
 with `OBS_VERIFY_FAST=1`; unchanged incident inputs are compared with their
 baseline reuse by `OBS_VERIFY_SKIP=1`. Any mismatch fails the command. The result
 cache includes the binary, seed, incidents, recording rules, contract and each
-alert's normalized CR definition. Time-derived queries also include the base
-timestamp and do not reuse shifted baseline results. Storage uses `OBS_TMPDIR`,
+alert's normalized CR definition. Time-derived queries (including sample
+timestamps) also include the base timestamp and do not reuse shifted baseline
+results. Wall-clock/random queries and a configured query guard bypass persistent
+caching. Storage uses `OBS_TMPDIR`,
 otherwise a writable `/dev/shm` with at least 1 GiB free (else the system temp
 directory); VictoriaMetrics caches are capped at 512 MiB.
 Unused metric series are omitted and VictoriaLogs starts only when needed.

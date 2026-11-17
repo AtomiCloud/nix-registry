@@ -114,3 +114,7 @@ for tc in "$here"/typecheck/*.sh; do
     sed 's/^/  | /' "$work/tc-$lang.txt"
   fi
 done
+
+# The concept 3.1 example verbatim: `user_id: free` on a span attribute, with no `free` type declared.
+run check --dir "$fx/gen/ok-concept-example/observability"
+[ "$rc" -eq 0 ] && ok "obs check accepts the concept 3.1 span example (free without a declaration)" || bad "concept 3.1 example: rc=$rc $(cat "$work/out.txt")"
