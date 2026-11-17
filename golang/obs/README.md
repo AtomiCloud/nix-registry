@@ -1,7 +1,7 @@
 # obs: observability checks with no running stack
 
-`obs` checks a repo's alerts and dashboards without a running Grafana, VictoriaMetrics
-or VictoriaLogs. It embeds the engines' own parsers and storage in one static Go binary:
+`obs` checks a repo's alerts and dashboards without a running Grafana, VictoriaMetrics,
+VictoriaLogs or Tempo. It embeds the engines' own parsers and storage in one static Go binary:
 no network, no containers.
 
 **Licence: AGPL-3.0-only** (`LICENSE`). Each registry release attaches the Corresponding Source
@@ -10,17 +10,18 @@ says where. Everything in the binary is AGPL-3.0, Apache-2.0, MIT, BSD or MPL-2.
 linked module ship in `share/licenses/obs`. Design: `concepts/observability.md` §11 and
 `design/registry-tools/obs.md` in the diene corpus (the concept wins where this file and it differ).
 
-## Release 0.1.0: what is in it
+## Available commands
 
-| Command              | What it does                                                                                                                                                                   |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `obs query --static` | Parses every MetricsQL and LogsQL query in the alerts and dashboards with the real parsers and applies the rules below.                                                        |
-| `obs query --live`   | Makes the seed, loads it into the embedded VictoriaMetrics and VictoriaLogs, runs every alert and dashboard query on it. Each must return rows. Also applies the static rules. |
-| `obs version`        | The obs version and every engine pin.                                                                                                                                          |
+| Command              | What it does                                                                                                                                                                          |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `obs query --static` | Parses every MetricsQL, LogsQL and TraceQL query in the alerts and dashboards with the real parsers and applies the rules below.                                                      |
+| `obs query --live`   | Makes the seed, loads it into the embedded VictoriaMetrics, VictoriaLogs and Tempo, runs every alert and dashboard query on it. Each must return rows. Also applies the static rules. |
+| `obs links`          | Checks trace → logs, metric → traces and backend span → profile labels on the seed.                                                                                                   |
+| `obs version`        | The obs version and every engine pin.                                                                                                                                                 |
 
-Not in 0.1.0 (they ship in later releases, see the corpus goal): `obs gen`, `obs check`
-(the contract), `obs alerts` (evaluating alerts over incidents), `obs links`, `obs assert`,
-`obs profile`, TraceQL (trace queries are skipped with one note), `obs engines --check-chart`,
+Follow-up commands (see the corpus goal): `obs gen`, `obs check`
+(the contract), `obs alerts` (evaluating alerts over incidents), `obs assert`,
+`obs profile`, trace alert evaluation, `obs engines --check-chart`,
 `obs sandbox`, `obs look`, `obs scrape`, `obs store move`.
 
 ```text
@@ -47,13 +48,14 @@ Not in 0.1.0 (they ship in later releases, see the corpus goal): `obs gen`, `obs
  7. e2e                   obs assert, obs profile compare
 ```
 
-This release ships step 6's `obs query --static` and `obs query --live`.
+This branch also ships step 6's `obs links`; the final release version is set when obs-full lands.
 
 ## Usage
 
 ```text
 obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
 obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names]
+obs links [--dir observability] [--seed seed.yaml] [--base unix]
 obs version
 ```
 
@@ -253,3 +255,94 @@ replaces this by hand run.
 - Seeded log rows against a real VictoriaLogs fed through Alloy (field names are FROM SOURCE).
 - LogsQL `_time:[start, end)` handling against real Grafana (the nightly parity job, a later release).
 - aarch64 and macOS builds are in CI; only x86_64 Linux was run by hand.
+
+## obs links
+
+`obs query --static` and `--live` also check Tempo dashboard targets (`query`, `expr`
+or `expression`). `queryType: traceId` targets and hex-only `traceql` targets
+(including the default query type) use a validated ID lookup; an
+unknown ID with no spans fails the live check. Legacy search models are refused
+explicitly (`nativeSearch`/`search`). Service maps, upload/clear and other
+non-query models print a note and are skipped, as are Jaeger/Zipkin datasources.
+TraceQL is parsed and validated by **Tempo 3.1.1**, commit
+`9db7df79d2af`; no regular-expression query parser is used. `--names` lists every
+non-intrinsic attribute, including those in `select` and metrics grouping. A
+`check.SpanAttributeNames` interface connects the contract's name list; a nil
+adapter leaves name enforcement off. Live checks reject missing attributes even
+in `select(...)` or `by(...)` when the query otherwise returns rows. Trace alerts
+print a note and await the alerts integration.
+
+**FROM SOURCE:** Grafana v13.3.0's
+[TraceQL editor documentation](https://github.com/grafana/grafana/blob/v13.3.0/docs/sources/shared/datasources/tempo-editor-traceql.md#query-by-traceid)
+supports entering a trace ID in the TraceQL editor. The requested
+`public/app/plugins/datasource/tempo/datasource.ts` no longer exists at that tag:
+[commit 61ec981](https://github.com/grafana/grafana/commit/61ec98144cd42d26d87a2fd477c74be122b99e20)
+removed Tempo from core. Its last core implementation at
+[datasource.ts:335](https://github.com/grafana/grafana/blob/b92bfd830f9c748ba7d1a2860b23b562fed68d28/public/app/plugins/datasource/tempo/datasource.ts#L335)
+matches trimmed hex-only text, and
+[datasource.ts:369](https://github.com/grafana/grafana/blob/b92bfd830f9c748ba7d1a2860b23b562fed68d28/public/app/plugins/datasource/tempo/datasource.ts#L369)
+routes it to `handleTraceIdQuery`. This routing is covered offline; parity with
+the separately shipped plugin remains untested.
+
+```text
+obs query --static --dir observability --names
+obs query --live --dir observability
+obs links --dir observability                  # optional --seed and --base
+```
+
+Add trace definitions to the seed. Each source event makes a server span and an
+optional client child, with real parent IDs, resource attributes, OTLP scalar
+types and matching `trace_id`/`span_id` on its log lines. The HTTP status code is
+an integer; explicit `attributes` retain YAML string/int/double/bool types.
+
+```yaml
+resource:
+  durian.cloud.service: checkout
+  k8s.pod.name: checkout-example
+traces:
+  - from: { metric: requests }
+    server: POST /charge
+    route: /charge
+    client: charge
+    error_when: { outcome: error }
+    attributes: { http.response.status_code: 200, cached: true }
+```
+
+`obs links` checks these paths offline:
+
+- **Trace → logs:** for every distinct server route and attribute set, run
+  `trace_id:="<id>" AND service.name:="<service>"` in VictoriaLogs over the span's
+  millisecond time range. Compare timestamps and bodies with that trace's seeded
+  log lines; a missing or foreign row fails. The range is at least 1 ms.
+- **Metric → traces:** for every stored series, keep all shared resource/span
+  labels except `__name__` and histogram `le`, preserving numeric/bool types.
+  Run the TraceQL search in the last active seeded minute; an unmapped label or
+  no matching trace fails. Searches are capped at 20; they prove existence.
+- **Span → profile:** check backend `service.name` and `k8s.pod.name`, mapped to
+  `service_name` and `pod`, plus the optional bounded where-from labels. This is
+  a light identity-label check; it does not read profiles or require CPU samples
+  in short spans.
+
+**FROM SOURCE:** the trace-to-logs expression follows Grafana 13.3.0's
+[`getQueryForVictoriaLogs`](https://github.com/grafana/grafana/blob/v13.3.0/public/app/features/explore/TraceView/components/logsLink.ts),
+with `filterByTraceID: true`, `filterBySpanID: false`, and explicit
+`tags: [{key: "service.name"}]`. Set this unmapped tag explicitly: Grafana's
+[`getDefaultLogsTags`](https://github.com/grafana/grafana/blob/v13.3.0/public/app/features/explore/TraceView/crossSignalConfig.ts)
+otherwise maps `service.name` to `service_name`, while VictoriaLogs retains dots.
+Span time rounding follows
+[`getTimeRangeFromTimestamps`](https://github.com/grafana/grafana/blob/v13.3.0/public/app/features/explore/TraceView/createTraceLink.ts).
+The VictoriaLogs datasource v0.34.0
+[`queryInstantURL`](https://github.com/VictoriaMetrics/victorialogs-datasource/blob/v0.34.0/pkg/plugin/query.go)
+sends the interpolated expression as `query`, and start/end as Unix nanoseconds;
+its [frontend interpolation](https://github.com/VictoriaMetrics/victorialogs-datasource/blob/v0.34.0/src/datasource.ts)
+keeps this expression. **NOT TESTED:** this exact query and time range through a
+real Grafana/VictoriaLogs UI; the parity job is the referee.
+
+The in-memory storage adapter ports the prototype's Tempo vParquet5 nested-set
+methods (AGPL-3.0) and typed-column predicates. The public engine API exposes
+`Search(query,start,end,limit)` and `MetricsRange(query,start,end,step)` for the
+future alert evaluator. **MEASURED offline:** structural operators, typed
+comparisons, metrics counts/rates/quantiles, both dashboard query modes and all
+three links. `tests/links.sh` plants syntax, attribute, log-link, trace-link and
+profile-label failures; every failure names the file, query/route/series and bad
+attribute or value. Real-store parity remains **NOT TESTED** here.
