@@ -21,11 +21,14 @@ var PlatformLabels = []string{
 // QueryLabels are labels that exist on query results rather than on stored series.
 var QueryLabels = []string{"le", "quantile", "vmrange", "__name__"}
 
-// PlatformLabelSet is Norm of PlatformLabels and QueryLabels.
+// PlatformLabelSet is Norm of PlatformLabels and QueryLabels, without the pod keys: a business
+// metric has no pod key in the store (concept 4.1), so only per_pod and platform metrics add them.
 func PlatformLabelSet() map[string]bool {
 	m := map[string]bool{}
 	for _, l := range PlatformLabels {
-		m[Norm(l)] = true
+		if !in(DefaultPodKeys, l) {
+			m[Norm(l)] = true
+		}
 	}
 	for _, l := range QueryLabels {
 		m[l] = true
@@ -60,6 +63,9 @@ func (c *Contract) Lookup(stored string) (StoredMetric, bool) {
 				ls := map[string]bool{}
 				for l := range PlatformLabelSet() {
 					ls[l] = true
+				}
+				for _, k := range c.EffectivePodKeys() {
+					ls[Norm(k)] = true // a platform metric is in no aggregation match, so it keeps its pod keys
 				}
 				for _, l := range c.Platform[k] {
 					ls[Norm(l)] = true

@@ -7,51 +7,19 @@ import (
 	"testing"
 
 	"github.com/AtomiCloud/obs/internal/contract"
-	"github.com/AtomiCloud/obs/internal/gen"
-)
-
-const (
-	fixture = "../../../../tests/fixtures/gen/good/observability/contract.yaml"
-	golden  = "../../../../tests/golden/bun/signals.ts.golden"
+	"github.com/AtomiCloud/obs/internal/gen/gentest"
 )
 
 func load(t *testing.T) *contract.Contract {
 	t.Helper()
-	c, err := contract.LoadValid(fixture)
+	c, err := contract.LoadValid(gentest.Fixture(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	return c
 }
 
-func TestGolden(t *testing.T) {
-	c := load(t)
-	fs, err := gen.Generate("bun", c, gen.Options{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(fs) != 1 || fs[0].Path != File {
-		t.Fatalf("files %v", fs)
-	}
-	if os.Getenv("OBS_UPDATE_GOLDEN") == "1" {
-		if err := os.MkdirAll(filepath.Dir(golden), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(golden, fs[0].Content, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	want, err := os.ReadFile(golden)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if string(want) != string(fs[0].Content) {
-		t.Fatalf("generated signals.ts differs from %s (OBS_UPDATE_GOLDEN=1 rewrites it):\n%s", golden, fs[0].Content)
-	}
-	if gen.HashOf(fs[0].Content) != c.Hash {
-		t.Fatalf("header hash %q != contract hash %q", gen.HashOf(fs[0].Content), c.Hash)
-	}
-}
+func TestGolden(t *testing.T) { gentest.Golden(t, "bun") }
 
 func TestDeterministic(t *testing.T) {
 	a, _ := Render(load(t))
@@ -72,7 +40,10 @@ func TestPlantedChangeIsRed(t *testing.T) {
 	if base == changed || !strings.Contains(changed, `"square"`) {
 		t.Fatal("a contract change did not change the output")
 	}
-	want, _ := os.ReadFile(golden)
+	want, err := os.ReadFile(filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(gentest.Fixture(t)))), "gen", "bun", "src", "signals", "signals.ts"))
+	if err != nil {
+		t.Skip("golden file not found")
+	}
 	if string(want) == changed {
 		t.Fatal("golden did not notice a planted enum value")
 	}

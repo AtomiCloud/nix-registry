@@ -1,0 +1,6 @@
+mode: static
+exit: 1
+contains: alerts/undeclared-metric/critical.yaml
+contains: [contract-undeclared-metric]
+contains: checkout_chargez_total
+contains: did you mean "checkout_charges_total"

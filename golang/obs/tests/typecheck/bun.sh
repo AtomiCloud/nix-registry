@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
-# Type-checks the Bun golden file (tests/golden/bun/signals.ts.golden) with tsc, strict:
-#   gen-bun.sh [--tsc <tsc binary>]      (default: tsc on PATH)
+# Type-checks the generated Bun file (tests/fixtures/gen/good/gen/bun/src/signals/signals.ts) with tsc, strict:
+#   bun.sh [--tsc <tsc binary>]      (default: tsc on PATH)
 # good.ts (a consumer sketch incl. the trace-port constraint) must compile; every bad-*.ts must fail
-# and the compiler output must name the bad token listed in typecheck/expect.
+# and the compiler output must name the bad token listed in tests/typecheck/bun/expect.
 # Not part of the nix sandbox check: typescript is not in the obs test inputs (CI runs it with
-# `nix shell nixpkgs#typescript -c tests/gen-bun.sh`).
+# `nix shell nixpkgs#typescript -c tests/typecheck/bun.sh`).
 set -euo pipefail
 TSC=tsc
 [ "${1:-}" = "--tsc" ] && TSC="$2"
-here="$(cd "$(dirname "$0")" && pwd)"
-g="$here/golden/bun"
+here="$(cd "$(dirname "$0")/.." && pwd)"
+g="$here/typecheck/bun"
+fx="$here/fixtures/gen/good/gen/bun/src/signals"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
-cp "$g/signals.ts.golden" "$work/signals.ts"
-cp "$g"/typecheck/*.ts "$work/"
+cp "$fx/signals.ts" "$work/signals.ts"
+cp "$g"/*.ts "$work/"
 cd "$work"
 flags=(--noEmit --strict --noUncheckedIndexedAccess --exactOptionalPropertyTypes --target es2022 --module esnext --moduleResolution bundler --skipLibCheck)
 fail=0
@@ -33,5 +34,5 @@ while read -r f token; do
     cat out.txt
     fail=1
   fi
-done <"$g/typecheck/expect"
+done <"$g/expect"
 exit $fail
