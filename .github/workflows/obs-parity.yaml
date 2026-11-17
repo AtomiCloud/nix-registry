@@ -28,10 +28,11 @@ jobs:
     env:
       OBS_PARITY_STATE: /tmp/obs-parity-${{ github.run_id }}-${{ github.run_attempt }}
       GOMAXPROCS: '2'
+      CGO_ENABLED: '0'
     steps:
       - uses: actions/checkout@v4
       - name: Refuse drift before starting stores
-        run: bash golang/obs/parity/check-pins.sh
+        run: bash golang/obs/parity/test-pins.sh
       - uses: actions/setup-go@v6
         with:
           go-version: '1.27.4'
