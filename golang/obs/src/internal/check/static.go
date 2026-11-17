@@ -25,11 +25,13 @@ func Static(set *files.Set, o Options) *Report {
 		r.add(Fail, o.Dir, "", "empty", "no alerts/**/*.yaml and no dashboards/**/*.json found")
 	}
 	c, problems := loadContract(&o)
+	if o.SpanAttributes == nil && c != nil {
+		o.SpanAttributes = c
+	}
 	for _, p := range problems {
 		r.add(Fail, o.contractPath(), "", "contract", "%s", p)
 	}
 	eventOn := o.eventRuleOn()
-	skippedTraces := 0
 	for i := range set.Queries {
 		q := &set.Queries[i]
 		if q.Problem != "" {
@@ -43,7 +45,8 @@ func Static(set *files.Set, o Options) *Report {
 				"datasource %q (type %q) is a Loki-type datasource: logs are LogsQL on VictoriaLogs, so a dashboard or alert query on Loki is refused",
 				firstNonEmpty(q.DSUID, q.DSType), q.DSType)
 		case files.Traces:
-			skippedTraces++
+			r.Counts["traces"]++
+			staticTraces(r, q, o)
 		case files.Metrics:
 			r.Counts["metrics"]++
 			staticMetrics(r, q, o, c)
@@ -51,9 +54,6 @@ func Static(set *files.Set, o Options) *Report {
 			r.Counts["logs"]++
 			staticLogs(r, q, o, eventOn, c)
 		}
-	}
-	if skippedTraces > 0 {
-		r.add(Note, o.Dir, "", "traces", "%d trace queries not checked: TraceQL is checked from a later obs release", skippedTraces)
 	}
 	return r
 }

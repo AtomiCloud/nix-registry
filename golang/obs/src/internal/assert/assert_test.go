@@ -238,6 +238,18 @@ func TestUnderfilledExportsStillCheckLabels(t *testing.T) {
 	}
 }
 
+func TestPlatformLabelsCheckedWithoutCardinalityLimit(t *testing.T) {
+	c := loadC(t)
+	green := sr("http_server_request_duration_seconds_count", "http_route", "/a", "k8s_pod_name", "pod-a")
+	if r := Check(c, []Series{green}, Options{}); r.Failures() != 0 {
+		t.Fatalf("platform metrics retain pod keys: %+v", r.Findings)
+	}
+	red := sr("http_server_request_duration_seconds_count", "http_route", "/a", "user_id", "review-user")
+	if r := Check(c, []Series{red}, Options{}); find(r, "label-not-in-contract") == nil {
+		t.Fatalf("platform declared labels must be enforced: %+v", r.Findings)
+	}
+}
+
 func TestReadSeriesBothForms(t *testing.T) {
 	dir := t.TempDir()
 	w := func(n, body string) string {

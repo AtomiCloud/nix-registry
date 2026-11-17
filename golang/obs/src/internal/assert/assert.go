@@ -126,8 +126,8 @@ func Check(c *contract.Contract, series []Series, o Options) *Result {
 			if int64(cnt.Series) > w {
 				res.Findings = append(res.Findings, overFinding(c, g, cnt, o.Pods))
 			}
-			res.Findings = append(res.Findings, holes(c, g)...)
 		}
+		res.Findings = append(res.Findings, holes(c, g)...)
 		res.Counts = append(res.Counts, cnt)
 	}
 	names := make([]string, 0, len(unknown))
@@ -175,7 +175,7 @@ func overFinding(c *contract.Contract, g *group, cnt Count, pods int) Finding {
 			cnt.Series, where, strings.Join(cnt.Stored, ", "), cnt.Worst, mult, budget)}
 }
 
-// holes checks every business series, regardless of count: undeclared labels, pod labels on a
+// holes checks every known series, regardless of count: undeclared labels, pod labels on a
 // metric without per_pod, and label values outside the type.
 func holes(c *contract.Contract, g *group) []Finding {
 	var out []Finding
@@ -201,7 +201,7 @@ func holes(c *contract.Contract, g *group) []Finding {
 	for _, l := range labels {
 		vs := sortedKeys(values[l])
 		switch {
-		case podKey[l] && !g.sm.Metric.PerPod:
+		case podKey[l] && !g.sm.Platform && !g.sm.Metric.PerPod:
 			out = append(out, Finding{Level: Fail, Metric: g.metric, Rule: "pod-label-on-business-metric",
 				Msg: fmt.Sprintf("label %q (%d values) is a pod key and the metric is not per_pod: the aggregation must drop it", l, len(vs))})
 		case !allowed[l]:

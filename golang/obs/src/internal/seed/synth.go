@@ -41,6 +41,7 @@ type Dataset struct {
 	Start, End time.Time
 	Series     map[string]*Series
 	Streams    map[string]*Stream
+	Traces     []*TTrace
 }
 
 // storedName is a metric or label name as the OTLP -> VictoriaMetrics path stores it.
@@ -152,6 +153,10 @@ var streamFieldNames = map[string]bool{
 // Build makes one baseline run starting at start. The run is laid out on a time
 // line that ends in the past, because stores drop data dated in the future.
 func Build(s *Seed, start time.Time) (*Dataset, error) {
+	traceDefs, err := s.traceDefs()
+	if err != nil {
+		return nil, err
+	}
 	length := s.Duration()
 	ds := &Dataset{Start: start, End: start.Add(length), Series: map[string]*Series{}, Streams: map[string]*Stream{}}
 	reqRate, err := ParseRate(s.Traffic.Requests)
@@ -315,8 +320,29 @@ func Build(s *Seed, start time.Time) (*Dataset, error) {
 					}
 				}
 				tsNs := start.Add(at).UnixNano() + int64(frac*1e9)
+				// Separate trace randomness keeps existing metric and log seeds stable.
+				tr := newRnd(s.RandomSeed, g.k+fmt.Sprint("/trace/", e), sec)
+				hi, lo := tr.next(), tr.next()
+				var trace *TTrace
+				for _, td := range traceDefs {
+					if td.From.Metric == g.metric && matches(g.where, td.From.Where) {
+						trace = makeTrace(td, g.where, res, hi, lo, uint64(tsNs), tr)
+						ds.Traces = append(ds.Traces, trace)
+					}
+				}
 				for _, ld := range a.logs {
-					stream.Rows = append(stream.Rows, makeRow(ld, g.where, resourceFields, tsNs, r))
+					row := makeRow(ld, g.where, resourceFields, tsNs, r)
+					if trace != nil {
+						for i := range row.Fields {
+							switch row.Fields[i].Name {
+							case "trace_id":
+								row.Fields[i].Value = fmt.Sprintf("%x", trace.TraceID)
+							case "span_id":
+								row.Fields[i].Value = fmt.Sprintf("%x", trace.Spans[0].SpanID)
+							}
+						}
+					}
+					stream.Rows = append(stream.Rows, row)
 				}
 			}
 		}
