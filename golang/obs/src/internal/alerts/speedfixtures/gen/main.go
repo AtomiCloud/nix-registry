@@ -1,3 +1,5 @@
+//go:build ignore
+
 // Command gen writes the speed-table fixture sets (see package speedfixtures).
 package main
 

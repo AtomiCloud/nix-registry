@@ -138,6 +138,16 @@ echo "// tamper" >>"$work/tp/lib/logstorage/parser.go"
 
 # ---- licences ship with the binary --------------------------------------------------
 if [ -n "${OUT:-}" ]; then
+  # buildGoModule installs every main package. Development-only generators must
+  # stay out of the shipped package: obs is one executable.
+  only_obs() { [ "$(ls -1 "$1/bin")" = obs ] && [ -x "$1/bin/obs" ]; }
+  only_obs "$OUT" && ok "single-binary: bin/obs is the only executable" || bad "single-binary: unexpected file in $OUT/bin"
+  mkdir -p "$work/binary-shape/bin"
+  cp "$OUT/bin/obs" "$work/binary-shape/bin/obs"
+  alias_dir="$work/binary-shape"
+  only_obs "$alias_dir" && ok "single-binary: copied baseline is green" || bad "single-binary: copied baseline failed"
+  touch "$alias_dir/bin/gen"
+  only_obs "$alias_dir" && bad "single-binary: planted bin/gen passed" || ok "single-binary: planted bin/gen is refused"
   lic="$OUT/share/licenses/obs"
   [ -s "$lic/LICENSE" ] && grep -q 'GNU AFFERO GENERAL PUBLIC LICENSE' "$lic/LICENSE" && ok "AGPL-3.0 text ships in share/licenses/obs" || bad "AGPL LICENSE missing in output"
   [ -s "$lic/modules.txt" ] && ok "vendor/modules.txt ships" || bad "modules.txt missing"
