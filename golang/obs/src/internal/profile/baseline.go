@@ -11,10 +11,13 @@ import (
 )
 
 // BaselineVersion is the file format version.
-const BaselineVersion = 4
+const BaselineVersion = 5
 
 // MinFunctionShare is the smallest share of the baseline's CPU a function needs to be a row.
 const MinFunctionShare = 0.03
+
+// MinDeclarationShare keeps sampling noise in tiny declarations out of group sizes.
+const MinDeclarationShare = MinFunctionShare / 2
 
 // Row of a baseline: a function or a span with its median share and median sample count.
 type Row struct {
@@ -22,10 +25,18 @@ type Row struct {
 	File         string  `json:"file,omitempty"`
 	Line         int64   `json:"line,omitempty"`
 	Column       int64   `json:"column,omitempty"`
-	Declarations int     `json:"declarations,omitempty"` // full group count, including cold declarations
+	Declarations int     `json:"declarations,omitempty"` // qualifying group count, including 1.5%-3% declarations
 	SourceOrder  int     `json:"source_order,omitempty"` // ordinal in the full group, sorted by line/column
 	Share        float64 `json:"share"`
 	N            int64   `json:"n"`
+}
+
+// FunctionGroup retains count context even when every baseline member is below
+// the 3% row cutoff, so a newly hot duplicate cannot bypass the identity gate.
+type FunctionGroup struct {
+	Name  string `json:"name"`
+	File  string `json:"file,omitempty"`
+	Count int    `json:"count"`
 }
 
 // Baseline is e2e/profile-baseline/<service>.<scenario>.json: median of 3 runs, a few KB,
@@ -45,9 +56,10 @@ type Baseline struct {
 	Samples  int64 `json:"samples"`
 	Requests int64 `json:"requests,omitempty"`
 	// CPUPerRequestNs is the median OS CPU per request (0 when the runs had no run meta).
-	CPUPerRequestNs float64 `json:"cpu_per_request_ns,omitempty"`
-	Functions       []Row   `json:"functions"`
-	Spans           []Row   `json:"spans"`
+	CPUPerRequestNs float64         `json:"cpu_per_request_ns,omitempty"`
+	Functions       []Row           `json:"functions"`
+	FunctionGroups  []FunctionGroup `json:"function_groups,omitempty"`
+	Spans           []Row           `json:"spans"`
 }
 
 func (b *Baseline) PrintSourceRoot(w io.Writer) {
@@ -115,7 +127,7 @@ func BuildBaseline(service, scenario, profiler string, own []string, runs []*Sum
 			}
 		}
 		groups := map[functionKey][]FuncRow{}
-		for k, indices := range groupedFunctions(functions) {
+		for k, indices := range groupedFunctions(functions, MinDeclarationShare) {
 			for _, i := range indices {
 				groups[k] = append(groups[k], functions[i])
 			}
@@ -140,11 +152,14 @@ func BuildBaseline(service, scenario, profiler string, own []string, runs []*Sum
 		return xs
 	}
 	for k, group := range declarations {
+		var groupCounts []float64
 		for _, r := range ownRuns {
+			groupCounts = append(groupCounts, float64(len(r[k])))
 			if n := len(r[k]); n != len(group) && (n > 1 || len(group) > 1) {
 				return nil, fmt.Errorf("%s across the baseline runs", ambiguousDuplicate(k, len(group), n))
 			}
 		}
+		hot := false
 		for order, f := range group {
 			var shares, counts []float64
 			for _, r := range ownRuns {
@@ -157,6 +172,7 @@ func BuildBaseline(service, scenario, profiler string, own []string, runs []*Sum
 			}
 			m := median(shares)
 			if m >= MinFunctionShare {
+				hot = true
 				row := Row{Name: f.Name, File: f.File, Line: f.Line, Column: f.Column, Share: round6(m), N: int64(median(counts) + .5)}
 				if len(group) > 1 {
 					row.Declarations = len(group)
@@ -164,6 +180,10 @@ func BuildBaseline(service, scenario, profiler string, own []string, runs []*Sum
 				}
 				b.Functions = append(b.Functions, row)
 			}
+		}
+		count := int(median(groupCounts))
+		if !hot && count > 0 {
+			b.FunctionGroups = append(b.FunctionGroups, FunctionGroup{Name: k.name, File: k.file, Count: count})
 		}
 	}
 	for name, xs := range sshare {
@@ -174,6 +194,13 @@ func BuildBaseline(service, scenario, profiler string, own []string, runs []*Sum
 		b.Spans = append(b.Spans, Row{Name: name, Share: round6(m), N: int64(median(pad(sn[name])) + 0.5)})
 	}
 	sortRows(b.Functions)
+	sort.Slice(b.FunctionGroups, func(i, j int) bool {
+		a, c := b.FunctionGroups[i], b.FunctionGroups[j]
+		if a.Name != c.Name {
+			return a.Name < c.Name
+		}
+		return a.File < c.File
+	})
 	sortRows(b.Spans)
 	return b, nil
 }

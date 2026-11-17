@@ -116,9 +116,12 @@ type functionKey struct{ name, file string }
 
 func functionKeyOf(name, file string) functionKey { return functionKey{name, sourceFile(file)} }
 
-func groupedFunctions(functions []FuncRow) map[functionKey][]int {
+func groupedFunctions(functions []FuncRow, minimum ...float64) map[functionKey][]int {
 	groups := map[functionKey][]int{}
 	for i, f := range functions {
+		if len(minimum) > 0 && f.OwnShare < minimum[0] {
+			continue
+		}
 		k := functionKeyOf(f.Name, f.File)
 		groups[k] = append(groups[k], i)
 	}
@@ -138,18 +141,31 @@ func ambiguousDuplicate(k functionKey, baseline, now int) string {
 	return fmt.Sprintf("ambiguous duplicate %s in %s: %d in baseline, %d now; rename or baseline --update", k.name, k.file, baseline, now)
 }
 
-// matchFunctions never guesses from distance. Equal-size declaration groups
-// match in source order; count changes make every baseline row in that group an
-// error. Cold declarations are counted but do not become comparison rows.
-func matchFunctions(base []Row, now []FuncRow) (map[int]int, map[int]string, map[int]bool) {
+// matchFunctions uses qualifying group counts and source order. A group is hot
+// when either a baseline row or a current member reaches the 3% cutoff.
+func matchFunctions(base []Row, now []FuncRow, contexts []FunctionGroup) (map[int]int, map[int]string, map[int]bool, []string) {
 	baseGroups := map[functionKey][]int{}
+	keys := map[functionKey]bool{}
 	for i, b := range base {
 		k := functionKeyOf(b.Name, b.File)
 		baseGroups[k] = append(baseGroups[k], i)
+		keys[k] = true
 	}
-	nowGroups := groupedFunctions(now)
+	contextByKey := map[functionKey]FunctionGroup{}
+	for _, c := range contexts {
+		k := functionKeyOf(c.Name, c.File)
+		contextByKey[k] = c
+		keys[k] = true
+	}
+	rawGroups := groupedFunctions(now)
+	countedGroups := groupedFunctions(now, MinDeclarationShare)
+	for k := range rawGroups {
+		keys[k] = true
+	}
 	matched, ambiguous, blocked := map[int]int{}, map[int]string{}, map[int]bool{}
-	for k, indices := range baseGroups {
+	var extraErrors []string
+	for k := range keys {
+		indices := baseGroups[k]
 		sort.SliceStable(indices, func(i, j int) bool {
 			a, b := base[indices[i]], base[indices[j]]
 			if a.Line != b.Line {
@@ -158,18 +174,55 @@ func matchFunctions(base []Row, now []FuncRow) (map[int]int, map[int]string, map
 			return a.Column < b.Column
 		})
 		expected := len(indices)
-		for _, bi := range indices {
-			if base[bi].Declarations > 0 {
-				expected = base[bi].Declarations
-				break
+		if c, ok := contextByKey[k]; ok {
+			expected = c.Count
+		} else {
+			for _, bi := range indices {
+				if base[bi].Declarations > 0 {
+					expected = base[bi].Declarations
+					break
+				}
 			}
 		}
-		current := nowGroups[k]
+		current := countedGroups[k]
+		hot := false
+		for _, bi := range indices {
+			if base[bi].Share >= MinFunctionShare {
+				hot = true
+			}
+		}
+		for _, ni := range rawGroups[k] {
+			if now[ni].OwnShare >= MinFunctionShare {
+				hot = true
+			}
+		}
+		if hot && (expected > 1 || len(current) > 1) && expected != len(current) {
+			msg := ambiguousDuplicate(k, expected, len(current))
+			if len(indices) == 0 {
+				extraErrors = append(extraErrors, msg)
+			}
+			for _, bi := range indices {
+				ambiguous[bi] = msg
+			}
+			for _, ni := range rawGroups[k] {
+				blocked[ni] = true
+			}
+			continue
+		}
+		if len(indices) == 0 {
+			continue
+		}
+		// Truly unique functions remain matchable when their share falls below the
+		// declaration-count floor; this is a measured speedup, not a new identity.
+		if expected == 1 && len(indices) == 1 && len(rawGroups[k]) == 1 {
+			matched[indices[0]] = rawGroups[k][0]
+			continue
+		}
 		if expected != len(current) {
 			for _, bi := range indices {
 				ambiguous[bi] = ambiguousDuplicate(k, expected, len(current))
 			}
-			for _, ni := range current {
+			for _, ni := range rawGroups[k] {
 				blocked[ni] = true
 			}
 			continue
@@ -185,5 +238,6 @@ func matchFunctions(base []Row, now []FuncRow) (map[int]int, map[int]string, map
 			matched[bi] = current[order]
 		}
 	}
-	return matched, ambiguous, blocked
+	sort.Strings(extraErrors)
+	return matched, ambiguous, blocked, extraErrors
 }

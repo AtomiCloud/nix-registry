@@ -55,7 +55,10 @@ func Compare(b *Baseline, now *Summary, l *Limits) (rows []Result, extra []strin
 			functions = append(functions, f)
 		}
 	}
-	matched, ambiguous, used := matchFunctions(b.Functions, functions)
+	matched, ambiguous, used, groupErrors := matchFunctions(b.Functions, functions, b.FunctionGroups)
+	for _, msg := range groupErrors {
+		rows = append(rows, Result{Kind: "input", Name: "duplicate group", Enforce: true, Slower: true, Note: msg})
+	}
 	bySpan := map[string]SpanRow{}
 	for _, s := range now.Spans {
 		bySpan[s.Name] = s

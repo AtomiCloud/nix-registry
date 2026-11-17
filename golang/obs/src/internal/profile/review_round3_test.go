@@ -75,8 +75,50 @@ func TestColdDuplicateContextDoesNotAddCompareRows(t *testing.T) {
 	}
 	rows, _ := Compare(b, base, nil)
 	for _, r := range rows {
-		if r.Failed() || r.Missing {
+		if r.Failed() || r.Missing || r.Change != 0 {
 			t.Errorf("unchanged cold duplicate is not ambiguous: %+v", r)
 		}
+	}
+	rows, _ = Compare(b, duplicateSummary(declared(10, .02), declared(20, .3)), nil)
+	if len(rows) != 1 || !rows[0].Failed() || !near(rows[0].Change, .5, 1e-9) {
+		t.Fatalf("hot second declaration +50%% must fail: %+v", rows)
+	}
+}
+
+func TestBaselineRejectsDifferentCountedDeclarationCounts(t *testing.T) {
+	two := duplicateSummary(declared(10, .02), declared(20, .2))
+	one := duplicateSummary(declared(20, .2))
+	if _, err := BuildBaseline("s", "n", "", []string{"render"}, []*Summary{two, two, one}); err == nil || !strings.Contains(err.Error(), "2 in baseline, 1 now") {
+		t.Fatalf("2,2,1 declarations must be rejected: %v", err)
+	}
+}
+
+func TestSubthresholdDuplicateMayBeUnsampled(t *testing.T) {
+	two := duplicateSummary(declared(10, .005), declared(20, .2))
+	one := duplicateSummary(declared(20, .2))
+	b, err := BuildBaseline("s", "n", "", []string{"render"}, []*Summary{two, two, one})
+	if err != nil {
+		t.Fatalf("0.5%% duplicate must not block baseline: %v", err)
+	}
+	for _, now := range []*Summary{two, one} {
+		rows, _ := Compare(b, now, nil)
+		for _, r := range rows {
+			if r.Failed() || r.Change != 0 {
+				t.Fatalf("0.5%% duplicate must not change the hot match: %+v", r)
+			}
+		}
+	}
+}
+
+func TestNewHotMemberOfColdDuplicateGroupIsAmbiguous(t *testing.T) {
+	base := duplicateSummary(declared(10, .01), declared(20, .02))
+	b := duplicateBaseline(t, base)
+	if len(b.Functions) != 0 {
+		t.Fatalf("all baseline members are below 3%%: %+v", b.Functions)
+	}
+	rows, extra := Compare(b, duplicateSummary(declared(10, .01), declared(20, .02), declared(30, .1)), nil)
+	var out strings.Builder
+	if PrintCompare(&out, "cold-group.baseline.json", rows, extra) == 0 || !strings.Contains(out.String(), "1 in baseline, 2 now") {
+		t.Fatalf("new hot duplicate must be an error, not a note:\n%s", out.String())
 	}
 }

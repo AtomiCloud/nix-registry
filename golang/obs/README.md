@@ -519,13 +519,18 @@ a note naming the inferred path and suggesting `--source-root`, without failing 
 Declaration line and column are retained only to disambiguate repeated name+file declarations;
 matching sorts each group by line and column and pairs the first declaration with the first,
 second with second, and so on. A unique pair matches regardless of its location. Different
-declaration counts are an error naming the function/file and both counts, suggesting a rename
-or baseline `--update`; no hot row falls back to a note. Cold declarations remain below the
-3% row cutoff, but their count and a hot row's source ordinal are retained for disambiguation.
+declaration counts are an error when a member is ≥ 3% in either the baseline or the current
+profile, naming the function/file and both counts and suggesting a rename or baseline `--update`.
+Only members with ≥ 1.5% own CPU share in that profile count toward the group; smaller members
+may be unsampled without changing identity. Members from 1.5% to 3% remain below the row cutoff,
+but their count and a hot row's source ordinal are retained for disambiguation. All-cold baseline
+groups retain their counts too, so a newly hot duplicate cannot fall back to a note. Reordering
+same-name, same-file function bodies without changing the group count is a known limit of
+source-order pairing.
 Chrome's zero-based
 `lineNumber` and `columnNumber` become one-based; speedscope `line` and `col` are kept, and pprof
 uses `Function.StartLine` rather than instruction lines. This includes separate same-line functions
-in a minified bundle. Baseline format is version 4: regenerate earlier preview baselines from
+in a minified bundle. Baseline format is version 5: regenerate earlier preview baselines from
 three profiles with `--own` and `--update`. **Closures** (never rows): Go `.funcN`,
 `.gowrap`, `-fm`; JS `(anonymous)` and empty names; Dart `<anonymous closure>`; .NET `<>c__`, `>b__`,
 `lambda_method`.
