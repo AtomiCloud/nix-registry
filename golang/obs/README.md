@@ -405,3 +405,100 @@ later part. The Grafana AGPL licence ships in `share/licenses/obs/grafana/LICENS
 - Seeded log rows against a real VictoriaLogs fed through Alloy (field names are FROM SOURCE).
 - LogsQL `_time:[start, end)` handling against real Grafana (the nightly parity job, a later release).
 - aarch64 and macOS builds are in CI; only x86_64 Linux was run by hand.
+
+## `obs alerts` speed (concept §11.1.1, re-measured with VictoriaLogs)
+
+### VictoriaLogs speed measurements
+
+The §11.1.1 table was measured in spike 7 with Loki as the log engine. This is the same
+table with the VictoriaLogs engine (`obs alerts` of this branch). MEASURED.
+
+| Alerts | 4 h seed | 24 h seed | Peak memory 4 h / 24 h |
+|---|---|---|---|
+| 1 | 3.55 s | 15.78 s | 2.03 / 7.85 GB |
+| 20 | 3.92 s | 18.55 s | 2.16 / 8.70 GB |
+| 200 | 11.86 s | 65.46 s | 2.21 / 8.17 GB |
+| 1,000 | 15.06 s | 68.75 s | 2.14 / 8.21 GB |
+
+Loki numbers (spike 7, same table) for comparison: 1 alert 0.23 / 1.10 s, 0.19 / 0.78 GB;
+20 alerts 1.05 / 5.45 s, 0.76 / 4.0 GB; 200 alerts 1.92 / 10.64 s, 1.07 / 5.3 GB;
+1,000 alerts 2.44 / 10.14 s, 1.22 / 5.9 GB.
+
+**What the numbers say**
+
+- Every cell is slower and heavier than the Loki table. A 4 h seed takes 3.5–15 s and
+  about 2 GB; a 24 h seed takes 16–69 s and 7.9–8.7 GB.
+- The 24 h column is at or over the 8 GB of a standard CI runner. The §11.1.1 budget
+  ("1,000 alerts in ~10 s and under 6 GB on a 24 h seed") does **not** hold with the
+  VictoriaLogs engine. The 4 h budget (under 2.5 s and 1.2 GB) does not hold either; the
+  concept text keeps the old numbers until the owner decides what to do.
+- Memory is flat across alert counts (2.0–2.2 GB at 4 h, 7.9–8.7 GB at 24 h): the cost is
+  loading the seed, not evaluating alerts. With Loki, 1 alert at 4 h used 0.19 GB. So in
+  this build the "load only what rules read" rule is not working for the seed (the
+  stores take the whole seed even for one alert). That is the first thing to look at.
+- Time does grow with alert count (3.9 s for 20 alerts and 11.9 s for 200 at 4 h), then
+  flattens (1,000 alerts: 15 s), as the shared seed and run reuse take over.
+
+**Box and method**
+
+- Box: Intel Xeon Platinum 8488C, 32 vCPU, 247 GB RAM, Linux 7.0 (AWS). The job runs on
+  2 CPUs (`taskset -c 0,1`), but the box is shared with other builders, so the other
+  30 CPUs, the disk and the memory bus were busy: expect noise. One run per cell
+  (`OBS_RUNS=1`); the runner takes several and prints the median time and the largest peak.
+- Cold start: a new process per run, an empty `OBS_CACHE_DIR`, the set copied to
+  `/dev/shm` first. The OS page cache is not dropped (needs root). Time is the process's
+  wall clock; peak memory is the process's `ru_maxrss`.
+- Binary: `obs` built from this branch (the `obs-alerts` evaluator at aa2085a merged).
+  Every run also checked its own expectations: all runs exited 0 (the table has no failed
+  cell; a failed run prints FAILED instead of a time).
+- Run it (under the shared heavy lock):
+
+  ```sh
+  cd golang/obs/src
+  go build -o /tmp/obs . && OBS_BIN=/tmp/obs OBS_FIXTURES=../tests/fixtures/alerts-speed OBS_RUNS=3 \
+    go test -tags speedbench -run TestSpeedTable -v -timeout 2h ./internal/alerts/speedfixtures
+  ```
+
+### Fixture sets (`tests/fixtures/alerts-speed/`)
+
+- `n1`, `n20`, `n200`, `n1000`: each has `alerts/` (GrafanaAlertRuleGroup CRs),
+  `incidents/` (3 incidents), `contract.yaml`, `seed.4h.yaml` and `seed.24h.yaml`.
+  The runner copies one seed to `seed.yaml`.
+- Generated, not hand-written: `go generate ./internal/alerts/speedfixtures` (run
+  `treefmt` after; the repo hook reformats the YAML). `go test ./internal/alerts/speedfixtures`
+  checks that every set loads with `internal/files`, has no LogQL, that variants differ,
+  and that the seeds load.
+- The 20 base alerts are the spike prototype's `proj20` mix: 13 metric-only, 6 log-only,
+  1 metric + log (`charge-errors/critical` joins both). The bigger sets repeat them as
+  variants `v2/ ... v50/`: a different rollup window (2–15 min, count thresholds scale with the
+  window) and a new rule uid, so 1,000 rules are 1,000 different rules.
+  Names are made up (landscape `speedland`, service `checkout`); no real landscape.
+- Incidents: `stripe-outage`, `checkout-slow`, `adyen-declines` (seed format of M1). Every
+  alert uid, variants included, is in `expect.fire` or `expect.quiet`.
+  Assertion coverage per set (baseline run + 3 incidents): n1 = 4 (1 positive, 3 negative);
+  n20 = 80 (19 positive, 61 negative); n200 = 800 (190 / 610); n1,000 = 4,000 (950 / 3,050).
+  The expect lists are what the evaluator produced on the 4 h and 24 h seeds, so they are a
+  regression baseline, not an independent oracle.
+
+### Fixture porting rules (prototype LogQL to LogsQL, by hand)
+
+1. `{service_name="checkout"}` becomes the stream filter `{durian.cloud.service="checkout"}`.
+2. `| durian_cloud_event="E"` becomes `"durian.cloud/event":="E"` (the contract event rule
+   needs this form); `| json | event="E"` has no json step in VictoriaLogs, it is the same filter
+   (written as `:in("E")` so the two alerts differ).
+3. `| severity_text="ERROR"` becomes `severity_text:="ERROR"`; `| payment_provider="adyen"`
+   becomes `"payment.provider":="adyen"`.
+4. `sum(count_over_time(S [W]))` becomes `_time:W S | stats count() hits`;
+   `sum(rate(S [W]))` becomes `_time:W S | stats rate() per_s`; `sum by (l)` becomes
+   `stats by (l)`. The rule's `relativeTimeRange.from` is the window in seconds.
+5. The threshold is a Grafana math node (`$A > 100`), as in the prototype, not a LogsQL `filter`.
+6. `unwrap duration_ms` (reads a log field value) has no LogsQL equivalent under seeds that
+   carry no field values; obs refuses it. The speed set replaces it with a count of
+   `declined` events at `WARN` severity (`logs/slow-unwrap`); a refusal test for the real
+   unwrap belongs to the alerts e2e tests.
+7. Metric queries are unchanged (MetricsQL); every metric node is `instant: true`, every
+   log node `queryType: stats`; the datasource types are `prometheus` and
+   `victoriametrics-logs-datasource`.
+
+NOT TESTED: 24 h seeds were measured once per cell; no run was on a quiet box; the cache-hit
+rows of §11.1.1 (unchanged PR 0.2-0.4 s, one changed alert 0.3-0.5 s) were not re-measured.
