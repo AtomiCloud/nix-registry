@@ -54,6 +54,8 @@ This release ships step 6's `obs query --static` and `obs query --live`.
 ```text
 obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
 obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names]
+obs check [--dir observability] [--pods n] [--landscapes n]
+obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
 obs version
 ```
 
@@ -74,8 +76,7 @@ the file, the rule or panel, the rule id in `[brackets]` and the offending name 
 - **`dashboards/**/\*.json`**: dashboard JSON. Panels (also inside collapsed rows), `targets[].expr`,
 `templating.list`, `time.from/to` are read. Annotation queries are not checked in 0.1.0.
 - **`seed.yaml`** (`--live` only; `--seed` overrides the path): see below.
-- **`contract.yaml`**: only its presence matters in 0.1.0 (the event rule, below). Its schema is
-  read from obs 0.2.
+- **`contract.yaml`**: the contract (see "The contract" below); its presence switches on the contract name checks and the event rule.
 
 **Which datasource speaks what.** The plugin type decides (`prometheus`,
 `victoriametrics-metrics-datasource` = MetricsQL; `victoriametrics-logs-datasource` = LogsQL;
@@ -179,6 +180,98 @@ e.g. `ERROR`) and `severity_number`, `trace_id`, `span_id`. Stream fields are th
 `durian.cloud.*` keys, when set), plus `stream_fields`. `service.name`, `service.namespace` and
 `deployment.environment.name` are filled from the `durian.cloud.*` keys, as Alloy does.
 
+## The contract (`observability/contract.yaml`)
+
+Written by hand (concept §3). Unknown keys fail. `obs check` and `obs gen` refuse an invalid contract.
+
+```yaml
+service: checkout
+modules: [api, worker] # the log stream count uses it
+pod_keys: [k8s.pod.name, k8s.pod.uid, k8s.node.name, service.instance.id] # default shown
+interval: 30s # aggregation interval (default 30s)
+types:
+  provider: { kind: enum, values: [stripe, adyen, paypal] }
+  shard: { kind: int, min: 0, max: 15 }
+  hour: { kind: time, unit: hour_of_day } # or weekday
+  billing_day: { kind: date, window_days: 30 } # a metric label only
+  user_id: { kind: free } # log fields and span attributes only
+metrics:
+  checkout.charges:
+    kind: counter # counter | histogram | gauge
+    budget: 5000
+    labels: { provider: provider, shard: shard, hour: hour }
+  checkout.queue.depth: { kind: gauge, across_pods: sum } # sum | avg | max | last, or per_pod: true
+logs:
+  ChargeFailed: { event: checkout.charge.failed, level: error }
+spans:
+  checkout.charge: { kind: internal, attributes: { user_id: user_id, provider: provider } }
+platform_metrics: # metrics the platform makes (OTel auto instrumentation), with their labels
+  http.server.request.duration: [http.route, http.response.status_code]
+generate: # `obs gen` targets, `out` relative to the folder that holds observability/
+  - { lang: go, out: internal/signals/generated, package: signals }
+```
+
+Two keys go beyond the concept's examples: `platform_metrics` (so a query on a metric the platform
+makes is not "undeclared") and `stream_labels` on a log event (the only way to declare a VictoriaLogs
+stream field, so that "free on a stream label" can be refused; the stream fields are otherwise the
+bounded where-from set). `modules` is the module count of the stream formula.
+
+## `obs check`
+
+```text
+obs check [--dir observability] [--pods n] [--landscapes n]
+```
+
+Prints the worst-case series per metric (the product of its label sizes, times buckets + 2 for a
+histogram: 14 for the default 12 buckets), the worst case times `--pods` for a `per_pod` metric, the
+log stream count (modules x `--landscapes`, times any declared stream label; log events add no
+streams) and `events=[...]`. It fails (exit 1, `FAIL <file> <yaml path>: [rule] ...`) on:
+
+- `free-metric-label`: `free` on a metric label;
+- `free-stream-label`, `date-stream-label`: `free` or a calendar date on a stream label;
+- `date-no-window`: a calendar date type without `window_days`;
+- `over-budget`, `budget-missing`: a metric over its budget, or with labels and no budget;
+- `gauge-pods`: a gauge with neither `across_pods` nor `per_pod` (or both);
+- `metric-kind`: no kind or an unknown kind; and the schema rules (`label-type`, `enum-empty`, `int-bounds`, `event-level`, ...).
+
+The after-start pod-key check of §4.1 is not here (it needs a running store: `obs assert`).
+
+## `obs gen`
+
+```text
+obs gen [--dir observability] [--lang go,dotnet,dart,bun]
+obs gen --check [--dir observability]
+```
+
+Writes, for a valid contract: one set of **types and constants** per `generate:` target (concept
+§3.4: label value types, one labels type per metric and span, a name carrier per signal, the
+allowed-keys table; no per-metric functions; shared base types are prefixed `DurianSignal`),
+`<dir>/contract/events.json` (event names, read by the log-alert event check) and
+`<dir>/contract/aggregation.yaml` (the §4.1 VictoriaMetrics stream-aggregation file: counters and
+histogram parts get `total`; gauges get `sum_samples`, `avg`, `max` or `last` with `dedup_interval`;
+`without` = `pod_keys`; `per_pod` metrics and unlisted metrics are in no match).
+Output is deterministic and formatted. Every file starts with `Code generated by obs gen. DO NOT EDIT.`
+and `contract-hash: sha256:<hash of the contract file>`.
+
+`--check` regenerates into a temp dir and compares with the committed files: a file that differs is
+`[gen-edited]` when its header hash equals the contract's (a hand edit) and `[gen-stale]` when it does
+not (the contract changed and nobody regenerated); a missing file is `[gen-missing]`.
+Golden files: `tests/fixtures/gen/good` is a consumer repo with its generated files committed; the
+Go unit tests and `obs gen --check` compare against it (`OBS_UPDATE_GOLDEN=1 go test ./internal/gen/...`
+rewrites them). The generated code compiles: `tests/typecheck/<lang>.sh` builds a consumer against it and
+runs planted bad consumers that must not compile.
+
+## Contract name checks in `obs query --static`
+
+When `<dir>/contract.yaml` exists, every name a query reads must be in the contract or in the platform
+label list (concept §2): `contract-undeclared-metric` (stored name, with "did you mean"),
+`contract-undeclared-label` (selector and `by`/`on` labels; a label of another metric fails),
+`contract-bad-enum-value` (an equality or plain `a|b` value that is not an enum value or is outside a
+bounded number; a value that holds a dashboard variable is not judged),
+`contract-pod-label` (a pod key on a business metric, §4.1), `contract-undeclared-event` and
+`contract-undeclared-stream-field` (a stream tag outside the where-from set). Names compare with dots
+and underscores equal. Other log fields are free-form (§6): not judged.
+
 ## Engines and pins
 
 | Signal  | Engine                                               | Version                        |
@@ -247,7 +340,66 @@ OBS_PARITY_VM=http://127.0.0.1:<port> OBS_PARITY_VL=http://127.0.0.1:<port> \
 Use fresh containers for every run (VictoriaLogs keeps duplicate rows). The nightly parity job (a later release)
 replaces this by hand run.
 
-## Not tested yet
+## obs alerts
+
+`obs alerts --dir observability` evaluates the `GrafanaAlertRuleGroup` CRs in
+`alerts/<slug>/<severity>.yaml` on the seed and each named incident. It prints one
+line per rule and expectation, including its file and incident window, and exits
+1 on a miss. Every rule must stay quiet on the baseline; rules omitted from an
+incident's expectations are also checked for quiet. Metric and LogsQL rules run
+inside VictoriaMetrics v1.156.0 and VictoriaLogs v1.54.0 with no network or containers.
+
+```text
+obs alerts --dir observability
+OBS_VERIFY_FAST=1 OBS_VERIFY_SKIP=1 obs alerts --dir observability
+OBS_CACHE_DIR=.cache/obs obs alerts --dir observability
+obs alerts --dir observability --steps steps.json --recorded recorded.json
+```
+
+The seed's `incidents: [spike]` reads `incidents/spike.yaml`. An incident declares
+`window: {start: 10m, duration: 10m}`, `change` entries with a metric, matching
+`where` labels and `rate`, `latency_x` or `share_x`, and
+`expect: {fire: [rule-uid], quiet: [], fire_within: 5m, resolve_within: 5m}`.
+Firing must begin inside the incident and before `fire_within`; it must stop by
+the end plus `resolve_within` (default zero). Use the recovery allowance for the
+query's rollup window and `keepFiringFor`. The time line ends in the past; an
+explicit `--base` whose complete time line reaches the future is refused.
+
+The Grafana 13.3.0 expression port supports math, reduce (including non-number
+mapping), threshold and recovery thresholds, `for`, `keepFiringFor`, missing
+series, `noDataState` and `execErrState`. Source functions are cited alongside
+each state transition. Recording rules use the same CR reader with
+`record: {metric: fixture_recorded, from: A}`; dependent recording rules execute
+first and their samples are appended to the embedded metric store before alerts.
+`--recorded` writes `{labels, timestamps, values}` rows; `--steps` writes each
+minute's evaluation and state. Both exports bypass the persistent result cache.
+
+LogsQL queries use each rule's `relativeTimeRange.from/to`, parse at the resulting
+end time and add the exclusive `[start, end)` range. Final `stats by (...)` fields
+are instance labels. With a contract, `durian.cloud/event` filters are checked
+against its event list. Other field-value filters are printed as assumptions and
+removed from the parsed AST; event filters in `_stream` or `or`, unknown events
+and stats reading field values are refused. Seed events must be declared too.
+Without a contract, one event-rule-skipped note is printed for each log query.
+
+The numeric light path is checked against the vendored Grafana dataframe path
+with `OBS_VERIFY_FAST=1`; unchanged incident inputs are compared with their
+baseline reuse by `OBS_VERIFY_SKIP=1`. Any mismatch fails the command. The result
+cache includes the binary, seed, incidents, recording rules, contract and each
+alert's normalized CR definition. Time-derived queries also include the base
+timestamp and do not reuse shifted baseline results. Storage uses `OBS_TMPDIR`,
+otherwise a writable `/dev/shm` with at least 1 GiB free (else the system temp
+directory); VictoriaMetrics caches are capped at 512 MiB.
+Unused metric series are omitted and VictoriaLogs starts only when needed.
+
+MEASURED: regression tests cover state transitions, numeric light/full parity,
+event-filter refusals, recording outputs, cache invalidation and planted wrong
+thresholds. NOT TESTED: parity against the live Grafana scheduler and datasource
+in this part PR, notification/persistence behavior, and VictoriaLogs runtime
+timeout/concurrency limits. TraceQL alerts use the `DatasourceEngine` hook in a
+later part. The Grafana AGPL licence ships in `share/licenses/obs/grafana/LICENSE`.
+
+### Existing query-check limits
 
 - Variable filling for LogsQL panels against the Grafana VictoriaLogs datasource (it reuses the Prometheus macros).
 - Seeded log rows against a real VictoriaLogs fed through Alloy (field names are FROM SOURCE).

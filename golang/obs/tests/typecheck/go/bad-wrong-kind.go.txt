@@ -1,0 +1,7 @@
+package main
+
+import "example.com/app/signals"
+
+var _ signals.DurianSignalHistogram[signals.CheckoutChargesLabels] = signals.CheckoutCharges
+
+func main() {}

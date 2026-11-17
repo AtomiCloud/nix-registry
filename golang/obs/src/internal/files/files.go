@@ -168,8 +168,8 @@ type alertRule struct {
 // Rule is a Grafana-managed rule read by Load, shared with obs alerts. File and
 // Interval come from the containing CR, all other fields are Grafana's schema.
 type Rule struct {
-	File, Interval string
-	Definition     alertRule
+	File, Interval, Name string
+	Definition           alertRule
 }
 
 func (s *Set) readAlert(rel string, b []byte) {
@@ -197,7 +197,7 @@ func (s *Set) readAlert(rel string, b []byte) {
 		return
 	}
 	for _, r := range d.Spec.Rules {
-		s.Rules = append(s.Rules, Rule{File: rel, Interval: d.Spec.Interval, Definition: r})
+		s.Rules = append(s.Rules, Rule{File: rel, Interval: d.Spec.Interval, Name: d.Metadata.Name, Definition: r})
 		id := r.UID
 		if id == "" {
 			id = d.Metadata.Name

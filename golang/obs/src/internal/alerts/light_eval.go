@@ -85,7 +85,7 @@ func sameResults(a, b []evalResult) bool {
 	}
 	for _, x := range a {
 		y, ok := m[x.key]
-		if !ok || x.state != y.state || x.hasVal != y.hasVal {
+		if !ok || x.state != y.state || x.hasVal != y.hasVal || x.err != y.err {
 			return false
 		}
 		if x.hasVal && !(x.value == y.value || (math.IsNaN(x.value) && math.IsNaN(y.value))) {

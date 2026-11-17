@@ -6,8 +6,10 @@ import (
 
 	"github.com/VictoriaMetrics/metricsql"
 
+	"github.com/AtomiCloud/obs/internal/contract"
 	"github.com/AtomiCloud/obs/internal/engines/vl"
 	"github.com/AtomiCloud/obs/internal/files"
+	"github.com/AtomiCloud/obs/internal/logevent"
 	"github.com/AtomiCloud/obs/internal/vars"
 )
 
@@ -22,6 +24,10 @@ func Static(set *files.Set, o Options) *Report {
 	}
 	if set.Alerts == 0 && len(set.Dashboards) == 0 && len(set.Problems) == 0 {
 		r.add(Fail, o.Dir, "", "empty", "no alerts/**/*.yaml and no dashboards/**/*.json found")
+	}
+	c, problems := loadContract(&o)
+	for _, p := range problems {
+		r.add(Fail, o.contractPath(), "", "contract", "%s", p)
 	}
 	eventOn := o.eventRuleOn()
 	skippedTraces := 0
@@ -41,10 +47,10 @@ func Static(set *files.Set, o Options) *Report {
 			skippedTraces++
 		case files.Metrics:
 			r.Counts["metrics"]++
-			staticMetrics(r, q, o)
+			staticMetrics(r, q, o, c)
 		case files.Logs:
 			r.Counts["logs"]++
-			staticLogs(r, q, o, eventOn)
+			staticLogs(r, q, o, eventOn, c)
 		}
 	}
 	if skippedTraces > 0 {
@@ -111,7 +117,7 @@ func age(s string, def time.Duration) time.Duration {
 	return def
 }
 
-func staticMetrics(r *Report, q *files.Query, o Options) {
+func staticMetrics(r *Report, q *files.Query, o Options, c *contract.Contract) {
 	expr := staticFill(q)
 	e, err := metricsql.Parse(expr)
 	if err != nil {
@@ -131,13 +137,16 @@ func staticMetrics(r *Report, q *files.Query, o Options) {
 		r.add(Warn, q.File, q.Where, "rollup-no-window",
 			"%s(...) has no [window]: the window then comes from the query step; write [5m] or similar", f)
 	}
+	if c != nil {
+		contractMetrics(r, q, e, c)
+	}
 	if o.Names {
 		m, l := metricNames(e)
 		r.add(Note, q.File, q.Where, "names", "reads metrics=%v labels=%v", m, l)
 	}
 }
 
-func staticLogs(r *Report, q *files.Query, o Options, eventOn bool) {
+func staticLogs(r *Report, q *files.Query, o Options, eventOn bool, c *contract.Contract) {
 	expr := staticFill(q)
 	parsed, err := vl.Parse(expr, time.Now())
 	if err != nil {
@@ -156,16 +165,40 @@ func staticLogs(r *Report, q *files.Query, o Options, eventOn bool) {
 				"stats over every row: the query has no field or stream filter besides _time (concept 6.4); narrow it")
 		}
 	}
+	if c != nil {
+		contractLogs(r, q, parsed, c, filters)
+	}
 	if q.IsAlert {
 		hasEvent := contains(filters, eventField) || contains(pipes, eventField)
 		switch {
 		case !eventOn:
 			r.add(Note, q.File, q.Where, "event-rule", "event rule skipped: no contract.yaml")
+		case c != nil:
+			a, err := logevent.Analyze(expr, c)
+			if err != nil {
+				id := "logsql-alert-event"
+				msg := err.Error()
+				if strings.Contains(msg, "must filter on the event") {
+					id = "logsql-alert-needs-event"
+				}
+				if strings.HasPrefix(msg, "event ") && strings.Contains(msg, "not in the contract") {
+					id = "contract-undeclared-event"
+				}
+				if strings.Contains(msg, "matches no contract event") {
+					id = "contract-event-regexp-no-match"
+				}
+				r.add(Fail, q.File, q.Where, id, "%v", err)
+			} else {
+				r.add(Note, q.File, q.Where, "event-rule", "events=%v", a.Events)
+				for _, assumed := range a.Assumed {
+					r.add(Note, q.File, q.Where, "assumed-filter", "assumed true (free-form fields): %s", assumed)
+				}
+			}
 		case !hasEvent:
 			r.add(Fail, q.File, q.Where, "logsql-alert-needs-event",
 				"a log alert must filter on the event field %q (exact :=, negated, regex :~ or in(...)); contract.yaml is present", eventField)
 		default:
-			r.add(Note, q.File, q.Where, "event-rule", "event filter present; the contract event names are checked from obs 0.2")
+			r.add(Note, q.File, q.Where, "event-rule", "event filter present; no contract event list")
 		}
 	}
 	if o.Names {

@@ -19,6 +19,11 @@ type RangeDatasourceEngine interface {
 	Range(Query, time.Time, time.Time, time.Duration) ([]Result, error)
 }
 
+// QueryGuard is implemented by the chart-derived VictoriaLogs limits adapter.
+type QueryGuard interface {
+	Check(string, time.Time, time.Time) error
+}
+
 type Engines struct {
 	Metrics     *vm.Engine // recording-rule sink
 	Datasources map[string]DatasourceEngine
@@ -56,12 +61,20 @@ func sampleResults(ss []*Series, shift time.Duration) []Result {
 	return out
 }
 
-type logsEngine struct{ e *vl.Engine }
+type logsEngine struct {
+	e     *vl.Engine
+	guard QueryGuard
+}
 
 func (l logsEngine) Instant(q Query, at time.Time) ([]Result, error) {
 	from := q.From
 	if from <= 0 {
 		from = 10 * time.Minute
+	}
+	if l.guard != nil {
+		if err := l.guard.Check(q.Expr, at.Add(-from), at.Add(-q.To)); err != nil {
+			return nil, err
+		}
 	}
 	rs, err := l.e.Stats(q.Expr, at.Add(-from), at.Add(-q.To), false)
 	if err != nil {
@@ -69,11 +82,26 @@ func (l logsEngine) Instant(q Query, at time.Time) ([]Result, error) {
 	}
 	out := make([]Result, 0, len(rs))
 	for _, r := range rs {
+		// The datasource's alertingDataFrames maps an empty stats value to null
+		// (NoData), and preserves the HTTP endpoint's __name__ column label.
+		if r.Value == "" {
+			continue
+		}
 		v, ok := r.Float()
 		if !ok {
 			return nil, fmt.Errorf("LogsQL stats value %q is not numeric: %s", r.Value, q.Expr)
 		}
-		out = append(out, Result{Labels: sortLabels(r.Labels), Points: map[int64]float64{at.UnixMilli(): v}})
+		labels := append([]Label{}, r.Labels...)
+		if r.Name != "" {
+			hasName := false
+			for _, l := range labels {
+				hasName = hasName || l.Name == "__name__"
+			}
+			if !hasName {
+				labels = append(labels, Label{Name: "__name__", Value: r.Name})
+			}
+		}
+		out = append(out, Result{Labels: sortLabels(labels), Points: map[int64]float64{at.UnixMilli(): v}})
 	}
 	return out, nil
 }

@@ -449,7 +449,7 @@ func verdicts(p *Project, runs []Run, out []AlertRun) []Verdict {
 		inc := run.Incident
 		ws := mustDur(inc.Window.Start)
 		within := mustDur(inc.Expect.FireWithin)
-		if within == 0 {
+		if inc.Expect.FireWithin == "" {
 			within = mustDur(inc.Window.Duration)
 		}
 		for _, id := range inc.Expect.Fire {
@@ -490,6 +490,19 @@ func verdicts(p *Project, runs []Run, out []AlertRun) []Verdict {
 				v.Why = describe(ar)
 			}
 			vs = append(vs, v)
+		}
+		// Omitted rules are quiet by default. Every rule is asserted in every
+		// incident, so a newly added or duplicated rule cannot escape the check.
+		listed := map[string]bool{}
+		for _, id := range append(append([]string{}, inc.Expect.Fire...), inc.Expect.Quiet...) {
+			listed[id] = true
+		}
+		for _, a := range p.Alerts {
+			if listed[a.ID] {
+				continue
+			}
+			ar := byKey[run.Name+"|"+a.ID]
+			vs = append(vs, Verdict{Run: run.Name, Alert: a.ID, Expect: "quiet", Pass: !ar.Fired && ar.Err == "", Why: describe(ar)})
 		}
 	}
 	return vs

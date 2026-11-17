@@ -1,0 +1,5 @@
+mode: check
+exit: 1
+contains: [metric-kind]
+contains: metrics.checkout.charges
+contains: no kind

@@ -1,0 +1,8 @@
+service: checkout
+types:
+  billing_day: { kind: date }
+metrics:
+  checkout.invoices:
+    kind: counter
+    budget: 100
+    labels: { billing_day: billing_day }
