@@ -337,10 +337,18 @@ or counter reset stops rollback; scaled data/PVCs remain intact.
 
 For VictoriaLogs and VictoriaMetrics omit the single/Alloy/role fields. Provide `scaled` storage
 workloads, `routers` insert/select workloads, `routing_manifest`, `original_routing_manifest`,
-and `metrics_url` (the insert-side `/metrics`). Routing manifests may contain ONLY the declared `routers` and change only their `-storageNode`
-lists (plus `-dedup.minScrapeInterval=1ms` for VM copies); every original endpoint must stay.
-Alloy or app workloads, Services and any other field change are refused before anything is applied,
-in both directions (move and rollback). There is no drain,
+and `metrics_url` (the insert-side `/metrics`); VictoriaMetrics may add `storage_workloads` (the vmstorage
+workloads). Routing manifests are an allow-list, checked in both directions (move and rollback) before
+anything is applied: both files carry exactly the same objects, all of them declared `routers` or
+`storage_workloads`; a router may differ only by endpoints ADDED to a `-storageNode` flag that already
+exists at the same place of the same container (each container and each flag occurrence keeps its own
+endpoints); a vmstorage workload may differ only by one exact `-dedup.minScrapeInterval=1ms` argument added
+(concept 10.6: copies added). Any other dedup value or form, removing the flag, Alloy or app workloads,
+Services and any other field change are refused. `scaled_manifest`, `metastore_manifest` and
+`single_manifest` may carry only statefulset, deployment, daemonset, service, configmap, secret,
+persistentvolumeclaim, serviceaccount, role and rolebinding objects; the latter two only the single as
+workload. Rollback applies a copy of `single_manifest` with the single at replicas 0 (the file on disk is
+not touched), so nothing starts before its template roles exist. There is no drain,
 rebalance, PVC deletion, or Alloy restart. VL checks the OTLP received counter rising and remote
 send errors flat; VM checks inserted rows rising. Read URLs end in `/select/logsql/stats_query_range`
 (VL) or `/select/0/prometheus/api/v1/query_range` (VM). Supply a query counting the known dataset

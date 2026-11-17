@@ -37,6 +37,7 @@ type Config struct {
 	OriginalRoutingManifest string              `yaml:"original_routing_manifest"`
 	Scaled                  []string            `yaml:"scaled"`
 	Routers                 []string            `yaml:"routers"`
+	Storage                 []string            `yaml:"storage_workloads"`
 	Single                  string              `yaml:"single"`
 	Alloy                   string              `yaml:"alloy"`
 	AlloyConfigObjects      []string            `yaml:"alloy_config_objects"`
@@ -74,6 +75,9 @@ func (c Config) Validate(store string, rollback bool) error {
 		required["metrics_url"] = c.MetricsURL
 		if len(c.Routers) == 0 {
 			return fmt.Errorf("routers: list insert and select workloads")
+		}
+		if len(c.Storage) > 0 && store != "victoriametrics" {
+			return fmt.Errorf("storage_workloads: only victoriametrics has a storage-side routing change (-dedup.minScrapeInterval=1ms on vmstorage)")
 		}
 	} else {
 		required["single"] = c.Single

@@ -98,7 +98,7 @@ func TestReview2R2RoutingManifestsOnlyRouters(t *testing.T) {
 	}{
 		{"add nodes to both routers", good, original, StorageRoute, true},
 		{"restore original", good, original, RestoreRoute, true},
-		{"add dedup flag documented for VM copies", reviewManifest(t, strings.Replace(router("insert", "vm:1", "a:8400,b:8400"), "\"-storageNode", "\"-dedup.minScrapeInterval=1ms\", \"-storageNode", 1)), original, StorageRoute, true},
+		{"dedup flag on a router (concept 10.6 puts it on vmstorage only)", reviewManifest(t, strings.Replace(router("insert", "vm:1", "a:8400,b:8400"), "\"-storageNode", "\"-dedup.minScrapeInterval=1ms\", \"-storageNode", 1)), original, StorageRoute, false},
 		{"alloy workload in routing", reviewManifest(t, router("insert", "vm:1", "a:8400,b:8400")+"---\n"+alloy), original, StorageRoute, false},
 		{"app workload in routing", reviewManifest(t, alloy), original, StorageRoute, false},
 		{"alloy workload in original", good, reviewManifest(t, router("insert", "vm:1", "a:8400")+"---\n"+alloy), RestoreRoute, false},

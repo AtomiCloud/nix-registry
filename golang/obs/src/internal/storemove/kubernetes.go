@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"sort"
 	"strconv"
@@ -305,6 +306,9 @@ func (k Kubernetes) Execute(ctx context.Context, s Step, store string, c Config)
 	case Step("stop compaction"):
 		return k.compaction(ctx, c, false)
 	case Step("retain single as metastore"):
+		if err := validateSingleManifest(c.MetastoreManifest, c); err != nil {
+			return err
+		}
 		if err := validateIsolatedManifest(c.MetastoreManifest, c); err != nil {
 			return err
 		}
@@ -326,10 +330,21 @@ func (k Kubernetes) Execute(ctx context.Context, s Step, store string, c Config)
 		patch, _ := json.Marshal(map[string]any{"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"labels": labels}}}})
 		return k.call(ctx, c, "patch", c.Single, "--type=merge", "-p", string(patch))
 	case Restore:
+		if err := validateSingleManifest(c.SingleManifest, c); err != nil {
+			return err
+		}
 		if err := validateIsolatedManifest(c.SingleManifest, c); err != nil {
 			return err
 		}
-		if err := k.apply(ctx, c, c.SingleManifest); err != nil {
+		// Apply a copy with the single at replicas 0: a manifest saying replicas 1 (or
+		// nothing, which defaults to 1) would start the single with role=false before
+		// the template roles below exist. The scale-up after the roles starts it.
+		zero, err := singleAtZero(c.SingleManifest, c.Single)
+		if err != nil {
+			return err
+		}
+		defer os.Remove(zero)
+		if err := k.apply(ctx, c, zero); err != nil {
 			return err
 		}
 		// Roles go true in the template while the single has no pods, so the first
