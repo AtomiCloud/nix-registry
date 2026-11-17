@@ -122,3 +122,31 @@ func TestNewHotMemberOfColdDuplicateGroupIsAmbiguous(t *testing.T) {
 		t.Fatalf("new hot duplicate must be an error, not a note:\n%s", out.String())
 	}
 }
+
+func TestThresholdCrossingCannotMoveAnExactHotDeclaration(t *testing.T) {
+	base := duplicateSummary(declared(10, .016), declared(20, .2), declared(30, .014))
+	b := duplicateBaseline(t, base)
+	for _, hot := range []float64{.2, .3} {
+		now := duplicateSummary(declared(10, .014), declared(20, hot), declared(30, .016))
+		rows, _ := Compare(b, now, nil)
+		want := hot/.2 - 1
+		if len(rows) != 1 || !near(rows[0].Change, want, 1e-9) || rows[0].Failed() != (hot == .3) {
+			t.Errorf("fixed location, cold threshold crossing, hot=%g: %+v", hot, rows)
+		}
+	}
+	// The formerly tiny third member must reserve its exact location before a
+	// shifted hot member is paired with the remaining declaration.
+	rows, _ := Compare(b, duplicateSummary(declared(10, .014), declared(40, .3), declared(30, .016)), nil)
+	if len(rows) != 1 || !near(rows[0].Change, .5, 1e-9) || !rows[0].Failed() {
+		t.Fatalf("cold exact matches must not steal a shifted hot member: %+v", rows)
+	}
+}
+
+func TestBaselineThresholdCrossingKeepsExactDeclarationMedian(t *testing.T) {
+	a := duplicateSummary(declared(10, .016), declared(20, .2), declared(30, .014))
+	c := duplicateSummary(declared(10, .014), declared(20, .3), declared(30, .016))
+	b, err := BuildBaseline("s", "n", "", []string{"render"}, []*Summary{a, c, c})
+	if err != nil || len(b.Functions) != 1 || b.Functions[0].Share != .3 {
+		t.Fatalf("exact hot member median must be 30%%: baseline=%+v err=%v", b, err)
+	}
+}

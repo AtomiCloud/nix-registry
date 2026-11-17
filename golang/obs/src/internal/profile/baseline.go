@@ -11,7 +11,7 @@ import (
 )
 
 // BaselineVersion is the file format version.
-const BaselineVersion = 5
+const BaselineVersion = 6
 
 // MinFunctionShare is the smallest share of the baseline's CPU a function needs to be a row.
 const MinFunctionShare = 0.03
@@ -31,12 +31,20 @@ type Row struct {
 	N            int64   `json:"n"`
 }
 
-// FunctionGroup retains count context even when every baseline member is below
-// the 3% row cutoff, so a newly hot duplicate cannot bypass the identity gate.
+// FunctionGroup retains count and location context even when every baseline
+// member is below the 3% row cutoff, so hot duplicates cannot bypass identity.
 type FunctionGroup struct {
-	Name  string `json:"name"`
-	File  string `json:"file,omitempty"`
-	Count int    `json:"count"`
+	Name    string        `json:"name"`
+	File    string        `json:"file,omitempty"`
+	Count   int           `json:"count"`
+	Members []Declaration `json:"members,omitempty"`
+}
+
+// Declaration is a source location, including cold members used for pairing.
+type Declaration struct {
+	Line    int64 `json:"line,omitempty"`
+	Column  int64 `json:"column,omitempty"`
+	Counted bool  `json:"counted,omitempty"`
 }
 
 // Baseline is e2e/profile-baseline/<service>.<scenario>.json: median of 3 runs, a few KB,
@@ -115,10 +123,11 @@ func BuildBaseline(service, scenario, profiler string, own []string, runs []*Sum
 	if c := median(cpu); c > 0 && cpu[0] > 0 && cpu[1] > 0 && cpu[2] > 0 {
 		b.CPUPerRequestNs = math.Round(c)
 	}
-	// Align equal-size groups in source order across the three runs. A count
+	// Reserve exact locations, then align remaining members in source order. A count
 	// change among duplicates cannot be assigned a trustworthy median.
 	declarations := map[functionKey][]FuncRow{}
 	var ownRuns []map[functionKey][]FuncRow
+	var rawRuns []map[functionKey][]FuncRow
 	for _, r := range runs {
 		var functions []FuncRow
 		for _, f := range r.Functions {
@@ -127,15 +136,22 @@ func BuildBaseline(service, scenario, profiler string, own []string, runs []*Sum
 			}
 		}
 		groups := map[functionKey][]FuncRow{}
+		raw := map[functionKey][]FuncRow{}
+		for k, indices := range groupedFunctions(functions) {
+			for _, i := range indices {
+				raw[k] = append(raw[k], functions[i])
+			}
+			if _, ok := declarations[k]; !ok {
+				declarations[k] = raw[k]
+			}
+		}
 		for k, indices := range groupedFunctions(functions, MinDeclarationShare) {
 			for _, i := range indices {
 				groups[k] = append(groups[k], functions[i])
 			}
-			if _, ok := declarations[k]; !ok {
-				declarations[k] = groups[k]
-			}
 		}
 		ownRuns = append(ownRuns, groups)
+		rawRuns = append(rawRuns, raw)
 	}
 	sshare := map[string][]float64{}
 	sn := map[string][]float64{}
@@ -152,38 +168,50 @@ func BuildBaseline(service, scenario, profiler string, own []string, runs []*Sum
 		return xs
 	}
 	for k, group := range declarations {
+		expected := 0
+		for _, f := range group {
+			if f.OwnShare >= MinDeclarationShare {
+				expected++
+			}
+		}
 		var groupCounts []float64
 		for _, r := range ownRuns {
 			groupCounts = append(groupCounts, float64(len(r[k])))
-			if n := len(r[k]); n != len(group) && (n > 1 || len(group) > 1) {
-				return nil, fmt.Errorf("%s across the baseline runs", ambiguousDuplicate(k, len(group), n))
+			if n := len(r[k]); n != expected && (n > 1 || expected > 1) {
+				return nil, fmt.Errorf("%s across the baseline runs", ambiguousDuplicate(k, expected, n))
 			}
 		}
-		hot := false
+		var members []Declaration
+		for _, f := range group {
+			members = append(members, Declaration{f.Line, f.Column, f.OwnShare >= MinDeclarationShare})
+		}
+		var pairings []map[int]int
+		for _, r := range rawRuns {
+			pairings = append(pairings, pairDeclarations(members, r[k]))
+		}
+		count := int(median(groupCounts))
 		for order, f := range group {
 			var shares, counts []float64
-			for _, r := range ownRuns {
+			for i, r := range rawRuns {
 				var share, count float64
-				if len(r[k]) == len(group) {
-					share, count = r[k][order].OwnShare, float64(r[k][order].OwnN)
+				if ni, ok := pairings[i][order]; ok {
+					share, count = r[k][ni].OwnShare, float64(r[k][ni].OwnN)
 				}
 				shares = append(shares, share)
 				counts = append(counts, count)
 			}
 			m := median(shares)
 			if m >= MinFunctionShare {
-				hot = true
 				row := Row{Name: f.Name, File: f.File, Line: f.Line, Column: f.Column, Share: round6(m), N: int64(median(counts) + .5)}
 				if len(group) > 1 {
-					row.Declarations = len(group)
+					row.Declarations = count
 					row.SourceOrder = order
 				}
 				b.Functions = append(b.Functions, row)
 			}
 		}
-		count := int(median(groupCounts))
-		if !hot && count > 0 {
-			b.FunctionGroups = append(b.FunctionGroups, FunctionGroup{Name: k.name, File: k.file, Count: count})
+		if count > 0 {
+			b.FunctionGroups = append(b.FunctionGroups, FunctionGroup{Name: k.name, File: k.file, Count: count, Members: members})
 		}
 	}
 	for name, xs := range sshare {

@@ -141,6 +141,33 @@ func ambiguousDuplicate(k functionKey, baseline, now int) string {
 	return fmt.Sprintf("ambiguous duplicate %s in %s: %d in baseline, %d now; rename or baseline --update", k.name, k.file, baseline, now)
 }
 
+// pairDeclarations reserves exact locations first, even if their share crossed
+// the count threshold. Unmatched qualifying members then pair in source order.
+// now is sorted by line and column by groupedFunctions.
+func pairDeclarations(base []Declaration, now []FuncRow) map[int]int {
+	paired, used := map[int]int{}, map[int]bool{}
+	for bi, b := range base {
+		for ni, n := range now {
+			if !used[ni] && b.Line == n.Line && b.Column == n.Column {
+				paired[bi], used[ni] = ni, true
+				break
+			}
+		}
+	}
+	var remaining []int
+	for ni, n := range now {
+		if !used[ni] && n.OwnShare >= MinDeclarationShare {
+			remaining = append(remaining, ni)
+		}
+	}
+	for bi := range base {
+		if _, ok := paired[bi]; !ok && base[bi].Counted && len(remaining) > 0 {
+			paired[bi], remaining = remaining[0], remaining[1:]
+		}
+	}
+	return paired
+}
+
 // matchFunctions uses qualifying group counts and source order. A group is hot
 // when either a baseline row or a current member reaches the 3% cutoff.
 func matchFunctions(base []Row, now []FuncRow, contexts []FunctionGroup) (map[int]int, map[int]string, map[int]bool, []string) {
@@ -227,15 +254,31 @@ func matchFunctions(base []Row, now []FuncRow, contexts []FunctionGroup) (map[in
 			}
 			continue
 		}
+		var members []Declaration
+		if c, ok := contextByKey[k]; ok {
+			members = c.Members
+		}
+		if len(members) == 0 {
+			for _, bi := range indices {
+				members = append(members, Declaration{base[bi].Line, base[bi].Column, true})
+			}
+		}
+		var group []FuncRow
+		for _, ni := range rawGroups[k] {
+			group = append(group, now[ni])
+		}
+		pairs := pairDeclarations(members, group)
 		for order, bi := range indices {
 			if base[bi].Declarations > 0 {
 				order = base[bi].SourceOrder
 			}
-			if order < 0 || order >= len(current) {
+			if order < 0 || order >= len(members) {
 				ambiguous[bi] = "invalid declaration order; baseline --update"
 				continue
 			}
-			matched[bi] = current[order]
+			if ni, ok := pairs[order]; ok {
+				matched[bi] = rawGroups[k][ni]
+			}
 		}
 	}
 	sort.Strings(extraErrors)
