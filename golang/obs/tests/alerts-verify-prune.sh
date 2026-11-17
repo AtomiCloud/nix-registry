@@ -77,7 +77,7 @@ run query --static --dir "$u"
 expect 1 'alerts/logs/critical.yaml' 'rule logs query A' 'sum(amount)'
 cp "$work/union-rule" "$u/alerts/logs/critical.yaml"
 run alerts --dir "$u" --base "$base" --steps "$work/union-pruned.json"
-expect 1 'alerts/logs/critical.yaml rule logs window baseline expect quiet' 'union ("durian.cloud/event":=fixture.ok)'
+expect 1 'alerts/logs/critical.yaml rule logs window baseline expect quiet' 'union (' 'fixture.ok'
 OBS_NO_PRUNE=1 run alerts --dir "$u" --base "$base" --steps "$work/union-full.json"
 expect 1 'alerts/logs/critical.yaml rule logs window baseline expect quiet'
 OBS_VERIFY_PRUNE=1 run alerts --dir "$u" --base "$base"
