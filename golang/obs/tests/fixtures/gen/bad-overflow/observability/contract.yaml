@@ -1,0 +1,8 @@
+service: checkout
+types:
+  big: { kind: int, min: 0, max: 2147483647 }
+metrics:
+  checkout.charges:
+    kind: counter
+    budget: 1
+    labels: { a: big, b: big, c: big } # 2^93 series: does not fit in 64 bits

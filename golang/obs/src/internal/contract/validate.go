@@ -156,8 +156,8 @@ func (c *Contract) Validate() []Issue {
 		w, ok := c.WorstCase(n)
 		if len(m.LabelOrder) > 0 && m.Budget <= 0 {
 			add(p, "budget-missing", "metric %q has labels but no budget: every metric keeps a budget (worst case %d series)", n, w)
-		} else if ok && m.Budget > 0 && w > int64(m.Budget) {
-			add(p, "over-budget", "metric %q worst case is %d series, over its budget of %d", n, w, m.Budget)
+		} else if ok && m.Budget > 0 && (w > int64(m.Budget) || w >= MaxWorst) {
+			add(p, "over-budget", "metric %q worst case is %s series, over its budget of %d", n, worstText(w), m.Budget)
 		}
 	}
 
@@ -196,6 +196,7 @@ func (c *Contract) Validate() []Issue {
 			case KindDate:
 				add(lp, "date-stream-label", "log %q stream label %q has type %q = date: a calendar date is never a VictoriaLogs stream field", k, l, e.StreamLabels[l])
 			}
+			add(lp, "stream-label-declared", "log %q declares stream label %q: the VictoriaLogs stream fields are only the bounded where-from set (concept 3.3: durian.cloud.landscape, .platform, .service, .module, service.name, service.namespace, deployment.environment.name, k8s.namespace.name); a log event adds none, so keep %q an ordinary log field", k, l, l)
 		}
 	}
 
@@ -234,6 +235,13 @@ func (c *Contract) Validate() []Issue {
 	return is
 }
 
+func worstText(w int64) string {
+	if w >= MaxWorst {
+		return "more than 2^53"
+	}
+	return fmt.Sprint(w)
+}
+
 func in(a []string, s string) bool {
 	for _, x := range a {
 		if x == s {
@@ -266,25 +274,32 @@ func (c *Contract) WorstCase(name string) (int64, bool) {
 			ok = false
 			continue
 		}
-		w *= int64(t.Size())
-		if w > MaxWorst {
-			w = MaxWorst
-		}
+		w = satMul(w, int64(t.Size()))
 	}
 	if m.Kind == MetricHistogram {
 		b := m.Buckets
 		if b == 0 {
 			b = DefaultBuckets
 		}
-		w *= int64(b + 2)
+		w = satMul(w, int64(b)+2)
 	}
 	return w, ok
 }
 
+// satMul multiplies and saturates at MaxWorst, so a product that does not fit is still over any budget.
+func satMul(a, b int64) int64 {
+	if a <= 0 || b <= 0 {
+		return 0
+	}
+	if a >= MaxWorst || b >= MaxWorst || a > MaxWorst/b {
+		return MaxWorst
+	}
+	return a * b
+}
+
 // StreamCount is the worst-case number of VictoriaLogs streams: services x landscapes x
-// platforms x modules (the four durian.cloud keys), times the bounded stream labels a log
-// event declares. Log events add no streams of their own (concept 11.4), so without
-// stream_labels it is landscapes x modules for this one service.
+// platforms x modules (the four durian.cloud keys). Log events add no streams of their own
+// (concept 11.4), so for this one service it is landscapes x modules.
 func (c *Contract) StreamCount(landscapes int) int64 {
 	if landscapes < 1 {
 		landscapes = 1
@@ -293,27 +308,7 @@ func (c *Contract) StreamCount(landscapes int) int64 {
 	if mods < 1 {
 		mods = 1
 	}
-	n := int64(landscapes) * int64(mods)
-	extra := int64(1)
-	seen := map[string]bool{}
-	for _, k := range c.LogOrder {
-		e := c.Logs[k]
-		ls := make([]string, 0, len(e.StreamLabels))
-		for l := range e.StreamLabels {
-			ls = append(ls, l)
-		}
-		sort.Strings(ls)
-		for _, l := range ls {
-			if seen[l] {
-				continue
-			}
-			seen[l] = true
-			if t, ok := c.Types[e.StreamLabels[l]]; ok && t.Size() > 0 {
-				extra *= int64(t.Size())
-			}
-		}
-	}
-	return n * extra
+	return int64(landscapes) * int64(mods)
 }
 
 // StoredBase is the name VictoriaMetrics stores for a metric before the kind suffix: dots become _.

@@ -16,13 +16,13 @@ cp "$here/fixtures/gen/good/gen/go/signals/signals.go" "$work/signals/"
 printf 'module example.com/app\n\ngo 1.24\n' >"$work/go.mod"
 cd "$work"
 fail=0
-cp "$g/good.go.txt" main.go
+cp -f "$g/good.go.txt" main.go
 if out=$("$GO" vet ./... 2>&1) && out=$("$GO" run . 2>&1) && grep -q 'stripe checkout.charge.failed error' <<<"$out"; then echo "PASS good.go builds, runs and refuses shard 16"; else
   echo "FAIL good.go: $out"
   fail=1
 fi
 while read -r f token; do
-  cp "$g/$f" main.go
+  cp -f "$g/$f" main.go
   if out=$("$GO" build ./... 2>&1); then
     echo "FAIL $f compiled but must not"
     fail=1

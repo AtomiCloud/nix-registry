@@ -16,22 +16,11 @@ import (
 
 	"github.com/AtomiCloud/obs/internal/contract"
 	"github.com/AtomiCloud/obs/internal/gen"
+	"github.com/AtomiCloud/obs/internal/testfix"
 )
 
 // Fixture finds the fixture contract by walking up from the working directory.
-func Fixture(t testing.TB) string {
-	t.Helper()
-	dir, _ := os.Getwd()
-	for i := 0; i < 8; i++ {
-		p := filepath.Join(dir, "tests", "fixtures", "gen", "good", "observability", "contract.yaml")
-		if _, err := os.Stat(p); err == nil {
-			return p
-		}
-		dir = filepath.Dir(dir)
-	}
-	t.Skip("tests/fixtures/gen/good not found (build from src/ alone)")
-	return ""
-}
+func Fixture(t testing.TB) string { t.Helper(); return testfix.GoodContract(t) }
 
 // Golden generates lang from the fixture contract and compares every file with the committed one.
 func Golden(t *testing.T, lang string) {
