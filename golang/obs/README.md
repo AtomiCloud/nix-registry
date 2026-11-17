@@ -539,9 +539,17 @@ the network.
   `vmagent`, `vmalert`, `vmauth` (VictoriaMetrics), `victoria-logs` (VictoriaLogs), `tempo`,
   `grafana` and `pyroscope`; other images (such as `grafana-image-renderer`, or a sidecar
   inside the Grafana values) are ignored;
-- a map under an `image` key with a `tag` or `digest` and no repository, inside the values of
-  a `Chart.yaml` dependency that is an engine chart, found by its `alias`, else its `name`
-  (`victoria-logs-single.server.image.tag`);
+- one of the engine's own `image` maps with no repository beside it, inside the values of a
+  `Chart.yaml` dependency that is an engine chart, found by its `alias`, else its `name`
+  (`victoria-logs-single.server.image.tag`). Only these paths below the dependency key count
+  (`internal/chartcheck` `ownImage`): `image` (grafana, victoria-metrics-agent, and tempo and
+  pyroscope beside `tempo.image` / `pyroscope.image`), `server.image` (victoria-metrics-single
+  and -alert, victoria-logs-single), `vmstorage.image`, `vmselect.image`, `vminsert.image`
+  (victoria-metrics-cluster), `vlstorage.image`, `vlselect.image`, `vlinsert.image`
+  (victoria-logs-cluster) and the `vmcluster`, `vmsingle`, `vmagent`, `vmalert` `spec` images
+  of victoria-metrics-k8s-stack. Any other image map with no repository (`grafana.sidecar.image.tag`,
+  a renderer, an init container) is not the engine and is never compared; with a repository
+  that is not an engine it is ignored the same way;
 - one string under an `image` key: `repo[:tag][@sha256:...]`. The tag starts after the last
   `:` that follows the last `/`, so a registry port (`myreg.io:5000/grafana/pyroscope:2.4.3`)
   is not a tag.
@@ -558,6 +566,12 @@ drift even behind the right tag. An image pinned **by digest only** is accepted 
 equals the recorded digest; with no digest recorded for that engine it fails with `pinned by
 digest only; cannot prove version <pin>`. A tag together with a digest compares both.
 
+Proof is per dependency and per image: two aliases of one engine each need their own resolved
+version, and every engine image map or string (each component of a cluster chart that the
+values set) must itself give a tag or a digest, so one matched occurrence never hides another
+unresolved one. A component the values do not set at all falls back to the chart default and is
+not checked.
+
 Exit 0 when every version and digest found equals its pin. Exit 1 on any failure, one line each
 naming file, line, key, the chart value and the pin: `values.yaml:18 tempo.tempo.tag: chart
 3.1.0, pin Tempo 3.1.1 [engine-pin-drift]`. These also exit 1, never a note: an engine the
@@ -570,7 +584,7 @@ another pins file instead of the built-in one (it exists so the digest-less case
 
 MEASURED: unit tests (`src/internal/chartcheck`) and `tests/engines.sh` with the fixture charts
 in `tests/fixtures/engines` (`matching` exit 0; `drifted`, `digest-drift`, `tag-no-repository`,
-`missing-tag`, `registry-port` and `digest-only-no-pin` exit 1; `digest-ok` exit 0; `none`
+`missing-tag`, `registry-port`, `two-aliases-missing`, `cluster-missing` and `digest-only-no-pin` exit 1; `digest-ok`, `two-aliases-ok`, `cluster-ok` and `sidecar-tag` exit 0; `none`
 exit 2). **NOT TESTED:** the real chart's location in the chart registry is not specified, so
 wiring this command into a consumer's CI is not tested; the fixtures follow the common upstream
 value shapes, and an umbrella chart that keeps its image tags outside `values.yaml` (for
@@ -1684,6 +1698,7 @@ source) where its section says so.
 **Commands and builds**
 
 - `obs engines --check-chart` wired into a consumer's CI: the real chart's location in the chart registry is not specified, so the command is tested only on fixture charts ([obs engines --check-chart](#obs-engines---check-chart)). Chart pins in the nightly parity job are in the same position.
+- `obs engines --check-chart` does not check a component whose image the values never set (it uses the chart default), and reads only the image paths listed under its section.
 - `obs engines --check-chart` reads `Chart.yaml` and `values.yaml` only: an engine image set in a template or in another values file is not read, and a digest is compared with the recorded image digest, not resolved against a registry.
 - `obs sandbox up` on aarch64 and macOS, and with podman (the box that ran it has docker only); Tempo and Pyroscope take no data from the seed yet ([`obs sandbox`](#obs-sandbox-the-local-stack-for-people)).
 - `obs look` with a pull request on GitHub: the agent posts the comment; obs only prints the prompt ([`obs look`](#obs-look-dashboard-screenshots-reviewed-by-the-calling-agent)).

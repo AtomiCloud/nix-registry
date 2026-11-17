@@ -1,0 +1,9 @@
+grafana:
+  image:
+    tag: 13.3.0
+  sidecar:
+    image:
+      tag: 1.30.0
+  imageRenderer:
+    image:
+      tag: 3.0.0

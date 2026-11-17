@@ -384,3 +384,71 @@ func TestTagAndDigestStringIsNotDriftWhenBothMatch(t *testing.T) {
 		t.Fatalf("repo:tag@digest equal to both pins: %v %+v", err, res)
 	}
 }
+
+// ---- round 3: proof is per dependency alias and per image occurrence -------------------------
+
+func TestTwoAliasesOfOneEngineEachNeedAVersion(t *testing.T) {
+	dep := "  - name: grafana\n    alias: dashboards\n    version: 9.0.0\n  - name: grafana\n    alias: second\n    version: 9.0.0\n"
+	g := pins.All()["Grafana"].Version
+	res, err := Check(depChart(t, dep, "dashboards:\n  image:\n    tag: "+g+"\nsecond:\n  replicas: 2\n"), pins.All())
+	if err != nil || len(res.Findings) != 1 {
+		t.Fatalf("the matched alias must not hide the unresolved one: %v %+v", err, res)
+	}
+	f := res.Findings[0]
+	if f.Kind != KindMissing || f.Key != "second" || f.File != "Chart.yaml" || f.Line == 0 {
+		t.Fatalf("finding must name the alias that has no version: %+v", f)
+	}
+	// Control: both aliases resolved.
+	res, err = Check(depChart(t, dep, "dashboards:\n  image:\n    tag: "+g+"\nsecond:\n  image:\n    tag: "+g+"\n"), pins.All())
+	if err != nil || len(res.Findings) != 0 || len(res.Matches) != 2 {
+		t.Fatalf("both aliases resolved: %v %+v", err, res)
+	}
+	// A drifted second alias is named on its own key.
+	res, err = Check(depChart(t, dep, "dashboards:\n  image:\n    tag: "+g+"\nsecond:\n  image:\n    tag: 12.0.0\n"), pins.All())
+	if err != nil || len(res.Findings) != 1 || res.Findings[0].Key != "second.image.tag" {
+		t.Fatalf("drift on the second alias: %v %+v", err, res)
+	}
+}
+
+func TestEveryComponentImageOfAClusterChartMustResolve(t *testing.T) {
+	dep := "  - name: victoria-metrics-cluster\n    version: 0.99.0\n"
+	vm := pins.All()["VictoriaMetrics"].Version
+	for name, c := range map[string]struct{ values, key string }{
+		"empty image map":       {"victoria-metrics-cluster:\n  vmstorage:\n    image:\n      tag: " + vm + "-cluster\n  vmselect:\n    image: {}\n", "victoria-metrics-cluster.vmselect.image"},
+		"image map with no tag": {"victoria-metrics-cluster:\n  vmstorage:\n    image:\n      tag: " + vm + "-cluster\n  vmselect:\n    image:\n      pullPolicy: Always\n", "victoria-metrics-cluster.vmselect.image"},
+		"empty tag":             {"victoria-metrics-cluster:\n  vmstorage:\n    image:\n      tag: " + vm + "-cluster\n  vmselect:\n    image:\n      tag: \"\"\n", "victoria-metrics-cluster.vmselect.image"},
+		"repository, no tag":    {"victoria-metrics-cluster:\n  vmstorage:\n    image:\n      tag: " + vm + "-cluster\n  vmselect:\n    image:\n      repository: victoriametrics/vmselect\n", "victoria-metrics-cluster.vmselect.image"},
+		"first component empty": {"victoria-metrics-cluster:\n  vmstorage:\n    image: {}\n  vmselect:\n    image:\n      tag: " + vm + "-cluster\n", "victoria-metrics-cluster.vmstorage.image"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			res, err := Check(depChart(t, dep, c.values), pins.All())
+			if err != nil || len(res.Findings) != 1 {
+				t.Fatalf("one resolved component must not hide the other: %v %+v", err, res)
+			}
+			if f := res.Findings[0]; f.Kind != KindMissing || f.Key != c.key || f.File != "values.yaml" || f.Line == 0 || f.Engine != "VictoriaMetrics" {
+				t.Fatalf("finding must name the component image: %+v", f)
+			}
+		})
+	}
+	// Control: every component resolved.
+	ok := "victoria-metrics-cluster:\n  vmstorage:\n    image:\n      tag: " + vm + "-cluster\n  vmselect:\n    image:\n      tag: " + vm + "-cluster\n  vminsert:\n    image:\n      tag: " + vm + "-cluster\n"
+	if res, err := Check(depChart(t, dep, ok), pins.All()); err != nil || len(res.Findings) != 0 || len(res.Matches) != 3 {
+		t.Fatalf("all three components resolved: %v %+v", err, res)
+	}
+}
+
+func TestOnlyTheEnginesOwnImageKeysCount(t *testing.T) {
+	// A sidecar or renderer image with no repository beside its tag is not the engine.
+	dep := "  - name: grafana\n    version: 9.0.0\n"
+	g := pins.All()["Grafana"].Version
+	values := "grafana:\n  image:\n    tag: " + g + "\n  sidecar:\n    image:\n      tag: 1.30.0\n  imageRenderer:\n    image:\n      tag: 3.0.0\n  initChownData:\n    image:\n      tag: 1.36\n"
+	res, err := Check(depChart(t, dep, values), pins.All())
+	if err != nil || len(res.Findings) != 0 || len(res.Matches) != 1 {
+		t.Fatalf("only grafana.image counts: %v %+v", err, res)
+	}
+	// Without the engine's own image the sidecar tag proves nothing: the dependency has no version.
+	res, err = Check(depChart(t, dep, "grafana:\n  sidecar:\n    image:\n      tag: 1.30.0\n"), pins.All())
+	if err != nil || len(res.Findings) != 1 || res.Findings[0].Kind != KindMissing || res.Findings[0].Key != "grafana" {
+		t.Fatalf("a sidecar tag must not prove the Grafana version: %v %+v", err, res)
+	}
+}

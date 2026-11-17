@@ -4,18 +4,21 @@
 // values.yaml: every image of an engine, in one of these shapes:
 //
 //   - a map with `repository` and `tag` and/or `digest` (the repository names the engine);
-//   - a map under an `image` key with a `tag` or `digest` and no repository, inside the values of
-//     a Chart.yaml dependency that is an engine chart (keyed by the dependency's alias, else its
-//     name): `victoria-logs-single.server.image.tag`;
+//   - one of the engine's own `image` maps, with no repository beside it, inside the values of a
+//     Chart.yaml dependency that is an engine chart (keyed by the dependency's alias, else its
+//     name), at a path listed in ownImage: `victoria-logs-single.server.image.tag`. Any other image
+//     map with no repository (`grafana.sidecar.image.tag`) is not the engine and is never compared;
 //   - one `repo[:tag][@digest]` string under an `image` key.
 //
 // Chart.yaml: which engine charts the folder depends on, and `appVersion` when the chart itself
 // is an engine chart. A dependency's `version` is a chart version, not an application version,
 // so it is never compared with a pin.
 //
-// An engine the chart uses but whose version cannot be read (a dependency with no image tag, an
-// empty tag that falls back to the chart default, an image with no tag or digest) is a failure:
-// obs cannot prove the version, and a silent pass would hide the drift.
+// An engine the chart uses but whose version cannot be read is a failure: obs cannot prove the
+// version, and a silent pass would hide the drift. Proof is per dependency (each alias of one
+// engine needs its own) and per image (each engine image map or string must itself give a tag or
+// a digest), so one matched occurrence never hides another unresolved one. A component whose image
+// the values do not set at all falls back to the chart default and is not checked.
 package chartcheck
 
 import (
@@ -93,12 +96,45 @@ type place struct {
 	line      int
 }
 
+type dep struct {
+	engine, name string // the engine and the chart name
+	place
+}
+
 type scan struct {
 	pin      map[string]pins.Pin
 	res      *Result
-	present  map[string]place  // engine -> where it was first seen
-	compared map[string]bool   // engine -> a version or digest was compared, or a finding was raised
-	depKeys  map[string]string // values.yaml top-level key (alias or name) -> engine
+	present  map[string]place // engine -> where an engine chart or image outside any dependency was first seen
+	compared map[string]bool  // engine -> one of those had a version or digest compared, or a finding raised
+	deps     map[string]dep   // values.yaml top-level key (alias or name) -> engine dependency
+	proved   map[string]bool  // dependency key -> one of its images was resolved or reported
+}
+
+// ownImage lists, per engine chart, the paths (below the dependency's values key) of the engine's
+// own `image` maps. Everything else with an image map (sidecars, renderers, init containers) is
+// not the engine.
+var ownImage = map[string][]string{
+	"grafana":                    {"image"},
+	"tempo":                      {"image", "tempo.image"},
+	"tempo-distributed":          {"image", "tempo.image"},
+	"pyroscope":                  {"image", "pyroscope.image"},
+	"victoria-metrics-single":    {"server.image"},
+	"victoria-metrics-cluster":   {"vmstorage.image", "vmselect.image", "vminsert.image"},
+	"victoria-metrics-agent":     {"image"},
+	"victoria-metrics-alert":     {"server.image"},
+	"victoria-metrics-k8s-stack": {"vmcluster.spec.vmstorage.image", "vmcluster.spec.vmselect.image", "vmcluster.spec.vminsert.image", "vmsingle.spec.image", "vmagent.spec.image", "vmalert.spec.image"},
+	"victoria-logs-single":       {"server.image"},
+	"victoria-logs-cluster":      {"vlstorage.image", "vlselect.image", "vlinsert.image"},
+}
+
+func isOwnImage(chart string, rel []string) bool {
+	j := strings.Join(rel, ".")
+	for _, p := range ownImage[chart] {
+		if p == j {
+			return true
+		}
+	}
+	return false
 }
 
 // Check reads dir and compares it with pin. A missing or unreadable folder is an error;
@@ -112,7 +148,7 @@ func Check(dir string, pin map[string]pins.Pin) (Result, error) {
 	if !st.IsDir() {
 		return res, fmt.Errorf("%s is not a folder", dir)
 	}
-	s := &scan{pin: pin, res: &res, present: map[string]place{}, compared: map[string]bool{}, depKeys: map[string]string{}}
+	s := &scan{pin: pin, res: &res, present: map[string]place{}, compared: map[string]bool{}, deps: map[string]dep{}, proved: map[string]bool{}}
 	if root, err := readNode(filepath.Join(dir, "Chart.yaml")); err != nil {
 		return res, err
 	} else if root != nil {
@@ -123,13 +159,18 @@ func Check(dir string, pin map[string]pins.Pin) (Result, error) {
 	} else if root != nil {
 		s.walk(root, nil, "", "")
 	}
-	if len(s.present) == 0 {
+	if len(s.present) == 0 && len(s.deps) == 0 {
 		return res, fmt.Errorf("%w in %s (looked at Chart.yaml dependencies and values.yaml images for %s)", ErrNoEngines, dir, engineList(pin))
 	}
 	for _, e := range sortedPlaces(s.present) {
 		if !s.compared[e] {
 			p := s.present[e]
 			res.Findings = append(res.Findings, Finding{File: p.file, Line: p.line, Key: p.key, Engine: e, PinValue: pin[e].Version, Kind: KindMissing})
+		}
+	}
+	for _, key := range sortedDeps(s.deps) {
+		if d := s.deps[key]; !s.proved[key] {
+			res.Findings = append(res.Findings, Finding{File: d.file, Line: d.line, Key: key, Engine: d.engine, PinValue: pin[d.engine].Version, Kind: KindMissing})
 		}
 	}
 	return res, nil
@@ -205,41 +246,43 @@ func (s *scan) chartYAML(root *yaml.Node) {
 			if _, alias := mapGet(d, "alias"); alias != nil && alias.Value != "" {
 				key = alias.Value
 			}
-			s.depKeys[key] = e
-			s.see(e, "Chart.yaml", key, k.Line)
+			s.deps[key] = dep{engine: e, name: n.Value, place: place{"Chart.yaml", key, k.Line}}
 		}
 	}
 }
 
-// walk looks for images. engine is the engine of the dependency whose values it is inside
-// ("" outside any); parent is the key of the map it is in.
-func (s *scan) walk(n *yaml.Node, path []string, engine, parent string) {
+// walk looks for images. ctx is the values key of the engine dependency whose values it is
+// inside ("" outside any); parent is the key of the map it is in.
+func (s *scan) walk(n *yaml.Node, path []string, ctx, parent string) {
 	switch n.Kind {
 	case yaml.MappingNode:
-		s.imageMap(n, path, engine, parent)
+		s.imageMap(n, path, ctx, parent)
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			key, val := n.Content[i], n.Content[i+1]
 			p := append(append([]string{}, path...), key.Value)
-			sub := engine
+			sub := ctx
 			if len(path) == 0 {
-				sub = s.depKeys[key.Value]
+				if _, ok := s.deps[key.Value]; ok {
+					sub = key.Value
+				}
 			}
 			if key.Value == "image" && val.Kind == yaml.ScalarNode {
-				s.imageString(val.Value, strings.Join(p, "."), key.Line)
+				s.imageString(val.Value, strings.Join(p, "."), key.Line, sub)
 				continue
 			}
 			s.walk(val, p, sub, key.Value)
 		}
 	case yaml.SequenceNode:
 		for i, c := range n.Content {
-			s.walk(c, append(append([]string{}, path...), fmt.Sprintf("[%d]", i)), engine, parent)
+			s.walk(c, append(append([]string{}, path...), fmt.Sprintf("[%d]", i)), ctx, parent)
 		}
 	}
 }
 
-// imageMap handles a map that is an image: it has a repository that names an engine, or it is
-// the `image` map of an engine dependency and has a tag or digest.
-func (s *scan) imageMap(n *yaml.Node, path []string, depEngine, parent string) {
+// imageMap handles a map that is an engine image: it has a repository that names an engine, or it
+// is one of the engine's own `image` maps (ownImage) inside the values of its dependency. Each such
+// map must itself give a tag or a digest: one resolved image never stands in for another.
+func (s *scan) imageMap(n *yaml.Node, path []string, ctx, parent string) {
 	rk, repo := mapGet(n, "repository")
 	tk, tag := mapGet(n, "tag")
 	dk, dg := mapGet(n, "digest")
@@ -250,8 +293,8 @@ func (s *scan) imageMap(n *yaml.Node, path []string, depEngine, parent string) {
 		if e, ok = engineOfRepo(repo.Value); !ok {
 			return // some other image
 		}
-	case parent == "image" && depEngine != "" && (tag != nil || dg != nil):
-		e = depEngine
+	case parent == "image" && ctx != "" && isOwnImage(s.deps[ctx].name, path[1:]):
+		e = s.deps[ctx].engine
 	default:
 		return
 	}
@@ -259,13 +302,13 @@ func (s *scan) imageMap(n *yaml.Node, path []string, depEngine, parent string) {
 		return
 	}
 	key := strings.Join(path, ".")
-	line := 0
+	line := n.Line
 	for _, k := range []*yaml.Node{rk, tk, dk} {
-		if k != nil && (line == 0 || k.Line < line) {
+		if k != nil && k.Line < line {
 			line = k.Line
 		}
 	}
-	s.see(e, "values.yaml", key, line)
+	s.occurrence(e, key, line, ctx)
 	img := image{engine: e, file: "values.yaml"}
 	if tag != nil && tag.Kind == yaml.ScalarNode && tag.Value != "" {
 		img.tag, img.tagLine, img.tagKey = tag.Value, tk.Line, key+".tag"
@@ -279,8 +322,7 @@ func (s *scan) imageMap(n *yaml.Node, path []string, depEngine, parent string) {
 		img.digest, img.digestLine, img.digestKey = dg.Value, dk.Line, key+".digest"
 	}
 	if img.tag == "" && img.digest == "" {
-		s.compared[e] = true
-		s.res.Findings = append(s.res.Findings, Finding{File: "values.yaml", Line: line, Key: key, Engine: e, PinValue: s.pin[e].Version, Kind: KindMissing})
+		s.missing(e, key, line)
 		return
 	}
 	s.check(img)
@@ -288,7 +330,7 @@ func (s *scan) imageMap(n *yaml.Node, path []string, depEngine, parent string) {
 
 // imageString handles `image: repo[:tag][@digest]`. The tag starts after the last ':' that
 // follows the last '/', so a registry port is not a tag.
-func (s *scan) imageString(ref, key string, line int) {
+func (s *scan) imageString(ref, key string, line int, ctx string) {
 	ref, digest, _ := strings.Cut(strings.TrimSpace(ref), "@")
 	repo, tag := ref, ""
 	if i := strings.LastIndex(ref, ":"); i > strings.LastIndex(ref, "/") {
@@ -298,13 +340,28 @@ func (s *scan) imageString(ref, key string, line int) {
 	if !ok || s.pin[e].Version == "" {
 		return
 	}
-	s.see(e, "values.yaml", key, line)
+	s.occurrence(e, key, line, ctx)
 	if tag == "" && digest == "" {
-		s.compared[e] = true
-		s.res.Findings = append(s.res.Findings, Finding{File: "values.yaml", Line: line, Key: key, Engine: e, PinValue: s.pin[e].Version, Kind: KindMissing})
+		s.missing(e, key, line)
 		return
 	}
 	s.check(image{engine: e, file: "values.yaml", tag: tag, tagLine: line, tagKey: key, digest: digest, digestLine: line, digestKey: key})
+}
+
+// occurrence records that an engine image was found: for its dependency (every alias needs its own
+// proof) or, outside any dependency, for the engine.
+func (s *scan) occurrence(engine, key string, line int, ctx string) {
+	if ctx != "" {
+		s.proved[ctx] = true
+		return
+	}
+	s.see(engine, "values.yaml", key, line)
+}
+
+// missing reports an engine image with no tag and no digest.
+func (s *scan) missing(engine, key string, line int) {
+	s.compared[engine] = true
+	s.res.Findings = append(s.res.Findings, Finding{File: "values.yaml", Line: line, Key: key, Engine: engine, PinValue: s.pin[engine].Version, Kind: KindMissing})
 }
 
 // image is one engine image as the chart writes it: a tag, a digest, or both.
@@ -370,6 +427,15 @@ func (s *scan) compare(engine, file, key, value string, line int) {
 }
 
 func sortedPlaces(m map[string]place) []string {
+	var s []string
+	for k := range m {
+		s = append(s, k)
+	}
+	sort.Strings(s)
+	return s
+}
+
+func sortedDeps(m map[string]dep) []string {
 	var s []string
 	for k := range m {
 		s = append(s, k)
