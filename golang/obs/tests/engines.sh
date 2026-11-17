@@ -50,6 +50,20 @@ sed -i 's/version: 9.9.9/version: 1.0.0/' "$work/c/Chart.yaml"
 run engines --check-chart "$work/c"
 expect 0 'ok:'
 
+run engines --check-chart "$fx/digest-ok"
+expect 0 'digest sha256:bf6675' 'pin Pyroscope digest'
+run engines --check-chart "$fx/digest-drift"
+expect 1 'values.yaml:2 pyroscope.image' 'chart digest sha256:0000' 'pin Pyroscope digest sha256:bf6675' '[engine-pin-drift]'
+# A digest-only image with no digest recorded for the engine cannot prove the version: red, never a pass.
+run engines --check-chart "$fx/digest-only-no-pin" --pins "$fx/pins-pyroscope-no-digest.json"
+expect 1 'values.yaml:2 pyroscope.image' 'sha256:0000' 'pinned by digest only; cannot prove version 2.4.3'
+run engines --check-chart "$fx/tag-no-repository"
+expect 1 'values.yaml:' 'victoria-logs-single.server.image.tag' 'chart v1.50.0' 'VictoriaLogs v1.54.0'
+run engines --check-chart "$fx/missing-tag"
+expect 1 'values.yaml:' 'grafana.image' 'cannot prove version 13.3.0' '[engine-pin-missing]'
+run engines --check-chart "$fx/registry-port"
+expect 1 'pyroscope.image' 'chart 2.4.0' 'Pyroscope 2.4.3'
+
 run engines --check-chart "$fx/none"
 expect 2 'no engine found'
 run engines --check-chart "$work/missing"

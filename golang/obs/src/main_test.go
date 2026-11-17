@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -165,6 +166,64 @@ func TestEndToEnd(t *testing.T) {
 	for _, line := range []string{"engine VictoriaMetrics ", "engine VictoriaLogs ", "engine Grafana ", "reference Pyroscope ", "reference VictoriaLogsDatasource "} {
 		if !strings.Contains(out, line) {
 			t.Errorf("version missing %q: %s", line, out)
+		}
+	}
+}
+
+// Every flag of these commands is named in the usage lines (main.go) and in the README
+// Usage block: the flag set's own listing is the source of truth.
+func TestUsageListsEveryFlag(t *testing.T) {
+	readme, _ := os.ReadFile("../README.md") // absent in a build from src/ alone: then only main.go is checked
+	block := string(readme)
+	if i := strings.Index(block, "## Usage"); i >= 0 {
+		block = block[i:]
+		if j := strings.Index(block[3:], "\n## "); j >= 0 {
+			block = block[:j+3]
+		}
+	}
+	flagRE := regexp.MustCompile(`(?m)^\s+-([a-z][a-z0-9-]*)`)
+	for _, c := range []struct {
+		name string
+		args []string
+		line string // the usage lines that belong to the command start with this
+	}{
+		{"alerts", []string{"alerts", "-h"}, "obs alerts"},
+		{"query", []string{"query", "-h"}, "obs query"},
+		{"sandbox", []string{"sandbox", "up", "-h"}, "obs sandbox"},
+		{"look", []string{"look", "-h"}, "obs look"},
+		{"scrape", []string{"scrape", "-h"}, "obs scrape"},
+	} {
+		_, listing := obs(c.args...)
+		flags := flagRE.FindAllStringSubmatch(listing, -1)
+		if len(flags) == 0 {
+			t.Fatalf("%s: no flags listed by -h: %s", c.name, listing)
+		}
+		for _, f := range flags {
+			if f[1] == "h" || f[1] == "help" {
+				continue
+			}
+			for label, src := range map[string]string{"main.go usage": usage, "README Usage": block} {
+				if src == "" {
+					continue
+				}
+				var own []string
+				in := false
+				for _, l := range strings.Split(src, "\n") {
+					t := strings.TrimSpace(l)
+					switch {
+					case strings.HasPrefix(t, c.line):
+						in = true
+						own = append(own, l)
+					case in && strings.HasPrefix(t, "["): // a continuation line
+						own = append(own, l)
+					default:
+						in = false
+					}
+				}
+				if !strings.Contains(strings.Join(own, "\n"), "--"+f[1]) {
+					t.Errorf("obs %s --%s is not in the %s", c.name, f[1], label)
+				}
+			}
 		}
 	}
 }

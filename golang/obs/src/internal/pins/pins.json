@@ -1,8 +1,26 @@
 {
-  "VictoriaMetrics": { "version": "v1.156.0" },
-  "VictoriaLogs": { "version": "v1.54.0", "commit": "6433dae5" },
-  "Tempo": { "version": "3.1.1", "commit": "9db7df79d2af" },
-  "Grafana": { "version": "13.3.0", "commit": "752e3462" },
-  "Pyroscope": { "version": "2.4.3" },
+  "VictoriaMetrics": {
+    "version": "v1.156.0",
+    "digest": "sha256:da8a90ac0912f16589be2b96a6441a2fca4bca415c83783d972d92e3b5b66970"
+  },
+  "VictoriaLogs": {
+    "version": "v1.54.0",
+    "commit": "6433dae5",
+    "digest": "sha256:ee4e820cac3721f5f5d91641b950c22439593adc4224f9655e5333d5a84c1dfe"
+  },
+  "Tempo": {
+    "version": "3.1.1",
+    "commit": "9db7df79d2af",
+    "digest": "sha256:64e2fbd56d9c2b3412a4b430a58ea59e91a670b1e75f920a0c702213ad145044"
+  },
+  "Grafana": {
+    "version": "13.3.0",
+    "commit": "752e3462",
+    "digest": "sha256:488984b716c0862639f91a698adbe2862677a5a07bad42da5f03f3030883b205"
+  },
+  "Pyroscope": {
+    "version": "2.4.3",
+    "digest": "sha256:bf667534cd403320573063894e3faba20a5a5d1bfb92eddaecfabeb2446c502b"
+  },
   "VictoriaLogsDatasource": { "version": "v0.34.0" }
 }

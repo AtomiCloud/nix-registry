@@ -1,0 +1,2 @@
+pyroscope:
+  image: grafana/pyroscope@sha256:bf667534cd403320573063894e3faba20a5a5d1bfb92eddaecfabeb2446c502b

@@ -14,6 +14,7 @@ func runEngines(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("obs engines", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dir := fs.String("check-chart", "", "a Helm chart folder (Chart.yaml and values.yaml) to compare with the engine pins")
+	pinsFile := fs.String("pins", "", "pins file to compare with (default: the pins built into obs; for tests)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -21,7 +22,15 @@ func runEngines(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "obs engines: give --check-chart <chart folder>")
 		return 2
 	}
-	res, err := chartcheck.Check(*dir, pins.All())
+	pin := pins.All()
+	if *pinsFile != "" {
+		var err error
+		if pin, err = pins.Load(*pinsFile); err != nil {
+			fmt.Fprintf(stderr, "obs engines: %v\n", err)
+			return 2
+		}
+	}
+	res, err := chartcheck.Check(*dir, pin)
 	if err != nil {
 		fmt.Fprintf(stderr, "obs engines --check-chart: %v\n", err)
 		return 2

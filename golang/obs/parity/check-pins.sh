@@ -14,10 +14,11 @@ jq -en --slurpfile pins "$pins" --slurpfile images "$images" '
       $job.plugin == ("victoriametrics-logs-datasource@" + ($pin.version | ltrimstr("v")))
     else
       ($job.image | split(":") | last) == $pin.version and
-      ($job.digest | test("^sha256:[a-f0-9]{64}$"))
+      ($job.digest | test("^sha256:[a-f0-9]{64}$")) and
+      $pin.digest == $job.digest
     end))
 ' >/dev/null || {
-  echo "parity images.json: engine version, commit, image tag or datasource plugin differs from obs pins.json" >&2
+  echo "parity images.json: engine version, commit, image tag, digest or datasource plugin differs from obs pins.json" >&2
   exit 1
 }
 echo "Parity pins match (chart pins NOT TESTED; no chart pin location is registered)."
