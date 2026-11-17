@@ -11,6 +11,7 @@ import (
 
 	"github.com/AtomiCloud/obs/internal/check"
 	"github.com/AtomiCloud/obs/internal/files"
+	"github.com/AtomiCloud/obs/internal/sandbox"
 )
 
 // version is set by the nix build (-X main.version=...).
@@ -30,7 +31,9 @@ usage:
   obs alerts [--dir observability] [--seed seed.yaml] [--base unix] [--out results.json]
   obs check [--dir observability] [--pods n] [--landscapes n]
   obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
-
+  obs sandbox up|down|status [--dir observability] [--project name] [--port-base n]
+  obs scrape --target <url> [--label name=value] [--interval 15s] [--once]
+  obs look [--base origin/main] [--all] [--json]
   obs links [--dir observability] [--seed seed.yaml] [--base unix]
   obs version
 
@@ -50,7 +53,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "alerts":
 		return runAlerts(args[1:], stdout, stderr)
-
+	case "scrape":
+		return runScrape(args[1:], stdout, stderr)
+	case "sandbox":
+		return runSandbox(args[1:], stdout, stderr)
+	case "look":
+		return runLook(args[1:], stdout, stderr)
 	case "links":
 		return runLinks(args[1:], stdout, stderr)
 	case "query":
@@ -73,6 +81,9 @@ func printVersion(w io.Writer) {
 	fmt.Fprintf(w, "engine VictoriaMetrics %s (MetricsQL)\n", pinVictoriaMetrics)
 	fmt.Fprintf(w, "engine VictoriaLogs %s (LogsQL)\n", pinVictoriaLogs)
 	fmt.Fprintln(w, "engine Grafana 13.3.0 (commit 752e3462; alert math and state machine)")
+	for _, l := range sandbox.PinLines() {
+		fmt.Fprintln(w, l)
+	}
 	fmt.Fprintln(w, "licence AGPL-3.0-only; source: https://github.com/AtomiCloud/nix-registry/tree/main/golang/obs (each release also attaches a source and vendored-modules tarball)")
 	if bi, ok := debug.ReadBuildInfo(); ok {
 		fmt.Fprintf(w, "go %s\n", bi.GoVersion)
