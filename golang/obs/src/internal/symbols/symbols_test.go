@@ -60,10 +60,10 @@ func TestUnknownPassThrough(t *testing.T) {
 	}
 }
 func TestNativeELFDecode(t *testing.T) {
-	if runtime.GOOS != "linux" {
-		t.Skip("ELF fixture requires Linux")
-	}
 	if _, err := exec.LookPath("llvm-symbolizer"); err != nil {
+		if os.Getenv("OBS_REQUIRE_LLVM") == "" && (errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist)) {
+			t.Skip("llvm-symbolizer absent in dev shell; Nix check sets OBS_REQUIRE_LLVM=1 and requires this proof")
+		}
 		t.Fatal("llvm-symbolizer required for the native ELF proof (nativeCheckInputs)")
 	}
 	work := t.TempDir()
@@ -75,7 +75,7 @@ func TestNativeELFDecode(t *testing.T) {
 	bin := filepath.Join(work, "fixture")
 	cmd := exec.Command(filepath.Join(runtime.GOROOT(), "bin", "go"), "build", "-ldflags=-B 0x00112233445566778899aabbccddeeff", "-o", bin, src)
 	cmd.Dir = work
-	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOTOOLCHAIN=local", "GOPROXY=off", "GOSUMDB=off", "GOWORK=off")
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux", "GOTOOLCHAIN=local", "GOPROXY=off", "GOSUMDB=off", "GOWORK=off")
 	if b, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("build offline ELF: %v: %s", err, b)
 	}
@@ -115,11 +115,12 @@ func TestNativeELFDecode(t *testing.T) {
 	}
 	// The same debug ELF represents Dart split debug info for the generic native
 	// address decoder; real Flutter ABI artifacts are not claimed as tested.
-	if _, err = Put(context.Background(), store, Ref{"dart", "aabb", "fixture"}, data, []byte(`{"a":"realName"}`)); err != nil {
+	dartStore := Directory{Root: filepath.Join(work, "dart-store")}
+	if _, err = Put(context.Background(), dartStore, Ref{"dart", "00112233445566778899aabbccddeeff", "fixture"}, data, []byte(`{"a":"realName"}`)); err != nil {
 		t.Fatal(err)
 	}
-	dart := strings.Replace(stack, "00112233445566778899aabbccddeeff", "aabb", 1)
-	got, err = (Decoder{Store: store}).Decode(context.Background(), dart)
+	dart := fmt.Sprintf("build_id: '00112233445566778899aabbccddeeff'\n#00 abs 7fffffff virt %x _kDartIsolateSnapshotInstructions+0x1\n", offset)
+	got, err = (Decoder{Store: dartStore}).Decode(context.Background(), dart)
 	if err != nil || !strings.Contains(got, "main.target") {
 		t.Fatalf("Dart-key fallback: %s %v", got, err)
 	}
@@ -225,10 +226,10 @@ func TestPDBMalformedDoesNotPanic(t *testing.T) {
 func TestMissingLLVMKeepsNativeLinesAndNotesOnce(t *testing.T) {
 	ctx := context.Background()
 	store := Directory{Root: t.TempDir()}
-	if _, err := Put(ctx, store, Ref{"native", "aabb", "app"}, []byte("fixture bytes"), nil); err != nil {
+	if _, err := Put(ctx, store, Ref{"native", "00112233445566778899aabbccddeeff", "app"}, reviewELF(), nil); err != nil {
 		t.Fatal(err)
 	}
-	stack := "at app+0x123\nat app+0x456\nbuild-id: aabb\n"
+	stack := "at app+0x123\nat app+0x456\nbuild-id: 00112233445566778899aabbccddeeff\n"
 	var notes bytes.Buffer
 	got, err := (Decoder{Store: store, Symbolizer: LLVM{Executable: filepath.Join(t.TempDir(), "missing-symbolizer")}, Notes: &notes}).Decode(ctx, stack)
 	if err != nil || got != stack {

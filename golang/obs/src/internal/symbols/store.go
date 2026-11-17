@@ -110,6 +110,15 @@ func Put(ctx context.Context, b Backend, r Ref, data, obfuscationMap []byte) (st
 	if len(data) == 0 {
 		return "", fmt.Errorf("%s: empty symbol file", key)
 	}
+	if r.Kind == "native" || r.Kind == "dart" {
+		actual, e := ELFBuildID(data)
+		if e != nil {
+			return "", fmt.Errorf("%s: %w", key, e)
+		}
+		if !strings.EqualFold(actual, r.ID) {
+			return "", fmt.Errorf("%s: GNU build-id mismatch: file=%s requested=%s", key, actual, r.ID)
+		}
+	}
 	if r.Kind == "jit" {
 		if _, err = readPDB(data); err != nil {
 			return "", fmt.Errorf("%s: %w", key, err)

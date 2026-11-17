@@ -122,7 +122,43 @@ func (h HTTP) Counts(ctx context.Context, store string, c Config, end time.Time)
 	if store == "pyroscope" {
 		return profileCounts(b, start)
 	}
+	if store == "tempo" {
+		return tempoCounts(b, start)
+	}
 	return matrixCounts(b, start)
+}
+
+func tempoCounts(b []byte, start time.Time) ([]float64, error) {
+	var reply struct {
+		Series []struct {
+			Samples []struct {
+				Timestamp json.Number `json:"timestampMs"`
+				Value     float64     `json:"value"`
+			} `json:"samples"`
+		} `json:"series"`
+	}
+	if err := json.Unmarshal(b, &reply); err != nil {
+		return nil, err
+	}
+	if len(reply.Series) != 1 {
+		return nil, fmt.Errorf("known Tempo dataset: want one aggregate series, got %d", len(reply.Series))
+	}
+	values, seen := make([]float64, 60), make([]bool, 60)
+	for _, sample := range reply.Series[0].Samples {
+		ts, err := strconv.ParseFloat(string(sample.Timestamp), 64)
+		if err != nil {
+			return nil, err
+		}
+		if err = insertMinute(values, seen, start, ts/1000, sample.Value); err != nil {
+			return nil, err
+		}
+	}
+	for _, present := range seen {
+		if !present {
+			return nil, fmt.Errorf("known Tempo dataset: missing minute")
+		}
+	}
+	return values, nil
 }
 func matrixCounts(b []byte, start time.Time) ([]float64, error) {
 	var reply struct {

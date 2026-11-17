@@ -24,7 +24,8 @@ type Estimate struct {
 	MetricsIngestMemoryGBHigh float64 `json:"metrics_ingest_memory_gb_high"`
 	MetricsDiskGBPerDay       float64 `json:"metrics_disk_gb_per_day"`
 	BucketGBPerDay            float64 `json:"bucket_gb_per_day"`
-	LogsBucketGBPerDay        float64 `json:"logs_bucket_gb_per_day"`
+	LokiLogsReferenceGBPerDay float64 `json:"loki_logs_reference_gb_per_day"`
+	VictoriaLogsDiskGBPerDay  float64 `json:"victorialogs_disk_gb_per_day"`
 	TracesBucketGBPerDay      float64 `json:"traces_bucket_gb_per_day"`
 	ProfilesBucketGBPerDay    float64 `json:"profiles_bucket_gb_per_day"`
 	ClassAPerDay              float64 `json:"class_a_per_day"`
@@ -41,5 +42,5 @@ func Calculate(in Input) (Estimate, error) {
 	}
 	r := in.RequestsPerSecond / 1000
 	series := int64(in.Services)*2520 + int64(in.Pods)*60
-	return Estimate{Input: in, TrafficCores: .27 * r, TrafficMemoryGiB: .3 * r, PodIndexMiB: 110 * float64(in.Pods) / 1000, StoredSeries: series, MetricsIngestMemoryGBLow: float64(series) * .6 / 1e6, MetricsIngestMemoryGBHigh: float64(series) * 1.1 / 1e6, MetricsDiskGBPerDay: float64(series) * 5.3 / 1e6, BucketGBPerDay: 21*r + 4.7*float64(in.ProfiledPods)/30, LogsBucketGBPerDay: 16.6 * r, TracesBucketGBPerDay: 4 * r, ProfilesBucketGBPerDay: 4.7 * float64(in.ProfiledPods) / 30, ClassAPerDay: 17000 * r, ClassBPerDay: 28000 * r, Basis: "EXTRAPOLATED: concept 10.7 Loki-era logs (not VictoriaLogs); 8 spans and 3.2 log lines/request, tail sampling on. Traffic cores/memory are incremental; exclude idle base, query peaks, app and control-plane resources. Series: 2520/service + 60/pod; metrics ingest memory 0.6–1.1 KB/series, disk 5.3 GB/day/M series at 30s. Bucket total uses rounded 21 GB/day (components 16.6 + 4.0); VictoriaLogs has no bucket. Class A/B are traffic write-path estimates only; profile operations and read workload not measured."}, nil
+	return Estimate{Input: in, TrafficCores: .27 * r, TrafficMemoryGiB: .3 * r, PodIndexMiB: 110 * float64(in.Pods) / 1000, StoredSeries: series, MetricsIngestMemoryGBLow: float64(series) * .6 / 1e6, MetricsIngestMemoryGBHigh: float64(series) * 1.1 / 1e6, MetricsDiskGBPerDay: float64(series) * 5.3 / 1e6, BucketGBPerDay: 4*r + 4.7*float64(in.ProfiledPods)/30, LokiLogsReferenceGBPerDay: 16.6 * r, VictoriaLogsDiskGBPerDay: 8.3 * r, TracesBucketGBPerDay: 4 * r, ProfilesBucketGBPerDay: 4.7 * float64(in.ProfiledPods) / 30, ClassAPerDay: 17000 * r, ClassBPerDay: 28000 * r, Basis: "EXTRAPOLATED: concept 10.7 Loki-era logs (not VictoriaLogs); 8 spans and 3.2 log lines/request, tail sampling on. Traffic cores/memory are incremental; exclude idle base, query peaks, app and control-plane resources. Series: 2520/service + 60/pod; metrics ingest memory 0.6–1.1 KB/series, disk 5.3 GB/day/M series at 30s. Bucket = traces (4 GB/day per 1000 req/s) + profiles. loki_logs_reference_gb_per_day is a Loki-era reference only, excluded from bucket total. VictoriaLogs disk: 8.3 GB/day per 1000 req/s (concept 10.4, measured spike 6; 28 B/line). Class A/B retain the Loki-era write-path reference (not current VictoriaLogs bucket operations); profile operations and read workload not measured."}, nil
 }

@@ -16,6 +16,7 @@ let
     src = ./src;
     vendorHash = "sha256-E+SO5TfljE7KgJr3l0l/WmzeWbLHYkmVqkkOUSerOw4=";
     env.CGO_ENABLED = "0";
+    env.OBS_REQUIRE_LLVM = "1";
     nativeCheckInputs = [ nixpkgs.llvmPackages.llvm ];
     ldflags = [ "-w" "-s" "-X main.version=${version}" ];
     # third_party/VictoriaLogs is its own Go module (wired by a go.mod replace), not part of this one.
@@ -44,7 +45,7 @@ let
   tests = nixpkgs.runCommand "obs-tests"
     { nativeBuildInputs = [ obs nixpkgs.bash nixpkgs.gnugrep nixpkgs.gnused nixpkgs.coreutils nixpkgs.findutils nixpkgs.diffutils nixpkgs.llvmPackages.llvm ]; }
     ''
-      bash ${./tests}/run.sh --obs ${obs}/bin/obs --src ${./src} --out ${obs}
+      OBS_REQUIRE_LLVM=1 bash ${./tests}/run.sh --obs ${obs}/bin/obs --src ${./src} --out ${obs}
       mkdir -p "$out"
     '';
 

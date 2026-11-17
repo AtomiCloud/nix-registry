@@ -64,7 +64,7 @@ func (k Kubernetes) ready(ctx context.Context, c Config, resources []string) err
 	return nil
 }
 func (k Kubernetes) apply(ctx context.Context, c Config, file string) error {
-	if err := validateNoServices(file); err != nil {
+	if err := validateProtectedManifest(file, c); err != nil {
 		return err
 	}
 	return k.call(ctx, c, "apply", "-f", file)
@@ -153,17 +153,6 @@ func (k Kubernetes) roles(ctx context.Context, c Config, reverse bool) error {
 		workloads = append(workloads, w)
 	}
 	sort.Strings(workloads)
-	if !reverse {
-		if err = k.labels(ctx, c, singleSelector, c.RoleLabels, "false"); err != nil {
-			return err
-		}
-	} else {
-		for _, w := range workloads {
-			if err = k.labels(ctx, c, selectors[w], c.RoleWorkloads[w], "false"); err != nil {
-				return err
-			}
-		}
-	}
 	targets := workloads
 	if reverse {
 		targets = []string{c.Single}
@@ -192,7 +181,33 @@ func (k Kubernetes) roles(ctx context.Context, c Config, reverse bool) error {
 			return err
 		}
 	}
-	return k.ready(ctx, c, targets)
+	if err = k.ready(ctx, c, targets); err != nil {
+		return err
+	}
+	if !reverse {
+		return k.labels(ctx, c, singleSelector, c.RoleLabels, "false")
+	}
+	for _, w := range workloads {
+		if err = k.labels(ctx, c, selectors[w], c.RoleWorkloads[w], "false"); err != nil {
+			return err
+		}
+		if err = k.templateRoles(ctx, c, w, nil); err != nil {
+			return err
+		}
+	}
+	return k.ready(ctx, c, workloads)
+
+}
+func (k Kubernetes) templateRoles(ctx context.Context, c Config, w string, active []string) error {
+	labels := map[string]string{}
+	for _, role := range c.RoleLabels {
+		labels[role] = "false"
+	}
+	for _, role := range active {
+		labels[role] = "true"
+	}
+	patch, _ := json.Marshal(map[string]any{"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"labels": labels}}}})
+	return k.call(ctx, c, "patch", w, "--type=merge", "-p", string(patch))
 }
 func (k Kubernetes) compaction(ctx context.Context, c Config, resume bool) error {
 	if c.Compactor != "" {
@@ -213,6 +228,7 @@ func (k Kubernetes) compaction(ctx context.Context, c Config, resume bool) error
 	return k.call(ctx, c, argv...)
 }
 func (k Kubernetes) Execute(ctx context.Context, s Step, store string, c Config) error {
+	c = c.normalized()
 	switch s {
 	case Prepare, AddNodes:
 		if err := validateScaledManifest(c); err != nil {
@@ -246,7 +262,13 @@ func (k Kubernetes) Execute(ctx context.Context, s Step, store string, c Config)
 	case Step("stop compaction"):
 		return k.compaction(ctx, c, false)
 	case Step("retain single as metastore"):
+		if err := validateIsolatedManifest(c.MetastoreManifest, c); err != nil {
+			return err
+		}
 		if err := k.apply(ctx, c, c.MetastoreManifest); err != nil {
+			return err
+		}
+		if err := k.templateRoles(ctx, c, c.Single, nil); err != nil {
 			return err
 		}
 		return k.ready(ctx, c, []string{c.Single})
@@ -261,6 +283,9 @@ func (k Kubernetes) Execute(ctx context.Context, s Step, store string, c Config)
 		patch, _ := json.Marshal(map[string]any{"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"labels": labels}}}})
 		return k.call(ctx, c, "patch", c.Single, "--type=merge", "-p", string(patch))
 	case Restore:
+		if err := validateIsolatedManifest(c.SingleManifest, c); err != nil {
+			return err
+		}
 		if err := k.apply(ctx, c, c.SingleManifest); err != nil {
 			return err
 		}
@@ -275,11 +300,10 @@ func (k Kubernetes) Execute(ctx context.Context, s Step, store string, c Config)
 				return err
 			}
 		}
-		if err := k.roles(ctx, c, true); err != nil {
-			return err
-		}
-		// The scaled form is retained. In particular, no new Pyroscope metastore
-		// PVC or Kafka topic is removed during rollback.
+		return nil
+	case ReverseRoles:
+		return k.roles(ctx, c, true)
+	case ReverseReconnect:
 		return k.Execute(ctx, Reconnect, store, c)
 	default:
 		return fmt.Errorf("unsupported cluster step %q", s)

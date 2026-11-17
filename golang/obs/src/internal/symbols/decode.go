@@ -57,7 +57,8 @@ func (l LLVM) Resolve(ctx context.Context, data []byte, offset uint64) (string, 
 	return lines[0] + " in " + lines[1], nil
 }
 
-var identityLine = regexp.MustCompile(`(?m)^\s*build-id:\s*([A-Fa-f0-9]+)\s*$`)
+var identityLine = regexp.MustCompile(`(?m)^\s*(?:build-id|build_id):\s*['"]?([A-Fa-f0-9]+)['"]?\s*$`)
+var dartFrame = regexp.MustCompile(`^(\s*#[0-9]+\s+)abs\s+(?:0x)?[A-Fa-f0-9]+\s+virt\s+(?:0x)?([A-Fa-f0-9]+)\s+.*$`)
 var nativeFrame = regexp.MustCompile(`^(\s*(?:at )?)([A-Za-z0-9_][A-Za-z0-9_.-]*)\+0x([A-Fa-f0-9]+)(.*)$`)
 var jitFrame = regexp.MustCompile(`^(\s*(?:at )?)([A-Za-z0-9_][A-Za-z0-9_.-]*)!0x(06[A-Fa-f0-9]{6})\+0x([A-Fa-f0-9]+)\s+mvid:([A-Fa-f0-9-]+)\s*$`)
 
@@ -120,6 +121,42 @@ func (d Decoder) Decode(ctx context.Context, stack string) (string, error) {
 			}
 			if loc != "" {
 				lines[i] = m[1] + m[2] + "!0x" + m[3] + " in " + loc
+			}
+			continue
+		}
+		if m := dartFrame.FindStringSubmatch(line); m != nil && id != "" {
+			key, err := (Ref{Kind: "dart", ID: id}).Key()
+			if err != nil {
+				return "", err
+			}
+			b, err := load(key)
+			if err != nil {
+				return "", err
+			}
+			if b == nil || unavailable {
+				continue
+			}
+			off, err := strconv.ParseUint(m[2], 16, 64)
+			if err != nil {
+				return "", err
+			}
+			s := d.Symbolizer
+			if s == nil {
+				s = LLVM{}
+			}
+			resolved, err := s.Resolve(ctx, b, off)
+			if errors.Is(err, ErrSymbolizerUnavailable) {
+				unavailable = true
+				if d.Notes != nil {
+					fmt.Fprintln(d.Notes, "obs symbols: llvm-symbolizer is unavailable; native/Dart frames kept as is (set --symbolizer or OBS_SYMBOLIZER)")
+				}
+				continue
+			}
+			if err != nil {
+				return "", fmt.Errorf("%s: %w", key, err)
+			}
+			if resolved != "" {
+				lines[i] = m[1] + resolved
 			}
 			continue
 		}

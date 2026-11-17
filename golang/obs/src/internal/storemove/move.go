@@ -12,17 +12,19 @@ import (
 type Step string
 
 const (
-	Prepare        Step = "apply scaled form and wait for every part Ready"
-	Route          Step = "flip role labels to scaled pods"
-	Reconnect      Step = "roll Alloy (at least two replicas); require old received counter flat"
-	Drain          Step = "stop old compaction; require completed and flushed blocks; stop old single"
-	PyroTransition Step = "no drain; retain original StatefulSet as Pyroscope v2 metastore"
-	Verify         Step = "read known data through read Service; compare 60 per-minute counts"
-	AddNodes       Step = "start new storage nodes and wait Ready"
-	StorageRoute   Step = "add storageNode endpoints and roll insert/select"
-	Writes         Step = "require received counter rising and send errors flat (no drain)"
-	RestoreRoute   Step = "remove new storageNode endpoints and roll insert/select; retain new PVCs and pods"
-	Restore        Step = "restore single Ready, undo drain controls, flip labels, roll Alloy, verify"
+	Prepare          Step = "apply scaled form and wait for every part Ready"
+	Route            Step = "flip role labels to scaled pods"
+	Reconnect        Step = "roll Alloy (at least two replicas); require old received counter flat"
+	Drain            Step = "stop old compaction; require completed and flushed blocks; stop old single"
+	PyroTransition   Step = "no drain; retain original StatefulSet as Pyroscope v2 metastore"
+	Verify           Step = "read known data through read Service; compare 60 per-minute counts"
+	AddNodes         Step = "start new storage nodes and wait Ready"
+	StorageRoute     Step = "add storageNode endpoints and roll insert/select"
+	Writes           Step = "require received counter rising and send errors flat (no drain)"
+	RestoreRoute     Step = "remove new storageNode endpoints and roll insert/select; retain new PVCs and pods"
+	Restore          Step = "restore isolated single Ready and undo drain controls"
+	ReverseRoles     Step = "activate single roles then clear scaled pod and template roles"
+	ReverseReconnect Step = "roll Alloy and require every scaled received counter flat"
 )
 
 type Config struct {
@@ -37,6 +39,8 @@ type Config struct {
 	Routers                 []string            `yaml:"routers"`
 	Single                  string              `yaml:"single"`
 	Alloy                   string              `yaml:"alloy"`
+	AlloyConfigObjects      []string            `yaml:"alloy_config_objects"`
+	ScaledMetricsURLs       []string            `yaml:"scaled_metrics_urls"`
 	RoleLabels              []string            `yaml:"role_labels"`
 	RoleWorkloads           map[string][]string `yaml:"role_workloads"`
 	// A separate backend-worker can be scaled to zero. For target=all a verified
@@ -54,6 +58,7 @@ type Config struct {
 }
 
 func (c Config) Validate(store string, rollback bool) error {
+	c = c.normalized()
 	switch store {
 	case "tempo", "pyroscope", "victorialogs", "victoriametrics":
 	default:
@@ -130,6 +135,9 @@ func (c Config) Validate(store string, rollback bool) error {
 		}
 		if rollback {
 			required["single_manifest"] = c.SingleManifest
+			if len(c.ScaledMetricsURLs) == 0 {
+				required["metrics_url (scaled receive tier for rollback)"] = c.MetricsURL
+			}
 		}
 	}
 	if store == "pyroscope" {
@@ -152,7 +160,7 @@ func Plan(store string, rollback bool) []Step {
 		return []Step{AddNodes, StorageRoute, Writes, Verify}
 	}
 	if rollback {
-		return []Step{Restore}
+		return []Step{Restore, ReverseRoles, ReverseReconnect, Verify}
 	}
 	if store == "pyroscope" {
 		return []Step{Prepare, Route, Reconnect, PyroTransition, Verify}
@@ -245,6 +253,7 @@ func compare(a, b []float64) error {
 	return nil
 }
 func (r Runner) Run(ctx context.Context, store string, c Config, rollback, dry bool) error {
+	c = c.normalized()
 	if err := c.Validate(store, rollback); err != nil {
 		return err
 	}
@@ -343,13 +352,17 @@ func (r Runner) Run(ctx context.Context, store string, c Config, rollback, dry b
 			if err == nil {
 				err = compare(before, after)
 			}
-		case Restore:
+		case ReverseReconnect:
 			err = r.Cluster.Execute(ctx, s, store, c)
 			if err == nil {
-				var after []float64
-				after, err = r.Metrics.Counts(ctx, store, c, end)
-				if err == nil {
-					err = compare(before, after)
+				urls := c.ScaledMetricsURLs
+				if len(urls) == 0 {
+					urls = []string{c.MetricsURL}
+				}
+				for _, endpoint := range urls {
+					if err = r.counterPair(ctx, endpoint, received(store), false); err != nil {
+						break
+					}
 				}
 			}
 		default:

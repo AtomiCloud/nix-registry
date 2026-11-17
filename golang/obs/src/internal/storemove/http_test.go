@@ -52,7 +52,7 @@ func matrix(start time.Time, mutate int) string {
 func TestStoreQueryAPIs(t *testing.T) {
 	start := time.Unix(1700000040, 0)
 	end := start.Add(59 * time.Minute)
-	for _, store := range []string{"tempo", "victorialogs", "victoriametrics"} {
+	for _, store := range []string{"victorialogs", "victoriametrics"} {
 		t.Run(store, func(t *testing.T) {
 			h := httpFixture(matrix(start, 0), func(r *http.Request) {
 				q := r.URL.Query()

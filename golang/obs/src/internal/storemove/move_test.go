@@ -194,7 +194,7 @@ func TestDryRunHasNoEffects(t *testing.T) {
 func TestRollbackRetainsStorage(t *testing.T) {
 	for _, store := range []string{"tempo", "victorialogs"} {
 		c := &fakeCluster{}
-		m := &fakeMetrics{}
+		m := &fakeMetrics{counters: map[string][]float64{received(store): {5, 5}}}
 		var b bytes.Buffer
 		r := runFake(c, m)
 		r.Out = &b
@@ -208,7 +208,11 @@ func TestRollbackRetainsStorage(t *testing.T) {
 				t.Fatal("lost-data warning missing")
 			}
 		}
-		if !reflect.DeepEqual(c.calls, []Step{want}) {
+		expected := []Step{want}
+		if !storage(store) {
+			expected = []Step{Restore, ReverseRoles, ReverseReconnect}
+		}
+		if !reflect.DeepEqual(c.calls, expected) {
 			t.Fatal(c.calls)
 		}
 	}

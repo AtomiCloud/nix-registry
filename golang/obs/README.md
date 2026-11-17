@@ -290,12 +290,18 @@ query: '{} | count_over_time()' # known immutable dataset; aggregate to one seri
 ```
 
 The scaled manifest must contain every listed workload with positive explicit replicas, initially
-without active role labels. It cannot change the old single, Alloy, or any Service. Include all
-parts (Tempo: Kafka-compatible queue and `tempo-traces` topic; headless Services with
-`publishNotReadyAddresses: true` must already exist). Render the §10.4/10.5 store settings in the
+without active role labels; every workload in the manifest must be listed for readiness checks.
+It cannot change the old single, Alloy configuration, or the eight stable Services (including
+their Endpoints/EndpointSlices). Headless Services are allowed, including Tempo's
+`publishNotReadyAddresses: true` and Pyroscope's metastore Service. List custom-named Alloy
+ConfigMaps/Secrets in `alloy_config_objects` (for example `[configmap/collector-config]`);
+Alloy names/labels are also protected. Kind aliases such as `sts/tempo` are normalized.
+Include all parts (Tempo: Kafka-compatible queue and `tempo-traces` topic).
+Render the §10.4/10.5 store settings in the
 manifests, including object storage from day one. Every workload must have a nonempty `matchLabels`
 selector without expressions; role labels must not appear in that immutable selector. The tool
 assigns each target only its configured role labels; it never labels Kafka as a read/write pod.
+New roles become active and Ready before old roles are removed, so Services do not become empty.
 The old single is never rolled by changing its template before its drain. Suspend external GitOps
 reconciliation of these workloads while moving so it cannot undo a step.
 
@@ -315,6 +321,14 @@ For Pyroscope, use `obs.diene/pyroscope-write` and `obs.diene/pyroscope-query` r
 its PVC and stable raft identity; no drain or deletion occurs. Set `profile_type` (for example
 `process_cpu:cpu:nanoseconds:cpu:nanoseconds`) and a label selector in `query`;
 `read_url` ends in `/querier.v1.QuerierService/SelectSeries`.
+The metastore manifest must contain no active read/write labels; the tool explicitly persists
+false labels on its pod template after conversion so a restart cannot rejoin those Services.
+
+Tempo/Pyroscope rollback restores an isolated single and waits for Ready, activates its roles,
+clears both scaled pod and template roles, rolls Alloy, checks scaled receive counters stay flat,
+then verifies the data window. Provide `scaled_metrics_urls` for every scaled receiver pod, or
+`metrics_url` for an endpoint aggregating the whole scaled receive tier. A receiving scaled pod
+or counter reset stops rollback; scaled data/PVCs remain intact.
 
 For VictoriaLogs and VictoriaMetrics omit the single/Alloy/role fields. Provide `scaled` storage
 workloads, `routers` insert/select workloads, `routing_manifest`, `original_routing_manifest`,
@@ -328,8 +342,10 @@ and PVCs**; data written there is unreadable until they are added back.
 
 Verification takes one fixed, closed 60-minute window before the move and queries the same
 window through the read Service afterward. Missing minutes, empty/all-zero baselines, errors,
-and unequal counts fail. `tenant` optionally sets `X-Scope-OrgID` on range queries. Counter
-endpoints must expose only the intended old single or insert tier; absent/reset counters fail.
+and unequal counts fail. `tenant` optionally sets `X-Scope-OrgID` on range queries. Query
+responses use each store's real format: Tempo `series[].samples[].timestampMs/value`,
+Pyroscope `series[].points[]`, and Victoria stores' Prometheus matrices.
+Counter endpoints must expose only the intended old single or insert tier; absent/reset counters fail.
 `--interval` defaults to 15s and `--timeout` to 15m. **NOT TESTED:** real cluster moves/rollback,
 chart compaction adapters, Tempo/Pyroscope drain durability, or live store HTTP endpoints.
 Unit tests use fake Kubernetes and HTTP transports; they never contact a real cluster.
@@ -346,15 +362,22 @@ obs symbols decode --store .obs/symbols --file stack.txt
 Native keys are `<gnu-build-id>/<app>.dbg`, JIT keys `<module-MVID>/<app>.pdb`, and Dart keys
 `<build_id>.symbols` with `<build_id>.obfuscation-map.json`. IDs are normalized to lowercase.
 Keys are immutable: uploading identical bytes is idempotent; different bytes under an existing
-key fail. Uploaders must supply the identity obtained from the build (GNU/Dart note or module
-MVID); this command does not infer it. Keep this private directory and symbols for as long as
+key fail. Native/Dart uploads must be ELF files whose `.note.gnu.build-id` equals `--build-id`;
+mismatched identities and non-ELF files are refused. **NOT CHECKED:** a Portable PDB does not
+carry the assembly's module MVID, so its MVID key is supplied by the uploader; obfuscation-map
+provenance likewise comes from the build. Keep this private directory and symbols for as long as
 that release can send data. An exported `Backend` interface supports object-store adapters;
 no object-store implementation or remote bucket is claimed as tested.
 
-The native/Dart decoder recognizes `at <module>+0x<offset>` frames with a `build-id: <id>` footer,
+The native decoder recognizes `at <module>+0x<offset>` frames with a `build-id: <id>` footer.
+Dart/Flutter uses `build_id: '<hex>'` and frames such as
+`#00 abs 00007f1234567890 virt 0000000000123456 _kDartIsolateSnapshotInstructions+0x22`;
+the decoder resolves the **virt** address, not the symbol-relative `+0x22`.
 then runs stock `llvm-symbolizer` found on PATH (`--symbolizer` or `OBS_SYMBOLIZER` can override it).
 LLVM is a test-only dependency, not part of the obs runtime closure. If it is unavailable, decoding
 prints one note to stderr, preserves native/Dart frames and keeps exit status zero; JIT decoding still works.
+The development shell includes LLVM. A manual Go test skips the ELF proof clearly if LLVM is
+missing; Nix checks set `OBS_REQUIRE_LLVM=1`, making absence a failure rather than a skipped proof.
 Unknown identities and unresolved addresses are preserved. Decode cause stacks with different
 build identities separately; ambiguous conflicting footers are refused. Split-debug ELF files
 retain real Dart names; the obfuscation map is stored for other consumers, not applied as a text
@@ -372,13 +395,17 @@ source line using LLVM; a small Portable PDB fixture resolves IL offsets and rej
 `obs size --req-per-second 1000 --services 30 --pods 90 --profiled-pods 30` prints deterministic
 JSON: incremental traffic cores/GiB, pod-index MiB, typical stored series, metrics ingest memory
 and disk GB/day, bucket GB/day and Class A/B requests/day. For that input: 0.27 traffic cores,
-0.3 GiB, 81,000 series and 25.7 GB/day to the bucket. Idle base memory, query peaks, applications
+0.3 GiB, 81,000 series, 8.7 GB/day to the bucket and 8.3 GB/day of VictoriaLogs disk.
+Idle base memory, query peaks, applications
 and the control plane are excluded; these components are deliberately reported separately.
 
-These are the concept §10.7 **Loki-era estimates**, not measured VictoriaLogs capacity. VictoriaLogs
-has no bucket. The rounded bucket unit is 21 GB/day per 1,000 req/s (logs 16.6, traces 4.0), plus
-4.7 GB/day per 30 profiled pods; Class A/B are 17k/28k per 1,000 req/s for the traffic write path
-only. Series use §3.2 (2,520/service + 60/pod), and metrics RAM/disk use §10.4
+Traffic CPU/RAM and Class A/B retain the concept §10.7 **Loki-era reference costs**.
+Current bucket storage includes only traces (4 GB/day per 1,000 req/s) and profiles
+(4.7 GB/day per 30 profiled pods). `loki_logs_reference_gb_per_day` reports the historical
+16.6 GB/day log figure separately; it is excluded from the bucket total. VictoriaLogs disk uses
+8.3 GB/day per 1,000 req/s (concept §10.4, line 1440 in the 17 Nov corpus; spike 6, 28 B/line).
+Class A/B are 17k/28k per 1,000 req/s as a historical write-path reference, not a measurement of
+the current VictoriaLogs setup. Series use §3.2 (2,520/service + 60/pod), and metrics RAM/disk use §10.4
 (0.6–1.1 KB/series; 5.3 GB/day/M series at 30s). Profile operations and interactive object reads
 have no measured unit cost. Three checked-in golden cases cover idle, typical and busy shapes;
 invalid, non-finite and negative inputs fail.
