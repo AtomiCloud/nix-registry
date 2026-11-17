@@ -288,6 +288,9 @@ func (s *scan) imageMap(n *yaml.Node, path []string, ctx, parent string) {
 	tk, tag := mapGet(n, "tag")
 	dk, dg := mapGet(n, "digest")
 	own := s.isOwn(ctx, path)
+	if _, nested := mapGet(n, "image"); own && nested != nil && repo == nil && tag == nil && dg == nil {
+		return // a wrapper (tempo.tempo): its nested image map is the image and is checked on its own
+	}
 	var e string
 	switch {
 	case repo != nil && repo.Kind == yaml.ScalarNode:

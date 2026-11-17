@@ -527,3 +527,40 @@ func TestOwnImagePathWithAMirrorRepositoryIsStillTheEngine(t *testing.T) {
 		t.Fatalf("a mirrored own image with a drifted tag: %v %+v", err, res)
 	}
 }
+
+// ---- round 5: a wrapper at an own path is not an unresolved image ---------------------------------
+
+func TestTempoWrapperWithANestedImageIsNotAnUnresolvedImage(t *testing.T) {
+	dep := "  - name: tempo\n    version: 1.30.0\n"
+	p := pins.All()["Tempo"]
+	nested := func(tag string) string {
+		return "tempo:\n  tempo:\n    image:\n      repository: grafana/tempo\n      tag: " + tag + "\n"
+	}
+	res, err := Check(depChart(t, dep, nested(p.Version)), pins.All())
+	if err != nil || len(res.Findings) != 0 || len(res.Matches) != 1 || !strings.Contains(res.Matches[0], "tempo.tempo.image.tag") {
+		t.Fatalf("the nested image is the image; the wrapper is not a missing one: %v %+v", err, res)
+	}
+	res, err = Check(depChart(t, dep, nested("3.1.0")), pins.All())
+	if err != nil || len(res.Findings) != 1 || res.Findings[0].Key != "tempo.tempo.image.tag" || res.Findings[0].Kind != KindVersion {
+		t.Fatalf("a drifted nested image names its own key: %v %+v", err, res)
+	}
+	// No-repository nested form.
+	res, err = Check(depChart(t, dep, "tempo:\n  tempo:\n    image:\n      tag: "+p.Version+"\n"), pins.All())
+	if err != nil || len(res.Findings) != 0 || len(res.Matches) != 1 {
+		t.Fatalf("nested image with no repository: %v %+v", err, res)
+	}
+	// The nested image itself is still checked: an empty one fails naming it, once.
+	for name, v := range map[string]string{"empty map": "{}", "empty string": `""`} {
+		res, err = Check(depChart(t, dep, "tempo:\n  tempo:\n    image: "+v+"\n"), pins.All())
+		if err != nil || len(res.Findings) != 1 || res.Findings[0].Kind != KindMissing || res.Findings[0].Key != "tempo.tempo.image" {
+			t.Fatalf("%s: an unresolved nested image still fails, once, naming it: %v %+v", name, err, res)
+		}
+	}
+	// The direct path keeps working, and a wrapper with nothing in it still fails.
+	if res, err = Check(depChart(t, dep, "tempo:\n  tempo:\n    tag: \""+p.Version+"\"\n"), pins.All()); err != nil || len(res.Findings) != 0 || len(res.Matches) != 1 {
+		t.Fatalf("direct tempo.tempo.tag: %v %+v", err, res)
+	}
+	if res, err = Check(depChart(t, dep, "tempo:\n  tempo:\n    pullPolicy: Always\n"), pins.All()); err != nil || len(res.Findings) != 1 || res.Findings[0].Kind != KindMissing || res.Findings[0].Key != "tempo.tempo" {
+		t.Fatalf("an own map with nothing in it still fails: %v %+v", err, res)
+	}
+}

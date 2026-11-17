@@ -78,6 +78,13 @@ run engines --check-chart "$fx/tempo-chart-tag-ok"
 expect 0 'tempo.tempo.tag' 'ok: 1 match(es)'
 run engines --check-chart "$fx/tempo-chart-tag-drift"
 expect 1 'values.yaml:3 tempo.tempo.tag' 'chart 3.1.0' 'Tempo 3.1.1'
+# A tempo.tempo wrapper with a nested image is not an unresolved image; the nested image is checked.
+run engines --check-chart "$fx/tempo-nested-image"
+expect 0 'tempo.tempo.image.tag' 'ok: 1 match(es)'
+run engines --check-chart "$fx/tempo-nested-image-drift"
+expect 1 'values.yaml:5 tempo.tempo.image.tag' 'chart 3.1.0' 'Tempo 3.1.1'
+run engines --check-chart "$fx/tempo-nested-image-empty"
+expect 1 'tempo.tempo.image' '[engine-pin-missing]' '1 drift(s)'
 # Only the dependency's own engine image proves it: a Tempo image in a Grafana sidecar does not hide the missing Grafana version,
 # and an empty own image string fails like an empty map.
 run engines --check-chart "$fx/foreign-sidecar"

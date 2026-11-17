@@ -576,6 +576,9 @@ not checked. Only the dependency's own engine image proves it: an image of anoth
 image in a Grafana sidecar) is compared with its own pin but does not prove the dependency. At an
 own image path the path decides: an empty string, `null` or `{}` fails, and a mirror repository
 name is still the engine's image.
+A map at an own path that holds a nested `image` and no tag, digest or repository of its own (the
+tempo wrapper `tempo.tempo.image.tag`) is a wrapper, not an unresolved image: the nested image is
+the one checked.
 
 
 Exit 0 when every version and digest found equals its pin. Exit 1 on any failure, one line each
@@ -590,7 +593,7 @@ another pins file instead of the built-in one (it exists so the digest-less case
 
 MEASURED: unit tests (`src/internal/chartcheck`) and `tests/engines.sh` with the fixture charts
 in `tests/fixtures/engines` (`matching` exit 0; `drifted`, `digest-drift`, `tag-no-repository`,
-`missing-tag`, `registry-port`, `two-aliases-missing`, `cluster-missing` and `digest-only-no-pin` exit 1; `digest-ok`, `two-aliases-ok`, `cluster-ok` and `sidecar-tag`, `tempo-chart-tag-ok` exit 0 (`tempo-chart-tag-drift`, `foreign-sidecar` and `empty-string` exit 1); `none`
+`missing-tag`, `registry-port`, `two-aliases-missing`, `cluster-missing` and `digest-only-no-pin` exit 1; `digest-ok`, `two-aliases-ok`, `cluster-ok` and `sidecar-tag`, `tempo-chart-tag-ok` exit 0 (`tempo-chart-tag-drift`, `foreign-sidecar`, `empty-string`, `tempo-nested-image-drift` and `tempo-nested-image-empty` exit 1; `tempo-nested-image` exit 0); `none`
 exit 2). **NOT TESTED:** the real chart's location in the chart registry is not specified, so
 wiring this command into a consumer's CI is not tested; the fixtures follow the common upstream
 value shapes, and an umbrella chart that keeps its image tags outside `values.yaml` (for
