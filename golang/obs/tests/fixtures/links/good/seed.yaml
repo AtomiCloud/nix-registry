@@ -18,4 +18,5 @@ traces:
     server: POST /charge
     client: charge
     route: /charge
+    median_s: 2
     attributes: { http.response.status_code: 200, cached: true }

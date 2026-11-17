@@ -12,7 +12,7 @@ const (
 	Metrics Kind = iota // MetricsQL (VictoriaMetrics)
 	Logs                // LogsQL (VictoriaLogs)
 	Loki                // a Loki-type datasource: refused (logs are LogsQL)
-	Traces              // TraceQL: not checked until the trace milestone
+	Traces              // Tempo TraceQL; other trace plugins remain classified but are skipped
 	Other               // expressions, annotations, Grafana's own source: nothing to parse
 )
 

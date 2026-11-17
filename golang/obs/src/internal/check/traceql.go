@@ -2,11 +2,12 @@ package check
 
 import (
 	"fmt"
-	"github.com/AtomiCloud/obs/internal/engines/tempo"
-	"github.com/AtomiCloud/obs/internal/files"
 	"math"
 	"strings"
 	"time"
+
+	"github.com/AtomiCloud/obs/internal/engines/tempo"
+	"github.com/AtomiCloud/obs/internal/files"
 )
 
 // SpanAttributeNames is implemented by the contract package. A nil interface
@@ -16,17 +17,21 @@ type SpanAttributeNames interface{ HasSpanAttribute(scope, name string) bool }
 
 func staticTraces(r *Report, q *files.Query, o Options) {
 	expr := staticFill(q)
-	id, modeErr := traceQueryMode(q)
+	if q.IsAlert {
+		r.add(Note, q.File, q.Where, "traces", "trace alerts not checked: await obs alerts integration; query: %s", oneLine(expr))
+		return
+	}
+	mode, modeErr := traceQueryMode(q, expr)
 	if modeErr != nil {
 		r.add(Fail, q.File, q.Where, "traceql-query-type", "%v; query: %s", modeErr, oneLine(expr))
 		return
 	}
-	if id {
-		if q.IsAlert {
-			r.add(Fail, q.File, q.Where, "traceql-alert-deferred", "TraceQL alerts await obs alerts integration; trace ID: %s", oneLine(expr))
-			return
-		}
-		if err := tempo.ValidateTraceID(expr); err != nil {
+	if mode == traceSkipped {
+		r.add(Note, q.File, q.Where, "traces", "trace target not checked: datasource %q queryType %q is not a Tempo TraceQL query or trace ID lookup", firstNonEmpty(q.DSType, q.DSUID, "tempo"), q.QueryType)
+		return
+	}
+	if mode == traceID {
+		if err := tempo.ValidateTraceID(strings.TrimSpace(expr)); err != nil {
 			r.add(Fail, q.File, q.Where, "trace-id", "%v; trace ID: %s", err, oneLine(expr))
 		}
 		return
@@ -39,10 +44,6 @@ func staticTraces(r *Report, q *files.Query, o Options) {
 	if o.Names {
 		r.add(Note, q.File, q.Where, "names", "reads span attributes=%v", p.Attributes)
 	}
-	if q.IsAlert {
-		r.add(Fail, q.File, q.Where, "traceql-alert-deferred", "TraceQL alerts await obs alerts integration; query: %s", oneLine(expr))
-		return
-	}
 	for _, a := range p.Attributes {
 		if o.SpanAttributes != nil && !o.SpanAttributes.HasSpanAttribute(a.Scope, a.Name) {
 			r.add(Fail, q.File, q.Where, "traceql-attribute", "undeclared attribute %s; query: %s", a, oneLine(expr))
@@ -51,17 +52,20 @@ func staticTraces(r *Report, q *files.Query, o Options) {
 }
 
 func (l *liveRun) tracePanel(q *files.Query, expr string, start, end time.Time, step time.Duration) (bool, error) {
-	id, err := traceQueryMode(q)
-	if err != nil {
+	mode, err := traceQueryMode(q, expr)
+	if err != nil || mode == traceSkipped {
 		return true, nil
 	}
-	if id {
-		hits, err := l.tempo.Lookup(expr)
+	if mode == traceID {
+		hits, err := l.tempo.Lookup(strings.TrimSpace(expr))
 		return len(hits) > 0, err
 	}
 	p, err := tempo.Parse(expr)
 	if err != nil {
 		return true, nil
+	}
+	if missing := l.missingTraceAttrs(expr); len(missing) > 0 {
+		return false, fmt.Errorf("not in the seed: %s", strings.Join(missing, ", "))
 	}
 	if !p.Metrics {
 		hits, err := l.tempo.Search(expr, start, end, 20)
@@ -81,14 +85,39 @@ func (l *liveRun) tracePanel(q *files.Query, expr string, start, end time.Time, 
 	return false, nil
 }
 
-func traceQueryMode(q *files.Query) (bool, error) {
+type traceMode int
+
+const (
+	traceQL traceMode = iota
+	traceID
+	traceSkipped
+)
+
+func traceQueryMode(q *files.Query, expr string) (traceMode, error) {
+	// Preserve M1's classification of other tracing plugins, without interpreting
+	// their datasource-specific models as Tempo TraceQL.
+	switch strings.ToLower(q.DSType) {
+	case "jaeger", "zipkin":
+		return traceSkipped, nil
+	}
 	switch strings.ToLower(q.QueryType) {
 	case "traceid":
-		return true, nil
-	case "", "traceql", "traceqlsearch":
-		return false, nil
+		return traceID, nil
+	case "", "traceql":
+		// Grafana's last core Tempo datasource (b92bfd830f9c), datasource.ts:
+		// 335-338 and 369-383, routes trimmed hex-only text to a trace ID lookup.
+		// Grafana v13.3.0's Tempo TraceQL editor docs retain this behavior; the
+		// plugin itself was extracted from core before that tag (see README).
+		if strings.Trim(strings.TrimSpace(expr), "0123456789abcdefABCDEF") == "" {
+			return traceID, nil
+		}
+		return traceQL, nil
+	case "traceqlsearch":
+		return traceQL, nil
+	case "nativesearch", "search":
+		return traceQL, fmt.Errorf("Tempo queryType %q is a legacy search model; legacy search models are not supported", q.QueryType)
 	default:
-		return false, fmt.Errorf("Tempo queryType %q is not a TraceQL query or traceId lookup; legacy search models are not supported", q.QueryType)
+		return traceSkipped, nil
 	}
 }
 

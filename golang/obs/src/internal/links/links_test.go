@@ -24,7 +24,7 @@ metrics:
 logs:
   - {event: charged, from: {metric: requests}}
 traces:
-  - {from: {metric: requests}, server: POST /charge, client: charge, route: /charge, attributes: {http.response.status_code: 200, cached: true}}
+  - {from: {metric: requests}, server: POST /charge, client: charge, route: /charge, median_s: 2, attributes: {http.response.status_code: 200, cached: true}}
 `
 
 func data(t *testing.T) *seed.Dataset {
@@ -152,5 +152,28 @@ func TestRejectWrongTraceRows(t *testing.T) {
 	r := Check(d, corruptLogs{l}, tempo.NewTempoEngine(d.Traces))
 	if !strings.Contains(fmt.Sprint(r.Findings), "another trace/service") {
 		t.Fatalf("wrong rows passed: %v", r.Findings)
+	}
+}
+
+type withoutTraceID struct{ inner *vl.Engine }
+
+func (c withoutTraceID) Rows(q string, s, e time.Time) ([]vl.Result, error) {
+	_, service, ok := strings.Cut(q, " AND ")
+	if !ok {
+		return nil, fmt.Errorf("trace-to-logs query missing service predicate: %s", q)
+	}
+	return c.inner.Rows(service, s, e)
+}
+
+func TestTraceToLogsRequiresTraceIDFilter(t *testing.T) {
+	d := data(t)
+	l, err := vl.New(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	r := Check(d, withoutTraceID{l}, tempo.NewTempoEngine(d.Traces))
+	if !strings.Contains(fmt.Sprint(r.Findings), "another trace/service's log line") {
+		t.Fatalf("missing trace_id filter was not caught: %+v", r.Findings)
 	}
 }

@@ -259,13 +259,30 @@ replaces this by hand run.
 ## obs links
 
 `obs query --static` and `--live` also check Tempo dashboard targets (`query`, `expr`
-or `expression`). `queryType: traceId` targets use a validated ID lookup; an
+or `expression`). `queryType: traceId` targets and hex-only `traceql` targets
+(including the default query type) use a validated ID lookup; an
 unknown ID with no spans fails the live check. Legacy search models are refused
-explicitly. TraceQL is parsed and validated by **Tempo 3.1.1**, commit
+explicitly (`nativeSearch`/`search`). Service maps, upload/clear and other
+non-query models print a note and are skipped, as are Jaeger/Zipkin datasources.
+TraceQL is parsed and validated by **Tempo 3.1.1**, commit
 `9db7df79d2af`; no regular-expression query parser is used. `--names` lists every
 non-intrinsic attribute, including those in `select` and metrics grouping. A
 `check.SpanAttributeNames` interface connects the contract's name list; a nil
-adapter leaves name enforcement off. Trace alerts await the alerts integration.
+adapter leaves name enforcement off. Live checks reject missing attributes even
+in `select(...)` or `by(...)` when the query otherwise returns rows. Trace alerts
+print a note and await the alerts integration.
+
+**FROM SOURCE:** Grafana v13.3.0's
+[TraceQL editor documentation](https://github.com/grafana/grafana/blob/v13.3.0/docs/sources/shared/datasources/tempo-editor-traceql.md#query-by-traceid)
+supports entering a trace ID in the TraceQL editor. The requested
+`public/app/plugins/datasource/tempo/datasource.ts` no longer exists at that tag:
+[commit 61ec981](https://github.com/grafana/grafana/commit/61ec98144cd42d26d87a2fd477c74be122b99e20)
+removed Tempo from core. Its last core implementation at
+[datasource.ts:335](https://github.com/grafana/grafana/blob/b92bfd830f9c748ba7d1a2860b23b562fed68d28/public/app/plugins/datasource/tempo/datasource.ts#L335)
+matches trimmed hex-only text, and
+[datasource.ts:369](https://github.com/grafana/grafana/blob/b92bfd830f9c748ba7d1a2860b23b562fed68d28/public/app/plugins/datasource/tempo/datasource.ts#L369)
+routes it to `handleTraceIdQuery`. This routing is covered offline; parity with
+the separately shipped plugin remains untested.
 
 ```text
 obs query --static --dir observability --names
