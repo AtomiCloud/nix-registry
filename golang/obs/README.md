@@ -56,6 +56,10 @@ This branch includes `obs check`, `obs gen`, `obs alerts` and `obs links`; the f
 obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
 obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names]
 obs alerts [--dir observability] [--vl-settings victorialogs-settings.yaml]
+
+obs sandbox up|down|status [--dir observability] [--project name] [--port-base n]
+obs look   [--base origin/main] [--all] [--json]
+obs scrape --target <url> [--label name=value] [--interval 15s] [--once]
 obs links [--dir observability] [--seed seed.yaml] [--base unix]
 
 obs check [--dir observability] [--pods n] [--landscapes n]
@@ -280,6 +284,100 @@ undeclared; regex label values must match an allowed value; label functions (`la
 labels their input has. Names compare with dots
 and underscores equal. Other log fields are free-form (§6): not judged.
 
+## `obs sandbox`: the local stack, for people
+
+```text
+obs sandbox up     [--dir observability] [--seed seed.yaml] [--project name] [--port-base n] [--runtime docker|podman] [--reseed]
+obs sandbox down   [--dir observability] [--project name] [--runtime docker|podman]
+obs sandbox status [--dir observability] [--project name]
+```
+
+`up` starts five containers (docker, or podman when docker is not there; `--runtime` or
+`$OBS_CONTAINER_RUNTIME` chooses) and loads them: the repo's dashboards into Grafana, the seed into
+VictoriaMetrics and VictoriaLogs. No check depends on it; it is for looking at the data.
+
+| Container    | Image                                      | Host port (default)   |
+| ------------ | ------------------------------------------ | --------------------- |
+| Grafana      | `grafana/grafana:13.3.0` + VictoriaLogs datasource 0.34.0 | 3000     |
+| VictoriaMetrics | `victoriametrics/victoria-metrics:v1.156.0` | 8428               |
+| VictoriaLogs | `victoriametrics/victoria-logs:v1.54.0`    | 9428                  |
+| Tempo        | `grafana/tempo:3.1.1`                      | 3200                  |
+| Pyroscope    | `grafana/pyroscope:2.4.3`                  | 4040                  |
+
+- **Pins.** The tags are the concept §1 versions, written into the binary (`obs version` prints them);
+  nothing reads them from the environment. `up` refuses, before it changes anything, when a container of
+  the same sandbox runs another tag; after the start it asks VictoriaMetrics, VictoriaLogs, Tempo, Grafana
+  and the datasource plugin which version they run and refuses on any difference. Pyroscope has no version
+  call obs relies on: its image tag is the pin.
+- **Safe removal.** Every container, volume and network carries the label `obs.sandbox=<project>` and a name
+  that starts with `obs-sandbox-<project>`. `down` lists by label, double-checks the name, removes only
+  those, and says what it skipped. obs never runs a prune: other teams' images and containers live on the
+  same machine. `--project` defaults to the repo folder's name. Every VOLUME an image declares is mounted
+  from a labelled named volume (Pyroscope 2.4.3 declares three: `/data`, `/data-compactor`,
+  `/data-metastore`; the list is in `pins.go` next to the pins, and `up` refuses an image that declares one
+  the list does not know), and `down` removes containers with `rm -f -v`: no anonymous volume is left behind.
+- **Single-instance settings** (concept §10.4): VictoriaMetrics `-retentionPeriod=30d`,
+  `-maxLabelsPerTimeseries=30`, `-search.maxConcurrentRequests=4`, `-memory.allowedPercent=60`;
+  VictoriaLogs `-retentionPeriod=30d`, `-retention.maxDiskSpaceUsageBytes=17179869184` (the 16 GiB laptop cap),
+  `-search.maxConcurrentRequests=4`, `-search.maxQueueDuration=10s`, `-search.maxQueryDuration=30s`,
+  `-memory.allowedPercent=60`; Tempo `distributor.max_attribute_bytes: 16384` and
+  `live_store.max_block_duration: 5m`. Left out on purpose: the cluster-only and per-pod settings (vmstorage
+  `-storage.maxDailySeries`/`-maxHourlySeries` have no value in §10.4, Pyroscope's retention and raft names
+  are for the cluster, S3 backends and resource requests do not exist on a laptop).
+- **Ports** are bound to `127.0.0.1` only. `--port-base 18300` moves Grafana to 18300 and the others to
+  18301 to 18304 when the defaults are taken.
+- **Data.** The seed's time line ends now, so a "last hours" view has data. Grafana is open to an anonymous
+  viewer (admin/admin for the API). The datasource uids are the ones the dashboards name (`primordial-metrics`
+  and so on); a kind no dashboard names gets `obs-metrics`, `obs-logs`, `obs-traces`, `obs-profiles`.
+  A second `up` reuses the running stack, loads the dashboards again and keeps the seed (`--reseed` loads it
+  again). Traces are not seeded yet: the seed file's `traces` are read by a later command.
+- `up` needs the network the first time (image pulls; Grafana downloads the datasource plugin).
+
+## `obs look`: dashboard screenshots, reviewed by the calling agent
+
+```text
+obs look [--base origin/main] [--all] [--file dashboards/x.json] [--checklist docs/standards/grafana-dashboards/index.md]
+         [--out obs-look] [--width 1600] [--height 1000] [--json] [sandbox flags]
+```
+
+`obs look` is the setup and a prompt; it calls no LLM, reads no key, spends nothing and posts nothing
+(owner ruling, 17 Nov 2026). It
+
+1. finds the changed dashboards: `observability/dashboards/*.json` that differ from the merge base with
+   `--base` (committed, edited or new), or all of them (`--all`), or the ones named with `--file`;
+2. brings up the sandbox, or reuses the running one (it stays up for the browser; the prompt prints the exact
+   `obs sandbox down --project <project> --runtime <runtime>` that ends it, with the values this run used);
+3. prints, for each dashboard, the Grafana URL (time range fixed to the seed window, template variables
+   filled: a datasource variable is resolved against the sandbox's datasources first (a saved uid is kept only
+   when the sandbox has it); the others take the dashboard's own current value, the first option, the first
+   value on the seed, or All), the viewport and the path to save the screenshot, plus one URL per panel.
+   Panels whose datasources are all Tempo or Pyroscope are listed as "expected empty in the sandbox; mark C1 n/a"
+   (the seed has no traces or profiles yet), so the reviewer does not fail the No-data item for them;
+4. prints the items of the visual checklist (the bullets under the "Visual checklist" heading of the
+   `--checklist` file) and the layout of the one pull request comment the agent writes: the images and a
+   verdict (pass, fail, unclear) with one line of evidence per item.
+
+The agent opens each URL in a browser, takes the screenshots, judges them and posts the comment. `--json`
+prints the same content (`ok`, `error`, `warnings`, `sandbox`, `dashboards`, `checklist`, `prompt`).
+
+**Always exit 0**: a failed setup (no runtime, a pin mismatch, git cannot find the base), a bad flag and
+`--help` print what failed (or the usage) and `ok: false` in JSON, and never fail the CI job that calls it.
+
+## `obs scrape`: an app's own metrics into the sandbox
+
+```text
+obs scrape --target <url> [--target <url> ...] [--label name=value ...] [--job name] [--interval 15s] [--once]
+           [--vm-url url] [--dir observability] [--project name]
+```
+
+Concept §11.8 names `obs scrape` next to the sandbox but does not define it; this is the minimal reading.
+It scrapes Prometheus text endpoints (an app's `/metrics`) on an interval and writes them into the running
+sandbox's VictoriaMetrics (`/api/v1/import/prometheus`), with `job`, `instance` and the `--label`s on every
+sample, so the app's metrics can be looked at next to the seed. Scraped metrics carry their where-from
+labels as `durian_cloud_*` (concept §2): pass `--label durian_cloud_landscape=local` and so on. `--once`
+scrapes once and exits 1 when it failed; otherwise it runs until Ctrl-C and keeps going after a failed
+scrape.
+
 ## Engines and pins
 
 | Signal  | Engine                                               | Version                        |
@@ -406,6 +504,8 @@ later part. The Grafana AGPL licence ships in `share/licenses/obs/grafana/LICENS
 
 ### Existing query-check limits
 
+- `obs sandbox up` on aarch64 and macOS, and with podman (the box that ran it has docker only); Tempo and Pyroscope take no data from the seed yet.
+- `obs look` with a pull request on GitHub (the agent posts the comment; obs only prints the prompt).
 - Variable filling for LogsQL panels against the Grafana VictoriaLogs datasource (it reuses the Prometheus macros).
 - Seeded log rows against a real VictoriaLogs fed through Alloy (field names are FROM SOURCE).
 - aarch64 and macOS builds are in CI; only x86_64 Linux was run by hand.
