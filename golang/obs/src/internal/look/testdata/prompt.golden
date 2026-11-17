@@ -1,0 +1,58 @@
+obs look: review 2 dashboard(s) in a browser
+
+You are the reviewer. obs look has set the stack up and calls no LLM; the screenshots and the judgement are yours.
+
+SANDBOX
+  Grafana: http://127.0.0.1:3000 (anonymous viewer, nothing to log in to)
+  seed window: 2026-11-17T09:30:00Z to 2026-11-17T10:00:00Z (the URLs fix it; do not change the time range)
+  changed dashboards are those that differ from origin/main
+
+STEPS
+  1. For each dashboard below, open its URL in a browser with a viewport of 1600 x 1000 px.
+     Wait until every panel has stopped loading (no spinners), then take a FULL-PAGE screenshot (the board is taller than the viewport)
+     and save it at the given path. Keep the width at 1600 px.
+  2. Open each screenshot and look at it. Judge it against EVERY checklist item: pass, fail or unclear.
+     For a fail or unclear item, name the panel by title and say what you see. Do not judge from the JSON; judge from the image.
+     If a panel needs a closer look, open its panel URL and save that shot too.
+  3. Write ONE pull request comment for all dashboards, in the layout under COMMENT LAYOUT, with the images attached.
+     If the pull request already has a comment that starts with <!-- obs-look -->, edit that one instead of adding a second.
+     GitHub has no image-upload API: paste or drag each PNG into the comment box in the browser (GitHub uploads it and inserts the link),
+     or upload it where the repo keeps assets and link it. If you cannot attach images, say so in the comment and give the file names.
+  4. When done, `obs sandbox down` stops the stack (only the containers, volumes and network labelled obs.sandbox=demo).
+
+DASHBOARDS
+  1. Payments overview  (dashboards/overview.json)
+     open: http://127.0.0.1:3000/d/payments-overview/payments-overview?orgId=1&from=1794907800000&to=1794909600000&var-ds=payments-metrics&var-outcome=error&var-provider=%24__all&var-route=%2Frefund&var-first=a&var-win=5m&kiosk
+     save: obs-look/dashboards-overview.png
+     variables set in the URL: $ds=payments-metrics (sandbox datasource); $outcome=error (first value on the seed); $provider=$__all (all values); $route=/refund (current); $first=a (first option); $win=5m (default)
+     every other variable keeps Grafana's default; check that each populates and changes the view
+     panels (open one only when the board shot is not enough):
+       - panel 1 "Charges" (timeseries): http://127.0.0.1:3000/d/payments-overview/payments-overview?orgId=1&from=1794907800000&to=1794909600000&var-ds=payments-metrics&var-outcome=error&var-provider=%24__all&var-route=%2Frefund&var-first=a&var-win=5m&viewPanel=panel-1&kiosk -> obs-look/dashboards-overview-panel-1.png
+       - panel 2 "Latency" (timeseries): http://127.0.0.1:3000/d/payments-overview/payments-overview?orgId=1&from=1794907800000&to=1794909600000&var-ds=payments-metrics&var-outcome=error&var-provider=%24__all&var-route=%2Frefund&var-first=a&var-win=5m&viewPanel=panel-2&kiosk -> obs-look/dashboards-overview-panel-2.png
+       - panel 3 "Errors" (logs): http://127.0.0.1:3000/d/payments-overview/payments-overview?orgId=1&from=1794907800000&to=1794909600000&var-ds=payments-metrics&var-outcome=error&var-provider=%24__all&var-route=%2Frefund&var-first=a&var-win=5m&viewPanel=panel-3&kiosk -> obs-look/dashboards-overview-panel-3.png
+  2. No uid  (dashboards/nouid.json)
+     open: http://127.0.0.1:3000/d/obs-dashboards-nouid/no-uid?orgId=1&from=1794907800000&to=1794909600000&kiosk
+     save: obs-look/dashboards-nouid.png
+
+CHECKLIST (from docs/standards/grafana-dashboards/index.md)
+  C1. No "No data" or error panels with synthetic data loaded
+  C2. Units render as units (`1.2k req/s`, `250 ms`), not raw numbers
+  C3. Legends readable and bounded; panel not swallowed by the legend
+  C4. Every template variable populates and visibly changes the view
+
+COMMENT LAYOUT
+  <!-- obs-look -->
+  ## Dashboard review (obs look)
+  Sandbox seed window <from> to <to>; reviewed by <your name> from screenshots at 1600 px wide.
+
+  ### <dashboard title> (`<file>`)
+  ![<dashboard title>](<image link>)
+
+  | Item | Verdict | Evidence |
+  |---|---|---|
+  | C1 No "No data" or error panels with synthetic data loaded | pass / fail / unclear | panel title and what you see (one line) |
+  | ...one row per checklist item, every item, in order | | |
+
+  **Fix first:** <the fails, worst first, one line each; write `nothing` when every item passes>
+
+  (repeat the ### block for each dashboard)
