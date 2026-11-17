@@ -6,3 +6,4 @@ forge-bad-value.ts dropped.unknown_value: metric \"checkout.charges\" label prov
 forge-bad-range.ts dropped.unknown_value: metric \"checkout.charges\" label shard value 999999 is outside 0..15
 forge-foreign-table.ts dropped.poisoned: event \"checkout.chrage.faild\": the port is poisoned (a competing table was refused); every signal is refused until restart
 forge-register-first.ts dropped.poisoned: event \"checkout.chrage.faild\": the port is poisoned (a competing table was refused); every signal is refused until restart
+forge-mutate-table.ts dropped.unknown_event: event \"checkout.chrage.faild\" is not in the generated event table

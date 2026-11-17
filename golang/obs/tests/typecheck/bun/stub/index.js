@@ -10,9 +10,19 @@ const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 
 // Tables are accepted once per process: the generated signals.ts registers them when it loads. A second
 // registration, or any table that is not the registered one, poisons the port: from then on every signal is
-// refused until restart. A forged table is never used silently.
+// refused until restart. A forged table is never used silently. The registered objects are kept only to
+// recognise them; the guard reads a frozen deep copy taken at registration, so editing the exported
+// generated tables later changes nothing.
 let registered = null;
+let snapshot = null;
 let poisoned = false;
+const deepFreeze = o => {
+  if (o && typeof o === 'object') {
+    for (const v of Object.values(o)) deepFreeze(v);
+    Object.freeze(o);
+  }
+  return o;
+};
 const poison = () => {
   if (!poisoned) counts.register += 1;
   poisoned = true;
@@ -37,14 +47,16 @@ exports.register = tables => {
     };
   }
   registered = tables;
+  snapshot = deepFreeze(structuredClone(tables));
   return ok(undefined);
 };
 exports.bounded = (spec, n) =>
   Number.isInteger(n) && n >= spec.min && n <= spec.max
     ? ok(n)
     : { ok: false, error: `${spec.name}: ${n} is outside ${spec.min}..${spec.max}` };
-exports.metrics = table => {
-  bind('metrics', table);
+exports.metrics = given => {
+  bind('metrics', given);
+  const table = poisoned ? {} : snapshot.metrics;
   const emit = kind => (name, labels) => {
     if (poisoned) return poisonedErr(`metric "${String(name)}"`);
     if (!own(table, name))
@@ -70,8 +82,9 @@ exports.metrics = table => {
   };
   return { counter: emit('counter'), histogram: emit('histogram'), gauge: emit('gauge') };
 };
-exports.logger = events => {
-  bind('events', events);
+exports.logger = given => {
+  bind('events', given);
+  const events = poisoned ? {} : snapshot.events;
   const log = level => event => {
     if (poisoned) return poisonedErr(`event "${event.name}"`);
     if (!own(events, event.name))
@@ -85,8 +98,9 @@ exports.logger = events => {
   };
   return { error: log('error'), warn: log('warn'), info: log('info'), debug: log('debug') };
 };
-exports.tracer = table => {
-  bind('spans', table);
+exports.tracer = given => {
+  bind('spans', given);
+  const table = poisoned ? {} : snapshot.spans;
   return {
     run: (name, attributes, fn) => {
       if (poisoned) counts.poisoned += 1;
