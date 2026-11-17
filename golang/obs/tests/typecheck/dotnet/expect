@@ -1,10 +1,10 @@
 bad-venmo-not-an-enum-value.cs CS0117
-bad-enum-made-outside.cs CS0122
-bad-name-made-outside.cs CS0122
-bad-event-made-outside.cs CS0122
+bad-enum-made-outside.cs CS1729
+bad-name-made-outside.cs CS1729
+bad-event-made-outside.cs CS1729
 bad-raw-int-for-bounded.cs CS1503
 bad-raw-string-for-enum.cs CS1503
 bad-wrong-level.cs CS0029
 bad-wrong-labels-for-name.cs CS0029
 bad-missing-label.cs CS7036
-bad-bounded-made-outside.cs CS0122
+bad-bounded-made-outside.cs CS1729
