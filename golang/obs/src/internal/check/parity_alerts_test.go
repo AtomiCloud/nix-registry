@@ -174,19 +174,30 @@ func TestParityAlertEval(t *testing.T) {
 	}
 	loadReal(t, os.Getenv("OBS_PARITY_VM"), os.Getenv("OBS_PARITY_VL"), ds)
 	runs := obsAlertSteps(t, binary, dir, base)
+	if len(runs) != len(rules) {
+		t.Fatalf("alerts/parity/warning.yaml: obs evaluated %d rule runs, expected all %d", len(runs), len(rules))
+	}
 	byUID := map[string]map[string]any{}
 	for _, rule := range rules {
 		byUID[rule["uid"].(string)] = rule
 	}
 	count := 0
+	seen := map[string]bool{}
 	var evidence []json.RawMessage
 	defer func() { parityEvidence(t, "grafana-eval", evidence) }()
 	for _, run := range runs {
+		if seen[run.Alert] || run.Run != "baseline" || len(run.Steps) != 9 {
+			t.Fatalf("alerts/parity/warning.yaml rule %s: duplicate/missing baseline minutes: run=%s steps=%d", run.Alert, run.Run, len(run.Steps))
+		}
+		seen[run.Alert] = true
 		rule := byUID[run.Alert]
 		if rule == nil {
 			t.Fatalf("unknown obs rule %s", run.Alert)
 		}
-		for _, step := range run.Steps {
+		for minute, step := range run.Steps {
+			if want := (base + int64(minute)*60) * 1000; step.T != want {
+				t.Fatalf("alerts/parity/warning.yaml rule %s minute %d: obs time=%d, expected %d", run.Alert, minute, step.T, want)
+			}
 			body, _ := json.Marshal(map[string]any{"condition": "C", "now": time.UnixMilli(step.T).UTC().Format(time.RFC3339Nano), "data": rule["data"]})
 			response := postReal(t, os.Getenv("OBS_PARITY_GRAFANA")+"/api/v1/eval", "application/json", bytes.NewReader(body))
 			evidence = append(evidence, json.RawMessage(response))

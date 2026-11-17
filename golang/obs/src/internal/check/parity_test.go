@@ -392,6 +392,9 @@ func TestParity(t *testing.T) {
 		ours.Close()
 		lours.Close()
 		t.Logf("%s: %s", r.name, rep.Summary("live"))
+		if ta.byFixture[r.name] == 0 {
+			t.Errorf("%s: no fixture queries were compared", r.dir)
+		}
 		if strings.HasPrefix(r.name, "bad-") {
 			if rep.Failures() == 0 {
 				t.Errorf("%s: planted bad fixture unexpectedly passed", r.dir)
