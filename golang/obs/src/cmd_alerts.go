@@ -14,6 +14,7 @@ func runAlerts(args []string, stdout, stderr io.Writer) int {
 	var o alerts.Options
 	fs.StringVar(&o.Dir, "dir", "observability", "observability folder containing GrafanaAlertRuleGroup CRs")
 	fs.StringVar(&o.SeedPath, "seed", "", "seed path (default <dir>/seed.yaml)")
+	fs.StringVar(&o.VLSettings, "vl-settings", "", "VictoriaLogs chart args YAML (default <dir>/victorialogs-settings.yaml, else pinned defaults)")
 	fs.Int64Var(&o.Base, "base", 0, "unix seconds of the first run; the complete time line must end in the past")
 	fs.IntVar(&o.Workers, "workers", 0, "evaluation workers (default all CPUs)")
 	fs.StringVar(&o.Out, "out", "", "write JSON results")

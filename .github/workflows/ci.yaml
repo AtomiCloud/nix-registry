@@ -79,6 +79,12 @@ jobs:
       - name: Nix Build
         run: ./scripts/ci/nix-build.sh
 
+  obs-parity:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/obs-parity.yaml
+    with:
+      release_check: true
+
   release:
     name: Semantic Release
     # `build-macos` is intentionally NOT listed here — see the TEMPORARY
@@ -86,6 +92,7 @@ jobs:
     needs:
       - precommit
       - build
+      - obs-parity
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     steps:

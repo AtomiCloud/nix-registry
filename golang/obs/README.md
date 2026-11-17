@@ -60,6 +60,7 @@ This branch also ships step 6's `obs links`; the final release version is set wh
 ```text
 obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
 obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names]
+obs alerts [--dir observability] [--seed seed.yaml] [--base unix] [--out results.json] [--vl-settings victorialogs-settings.yaml]
 obs check [--dir observability] [--pods n] [--landscapes n]
 obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
 obs sandbox up|down|status [--dir observability] [--project name] [--port-base n]
@@ -511,7 +512,9 @@ copies it into `vendor/`, so the vendor hash covers it.
   (`internal/treecheck`) and `tests/run.sh` fail when any file differs, is missing or is not listed, other than
   the marked one. Planted drift (edit, add, delete) is tested red.
 - To bump: clone the new tag, copy the same file set (without `*_test.go`), regenerate the manifest, re-add the
-  marked file (check it still compiles), change the pin in `src/main.go`, the chart and the corpus together.
+  marked file (check it still compiles), change `src/internal/pins/pins.json`, update
+  `third_party/VictoriaLogs.source.json` (version, tag commit and manifest SHA256),
+  the chart and the corpus together. Pin tests tie the source marker to the actual manifest.
 
 The engines run in-process; obs marks the global flag set parsed before the first engine call
 (VictoriaMetrics' `lib/memory` panics otherwise) and caps VictoriaMetrics' cache at 512 MiB
@@ -735,16 +738,8 @@ the embedded engines and the containers (instant and range queries through `/api
 queries through `/select/logsql/stats_query` with `start`, `end` and `time` as the datasource sends them, log queries
 through `/select/logsql/query`). Results must be equal: same series, same values, same row counts.
 
-```text
-docker run -d --name obs-parity-vm -p 127.0.0.1::8428 victoriametrics/victoria-metrics:v1.156.0 \
-    -retentionPeriod=10y -search.latencyOffset=0s -search.disableCache
-docker run -d --name obs-parity-vl -p 127.0.0.1::9428 victoriametrics/victoria-logs:v1.54.0 -retentionPeriod=10y
-OBS_PARITY_VM=http://127.0.0.1:<port> OBS_PARITY_VL=http://127.0.0.1:<port> \
-    go test -tags parity -run Parity -v ./internal/check      # in golang/obs/src
-```
-
-Use fresh containers for every run (VictoriaLogs keeps duplicate rows). The nightly parity job (a later release)
-replaces this by hand run.
+Use the labeled, digest-pinned stack and cleanup commands in [Nightly parity](#nightly-parity).
+The harness creates fresh containers for every run: VictoriaLogs retains duplicate rows.
 
 ## obs alerts
 
@@ -825,8 +820,122 @@ later part. The Grafana AGPL licence ships in `share/licenses/obs/grafana/LICENS
 - `obs look` with a pull request on GitHub (the agent posts the comment; obs only prints the prompt).
 - Variable filling for LogsQL panels against the Grafana VictoriaLogs datasource (it reuses the Prometheus macros).
 - Seeded log rows against a real VictoriaLogs fed through Alloy (field names are FROM SOURCE).
-- LogsQL `_time:[start, end)` handling against real Grafana (the nightly parity job, a later release).
 - aarch64 and macOS builds are in CI; only x86_64 Linux was run by hand.
+
+## Nightly parity
+
+The `Obs parity` workflow runs nightly and on changes to engine pins, and can be
+dispatched manually. The main-push release job also requires the reusable parity
+workflow: it compares `golang/obs/**` with the latest full `vX.Y.Z` release tag,
+skips successfully when unchanged, and runs full parity otherwise (or when no
+release tag exists). Branch CI is unchanged. It uses GitHub's standard
+`ubuntu-24.04` runner in this public repository.
+
+`src/internal/pins/pins.json` is obs's version source, embedded in `obs version`.
+Before any container starts, `parity/check-pins.sh` compares every version and
+source commit with `parity/images.json`, including the image tags and datasource
+plugin version. The job starts VictoriaMetrics v1.156.0, VictoriaLogs v1.54.0,
+Tempo 3.1.1, Pyroscope 2.4.3 and Grafana 13.3.0 with VictoriaLogs datasource
+v0.34.0. **Chart pins are NOT TESTED:** their location in the chart registry has
+not been specified. Recorded image digests establish which binaries ran; the
+manifest's source commit fields describe the embedded source provenance. Every
+image is pinned by tag and digest: the current tag must still resolve to that
+digest before anything starts, and the containers run by digest. Grafana's
+reported image build commit is also checked against its separate pin. The public
+v13.3.0 source commit is `752e3462`; the image build commit is
+`6f8ce3c693b493043ebcd4787566d2b6b118b0f0`. The source commit cannot be proven
+from the released image.
+
+Each comparison is a separate workflow step: fixture and panel queries, historic
+per-minute datasource values, LogsQL alert values through Grafana's `/api/ds/query`,
+VictoriaLogs query limits, and (when the corresponding command exists) full
+Grafana alert evaluation, live scheduler history, TraceQL, links and profiles.
+An available command with a missing parity test fails. Container tests carry the
+`parity` build tag and never run in the offline Nix checks. Tempo/links are now
+part of the base branch, so their adapter compiles directly against those packages.
+
+On 17 November 2026, the final local core run compared **23 fixture query
+executions (three intentionally empty), nine metric panel executions through
+Grafana, 472 LogsQL alert minutes through Grafana, 462 MetricsQL alert minutes
+through Grafana, and six settings-driven VictoriaLogs limit cases (MEASURED)**.
+The complete local settings/core/TraceQL session took 155 seconds, including
+startup, builds, ordinary Go tests, 30 offline shell checks and the TraceQL/links
+suite (three baselines and five planted failures). All seven planted pin drifts,
+four planted comparison drifts and six release-gate histories were rejected or
+classified correctly. VictoriaMetrics values use a relative tolerance of `1e-11`.
+
+The panel comparison found a real difference: Grafana aligns range endpoints to
+the step grid, while obs previously used the unaligned seed end. `obs query
+--live` now applies the same alignment before executing metric panels.
+
+Advanced adapters were also run against the parallel part branches: M3
+`aa2085a` (27 historic alert evaluations, including numeric LogsQL counts; four
+live scheduler transitions and ten recording-rule points), M4 `e462cb4` (seven
+TraceQL searches, two range-metric queries and six link checks), and M5 `0257d0b` (12 function CPU shares
+and two span CPU shares). These are MEASURED local results. Alerts and TraceQL
+are now integrated in this branch; the profile step switches on when its command lands.
+
+VictoriaLogs referee settings found on that run: a recent, disjoint time line per
+fixture; `-retentionPeriod=10y`; explicit insert `/internal/force_flush` before
+queries; a two-second settling wait; `-memory.allowedBytes=256MiB`;
+`-search.maxQueryDuration=30s`; `-search.maxQueryLen=16KiB`;
+`-search.maxQueryTimeRange=7d`. Length and range boundaries are compared with
+the settings-file-driven embedded engine, including an authored `_time` filter
+that narrows a larger API range. Runtime timeout/concurrency equivalence on
+different hardware is NOT TESTED. The artifacts include the real server's `/flags`, plugin
+metadata, container digests, test output and timings. Tempo uses one hour of
+WAL ingestion slack in both storage and live-store, a one-hour recent-query
+window, zero query-end cutoff, and short trace-idle timers so a past seed remains
+searchable without waiting for the backend block poll.
+
+For a local run, use a unique absolute scratch directory and hold the machine's
+heavy-work lock for the whole stack and test session:
+
+```bash
+export OBS_PARITY_STATE=/tmp/obs-parity-local
+bash golang/obs/parity/stack.sh up
+(cd golang/obs/src && go build -o "$OBS_PARITY_STATE/obs" .)
+bash golang/obs/parity/step.sh TestParity
+bash golang/obs/parity/step.sh TestParityGrafanaLogs
+bash golang/obs/parity/stack.sh logs
+bash golang/obs/parity/stack.sh down
+```
+
+Every container has `obs.parity=1` and a unique run label. Cleanup removes only
+that run's containers and network. No Docker prune is used.
+
+### VictoriaLogs chart settings
+
+`obs query --live --vl-settings FILE` and `obs alerts --vl-settings FILE` read the consumer's extracted VictoriaLogs
+args. By default it loads `<dir>/victorialogs-settings.yaml` if present; without
+that file it uses the pinned v1.54.0 defaults and prints one note. Finding the
+chart and extracting its deployed args is the consumer's responsibility. An
+explicit missing file, duplicate flag, invalid value or unknown `search.*` flag
+is an input error. Accepted YAML forms are a flag map, a list of one-flag maps,
+or a list of `-flag=value` strings, for example:
+
+```yaml
+-search.maxQueryLen: 16KiB
+-search.maxQueryTimeRange: 7d
+-search.maxQueryDuration: 30s
+-search.maxConcurrentRequests: 4
+-search.maxQueueDuration: 10s
+```
+
+The embedded engine enforces the original query's byte length before rewriting,
+the effective time-filter intersection, execution deadline, concurrency slots
+and queue deadline. Refusals name the server flag. `select.disable` is also
+honored. Non-query args (retention, storage, HTTP auth, etc.) do not configure the
+temporary embedded store; `search.allowPartialResponse` is cluster-only and
+`search.logSlowQueryDuration` affects logging, not refusal. Pinned defaults are
+16KiB, unlimited time range, 30s execution, 10s queue, and the server's CPU-based
+concurrency formula (twice CPUs up to four CPUs, otherwise CPUs, capped at 16).
+These defaults and flag parsing follow the pinned
+[vlselect frontend](https://github.com/VictoriaMetrics/VictoriaLogs/blob/v1.54.0/app/vlselect/main.go)
+and [LogsQL frontend](https://github.com/VictoriaMetrics/VictoriaLogs/blob/v1.54.0/app/vlselect/logsql/logsql.go).
+`vl.Limits.Check` is also the alerts integration's query-guard interface. Alerts
+check the original query before assumed-filter rewriting; effective settings
+participate in result-cache keys, so tightening a limit cannot reuse a cached success.
 
 ## `obs alerts` speed (concept §11.1.1, re-measured with VictoriaLogs)
 

@@ -63,8 +63,9 @@ func sampleResults(ss []*Series, shift time.Duration) []Result {
 }
 
 type logsEngine struct {
-	e     *vl.Engine
-	guard QueryGuard
+	e         *vl.Engine
+	guard     QueryGuard
+	onRefusal func(Query, error)
 }
 
 func (l logsEngine) Instant(q Query, at time.Time) ([]Result, error) {
@@ -78,11 +79,17 @@ func (l logsEngine) Instant(q Query, at time.Time) ([]Result, error) {
 			original = q.Expr
 		}
 		if err := l.guard.Check(original, at.Add(-from), at.Add(-q.To)); err != nil {
+			if l.onRefusal != nil && vl.IsRefusal(err) {
+				l.onRefusal(q, err)
+			}
 			return nil, err
 		}
 	}
 	rs, err := l.e.Stats(q.Expr, at.Add(-from), at.Add(-q.To), false)
 	if err != nil {
+		if l.onRefusal != nil && vl.IsRefusal(err) {
+			l.onRefusal(q, err)
+		}
 		return nil, err
 	}
 	out := make([]Result, 0, len(rs))

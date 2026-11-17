@@ -7,7 +7,11 @@
 // package never runs a prune: other teams' images and containers live on the same box.
 package sandbox
 
-import "fmt"
+import (
+	"fmt"
+	"github.com/AtomiCloud/obs/internal/pins"
+	"strings"
+)
 
 // Component is one container of the stack.
 type Component struct {
@@ -28,20 +32,20 @@ func (c Component) Ref() string { return c.Image + ":" + c.Tag }
 
 // Pins are the images of the stack. Each tag equals the version in concept section 1;
 // nothing here is read from the environment, so the stack cannot drift from the pins.
+var versions = pins.All()
 var Pins = []Component{
-	{Name: "grafana", Image: "grafana/grafana", Tag: "13.3.0", Port: 3000, Offset: 0, Data: "/var/lib/grafana", Health: "/api/health"},
-	{Name: "vm", Image: "victoriametrics/victoria-metrics", Tag: "v1.156.0", Port: 8428, Offset: 1, Data: "/victoria-metrics-data", Health: "/health"},
-	{Name: "vl", Image: "victoriametrics/victoria-logs", Tag: "v1.54.0", Port: 9428, Offset: 2, Data: "/victoria-logs-data", Health: "/health"},
-	{Name: "tempo", Image: "grafana/tempo", Tag: "3.1.1", Port: 3200, Offset: 3, Data: "/var/tempo", Health: "/ready"},
-	{Name: "pyroscope", Image: "grafana/pyroscope", Tag: "2.4.3", Port: 4040, Offset: 4, Data: "/data", Health: "/ready",
+	{Name: "grafana", Image: "grafana/grafana", Tag: versions["Grafana"].Version, Port: 3000, Offset: 0, Data: "/var/lib/grafana", Health: "/api/health"},
+	{Name: "vm", Image: "victoriametrics/victoria-metrics", Tag: versions["VictoriaMetrics"].Version, Port: 8428, Offset: 1, Data: "/victoria-metrics-data", Health: "/health"},
+	{Name: "vl", Image: "victoriametrics/victoria-logs", Tag: versions["VictoriaLogs"].Version, Port: 9428, Offset: 2, Data: "/victoria-logs-data", Health: "/health"},
+	{Name: "tempo", Image: "grafana/tempo", Tag: versions["Tempo"].Version, Port: 3200, Offset: 3, Data: "/var/tempo", Health: "/ready"},
+	{Name: "pyroscope", Image: "grafana/pyroscope", Tag: versions["Pyroscope"].Version, Port: 4040, Offset: 4, Data: "/data", Health: "/ready",
 		Declared: []string{"/data", "/data-compactor", "/data-metastore"}},
 }
 
 // The Grafana VictoriaLogs datasource plugin (concept section 1).
-const (
-	PluginID      = "victoriametrics-logs-datasource"
-	PluginVersion = "0.34.0"
-)
+const PluginID = "victoriametrics-logs-datasource"
+
+var PluginVersion = strings.TrimPrefix(versions["VictoriaLogsDatasource"].Version, "v")
 
 // ByName returns the pin of a component by short name.
 func ByName(name string) (Component, bool) {
