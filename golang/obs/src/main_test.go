@@ -74,6 +74,53 @@ func TestVLSettingsCLI(t *testing.T) {
 	}
 }
 
+func TestAlertsVLSettingsCache(t *testing.T) {
+	dir := project(t, map[string]string{"logs/warning.yaml": `apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata: {name: settings}
+spec:
+  interval: 1m
+  rules:
+    - uid: r1
+      condition: B
+      data:
+        - refId: A
+          datasourceUid: primordial-logs
+          relativeTimeRange: {from: 60, to: 0}
+          model: {expr: '"durian.cloud/event":="checkout.charge.failed" | stats count() n', queryType: stats}
+        - refId: B
+          datasourceUid: __expr__
+          model: {type: math, expression: '$A > 1000000'}
+`})
+	if err := os.WriteFile(filepath.Join(dir, "seed.yaml"), []byte(strings.Replace(seedDoc, "length: 1h", "length: 1m", 1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OBS_CACHE_DIR", t.TempDir())
+	path := filepath.Join(dir, "victorialogs-settings.yaml")
+	if err := os.WriteFile(path, []byte("search.maxQueryLen: 1KiB"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		rc, out := obs("alerts", "--dir", dir, "--base", "1700000000", "--vl-settings", path)
+		if rc != 0 || (i == 1 && !strings.Contains(out, "cached=1")) {
+			t.Fatalf("settings cache baseline %d: rc=%d %s", i, rc, out)
+		}
+	}
+	for _, tc := range []struct{ settings, flag string }{
+		{"search.maxQueryLen: 1", "-search.maxQueryLen=1"},
+		{"search.maxQueryDuration: 0s", "-search.maxQueryDuration=0s"},
+		{"search.maxConcurrentRequests: 0\nsearch.maxQueueDuration: 1ns", "-search.maxConcurrentRequests=0"},
+	} {
+		if err := os.WriteFile(path, []byte(tc.settings), 0600); err != nil {
+			t.Fatal(err)
+		}
+		rc, out := obs("alerts", "--dir", dir, "--base", "1700000000")
+		if rc != 1 || !strings.Contains(out, tc.flag) || !strings.Contains(out, "logs/warning.yaml") || !strings.Contains(out, "rule r1") {
+			t.Fatalf("changed settings must invalidate cached success and name flag/rule: rc=%d %s", rc, out)
+		}
+	}
+}
+
 func TestEndToEnd(t *testing.T) {
 	good := project(t, map[string]string{
 		"a/critical.yaml": alert("primordial-metrics", `sum(rate(checkout_charges_total{outcome="error"}[5m])) > 1`, "instant"),

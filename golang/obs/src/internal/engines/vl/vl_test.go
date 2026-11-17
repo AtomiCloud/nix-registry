@@ -81,4 +81,25 @@ func TestStatsWindow(t *testing.T) {
 	if len(rs) != 0 {
 		t.Fatalf("threshold kept: %+v", rs)
 	}
+	// Output columns may be reordered and there may be several numeric stats.
+	// Only the actual by-fields are labels; every numeric column is a series.
+	rs, err = e.Stats(`_time:5m severity_text:ERROR | stats by (service.name) count() as hits, rate() as speed | fields speed, hits, service.name`, end.Add(-10*time.Minute), end, false)
+	if err != nil || len(rs) != 2 {
+		t.Fatalf("multiple stats: %+v %v", rs, err)
+	}
+	for _, r := range rs {
+		if len(r.Labels) != 1 || r.Labels[0].Name != "service.name" {
+			t.Fatalf("numeric column became a label: %+v", r)
+		}
+		if r.Name == "hits" && r.Value != "3" {
+			t.Fatalf("wrong count: %+v", r)
+		}
+		if r.Name != "hits" && r.Name != "speed" {
+			t.Fatalf("missing stats name: %+v", r)
+		}
+	}
+	rs, err = e.Stats(`_time:5m severity_text:ERROR | stats max(nonexistent) as no_value`, end.Add(-10*time.Minute), end, false)
+	if err != nil || len(rs) != 1 || rs[0].Name != "no_value" || rs[0].Value != "" {
+		t.Fatalf("empty stats should map to a null alert value: %+v %v", rs, err)
+	}
 }

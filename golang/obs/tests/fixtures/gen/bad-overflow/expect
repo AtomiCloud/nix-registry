@@ -1,0 +1,5 @@
+mode: check
+exit: 1
+contains: [over-budget]
+contains: metrics.checkout.charges
+contains: more than 2^53 series

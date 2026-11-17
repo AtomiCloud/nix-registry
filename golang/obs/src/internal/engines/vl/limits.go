@@ -1,6 +1,7 @@
 package vl
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,16 @@ import (
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/flagutil"
 	"gopkg.in/yaml.v3"
 )
+
+type refusalError struct{ error }
+
+func refusal(format string, args ...any) error { return &refusalError{fmt.Errorf(format, args...)} }
+
+// IsRefusal distinguishes deployed frontend limits from ordinary query errors.
+func IsRefusal(err error) bool {
+	var target *refusalError
+	return errors.As(err, &target)
+}
 
 // Limits mirrors the query frontend flags of VictoriaLogs v1.54.0.
 // Check satisfies alerts.QueryGuard; NewWithLimits also enforces runtime limits.
@@ -170,10 +181,10 @@ func ParseLimits(b []byte) (Limits, error) {
 // then range to the actual intersection with any authored _time filter.
 func (l Limits) Check(query string, start, end time.Time) error {
 	if l.SelectDisabled {
-		return fmt.Errorf("query refused by -select.disable=true")
+		return refusal("query refused by -select.disable=true")
 	}
 	if (l.queryLenSet || l.MaxQueryLen > 0) && len(query) > l.MaxQueryLen {
-		return fmt.Errorf("query %q: -search.maxQueryLen=%d exceeded (%d bytes)", query, l.MaxQueryLen, len(query))
+		return refusal("query %q: -search.maxQueryLen=%d exceeded (%d bytes)", query, l.MaxQueryLen, len(query))
 	}
 	if l.MaxQueryTimeRange > 0 {
 		q, err := Parse(query, end)
@@ -183,7 +194,7 @@ func (l Limits) Check(query string, start, end time.Time) error {
 		q.q.AddTimeFilter(start.UnixNano(), end.UnixNano()-1)
 		a, b := q.q.GetFilterTimeRange()
 		if b > a && (b-a < 0 || b-a > l.MaxQueryTimeRange.Nanoseconds()) {
-			return fmt.Errorf("query %q: -search.maxQueryTimeRange=%s exceeded", query, l.MaxQueryTimeRange)
+			return refusal("query %q: -search.maxQueryTimeRange=%s exceeded", query, l.MaxQueryTimeRange)
 		}
 	}
 	return nil

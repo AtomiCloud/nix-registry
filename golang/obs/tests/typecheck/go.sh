@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Compiles the generated Go file (tests/fixtures/gen/good/gen/go/signals/signals.go) the way a
+# consumer uses it: good.go.txt must build and run; every bad-*.go.txt must fail and the compiler
+# output must name the token listed in typecheck/go/expect.
+#   go.sh [--go <go binary>]
+set -euo pipefail
+GO=go
+[ "${1:-}" = "--go" ] && GO="$2"
+here="$(cd "$(dirname "$0")/.." && pwd)"
+g="$here/typecheck/go"
+work="$(mktemp -d)"
+trap 'rm -rf "$work"' EXIT
+export HOME="$work" GOCACHE="$work/cache" GOPATH="$work/gopath" GOFLAGS=-mod=mod GOTOOLCHAIN=local GOPROXY=off CGO_ENABLED=0
+mkdir -p "$work/signals"
+cp "$here/fixtures/gen/good/gen/go/signals/signals.go" "$work/signals/"
+printf 'module example.com/app\n\ngo 1.24\n' >"$work/go.mod"
+cd "$work"
+fail=0
+cp -f "$g/good.go.txt" main.go
+if out=$("$GO" vet ./... 2>&1) && out=$("$GO" run . 2>&1) && grep -q 'stripe checkout.charge.failed error' <<<"$out"; then echo "PASS good.go builds, runs and refuses shard 16"; else
+  echo "FAIL good.go: $out"
+  fail=1
+fi
+while read -r f token; do
+  cp -f "$g/$f" main.go
+  if out=$("$GO" build ./... 2>&1); then
+    echo "FAIL $f compiled but must not"
+    fail=1
+  elif grep -qF -- "$token" <<<"$out"; then echo "PASS $f red, names $token"; else
+    echo "FAIL $f red but output lacks $token: $out"
+    fail=1
+  fi
+done <"$g/expect"
+exit $fail

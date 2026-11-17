@@ -1,0 +1,5 @@
+mode: check
+exit: 1
+contains: [over-budget]
+contains: metrics.checkout.charges
+contains: worst case is 3456 series, over its budget of 3000

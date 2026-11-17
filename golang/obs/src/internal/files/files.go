@@ -71,7 +71,8 @@ type Set struct {
 	Queries    []Query
 	Dashboards []*Dashboard
 	Problems   []Problem
-	Alerts     int // alert files read
+	Alerts     int    // alert files read
+	Rules      []Rule // complete alert definitions, including Grafana expressions
 }
 
 // Load reads dir. A missing dashboards/ or alerts/ folder is fine; nothing at all is not.
@@ -129,7 +130,8 @@ type alertDoc struct {
 		Name string `yaml:"name"`
 	} `yaml:"metadata"`
 	Spec struct {
-		Rules []alertRule `yaml:"rules"`
+		Interval string      `yaml:"interval"`
+		Rules    []alertRule `yaml:"rules"`
 	} `yaml:"spec"`
 	// Keys of Primordial's flat authoring form: refused with a pointer to the CR.
 	Title      string `yaml:"title"`
@@ -138,9 +140,20 @@ type alertDoc struct {
 }
 
 type alertRule struct {
-	UID   string `yaml:"uid"`
-	Title string `yaml:"title"`
-	Data  []struct {
+	UID                         string            `yaml:"uid"`
+	Title                       string            `yaml:"title"`
+	Condition                   string            `yaml:"condition"`
+	For                         string            `yaml:"for"`
+	KeepFiringFor               string            `yaml:"keepFiringFor"`
+	NoDataState                 string            `yaml:"noDataState"`
+	ExecErrState                string            `yaml:"execErrState"`
+	MissingSeriesEvalsToResolve int               `yaml:"missingSeriesEvalsToResolve"`
+	Labels                      map[string]string `yaml:"labels"`
+	Record                      *struct {
+		Metric string `yaml:"metric"`
+		From   string `yaml:"from"`
+	} `yaml:"record"`
+	Data []struct {
 		RefID             string `yaml:"refId"`
 		QueryType         string `yaml:"queryType"`
 		DatasourceUID     string `yaml:"datasourceUid"`
@@ -150,6 +163,13 @@ type alertRule struct {
 		} `yaml:"relativeTimeRange"`
 		Model map[string]any `yaml:"model"`
 	} `yaml:"data"`
+}
+
+// Rule is a Grafana-managed rule read by Load, shared with obs alerts. File and
+// Interval come from the containing CR, all other fields are Grafana's schema.
+type Rule struct {
+	File, Interval, Name string
+	Definition           alertRule
 }
 
 func (s *Set) readAlert(rel string, b []byte) {
@@ -177,6 +197,7 @@ func (s *Set) readAlert(rel string, b []byte) {
 		return
 	}
 	for _, r := range d.Spec.Rules {
+		s.Rules = append(s.Rules, Rule{File: rel, Interval: d.Spec.Interval, Name: d.Metadata.Name, Definition: r})
 		id := r.UID
 		if id == "" {
 			id = d.Metadata.Name

@@ -1,0 +1,5 @@
+mode: check
+exit: 1
+contains: [free-stream-label]
+contains: stream_labels.who
+contains: logs.ChargeFailed

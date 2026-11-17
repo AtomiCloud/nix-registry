@@ -189,7 +189,7 @@ func (l *liveRun) alert(q *files.Query) {
 		e, n := stripThresholds(e)
 		expr := string(e.AppendString(nil))
 		if n > 0 {
-			l.r.add(Note, q.File, q.Where, "threshold-removed", "ran the query without its %d comparison(s): a threshold filters rows out on a quiet seed; query run: %s", n, oneLine(expr))
+			l.r.add(Note, q.File, q.Where, "threshold-removed", "ran the query without its %d comparison(s) or absence check(s): a threshold filters rows out on a quiet seed; query run: %s", n, oneLine(expr))
 		}
 		rs, err := l.vm.Instant(expr, l.end)
 		if err != nil {

@@ -48,14 +48,18 @@ Follow-up commands (see the corpus goal): `obs gen`, `obs check`
  7. e2e                   obs assert, obs profile compare
 ```
 
-This branch also ships step 6's `obs links`; the final release version is set when obs-full lands.
+This branch includes `obs check`, `obs gen`, `obs alerts` and `obs links`; the final release version is set when obs-full lands.
 
 ## Usage
 
 ```text
 obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
 obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names]
+obs alerts [--dir observability] [--vl-settings victorialogs-settings.yaml]
 obs links [--dir observability] [--seed seed.yaml] [--base unix]
+
+obs check [--dir observability] [--pods n] [--landscapes n]
+obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
 obs version
 ```
 
@@ -76,8 +80,7 @@ the file, the rule or panel, the rule id in `[brackets]` and the offending name 
 - **`dashboards/**/\*.json`**: dashboard JSON. Panels (also inside collapsed rows), `targets[].expr`,
 `templating.list`, `time.from/to` are read. Annotation queries are not checked in 0.1.0.
 - **`seed.yaml`** (`--live` only; `--seed` overrides the path): see below.
-- **`contract.yaml`**: only its presence matters in 0.1.0 (the event rule, below). Its schema is
-  read from obs 0.2.
+- **`contract.yaml`**: the contract (see "The contract" below); its presence switches on the contract name checks and the event rule.
 
 **Which datasource speaks what.** The plugin type decides (`prometheus`,
 `victoriametrics-metrics-datasource` = MetricsQL; `victoriametrics-logs-datasource` = LogsQL;
@@ -181,6 +184,102 @@ e.g. `ERROR`) and `severity_number`, `trace_id`, `span_id`. Stream fields are th
 `durian.cloud.*` keys, when set), plus `stream_fields`. `service.name`, `service.namespace` and
 `deployment.environment.name` are filled from the `durian.cloud.*` keys, as Alloy does.
 
+## The contract (`observability/contract.yaml`)
+
+Written by hand (concept §3). Unknown keys fail. `obs check` and `obs gen` refuse an invalid contract.
+
+```yaml
+service: checkout
+modules: [api, worker] # the log stream count uses it
+pod_keys: [k8s.pod.name, k8s.pod.uid, k8s.node.name, service.instance.id] # default shown
+interval: 30s # aggregation interval (default 30s)
+types:
+  provider: { kind: enum, values: [stripe, adyen, paypal] }
+  shard: { kind: int, min: 0, max: 15 }
+  hour: { kind: time, unit: hour_of_day } # or weekday
+  billing_day: { kind: date, window_days: 30 } # a metric label only
+  user_id: { kind: free } # log fields and span attributes only
+metrics:
+  checkout.charges:
+    kind: counter # counter | histogram | gauge
+    budget: 5000
+    labels: { provider: provider, shard: shard, hour: hour }
+  checkout.queue.depth: { kind: gauge, across_pods: sum } # sum | avg | max | last, or per_pod: true
+logs:
+  ChargeFailed: { event: checkout.charge.failed, level: error }
+spans:
+  checkout.charge: { kind: internal, attributes: { user_id: user_id, provider: provider } }
+platform_metrics: # metrics the platform makes (OTel auto instrumentation), with their labels
+  http.server.request.duration: [http.route, http.response.status_code]
+generate: # `obs gen` targets, `out` relative to the folder that holds observability/
+  - { lang: go, out: internal/signals/generated, package: signals }
+```
+
+Two keys go beyond the concept's examples: `platform_metrics` (so a query on a metric the platform
+makes is not "undeclared") and `modules` (the module count of the stream formula). `free` may be
+written without declaring it (`attributes: { user_id: free }`, as concept 3.1 does). The VictoriaLogs
+stream fields are only the bounded where-from set (concept 3.3): a log event declares none, so a
+`stream_labels` entry is refused (`stream-label-declared`; with `free-stream-label` or `date-stream-label`
+when its type is free or a date).
+
+## `obs check`
+
+```text
+obs check [--dir observability] [--pods n] [--landscapes n]
+```
+
+Prints the worst-case series per metric (the product of its label sizes, times buckets + 2 for a
+histogram: 14 for the default 12 buckets), the worst case times `--pods` for a `per_pod` metric, the
+log stream count (modules x `--landscapes`, times any declared stream label; log events add no
+streams) and `events=[...]`. It fails (exit 1, `FAIL <file> <yaml path>: [rule] ...`) on:
+
+- `free-metric-label`: `free` on a metric label;
+- `stream-label-declared` (with `free-stream-label`, `date-stream-label`): a log event declares a stream field, or a free or date one;
+- `date-no-window`: a calendar date type without `window_days`;
+- `over-budget`, `budget-missing`: a metric over its budget, or with labels and no budget;
+- `gauge-pods`: a gauge with neither `across_pods` nor `per_pod` (or both);
+- `metric-kind`: no kind or an unknown kind; and the schema rules (`label-type`, `enum-empty`, `int-bounds`, `event-level`, ...).
+
+The after-start pod-key check of §4.1 is not here (it needs a running store: `obs assert`).
+
+## `obs gen`
+
+```text
+obs gen [--dir observability] [--lang go,dotnet,dart,bun]
+obs gen --check [--dir observability]
+```
+
+Writes, for a valid contract: one set of **types and constants** per `generate:` target (concept
+§3.4: label value types, one labels type per metric and span, a name carrier per signal, the
+allowed-keys table; no per-metric functions; shared base types are prefixed `DurianSignal`),
+`<dir>/contract/events.json` (event names, read by the log-alert event check) and
+`<dir>/contract/aggregation.yaml` (the §4.1 VictoriaMetrics stream-aggregation file: counters and
+histogram parts get `total`; gauges get `sum_samples`, `avg`, `max` or `last` with `dedup_interval`;
+`without` = `pod_keys`; `per_pod` metrics and unlisted metrics are in no match).
+Output is deterministic and formatted. Every file starts with `Code generated by obs gen. DO NOT EDIT.`
+and `contract-hash: sha256:<hash of the contract file>`.
+
+`--check` regenerates into a temp dir and compares with the committed files: a file that differs is
+`[gen-edited]` when its header hash equals the contract's (a hand edit) and `[gen-stale]` when it does
+not (the contract changed and nobody regenerated); a missing file is `[gen-missing]`.
+Golden files: `tests/fixtures/gen/good` is a consumer repo with its generated files committed; the
+Go unit tests and `obs gen --check` compare against it (`OBS_UPDATE_GOLDEN=1 go test ./internal/gen/...`
+rewrites them). The tests find `tests/` in an ancestor of the package (or `OBS_TESTS_DIR`); a build from `src/` alone skips them, and the nix check copies `tests/` next to the source root. The generated code compiles: `tests/typecheck/<lang>.sh` builds a consumer against it and
+runs planted bad consumers that must not compile.
+
+## Contract name checks in `obs query --static`
+
+When `<dir>/contract.yaml` exists, every name a query reads must be in the contract or in the platform
+label list (concept §2): `contract-undeclared-metric` (stored name, with "did you mean"),
+`contract-undeclared-label` (selector and `by`/`on` labels; a label of another metric fails),
+`contract-bad-enum-value` (an equality or plain `a|b` value that is not an enum value or is outside a
+bounded number; a value that holds a dashboard variable is not judged),
+`contract-pod-label` (a pod key on a business metric, §4.1), `contract-undeclared-event` and
+`contract-undeclared-stream-field` (a stream tag outside the where-from set). Regex metric names (`{__name__=~"..."}`) are matched against the known names and a regex that matches none is
+undeclared; regex label values must match an allowed value; label functions (`label_replace`, ...) must read
+labels their input has. Names compare with dots
+and underscores equal. Other log fields are free-form (§6): not judged.
+
 ## Engines and pins
 
 | Signal  | Engine                                               | Version                        |
@@ -243,7 +342,69 @@ through `/select/logsql/query`). Results must be equal: same series, same values
 Use the labeled, digest-pinned stack and cleanup commands in [Nightly parity](#nightly-parity).
 The harness creates fresh containers for every run: VictoriaLogs retains duplicate rows.
 
-## Not tested yet
+## obs alerts
+
+`obs alerts --dir observability` evaluates the `GrafanaAlertRuleGroup` CRs in
+`alerts/<slug>/<severity>.yaml` on the seed and each named incident. It prints one
+line per rule and expectation, including its file and incident window, and exits
+1 on a miss. Every rule must stay quiet on the baseline; rules omitted from an
+incident's expectations are also checked for quiet. Metric and LogsQL rules run
+inside VictoriaMetrics v1.156.0 and VictoriaLogs v1.54.0 with no network or containers.
+
+```text
+obs alerts --dir observability
+OBS_VERIFY_FAST=1 OBS_VERIFY_SKIP=1 obs alerts --dir observability
+OBS_CACHE_DIR=.cache/obs obs alerts --dir observability
+obs alerts --dir observability --steps steps.json --recorded recorded.json
+```
+
+The seed's `incidents: [spike]` reads `incidents/spike.yaml`. An incident declares
+`window: {start: 10m, duration: 10m}`, `change` entries with a metric, matching
+`where` labels and `rate`, `latency_x` or `share_x`, and
+`expect: {fire: [rule-uid], quiet: [], fire_within: 5m, resolve_within: 5m}`.
+Firing must begin inside the incident and before `fire_within`; it must stop by
+the end plus `resolve_within` (default zero). Use the recovery allowance for the
+query's rollup window and `keepFiringFor`. The time line ends in the past; an
+explicit `--base` whose complete time line reaches the future is refused.
+
+The Grafana 13.3.0 expression port supports math, reduce (including non-number
+mapping), threshold and recovery thresholds, `for`, `keepFiringFor`, missing
+series, `noDataState` and `execErrState`. Source functions are cited alongside
+each state transition. Recording rules use the same CR reader with
+`record: {metric: fixture_recorded, from: A}`; dependent recording rules execute
+first and their samples are appended to the embedded metric store before alerts.
+`--recorded` writes `{labels, timestamps, values}` rows; `--steps` writes each
+minute's evaluation and state. Both exports bypass the persistent result cache.
+
+LogsQL queries use each rule's `relativeTimeRange.from/to`, parse at the resulting
+end time and add the exclusive `[start, end)` range. Final `stats by (...)` fields
+are instance labels, alongside `__name__` for each stats output column. A numeric
+null keeps that instance's labels and evaluates as NoData. With a contract, `durian.cloud/event` filters are checked
+against its event list. Other field-value filters are printed as assumptions and
+removed from the parsed AST; event filters in `_stream` or `or`, unknown events
+and stats reading field values are refused. Seed events must be declared too.
+Without a contract, one event-rule-skipped note is printed for each log query.
+
+The numeric light path is checked against the vendored Grafana dataframe path
+with `OBS_VERIFY_FAST=1`; unchanged incident inputs are compared with their
+baseline reuse by `OBS_VERIFY_SKIP=1`. Any mismatch fails the command. The result
+cache includes the binary, seed, incidents, recording rules, contract and each
+alert's normalized CR definition. Time-derived queries (including sample
+timestamps) also include the base timestamp and do not reuse shifted baseline
+results. Wall-clock/random queries and a configured query guard bypass persistent
+caching. Storage uses `OBS_TMPDIR`,
+otherwise a writable `/dev/shm` with at least 1 GiB free (else the system temp
+directory); VictoriaMetrics caches are capped at 512 MiB.
+Unused metric series are omitted and VictoriaLogs starts only when needed.
+
+MEASURED: regression tests cover state transitions, numeric light/full parity,
+event-filter refusals, recording outputs, cache invalidation and planted wrong
+thresholds. NOT TESTED: parity against the live Grafana scheduler and datasource
+in this part PR, notification/persistence behavior, and VictoriaLogs runtime
+timeout/concurrency limits. TraceQL alerts use the `DatasourceEngine` hook in a
+later part. The Grafana AGPL licence ships in `share/licenses/obs/grafana/LICENSE`.
+
+### Existing query-check limits
 
 - Variable filling for LogsQL panels against the Grafana VictoriaLogs datasource (it reuses the Prometheus macros).
 - Seeded log rows against a real VictoriaLogs fed through Alloy (field names are FROM SOURCE).
@@ -284,11 +445,12 @@ part of the base branch, so their adapter compiles directly against those packag
 On 17 November 2026, the final local core run compared **23 fixture query
 executions (three intentionally empty), nine metric panel executions through
 Grafana, 472 LogsQL alert minutes through Grafana, 462 MetricsQL alert minutes
-through Grafana, and five VictoriaLogs limit cases in 30.592 seconds (MEASURED)**.
-The whole local core session, including stack startup, builds, ordinary Go tests
-and the offline fixture suite, took 108 seconds; the fixture suite passed all 30
-checks. All seven planted pin drifts and four planted comparison drifts were
-rejected. VictoriaMetrics values use a relative tolerance of `1e-11`.
+through Grafana, and six settings-driven VictoriaLogs limit cases (MEASURED)**.
+The complete local settings/core/TraceQL session took 155 seconds, including
+startup, builds, ordinary Go tests, 30 offline shell checks and the TraceQL/links
+suite (three baselines and five planted failures). All seven planted pin drifts,
+four planted comparison drifts and six release-gate histories were rejected or
+classified correctly. VictoriaMetrics values use a relative tolerance of `1e-11`.
 
 The panel comparison found a real difference: Grafana aligns range endpoints to
 the step grid, while obs previously used the unaligned seed end. `obs query
@@ -298,8 +460,8 @@ Advanced adapters were also run against the parallel part branches: M3
 `aa2085a` (27 historic alert evaluations, including numeric LogsQL counts; four
 live scheduler transitions and ten recording-rule points), M4 `e462cb4` (seven
 TraceQL searches, two range-metric queries and six link checks), and M5 `0257d0b` (12 function CPU shares
-and two span CPU shares). These are MEASURED local results. Their combined cloud
-run switches on when the corresponding commands land in `obs-full`.
+and two span CPU shares). These are MEASURED local results. Alerts and TraceQL
+are now integrated in this branch; the profile step switches on when its command lands.
 
 VictoriaLogs referee settings found on that run: a recent, disjoint time line per
 fixture; `-retentionPeriod=10y`; explicit insert `/internal/force_flush` before
@@ -332,7 +494,7 @@ that run's containers and network. No Docker prune is used.
 
 ### VictoriaLogs chart settings
 
-`obs query --live --vl-settings FILE` reads the consumer's extracted VictoriaLogs
+`obs query --live --vl-settings FILE` and `obs alerts --vl-settings FILE` read the consumer's extracted VictoriaLogs
 args. By default it loads `<dir>/victorialogs-settings.yaml` if present; without
 that file it uses the pinned v1.54.0 defaults and prints one note. Finding the
 chart and extracting its deployed args is the consumer's responsibility. An
@@ -359,8 +521,9 @@ concurrency formula (twice CPUs up to four CPUs, otherwise CPUs, capped at 16).
 These defaults and flag parsing follow the pinned
 [vlselect frontend](https://github.com/VictoriaMetrics/VictoriaLogs/blob/v1.54.0/app/vlselect/main.go)
 and [LogsQL frontend](https://github.com/VictoriaMetrics/VictoriaLogs/blob/v1.54.0/app/vlselect/logsql/logsql.go).
-`vl.Limits.Check` is also the alerts integration's query-guard interface; the
-alerts CLI wiring is supplied when that command merges.
+`vl.Limits.Check` is also the alerts integration's query-guard interface. Alerts
+check the original query before assumed-filter rewriting; effective settings
+participate in result-cache keys, so tightening a limit cannot reuse a cached success.
 
 ## obs links
 
@@ -452,3 +615,100 @@ comparisons, metrics counts/rates/quantiles, both dashboard query modes and all
 three links. `tests/links.sh` plants syntax, attribute, log-link, trace-link and
 profile-label failures; every failure names the file, query/route/series and bad
 attribute or value. Real-store parity remains **NOT TESTED** here.
+
+## `obs alerts` speed (concept §11.1.1, re-measured with VictoriaLogs)
+
+### VictoriaLogs speed measurements
+
+The §11.1.1 table was measured in spike 7 with Loki as the log engine. This is the same
+table with the VictoriaLogs engine (`obs alerts` of this branch). MEASURED.
+
+| Alerts | 4 h seed | 24 h seed | Peak memory 4 h / 24 h |
+|---|---|---|---|
+| 1 | 3.55 s | 15.78 s | 2.03 / 7.85 GB |
+| 20 | 3.92 s | 18.55 s | 2.16 / 8.70 GB |
+| 200 | 11.86 s | 65.46 s | 2.21 / 8.17 GB |
+| 1,000 | 15.06 s | 68.75 s | 2.14 / 8.21 GB |
+
+Loki numbers (spike 7, same table) for comparison: 1 alert 0.23 / 1.10 s, 0.19 / 0.78 GB;
+20 alerts 1.05 / 5.45 s, 0.76 / 4.0 GB; 200 alerts 1.92 / 10.64 s, 1.07 / 5.3 GB;
+1,000 alerts 2.44 / 10.14 s, 1.22 / 5.9 GB.
+
+**What the numbers say**
+
+- Every cell is slower and heavier than the Loki table. A 4 h seed takes 3.5–15 s and
+  about 2 GB; a 24 h seed takes 16–69 s and 7.9–8.7 GB.
+- The 24 h column is at or over the 8 GB of a standard CI runner. The §11.1.1 budget
+  ("1,000 alerts in ~10 s and under 6 GB on a 24 h seed") does **not** hold with the
+  VictoriaLogs engine. The 4 h budget (under 2.5 s and 1.2 GB) does not hold either; the
+  concept text keeps the old numbers until the owner decides what to do.
+- Memory is flat across alert counts (2.0–2.2 GB at 4 h, 7.9–8.7 GB at 24 h): the cost is
+  loading the seed, not evaluating alerts. With Loki, 1 alert at 4 h used 0.19 GB. So in
+  this build the "load only what rules read" rule is not working for the seed (the
+  stores take the whole seed even for one alert). That is the first thing to look at.
+- Time does grow with alert count (3.9 s for 20 alerts and 11.9 s for 200 at 4 h), then
+  flattens (1,000 alerts: 15 s), as the shared seed and run reuse take over.
+
+**Box and method**
+
+- Box: Intel Xeon Platinum 8488C, 32 vCPU, 247 GB RAM, Linux 7.0 (AWS). The job runs on
+  2 CPUs (`taskset -c 0,1`), but the box is shared with other builders, so the other
+  30 CPUs, the disk and the memory bus were busy: expect noise. One run per cell
+  (`OBS_RUNS=1`); the runner takes several and prints the median time and the largest peak.
+- Cold start: a new process per run, an empty `OBS_CACHE_DIR`, the set copied to
+  `/dev/shm` first. The OS page cache is not dropped (needs root). Time is the process's
+  wall clock; peak memory is the process's `ru_maxrss`.
+- Binary: `obs` built from this branch (the `obs-alerts` evaluator at aa2085a merged).
+  Every run also checked its own expectations: all runs exited 0 (the table has no failed
+  cell; a failed run prints FAILED instead of a time).
+- Run it (under the shared heavy lock):
+
+  ```sh
+  cd golang/obs/src
+  go build -o /tmp/obs . && OBS_BIN=/tmp/obs OBS_FIXTURES=../tests/fixtures/alerts-speed OBS_RUNS=3 \
+    go test -tags speedbench -run TestSpeedTable -v -timeout 2h ./internal/alerts/speedfixtures
+  ```
+
+### Fixture sets (`tests/fixtures/alerts-speed/`)
+
+- `n1`, `n20`, `n200`, `n1000`: each has `alerts/` (GrafanaAlertRuleGroup CRs),
+  `incidents/` (3 incidents), `contract.yaml`, `seed.4h.yaml` and `seed.24h.yaml`.
+  The runner copies one seed to `seed.yaml`.
+- Generated, not hand-written: `go generate ./internal/alerts/speedfixtures` (run
+  `treefmt` after; the repo hook reformats the YAML). `go test ./internal/alerts/speedfixtures`
+  checks that every set loads with `internal/files`, has no LogQL, that variants differ,
+  and that the seeds load.
+- The 20 base alerts are the spike prototype's `proj20` mix: 13 metric-only, 6 log-only,
+  1 metric + log (`charge-errors/critical` joins both). The bigger sets repeat them as
+  variants `v2/ ... v50/`: a different rollup window (2–15 min, count thresholds scale with the
+  window) and a new rule uid, so 1,000 rules are 1,000 different rules.
+  Names are made up (landscape `speedland`, service `checkout`); no real landscape.
+- Incidents: `stripe-outage`, `checkout-slow`, `adyen-declines` (seed format of M1). Every
+  alert uid, variants included, is in `expect.fire` or `expect.quiet`.
+  Assertion coverage per set (baseline run + 3 incidents): n1 = 4 (1 positive, 3 negative);
+  n20 = 80 (19 positive, 61 negative); n200 = 800 (190 / 610); n1,000 = 4,000 (950 / 3,050).
+  The expect lists are what the evaluator produced on the 4 h and 24 h seeds, so they are a
+  regression baseline, not an independent oracle.
+
+### Fixture porting rules (prototype LogQL to LogsQL, by hand)
+
+1. `{service_name="checkout"}` becomes the stream filter `{durian.cloud.service="checkout"}`.
+2. `| durian_cloud_event="E"` becomes `"durian.cloud/event":="E"` (the contract event rule
+   needs this form); `| json | event="E"` has no json step in VictoriaLogs, it is the same filter
+   (written as `:in("E")` so the two alerts differ).
+3. `| severity_text="ERROR"` becomes `severity_text:="ERROR"`; `| payment_provider="adyen"`
+   becomes `"payment.provider":="adyen"`.
+4. `sum(count_over_time(S [W]))` becomes `_time:W S | stats count() hits`;
+   `sum(rate(S [W]))` becomes `_time:W S | stats rate() per_s`; `sum by (l)` becomes
+   `stats by (l)`. The rule's `relativeTimeRange.from` is the window in seconds.
+5. The threshold is a Grafana math node (`$A > 100`), as in the prototype, not a LogsQL `filter`.
+6. `unwrap duration_ms` (reads a log field value) has no LogsQL equivalent under seeds that
+   carry no field values; obs refuses it. The speed set replaces it with a count of
+   `declined` events at `WARN` severity (`logs/slow-unwrap`); a refusal test for the real
+   unwrap belongs to the alerts e2e tests.
+7. Metric queries are unchanged (MetricsQL); every metric node is `instant: true`, every
+   log node `queryType: stats`; the datasource types are `prometheus` and
+   `victoriametrics-logs-datasource`.
+
+NOT TESTED: 24 h seeds were measured once per cell; no run was on a quiet box; the cache-hit
+rows of §11.1.1 (unchanged PR 0.2-0.4 s, one changed alert 0.3-0.5 s) were not re-measured.

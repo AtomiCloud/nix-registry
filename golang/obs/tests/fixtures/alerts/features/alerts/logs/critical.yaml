@@ -1,0 +1,34 @@
+{
+  apiVersion: grafana.integreatly.org/v1beta1,
+  kind: GrafanaAlertRuleGroup,
+  metadata: { name: fixture-logs },
+  spec:
+    {
+      interval: 1m,
+      rules:
+        [
+          {
+            uid: logs,
+            title: logs,
+            condition: C,
+            for: 1m,
+            data:
+              [
+                {
+                  refId: A,
+                  datasourceUid: fixture-logs,
+                  queryType: stats,
+                  relativeTimeRange: { from: 60, to: 0 },
+                  model:
+                    {
+                      datasource: { type: victoriametrics-logs-datasource, uid: fixture-logs },
+                      queryType: stats,
+                      expr: '_stream:{"service.name"="checkout"} "durian.cloud/event":=fixture.failed customer_tier:=gold "timeout" | stats count() as hits',
+                    },
+                },
+                { refId: C, datasourceUid: __expr__, model: { type: math, expression: $A > 20 } },
+              ],
+          },
+        ],
+    },
+}

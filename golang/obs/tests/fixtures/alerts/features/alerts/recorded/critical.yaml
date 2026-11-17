@@ -1,0 +1,34 @@
+{
+  apiVersion: grafana.integreatly.org/v1beta1,
+  kind: GrafanaAlertRuleGroup,
+  metadata: { name: fixture-recorded },
+  spec:
+    {
+      interval: 1m,
+      rules:
+        [
+          {
+            uid: recorded,
+            title: recorded,
+            condition: C,
+            for: 1m,
+            data:
+              [
+                {
+                  refId: A,
+                  datasourceUid: fixture-metrics,
+                  relativeTimeRange: { from: 60, to: 0 },
+                  model:
+                    {
+                      datasource: { type: prometheus, uid: fixture-metrics },
+                      expr: fixture_recorded,
+                      instant: true,
+                      range: false,
+                    },
+                },
+                { refId: C, datasourceUid: __expr__, model: { type: math, expression: $A > 0.5 } },
+              ],
+          },
+        ],
+    },
+}

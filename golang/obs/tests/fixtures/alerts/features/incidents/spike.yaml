@@ -1,0 +1,7 @@
+{
+  story: Synthetic failure burst,
+  window: { start: 10m, duration: 10m },
+  change: [{ metric: fixture.requests, where: { outcome: error }, rate: 2/s }],
+  expect:
+    { fire: [metric, logs, recorded, range, hyst, keep], quiet: [nodata, error], fire_within: 5m, resolve_within: 5m },
+}

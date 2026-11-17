@@ -1,0 +1,28 @@
+{
+  apiVersion: grafana.integreatly.org/v1beta1,
+  kind: GrafanaAlertRuleGroup,
+  metadata: { name: fixture-error },
+  spec:
+    {
+      interval: 1m,
+      rules:
+        [
+          {
+            uid: error,
+            title: error,
+            condition: C,
+            for: 1m,
+            execErrState: Error,
+            data:
+              [
+                { refId: A, datasourceUid: __expr__, model: { type: math, expression: '1' } },
+                {
+                  refId: C,
+                  datasourceUid: __expr__,
+                  model: { type: reduce, expression: A, reducer: mean, settings: { mode: dropNN } },
+                },
+              ],
+          },
+        ],
+    },
+}

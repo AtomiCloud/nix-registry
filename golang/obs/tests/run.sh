@@ -145,5 +145,10 @@ if [ -n "${OUT:-}" ]; then
 fi
 
 bash "$here/links.sh" "$OBS" "${OUT:-}"
+# ---- obs check, obs gen, generated code (gen.sh)
+# shellcheck disable=SC1091 # path is dynamic; gen.sh is checked on its own
+. "$here/gen.sh"
+
 echo "obs tests: $pass passed, $fail failed"
+bash "$here/alerts.sh" "$OBS"
 [ "$fail" -eq 0 ]
