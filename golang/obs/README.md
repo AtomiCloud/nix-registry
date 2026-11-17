@@ -236,25 +236,16 @@ the embedded engines and the containers (instant and range queries through `/api
 queries through `/select/logsql/stats_query` with `start`, `end` and `time` as the datasource sends them, log queries
 through `/select/logsql/query`). Results must be equal: same series, same values, same row counts.
 
-```text
-docker run -d --name obs-parity-vm -p 127.0.0.1::8428 victoriametrics/victoria-metrics:v1.156.0 \
-    -retentionPeriod=10y -search.latencyOffset=0s -search.disableCache
-docker run -d --name obs-parity-vl -p 127.0.0.1::9428 victoriametrics/victoria-logs:v1.54.0 -retentionPeriod=10y
-OBS_PARITY_VM=http://127.0.0.1:<port> OBS_PARITY_VL=http://127.0.0.1:<port> \
-    go test -tags parity -run Parity -v ./internal/check      # in golang/obs/src
-```
-
-Use fresh containers for every run (VictoriaLogs keeps duplicate rows). The nightly parity job (a later release)
-replaces this by hand run.
+Use the labeled, digest-pinned stack and cleanup commands in [Nightly parity](#nightly-parity).
+The harness creates fresh containers for every run: VictoriaLogs retains duplicate rows.
 
 ## Not tested yet
 
 - Variable filling for LogsQL panels against the Grafana VictoriaLogs datasource (it reuses the Prometheus macros).
 - Seeded log rows against a real VictoriaLogs fed through Alloy (field names are FROM SOURCE).
-- LogsQL `_time:[start, end)` handling against real Grafana (the nightly parity job, a later release).
 - aarch64 and macOS builds are in CI; only x86_64 Linux was run by hand.
 
-# Nightly parity
+## Nightly parity
 
 The `Obs parity` workflow runs nightly and on changes to engine pins, and can be
 dispatched before a release. It uses GitHub's standard `ubuntu-24.04` runner in
@@ -280,13 +271,30 @@ per-minute datasource values, LogsQL alert values through Grafana's `/api/ds/que
 VictoriaLogs query limits, and (when the corresponding command exists) full
 Grafana alert evaluation, live scheduler history, TraceQL, links and profiles.
 An available command with a missing parity test fails. Container tests carry the
-`parity` build tag and never run in the offline Nix checks.
+`parity` build tag and never run in the offline Nix checks. The optional Tempo
+adapter stays in `parity/tempo_test.go.txt` until its step copies it into the test
+package: `go mod vendor` follows every build tag, so a dormant `.go` file would
+otherwise import packages that have not landed yet.
 
-On 17 November 2026, the first local real-store run compared **23 fixture query
-executions, 472 LogsQL alert minutes through Grafana, 462 MetricsQL alert minutes
-through Grafana, and five VictoriaLogs limit cases in 31.036 seconds (MEASURED)**.
-The three deliberately empty fixture queries remained empty on both sides.
-VictoriaMetrics values use a relative tolerance of `1e-11`.
+On 17 November 2026, the final local core run compared **23 fixture query
+executions (three intentionally empty), nine metric panel executions through
+Grafana, 472 LogsQL alert minutes through Grafana, 462 MetricsQL alert minutes
+through Grafana, and five VictoriaLogs limit cases in 30.592 seconds (MEASURED)**.
+The whole local core session, including stack startup, builds, ordinary Go tests
+and the offline fixture suite, took 108 seconds; the fixture suite passed all 30
+checks. All seven planted pin drifts and four planted comparison drifts were
+rejected. VictoriaMetrics values use a relative tolerance of `1e-11`.
+
+The panel comparison found a real difference: Grafana aligns range endpoints to
+the step grid, while obs previously used the unaligned seed end. `obs query
+--live` now applies the same alignment before executing metric panels.
+
+Advanced adapters were also run against the parallel part branches: M3
+`aa2085a` (27 historic alert evaluations, including numeric LogsQL counts; four
+live scheduler transitions and ten recording-rule points), M4 `e462cb4` (seven
+TraceQL searches, two range-metric queries and six link checks), and M5 `0257d0b` (12 function CPU shares
+and two span CPU shares). These are MEASURED local results. Their combined cloud
+run switches on when the corresponding commands land in `obs-full`.
 
 VictoriaLogs referee settings found on that run: a recent, disjoint time line per
 fixture; `-retentionPeriod=10y`; explicit insert `/internal/force_flush` before
@@ -295,7 +303,10 @@ queries; a two-second settling wait; `-memory.allowedBytes=256MiB`;
 `-search.maxQueryTimeRange=7d`. Length and range boundaries are compared with
 `vl.Limits.Check`; deployed chart settings, runtime timeouts and concurrency
 limits are NOT TESTED. The artifacts include the real server's `/flags`, plugin
-metadata, container digests, test output and timings.
+metadata, container digests, test output and timings. Tempo uses one hour of
+WAL ingestion slack in both storage and live-store, a one-hour recent-query
+window, zero query-end cutoff, and short trace-idle timers so a past seed remains
+searchable without waiting for the backend block poll.
 
 For a local run, use a unique absolute scratch directory and hold the machine's
 heavy-work lock for the whole stack and test session:

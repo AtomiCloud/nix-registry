@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -210,7 +211,86 @@ func TestParityTraceQL(t *testing.T) {
 			t.Fatalf("seed.yaml TraceQL %q: obs %v, Tempo %v", query, keys(got), keys(want))
 		}
 	}
-	t.Logf("MEASURED %d TraceQL searches, including structural and typed-attribute queries, across %d seeded traces", len(queries), len(ds.Traces))
+	metricQueries := []string{`{} | count_over_time()`, `{kind=server} | count_over_time()`}
+	for _, query := range metricQueries {
+		step := time.Minute
+		got, err := engine.MetricsRange(query, ds.Start, ds.End, step)
+		if err != nil {
+			t.Fatal(err)
+		}
+		params := url.Values{"q": {query}, "start": {fmt.Sprint(ds.Start.Unix())}, "end": {fmt.Sprint(ds.End.Unix())}, "step": {step.String()}, "exemplars": {"0"}}
+		body := get(t, os.Getenv("OBS_PARITY_TEMPO")+"/api/metrics/query_range?"+params.Encode())
+		var response struct {
+			Error  string `json:"error"`
+			Series []struct {
+				Labels []struct {
+					Key   string                     `json:"key"`
+					Value map[string]json.RawMessage `json:"value"`
+				} `json:"labels"`
+				Samples []struct {
+					TimestampMs json.RawMessage `json:"timestampMs"`
+					Value       json.RawMessage `json:"value"`
+				} `json:"samples"`
+			} `json:"series"`
+		}
+		if err := json.Unmarshal(body, &response); err != nil {
+			t.Fatalf("Tempo metrics %q: %v: %s", query, err, body)
+		}
+		if response.Error != "" {
+			t.Fatalf("Tempo metrics %q: %s", query, body)
+		}
+		number := func(raw json.RawMessage) float64 {
+			// Protobuf JSON may omit a scalar whose value is zero.
+			if len(raw) == 0 {
+				return 0
+			}
+			if string(raw) == "null" {
+				return math.NaN()
+			}
+			n, err := strconv.ParseFloat(strings.Trim(string(raw), `"`), 64)
+			if err != nil {
+				t.Fatalf("Tempo metrics %q invalid number %s", query, raw)
+			}
+			return n
+		}
+		wantNumbers, gotNumbers := map[string][]float64{}, map[string][]float64{}
+		for _, series := range response.Series {
+			var labels []seed.Label
+			for _, label := range series.Labels {
+				for kind, value := range label.Value {
+					var text string
+					if kind == "stringValue" {
+						if err := json.Unmarshal(value, &text); err != nil {
+							t.Fatal(err)
+						}
+					} else {
+						text = strings.Trim(string(value), `"`)
+					}
+					labels = append(labels, seed.Label{Name: label.Key, Value: text})
+				}
+			}
+			for _, sample := range series.Samples {
+				value := number(sample.Value)
+				if !math.IsNaN(value) {
+					wantNumbers[labelKey(labels)+"@"+fmt.Sprint(int64(number(sample.TimestampMs)))] = []float64{value}
+				}
+			}
+		}
+		for _, series := range got {
+			for at, value := range series.Points {
+				if !math.IsNaN(value) {
+					gotNumbers[labelKey(series.Labels)+"@"+fmt.Sprint(at)] = []float64{value}
+				}
+			}
+		}
+		if len(wantNumbers) == 0 {
+			t.Fatalf("Tempo metrics %q returned no seed points: %s", query, body)
+		}
+		if err := compareNumbers(gotNumbers, wantNumbers); err != nil {
+			t.Fatalf("seed.yaml TraceQL metrics %q: %v", query, err)
+		}
+	}
+	t.Logf("MEASURED %d TraceQL searches and %d range-metric queries, including structural and typed-attribute queries, across %d seeded traces", len(queries), len(metricQueries), len(ds.Traces))
 }
 
 type realTraceLinks struct{ t *testing.T }

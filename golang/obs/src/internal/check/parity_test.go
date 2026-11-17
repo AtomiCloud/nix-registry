@@ -4,9 +4,8 @@ package check
 
 // Local parity run: obs's embedded engines against real VictoriaMetrics and VictoriaLogs.
 //
-//	docker run -d --name obs-parity-vm -p 127.0.0.1::8428 victoriametrics/victoria-metrics:v1.156.0 \
-//	    -retentionPeriod=10y -search.latencyOffset=0s -search.disableCache
-//	docker run -d --name obs-parity-vl -p 127.0.0.1::9428 victoriametrics/victoria-logs:v1.54.0 -retentionPeriod=10y
+// Start fresh, labeled, digest-pinned containers with parity/stack.sh (see README).
+//
 //	OBS_PARITY_VM=http://127.0.0.1:<port> OBS_PARITY_VL=http://127.0.0.1:<port> \
 //	    go test -tags parity -run Parity -v ./internal/check
 //
