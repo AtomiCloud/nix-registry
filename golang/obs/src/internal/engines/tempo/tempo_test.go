@@ -1,0 +1,73 @@
+package tempo
+
+import (
+	"github.com/AtomiCloud/obs/internal/seed"
+	"strings"
+	"testing"
+	"time"
+)
+
+func testEngine() (*TempoEngine, time.Time) {
+	at := time.Unix(1800000000, 0)
+	root := &TSpan{SpanID: [8]byte{1}, Name: "root", Service: "checkout", Kind: 2, StartNs: uint64(at.UnixNano()), DurNs: 1000000000, Attrs: map[string]TAttrVal{"amount": seed.TInt(42)}, Resource: map[string]TAttrVal{"durian.cloud.service": seed.TStr("checkout")}}
+	a := &TSpan{SpanID: [8]byte{2}, ParentID: root.SpanID, Name: "a", Service: "checkout", Kind: 3, Status: 2, StartNs: root.StartNs + 1000, DurNs: 500000000, Attrs: map[string]TAttrVal{"ratio": seed.TFloat(2.5)}}
+	b := &TSpan{SpanID: [8]byte{3}, ParentID: root.SpanID, Name: "b", Service: "checkout", StartNs: root.StartNs + 2000, DurNs: 500000000}
+	c := &TSpan{SpanID: [8]byte{4}, ParentID: a.SpanID, Name: "c", Service: "checkout", StartNs: root.StartNs + 3000, DurNs: 100000000}
+	return NewTempoEngine([]*TTrace{{TraceID: [16]byte{1}, Spans: []*TSpan{c, b, a, root}}}), at
+}
+
+func TestSearchStructuralAndTypedColumns(t *testing.T) {
+	e, at := testEngine()
+	for _, tc := range []struct {
+		q string
+		n int
+	}{
+		{`{name="root"}`, 1}, {`{name="root"} >> {name="c"}`, 1}, {`{name="root"} > {name="a"}`, 1},
+		{`{name="root"} > {name="c"}`, 0}, {`{name="a"} ~ {name="b"}`, 1}, {`{name="c"} << {name="root"}`, 1},
+		{`{name="a"} < {name="root"}`, 1}, {`{name="a"} !> {name="root"}`, 1}, {`{name="root"} !>> {name="c"}`, 0},
+		{`{name="root"} &>> {name="c"}`, 1}, {`{name="root"} &> {name="a"}`, 1}, {`{name="a"} &~ {name="b"}`, 1},
+		{`{span.amount=42}`, 1}, {`{span.amount="42"}`, 0}, {`{span.ratio>2.0}`, 1}, {`{span.ratio>2}`, 0},
+		{`{status=error}`, 1}, {`{kind=server && resource.service.name="checkout"}`, 1}, {`{span.missing="x"}`, 0},
+	} {
+		t.Run(tc.q, func(t *testing.T) {
+			hits, err := e.Search(tc.q, at.Add(-time.Second), at.Add(2*time.Second), 20)
+			if err != nil || len(hits) != tc.n {
+				t.Fatalf("hits=%v err=%v want=%d", hits, err, tc.n)
+			}
+			if e.Inexact.Load() != 0 {
+				t.Fatalf("inexact storage predicate: %d", e.Inexact.Load())
+			}
+		})
+	}
+	hits, err := e.Search(`{}`, at.Add(time.Hour), at.Add(2*time.Hour), 20)
+	if err != nil || len(hits) != 0 {
+		t.Fatalf("outside range: %v %v", hits, err)
+	}
+	if _, err := e.Search(`{span.broken=`, at.Add(time.Hour), at.Add(2*time.Hour), 20); err == nil {
+		t.Fatal("invalid query passed on empty range")
+	}
+}
+
+func TestMetricsAndParse(t *testing.T) {
+	e, at := testEngine()
+	for _, q := range []string{`{} | count_over_time()`, `{} | rate() by (resource.service.name)`, `{} | quantile_over_time(duration,.5)`} {
+		rs, err := e.MetricsRange(q, at.Add(-time.Second), at.Add(2*time.Second), time.Second)
+		if err != nil || len(rs) == 0 {
+			t.Fatalf("%s: %v %v", q, rs, err)
+		}
+	}
+	if _, err := e.MetricsRange(`{} | no_such_fn()`, at, at.Add(time.Second), time.Second); err == nil {
+		t.Fatal("invalid metrics query passed")
+	}
+	p, err := Parse(`{span.known="x" || span.drifted="y"} | select(resource.service.name)`)
+	if err != nil || len(p.Attributes) != 3 {
+		t.Fatalf("names: %+v %v", p, err)
+	}
+	if _, err := Parse(`{span.provider =`); err == nil || !strings.Contains(err.Error(), "parse") {
+		t.Fatalf("bad syntax: %v", err)
+	}
+	p, err = Parse(`{} | count_over_time() by (span.provider)`)
+	if err != nil || !p.Metrics || len(p.Attributes) != 1 {
+		t.Fatalf("metrics names: %+v %v", p, err)
+	}
+}

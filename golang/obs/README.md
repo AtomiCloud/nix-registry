@@ -253,3 +253,75 @@ replaces this by hand run.
 - Seeded log rows against a real VictoriaLogs fed through Alloy (field names are FROM SOURCE).
 - LogsQL `_time:[start, end)` handling against real Grafana (the nightly parity job, a later release).
 - aarch64 and macOS builds are in CI; only x86_64 Linux was run by hand.
+
+## obs links
+
+`obs query --static` and `--live` also check Tempo dashboard targets (`query`, `expr`
+or `expression`). TraceQL is parsed and validated by **Tempo 3.1.1**, commit
+`9db7df79d2af`; no regular-expression query parser is used. `--names` lists every
+non-intrinsic attribute, including those in `select` and metrics grouping. A
+`check.SpanAttributeNames` interface connects the contract's name list; a nil
+adapter leaves name enforcement off. Trace alerts await the alerts integration.
+
+```text
+obs query --static --dir observability --names
+obs query --live --dir observability
+obs links --dir observability                  # optional --seed and --base
+```
+
+Add trace definitions to the seed. Each source event makes a server span and an
+optional client child, with real parent IDs, resource attributes, OTLP scalar
+types and matching `trace_id`/`span_id` on its log lines. The HTTP status code is
+an integer; explicit `attributes` retain YAML string/int/double/bool types.
+
+```yaml
+resource:
+  durian.cloud.service: checkout
+  k8s.pod.name: checkout-example
+traces:
+  - from: { metric: requests }
+    server: POST /charge
+    route: /charge
+    client: charge
+    error_when: { outcome: error }
+    attributes: { http.response.status_code: 200, cached: true }
+```
+
+`obs links` checks these paths offline:
+
+- **Trace → logs:** for every distinct server route and attribute set, run
+  `trace_id:="<id>" AND service.name:="<service>"` in VictoriaLogs over the span's
+  millisecond time range. Compare timestamps and bodies with that trace's seeded
+  log lines; a missing or foreign row fails. The range is at least 1 ms.
+- **Metric → traces:** for every stored series, keep all shared resource/span
+  labels except `__name__` and histogram `le`, preserving numeric/bool types.
+  Run the TraceQL search in the last active seeded minute; an unmapped label or
+  no matching trace fails. Searches are capped at 20; they prove existence.
+- **Span → profile:** check backend `service.name` and `k8s.pod.name`, mapped to
+  `service_name` and `pod`, plus the optional bounded where-from labels. This is
+  a light identity-label check; it does not read profiles or require CPU samples
+  in short spans.
+
+**FROM SOURCE:** the trace-to-logs expression follows Grafana 13.3.0's
+[`getQueryForVictoriaLogs`](https://github.com/grafana/grafana/blob/v13.3.0/public/app/features/explore/TraceView/components/logsLink.ts),
+with `filterByTraceID: true`, `filterBySpanID: false`, and explicit
+`tags: [{key: "service.name"}]`. Set this unmapped tag explicitly: Grafana's
+[`getDefaultLogsTags`](https://github.com/grafana/grafana/blob/v13.3.0/public/app/features/explore/TraceView/crossSignalConfig.ts)
+otherwise maps `service.name` to `service_name`, while VictoriaLogs retains dots.
+Span time rounding follows
+[`getTimeRangeFromTimestamps`](https://github.com/grafana/grafana/blob/v13.3.0/public/app/features/explore/TraceView/createTraceLink.ts).
+The VictoriaLogs datasource v0.34.0
+[`queryInstantURL`](https://github.com/VictoriaMetrics/victorialogs-datasource/blob/v0.34.0/pkg/plugin/query.go)
+sends the interpolated expression as `query`, and start/end as Unix nanoseconds;
+its [frontend interpolation](https://github.com/VictoriaMetrics/victorialogs-datasource/blob/v0.34.0/src/datasource.ts)
+keeps this expression. **NOT TESTED:** this exact query and time range through a
+real Grafana/VictoriaLogs UI; the parity job is the referee.
+
+The in-memory storage adapter ports the prototype's Tempo vParquet5 nested-set
+methods (AGPL-3.0) and typed-column predicates. The public engine API exposes
+`Search(query,start,end,limit)` and `MetricsRange(query,start,end,step)` for the
+future alert evaluator. **MEASURED offline:** structural operators, typed
+comparisons, metrics counts/rates/quantiles, both dashboard query modes and all
+three links. `tests/links.sh` plants syntax, attribute, log-link, trace-link and
+profile-label failures; every failure names the file, query/route/series and bad
+attribute or value. Real-store parity remains **NOT TESTED** here.

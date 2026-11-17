@@ -8,6 +8,7 @@ import (
 
 	"github.com/VictoriaMetrics/metricsql"
 
+	"github.com/AtomiCloud/obs/internal/engines/tempo"
 	"github.com/AtomiCloud/obs/internal/engines/vl"
 	"github.com/AtomiCloud/obs/internal/engines/vm"
 	"github.com/AtomiCloud/obs/internal/files"
@@ -90,12 +91,13 @@ func Live(set *files.Set, o Options) (*Report, error) {
 func runLive(set *files.Set, o Options, ds *seed.Dataset, m metricsEngine, l logsEngine) *Report {
 	r := newReport()
 	lv := &liveRun{r: r, o: o, ds: ds, end: ds.End, vm: m, vl: l}
+	lv.tempo = tempo.NewTempoEngine(ds.Traces)
 	lv.logFields = logFieldSet(ds)
 	lv.metricNames = toSet(ds.MetricNames())
 	lv.labelNames = labelNameSet(ds)
 	for i := range set.Queries {
 		q := &set.Queries[i]
-		if q.Problem != "" || (q.Kind != files.Metrics && q.Kind != files.Logs) {
+		if q.Problem != "" || (q.Kind != files.Metrics && q.Kind != files.Logs && q.Kind != files.Traces) {
 			continue
 		}
 		r.Counts[q.Kind.String()]++
@@ -118,6 +120,7 @@ type liveRun struct {
 	logFields   map[string]bool
 	metricNames map[string]bool
 	labelNames  map[string]bool
+	tempo       *tempo.TempoEngine
 }
 
 func toSet(a []string) map[string]bool {
@@ -292,6 +295,8 @@ func (l *liveRun) panel(q *files.Query) {
 
 func (l *liveRun) runPanel(q *files.Query, res vars.Result, start, end time.Time) (bool, error) {
 	switch q.Kind {
+	case files.Traces:
+		return l.tracePanel(q, res.Expr, start, end, time.Duration(max(res.StepMs, 1000))*time.Millisecond)
 	case files.Metrics:
 		if _, err := metricsql.Parse(res.Expr); err != nil {
 			return true, nil // the static check reports it
@@ -367,6 +372,8 @@ func (l *liveRun) varValues(v files.Variable, start, end time.Time) []string {
 func (l *liveRun) noRows(q *files.Query, expr, extra string) {
 	var missing []string
 	switch q.Kind {
+	case files.Traces:
+		missing = l.missingTraceAttrs(expr)
 	case files.Metrics:
 		if e, err := metricsql.Parse(expr); err == nil {
 			ms, ls := metricNames(e)
