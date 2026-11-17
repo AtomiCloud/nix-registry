@@ -123,7 +123,9 @@ func TestGitMessageUnderAnotherLocale(t *testing.T) {
 	probe := exec.Command("git", "rev-parse", "--show-toplevel")
 	probe.Dir = dir
 	out, _ := probe.CombinedOutput()
-	t.Logf("git says, translated: %v (%s)", !strings.Contains(string(out), "not a git repository"), strings.TrimSpace(string(out)))
+	if strings.Contains(string(out), "not a git repository") {
+		t.Skip("git is not translated on this machine; the test would prove nothing")
+	}
 	if code, stdout, errs := newEnv(t, dir).ul("check"); code != 0 {
 		t.Fatalf("plain folder under a German locale: exit %d\n%s%s", code, stdout, errs)
 	}
@@ -153,5 +155,10 @@ func TestRelativeFromInSymlinkedCwd(t *testing.T) {
 	got := newEnv(t, blink).lookupIDs("A", "--from", "../zz/x.go")
 	if len(got) == 0 || got[0] != "ex.org/zz#A" {
 		t.Fatalf("--from ../zz/x.go from a symlinked b: %v, want ex.org/zz#A first", got)
+	}
+	// --root takes the same real-path join.
+	r := newEnv(t, blink).report("all", "--root", "../zz")
+	if ids := wordIDs(r); len(ids) != 1 || ids[0] != "ex.org/zz#A" {
+		t.Fatalf("--root ../zz from a symlinked b: %v, want only ex.org/zz#A", ids)
 	}
 }
