@@ -88,9 +88,6 @@ func (f *Final) refText(from *FNS, id string, o mdOpts) string {
 		return "[" + t.E.Word + "](#" + from.anchorsOf()[t] + ")"
 	}
 	label := lastSegment(t.NS.Namespace) + "#" + t.E.Word
-	if t.NS.Layer != layerRepo {
-		return label
-	}
 	rel, err := relPath(path.Dir(from.File), path.Dir(t.NS.File))
 	if err != "" {
 		return label
@@ -134,9 +131,6 @@ func heading(level int, text string) string { return strings.Repeat("#", level) 
 func (f *Final) renderNS(ns *FNS, o mdOpts) string {
 	var blocks []string
 	title := lastSegment(ns.Namespace)
-	if ns.Namespace == sessionNamespace {
-		title = "session"
-	}
 	blocks = append(blocks, heading(o.level, title), strings.Join(ns.Breadcrumb, " > "), ns.Premise)
 	active, retired := ns.sections()
 	if len(active) > 0 {

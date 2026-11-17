@@ -7,7 +7,6 @@ import (
 )
 
 // Problem is one rule violation (spec §8). File is relative to the root for repo files and
-// the absolute session-file path for the session layer.
 type Problem struct {
 	Code    string `json:"code"`
 	File    string `json:"file"`
@@ -34,7 +33,7 @@ type Entry struct {
 	ReplacedBy Named  // Name == "" when absent
 }
 
-// Doc is one namespace as written in one file (or one document of the session file).
+// Doc is one namespace as written in one file.
 type Doc struct {
 	File      string
 	Namespace string
@@ -44,11 +43,8 @@ type Doc struct {
 }
 
 const (
-	sessionNamespace = "session"
-	layerRepo        = "repo"
-	layerSession     = "session"
-	statusActive     = "active"
-	statusRetired    = "retired"
+	statusActive  = "active"
+	statusRetired = "retired"
 )
 
 func isWordRune(r rune) bool { return unicode.IsLetter(r) || unicode.IsDigit(r) || r == '_' }
@@ -98,13 +94,7 @@ func validName(s string) string {
 }
 
 // validNamespace reports why a namespace is malformed ("" when fine). Spec §3.
-func validNamespace(ns string, allowSession bool) string {
-	if ns == sessionNamespace {
-		if allowSession {
-			return ""
-		}
-		return "\"session\" is reserved for the session layer"
-	}
+func validNamespace(ns string) string {
 	segs := strings.Split(ns, "/")
 	if len(segs) < 2 {
 		return "needs at least two segments joined by /"

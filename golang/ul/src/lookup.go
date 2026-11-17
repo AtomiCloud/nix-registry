@@ -11,7 +11,7 @@ import (
 )
 
 // lookup returns every entry that matches a word, alias or full id, in lookup order
-// (spec §4.3): word before alias; session before repo; closest namespace to `from`; A–Z.
+// (spec §4.3): word before alias; closest namespace to `from`; A–Z.
 func (f *Final) lookup(query string, from []string, haveFrom bool) []*FEntry {
 	q := fold(strings.TrimSpace(query))
 	name := q
@@ -27,14 +27,11 @@ func (f *Final) lookup(query string, from []string, haveFrom bool) []*FEntry {
 	} else {
 		cands = slices.Clone(f.nameIdx[q])
 	}
-	rank := func(fe *FEntry) (word int, session int, depth int, shared int) {
+	rank := func(fe *FEntry) (word int, depth int, shared int) {
 		if matchesName(fe, name) == 2 {
 			word = 1
 		}
-		if fe.Layer == layerSession {
-			session = 1
-		}
-		if haveFrom && fe.NS.Layer == layerRepo {
+		if haveFrom {
 			dir := splitDir(path.Dir(fe.NS.File))
 			if len(dir) <= len(from) && slices.Equal(dir, from[:len(dir)]) {
 				depth = len(dir) + 1 // contained: deeper wins
@@ -46,10 +43,10 @@ func (f *Final) lookup(query string, from []string, haveFrom bool) []*FEntry {
 		return
 	}
 	slices.SortStableFunc(cands, func(a, b *FEntry) int {
-		aw, as, ad, ash := rank(a)
-		bw, bs, bd, bsh := rank(b)
+		aw, ad, ash := rank(a)
+		bw, bd, bsh := rank(b)
 		return cmp.Or(
-			cmp.Compare(bw, aw), cmp.Compare(bs, as), cmp.Compare(bd, ad), cmp.Compare(bsh, ash),
+			cmp.Compare(bw, aw), cmp.Compare(bd, ad), cmp.Compare(bsh, ash),
 			cmpFold(a.NS.Namespace, b.NS.Namespace), cmpFold(a.E.Word, b.E.Word))
 	})
 	return cands

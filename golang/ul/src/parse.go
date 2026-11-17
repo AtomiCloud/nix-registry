@@ -12,16 +12,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-type parseOpts struct {
-	session    bool   // the session file: several documents, namespace `session` allowed
-	fragment   bool   // `ul add --file`: namespace and premise may be missing
-	defNS      string // namespace used by a fragment that names none
-	defPremise string
-}
-
 type parser struct {
 	file  string
-	opts  parseOpts
 	probs []Problem
 }
 
@@ -43,8 +35,8 @@ func (p *parser) add(code string, line int, format string, a ...any) {
 // parseDocs parses the rules that look at one file alone: UL101, UL102, UL104, UL105, UL106
 // and UL108. A document whose YAML cannot be read, or whose namespace is unusable, is dropped
 // (it has no id to hang words on); every other problem keeps the document.
-func parseDocs(file string, data []byte, opts parseOpts) ([]*Doc, []Problem) {
-	p := &parser{file: file, opts: opts}
+func parseDocs(file string, data []byte) ([]*Doc, []Problem) {
+	p := &parser{file: file}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var docs []*Doc
 	count := 0
@@ -63,7 +55,7 @@ func parseDocs(file string, data []byte, opts parseOpts) ([]*Doc, []Problem) {
 			return nil, p.probs
 		}
 		count++
-		if count > 1 && !opts.session {
+		if count > 1 {
 			p.add("UL101", n.Line, "more than one YAML document in the file")
 			break
 		}
@@ -71,7 +63,7 @@ func parseDocs(file string, data []byte, opts parseOpts) ([]*Doc, []Problem) {
 			docs = append(docs, d)
 		}
 	}
-	if count == 0 && !opts.session {
+	if count == 0 {
 		p.add("UL101", 1, "the file is empty")
 	}
 	return docs, p.probs
@@ -182,24 +174,16 @@ func (p *parser) doc(root *yaml.Node) *Doc {
 			p.add("UL101", kv.knode.Line, "unknown field %q (allowed: namespace, premise, language)", kv.key)
 		}
 	}
-	if !haveNS && p.opts.fragment {
-		d.Namespace = p.opts.defNS
-		haveNS = true
-	}
 	if !haveNS {
 		p.add("UL102", n.Line, "namespace is missing")
 		return nil
 	}
-	if why := validNamespace(d.Namespace, p.opts.session || p.opts.fragment); why != "" {
+	if why := validNamespace(d.Namespace); why != "" {
 		p.add("UL102", d.NSLine, "namespace %q: %s", d.Namespace, why)
 		return nil
 	}
 	if !havePremise {
-		if p.opts.fragment {
-			d.Premise = p.opts.defPremise
-		} else {
-			p.add("UL104", n.Line, "premise is missing")
-		}
+		p.add("UL104", n.Line, "premise is missing")
 	}
 	switch {
 	case !haveLang:

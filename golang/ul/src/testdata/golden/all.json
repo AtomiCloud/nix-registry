@@ -1,7 +1,6 @@
 {
   "schema": "ul/v1",
   "root": "/ROOT",
-  "session": null,
   "namespaces": [
     {
       "namespace": "durian.cloud/engineering/standards/OOP",
@@ -12,8 +11,7 @@
         "OOP"
       ],
       "premise": "When writing code, best practice when using object-oriented programming",
-      "file": "docs/standard/oop/UL.yaml",
-      "layer": "repo"
+      "file": "docs/standard/oop/UL.yaml"
     },
     {
       "namespace": "durian.cloud/shop/billing",
@@ -23,8 +21,7 @@
         "billing"
       ],
       "premise": "Money owed by a customer, from the first charge to the last receipt",
-      "file": "docs/domain/billing/UL.yaml",
-      "layer": "repo"
+      "file": "docs/domain/billing/UL.yaml"
     },
     {
       "namespace": "durian.cloud/shop/billing/pay",
@@ -35,8 +32,7 @@
         "pay"
       ],
       "premise": "The card payment plugin of billing",
-      "file": "plugins/pay/UL.yaml",
-      "layer": "repo"
+      "file": "plugins/pay/UL.yaml"
     }
   ],
   "words": [
@@ -60,8 +56,6 @@
       ],
       "status": "retired",
       "replacedBy": "durian.cloud/engineering/standards/OOP#Plugin",
-      "layer": "repo",
-      "overrides": null,
       "file": "docs/standard/oop/UL.yaml",
       "line": 22
     },
@@ -93,8 +87,6 @@
       ],
       "status": "active",
       "replacedBy": null,
-      "layer": "repo",
-      "overrides": null,
       "file": "docs/standard/oop/UL.yaml",
       "line": 4
     },
@@ -118,8 +110,6 @@
       "mentions": [],
       "status": "active",
       "replacedBy": null,
-      "layer": "repo",
-      "overrides": null,
       "file": "docs/standard/oop/UL.yaml",
       "line": 13
     },
@@ -146,8 +136,6 @@
       ],
       "status": "active",
       "replacedBy": null,
-      "layer": "repo",
-      "overrides": null,
       "file": "docs/standard/oop/UL.yaml",
       "line": 18
     },
@@ -172,8 +160,6 @@
       ],
       "status": "active",
       "replacedBy": null,
-      "layer": "repo",
-      "overrides": null,
       "file": "docs/domain/billing/UL.yaml",
       "line": 12
     },
@@ -202,8 +188,6 @@
       ],
       "status": "active",
       "replacedBy": null,
-      "layer": "repo",
-      "overrides": null,
       "file": "docs/domain/billing/UL.yaml",
       "line": 4
     },
@@ -226,8 +210,6 @@
       "mentions": [],
       "status": "active",
       "replacedBy": null,
-      "layer": "repo",
-      "overrides": null,
       "file": "docs/domain/billing/UL.yaml",
       "line": 15
     },
@@ -255,8 +237,6 @@
       ],
       "status": "active",
       "replacedBy": null,
-      "layer": "repo",
-      "overrides": null,
       "file": "plugins/pay/UL.yaml",
       "line": 4
     },
@@ -282,8 +262,6 @@
       ],
       "status": "active",
       "replacedBy": null,
-      "layer": "repo",
-      "overrides": null,
       "file": "plugins/pay/UL.yaml",
       "line": 8
     }

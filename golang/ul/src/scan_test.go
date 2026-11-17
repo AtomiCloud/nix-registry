@@ -148,9 +148,7 @@ func TestParseEdges(t *testing.T) {
 		t.Errorf("block scalar: %q", w.Desc)
 	}
 	// The first document of a multi-document repo file is still loaded.
-	if findWord(t, r, "ex.org/m#Em").Layer != "repo" {
-		t.Error("multi")
-	}
+	findWord(t, r, "ex.org/m#Em")
 }
 
 func TestCLI(t *testing.T) {
@@ -163,7 +161,7 @@ func TestCLI(t *testing.T) {
 		t.Errorf("version: %q", got)
 	}
 	for _, args := range [][]string{{}, {"nope"}, {"all", "--bogus"}, {"all", "--format", "xml", "--root", dir}, {"all", "extra", "--root", dir},
-		{"check", "--format", "md", "--root", dir}, {"lookup", "a", "b", "--root", dir}, {"session"}, {"session", "x", "--session", "s"}} {
+		{"check", "--format", "md", "--root", dir}, {"lookup", "a", "b", "--root", dir}} {
 		if code, _, _ := te.ul(args...); code != 2 {
 			t.Errorf("ul %v: exit %d, want 2", args, code)
 		}

@@ -88,7 +88,7 @@ func TestJSONContract(t *testing.T) {
 	dir := fixture(t, "clean")
 	te := newEnv(t, dir)
 	raw := te.mustOK("all", "--root", dir)
-	for _, must := range []string{`"schema": "ul/v1"`, `"replacedBy": null`, `"overrides": null`, `"session": null`,
+	for _, must := range []string{`"schema": "ul/v1"`, `"replacedBy": null`,
 		`"aliases": []`, `"avoid": []`, `"see": []`, `"mentions": []`, `"problems": []`} {
 		if !strings.Contains(raw, must) {
 			t.Errorf("JSON lacks %s", must)
@@ -100,7 +100,7 @@ func TestJSONContract(t *testing.T) {
 		}
 	}
 	r := te.report("all", "--root", dir)
-	if r.Schema != "ul/v1" || r.Root != dir || r.Session != nil {
+	if r.Schema != "ul/v1" || r.Root != dir {
 		t.Fatalf("header: %+v", r.Schema)
 	}
 	// Sorted by namespace, then word; paths relative to the root.
@@ -116,7 +116,7 @@ func TestJSONContract(t *testing.T) {
 		}
 	}
 	ocp := findWord(t, r, "durian.cloud/engineering/standards/OOP#OCP")
-	if strings.Join(ocp.Breadcrumb, ">") != "durian.cloud>engineering>standards>OOP" || ocp.Status != "active" || ocp.Layer != "repo" || ocp.Line != 4 {
+	if strings.Join(ocp.Breadcrumb, ">") != "durian.cloud>engineering>standards>OOP" || ocp.Status != "active" || ocp.Line != 4 {
 		t.Errorf("OCP: %+v", ocp)
 	}
 	fac := findWord(t, r, "durian.cloud/engineering/standards/OOP#Facade")

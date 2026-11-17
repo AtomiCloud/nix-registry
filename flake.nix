@@ -123,7 +123,7 @@
             # verify and drift detection.
             problemgen-tests = packages.problemgen-tests;
             # Runs ul end to end in the sandbox: the clean fixture green, every planted failure red
-            # with its code, the session round trip, gen drift detection and the speed bound.
+            # with its code, gen drift detection and the speed bound.
             ul-tests = packages.ul-tests;
             # Runs obs end to end in the sandbox (no network, no containers): good fixtures green,
             # every planted failure red naming file + rule + token, the vendored VictoriaLogs tree

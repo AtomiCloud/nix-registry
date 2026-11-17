@@ -30,8 +30,6 @@
       ],
       "status": "active",
       "replacedBy": null,
-      "layer": "repo",
-      "overrides": null,
       "file": "docs/standard/oop/UL.yaml",
       "line": 4
     }

@@ -1,6 +1,5 @@
-// ul: the ubiquitous-language tool. It loads every UL.yaml of a repo (plus the words an LLM
-// coined in this session), overlays them into one final UL and serves it as JSON, Markdown
-// and lookups. Spec: design/registry-tools/ul.md.
+// ul: the ubiquitous-language tool. It loads every UL.yaml of a repo, resolves their references
+// and serves the result as JSON, Markdown and lookups. Spec: design/registry-tools/ul.md.
 package main
 
 import (
@@ -15,10 +14,8 @@ import (
 var version = "dev"
 
 type globals struct {
-	root      string
-	session   string
-	format    string
-	noSession bool
+	root   string
+	format string
 }
 
 type env struct {
@@ -31,14 +28,12 @@ type env struct {
 
 const usageText = `ul: the ubiquitous-language tool
 
-Usage: ul [--root DIR] [--session ID] [--no-session] [--format F] <command> [flags]
+Usage: ul [--root DIR] [--format F] <command> [flags]
 
 Commands:
   all                 the final UL (--format json|md, --details)
   lookup <name>       every match for a word, alias or id (--from PATH, --format text|json|md)
-  add                 add a word to the session layer (--word --desc [--namespace --alias --see --avoid --details] | --file)
-  session path|show|clear
-  check               every rule over the repo layer (--format text|json); exit 1 on problems
+  check               every rule (--format text|json); exit 1 on problems
   gen                 write UL.md beside each UL.yaml (--check: exit 1 on drift)
   --version
 
@@ -61,8 +56,6 @@ func (m *multi) Set(s string) error { *m = append(*m, s); return nil }
 
 func addCommon(fs *flag.FlagSet, g *globals) {
 	fs.StringVar(&g.root, "root", g.root, "repo root (default: git top level, else the current directory)")
-	fs.StringVar(&g.session, "session", g.session, "session id (default: $UL_SESSION, then $FY_SESSION_ID)")
-	fs.BoolVar(&g.noSession, "no-session", g.noSession, "ignore the session layer")
 	fs.StringVar(&g.format, "format", g.format, "output format")
 }
 
@@ -122,10 +115,6 @@ func run(args []string, e *env) int {
 		code, err = cmdAll(g, rest, e)
 	case "lookup":
 		code, err = cmdLookup(g, rest, e)
-	case "add":
-		code, err = cmdAdd(g, rest, e)
-	case "session":
-		code, err = cmdSession(g, rest, e)
 	case "check":
 		code, err = cmdCheck(g, rest, e)
 	case "gen":

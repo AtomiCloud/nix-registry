@@ -20,7 +20,7 @@ type testEnv struct {
 
 func newEnv(t *testing.T, cwd string) *testEnv {
 	t.Helper()
-	return &testEnv{t: t, cwd: cwd, vars: map[string]string{"UL_STATE_DIR": t.TempDir(), "HOME": t.TempDir()}}
+	return &testEnv{t: t, cwd: cwd, vars: map[string]string{"HOME": t.TempDir()}}
 }
 
 func (te *testEnv) run(stdin string, args ...string) (code int, stdout, stderr string) {

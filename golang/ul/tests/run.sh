@@ -3,7 +3,7 @@
 # End-to-end test of the ul binary, run inside a nix build (no network).
 #   run.sh --ul <bin> --src <tool source dir> [--out <package output>]
 # Everything here drives the BUILT binary: the clean fixture is green, every planted failure
-# is red with its one code, an add/session round trip works, gen detects drift, and the
+# is red with its one code, gen detects drift, and the
 # commands stay fast on 1,000 words in 100 files.
 set -euo pipefail
 while [ $# -gt 0 ]; do
@@ -28,9 +28,7 @@ while [ $# -gt 0 ]; do
 done
 work="$(mktemp -d)"
 export HOME="$work/home"
-export UL_STATE_DIR="$work/state"
 mkdir -p "$HOME"
-unset UL_SESSION FY_SESSION_ID
 pass=0
 fail=0
 ok() {
@@ -64,10 +62,10 @@ expect_exit 0 "clean: check json" "$UL" check --root "$clean" --format json
 [ "$(jq -r '.problems | length' <<<"$out")" = 0 ] && ok "clean: no problems in json" || bad "clean: json problems: $out"
 expect_exit 0 "clean: gen --check (committed UL.md are current)" "$UL" gen --check --root "$clean"
 expect_exit 0 "clean: all json" "$UL" all --root "$clean"
-if jq -e '.schema == "ul/v1" and (.words | length) == 9 and (.namespaces | length) == 3 and .session == null and (.problems | length) == 0' >/dev/null <<<"$out"; then
+if jq -e '.schema == "ul/v1" and (.words | length) == 9 and (.namespaces | length) == 3 and (.problems | length) == 0' >/dev/null <<<"$out"; then
   ok "clean: ul/v1 shape"
 else bad "clean: ul/v1 shape: $out"; fi
-jq -e '[.words[] | select(.id == "durian.cloud/engineering/standards/OOP#OCP")][0] | .breadcrumb == ["durian.cloud","engineering","standards","OOP"] and .replacedBy == null and .overrides == null and (.mentions | length) == 1' >/dev/null <<<"$out" && ok "clean: OCP fields" || bad "clean: OCP fields"
+jq -e '[.words[] | select(.id == "durian.cloud/engineering/standards/OOP#OCP")][0] | .breadcrumb == ["durian.cloud","engineering","standards","OOP"] and .replacedBy == null and (.mentions | length) == 1' >/dev/null <<<"$out" && ok "clean: OCP fields" || bad "clean: OCP fields"
 expect_exit 0 "clean: all md" "$UL" all --root "$clean" --format md
 grep -q '^durian.cloud > shop > billing > pay$' <<<"$out" && ok "clean: breadcrumb line" || bad "clean: breadcrumb line"
 expect_exit 0 "clean: lookup by alias" "$UL" lookup "open-close principle" --root "$clean" --format json
@@ -87,32 +85,12 @@ for d in "$SRC"/testdata/bad/*/; do
   if [ "$got" = 1 ] && [ "$codes" = "$want " ]; then ok "check $want $name"; else bad "check $name: exit $got, want 1 with only $want, got [$codes]: $out"; fi
 done
 
-# --- add / session round trip ------------------------------------------------------------
-export UL_SESSION=round-trip
-expect_exit 0 "add: a session word" "$UL" add --root "$clean" --word Gizmo --desc "A thing coined in chat." --alias Gadget --see "durian.cloud/engineering/standards/OOP#OCP"
-grep -q 'added session#Gizmo' <<<"$out" && ok "add: reports the id" || bad "add: output $out"
-expect_exit 0 "add: sharpen a repo word" "$UL" add --root "$clean" --namespace durian.cloud/engineering/standards/OOP --word SRP --desc "One reason to change per module."
-expect_exit 0 "session path" "$UL" session path
-[ "$out" = "$UL_STATE_DIR/sessions/round-trip.yaml" ] && [ -f "$out" ] && ok "session file lives under UL_STATE_DIR" || bad "session path: $out"
-expect_exit 0 "session show" "$UL" session show
-grep -q '^namespace: session$' <<<"$out" && grep -q 'Gizmo:' <<<"$out" && ok "session show prints UL.yaml text" || bad "session show: $out"
-expect_exit 0 "all with the session layer" "$UL" all --root "$clean"
-jq -e '.session == "round-trip" and ([.words[] | select(.id == "session#Gizmo")][0].layer == "session") and ([.words[] | select(.id == "durian.cloud/engineering/standards/OOP#SRP")][0] | .layer == "session" and .overrides == "repo")' >/dev/null <<<"$out" && ok "all: session layer on top, overrides marked" || bad "all: session layer: $out"
-expect_exit 0 "lookup finds the session word by alias" "$UL" lookup gadget --root "$clean"
-grep -q '^Gizmo' <<<"$out" && ok "lookup: Gizmo" || bad "lookup gadget: $out"
-expect_exit 0 "no-session ignores the layer" "$UL" all --root "$clean" --no-session
-[ "$(jq -r '.session' <<<"$out")" = null ] && ok "no-session: session null" || bad "no-session: $out"
-expect_exit 1 "add: a word that breaks a rule is refused" "$UL" add --root "$clean" --word Bad --desc "x" --see Nope
-grep -q 'UL201' <<<"$err" && ok "add: refusal names UL201" || bad "add refusal: $err"
-expect_exit 0 "check never sees the session layer" "$UL" check --root "$clean"
-expect_exit 0 "gen --check never sees the session layer" "$UL" gen --check --root "$clean"
-expect_exit 0 "session clear" "$UL" session clear
-[ ! -e "$UL_STATE_DIR/sessions/round-trip.yaml" ] && ok "session file removed" || bad "session file still there"
-unset UL_SESSION
-expect_exit 2 "add without a session id" "$UL" add --root "$clean" --word W --desc x
-expect_exit 0 "all without a session id runs on the repo layer" "$UL" all --root "$clean"
-[ "$(jq -r '.session' <<<"$out")" = null ] && ok "all: no session id" || bad "all without session: $out"
-FY_SESSION_ID=from-fy "$UL" session path | grep -q 'from-fy.yaml$' && ok "FY_SESSION_ID is the fallback" || bad "FY_SESSION_ID fallback"
+# --- no session layer: the repo scan is the whole UL -------------------------------------
+expect_exit 2 "no add command" "$UL" add --root "$clean" --word W --desc x
+expect_exit 2 "no session command" "$UL" session path
+expect_exit 2 "no --session flag" "$UL" all --root "$clean" --session s
+FY_SESSION_ID=x UL_SESSION=x "$UL" all --root "$clean" >"$work/all.json" && ok "session variables are ignored" || bad "session variables"
+if grep -qE '"(session|layer|overrides)"' "$work/all.json"; then bad "ul/v1 output has session, layer or overrides"; else ok "ul/v1 output has no session, layer or overrides"; fi
 
 # --- gen drift detection -----------------------------------------------------------------
 md="$clean/docs/standard/oop/UL.md"

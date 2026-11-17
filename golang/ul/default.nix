@@ -1,8 +1,7 @@
 { nixpkgs, go }:
 
-# ul: the ubiquitous-language tool. It loads every UL.yaml of a repo (plus the words an LLM
-# coined in the current session), overlays them into one final UL, and serves it as JSON
-# (`ul/v1`), Markdown, lookups, `ul check` rules and generated UL.md files.
+# ul: the ubiquitous-language tool. It loads every UL.yaml of a repo, overlays them into one final
+# UL, and serves it as JSON (`ul/v1`), Markdown, lookups, `ul check` rules and generated UL.md files.
 # Spec: design/registry-tools/ul.md in the diene corpus.
 #
 # The source lives in-tree (src/), like problemgen, so the registry release IS the tool
@@ -39,7 +38,7 @@ let
   };
 
   # End-to-end run of the built binary in the sandbox (no network): the clean fixture is
-  # green, every planted failure is red with its code, an add/session round trip, drift
+  # green, every planted failure is red with its code, drift
   # detection, and the speed bound.
   tests = nixpkgs.runCommand "ul-tests"
     {

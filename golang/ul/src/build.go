@@ -12,8 +12,7 @@ type FNS struct {
 	Namespace  string
 	Breadcrumb []string
 	Premise    string
-	File       string // relative to the root (repo) or absolute (session-only namespace)
-	Layer      string
+	File       string    // relative to the root
 	Entries    []*FEntry // sorted A–Z
 	anchors    map[*FEntry]string
 }
@@ -22,8 +21,6 @@ type FNS struct {
 type FEntry struct {
 	E          *Entry
 	NS         *FNS
-	Layer      string
-	Overrides  bool
 	ID         string
 	File       string
 	Retired    bool
@@ -32,10 +29,9 @@ type FEntry struct {
 	ReplacedBy string
 }
 
-// Final is the overlay of the repo layer and the session layer.
+// Final is the UL of a repo: every UL.yaml found by the scan.
 type Final struct {
 	Root     string
-	Session  *string
 	NS       []*FNS
 	Entries  []*FEntry // by namespace, then word
 	Problems []Problem
@@ -47,10 +43,9 @@ type Final struct {
 
 func fold(s string) string { return strings.ToLower(s) }
 
-// buildFinal overlays the session documents on the repo documents, then runs the rules that
-// need the whole picture (UL103, UL107, UL109, UL201–UL204) and computes mentions.
-func buildFinal(root string, session *string, repo, sess []*Doc, sessFile string, base []Problem) *Final {
-	f := &Final{Root: root, Session: session, Problems: slices.Clone(base),
+// buildFinal assembles the repo documents, then runs the rules that need the whole picture (UL103, UL107, UL109, UL201–UL204) and computes mentions.
+func buildFinal(root string, repo []*Doc, base []Problem) *Final {
+	f := &Final{Root: root, Problems: slices.Clone(base),
 		byID: map[string]*FEntry{}, nameIdx: map[string][]*FEntry{}, nsNames: map[string]map[string]*FEntry{}}
 	nsMap := map[string]*FNS{}
 	problem := func(code, file string, line int, format string, a ...any) {
@@ -62,35 +57,12 @@ func buildFinal(root string, session *string, repo, sess []*Doc, sessFile string
 			problem("UL103", d.File, d.NSLine, "namespace %s is already defined in %s", d.Namespace, prev.File)
 			continue
 		}
-		ns := &FNS{Namespace: d.Namespace, Breadcrumb: breadcrumb(d.Namespace), Premise: d.Premise, File: d.File, Layer: layerRepo}
+		ns := &FNS{Namespace: d.Namespace, Breadcrumb: breadcrumb(d.Namespace), Premise: d.Premise, File: d.File}
 		nsMap[d.Namespace] = ns
 		for _, e := range d.Entries {
-			ns.Entries = append(ns.Entries, &FEntry{E: e, NS: ns, Layer: layerRepo, File: d.File})
+			ns.Entries = append(ns.Entries, &FEntry{E: e, NS: ns, File: d.File})
 		}
 	}
-	seenSess := map[string]bool{}
-	for _, d := range sess {
-		if seenSess[d.Namespace] {
-			problem("UL103", sessFile, d.NSLine, "namespace %s appears twice in the session file", d.Namespace)
-			continue
-		}
-		seenSess[d.Namespace] = true
-		ns := nsMap[d.Namespace]
-		if ns == nil {
-			ns = &FNS{Namespace: d.Namespace, Breadcrumb: breadcrumb(d.Namespace), Premise: d.Premise, File: sessFile, Layer: layerSession}
-			nsMap[d.Namespace] = ns
-		}
-		for _, e := range d.Entries {
-			fe := &FEntry{E: e, NS: ns, Layer: layerSession, File: sessFile}
-			if i := slices.IndexFunc(ns.Entries, func(x *FEntry) bool { return x.E.Word == e.Word }); i >= 0 {
-				fe.Overrides = ns.Entries[i].Layer == layerRepo
-				ns.Entries[i] = fe
-			} else {
-				ns.Entries = append(ns.Entries, fe)
-			}
-		}
-	}
-
 	for _, ns := range nsMap {
 		f.NS = append(f.NS, ns)
 	}
@@ -163,9 +135,6 @@ func (f *Final) checkNames(problem func(code, file string, line int, format stri
 	for _, ns := range f.NS {
 		ordered := slices.Clone(ns.Entries)
 		slices.SortFunc(ordered, func(a, b *FEntry) int {
-			if a.Layer != b.Layer {
-				return strings.Compare(a.Layer, b.Layer) // repo before session
-			}
 			if c := strings.Compare(a.File, b.File); c != 0 {
 				return c
 			}

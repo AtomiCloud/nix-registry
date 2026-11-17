@@ -46,7 +46,6 @@ func TestSpeed1000Words(t *testing.T) {
 				gitIn(t, dir, "init", "-q")
 			}
 			te := newEnv(t, dir)
-			te.vars["UL_SESSION"] = "speed"
 			r := te.report("all", "--root", dir)
 			if len(r.Words) != 1000 || len(r.Namespaces) != 100 || len(r.Problems) != 0 {
 				t.Fatalf("generated repo: %d words, %d namespaces, problems %v", len(r.Words), len(r.Namespaces), r.Problems[:min(3, len(r.Problems))])

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
-	"path/filepath"
 	"slices"
 )
 
@@ -15,7 +14,6 @@ type JNamespace struct {
 	Breadcrumb []string `json:"breadcrumb"`
 	Premise    string   `json:"premise"`
 	File       string   `json:"file"`
-	Layer      string   `json:"layer"`
 }
 
 type JWord struct {
@@ -31,8 +29,6 @@ type JWord struct {
 	Mentions   []string `json:"mentions"`
 	Status     string   `json:"status"`
 	ReplacedBy *string  `json:"replacedBy"`
-	Layer      string   `json:"layer"`
-	Overrides  *string  `json:"overrides"`
 	File       string   `json:"file"`
 	Line       int      `json:"line"`
 }
@@ -40,7 +36,6 @@ type JWord struct {
 type Report struct {
 	Schema     string       `json:"schema"`
 	Root       string       `json:"root"`
-	Session    *string      `json:"session"`
 	Namespaces []JNamespace `json:"namespaces"`
 	Words      []JWord      `json:"words"`
 	Problems   []Problem    `json:"problems"`
@@ -66,30 +61,23 @@ func (fe *FEntry) jword() JWord {
 		ID: fe.ID, Word: fe.E.Word, Namespace: fe.NS.Namespace, Breadcrumb: fe.NS.Breadcrumb,
 		Aliases: names(fe.E.Aliases), Desc: fe.E.Desc, Details: fe.E.Details, Avoid: names(fe.E.Avoid),
 		See: nonNil(fe.See), Mentions: nonNil(fe.Mentions), Status: fe.E.Status,
-		Layer: fe.Layer, File: fe.File, Line: fe.E.WordLine,
+		File: fe.File, Line: fe.E.WordLine,
 	}
 	if fe.ReplacedBy != "" {
 		s := fe.ReplacedBy
 		w.ReplacedBy = &s
 	}
-	if fe.Overrides {
-		s := layerRepo
-		w.Overrides = &s
-	}
 	return w
 }
 
-// relFile shows a repo path relative to the root (already so) and a session path as is.
-func relFile(f string) string { return filepath.ToSlash(f) }
-
 func (f *Final) report() *Report {
-	r := &Report{Schema: "ul/v1", Root: f.Root, Session: f.Session,
+	r := &Report{Schema: "ul/v1", Root: f.Root,
 		Namespaces: make([]JNamespace, 0, len(f.NS)), Words: make([]JWord, 0, len(f.Entries)), Problems: slices.Clone(f.Problems)}
 	if r.Problems == nil {
 		r.Problems = []Problem{}
 	}
 	for _, ns := range f.NS {
-		r.Namespaces = append(r.Namespaces, JNamespace{ns.Namespace, ns.Breadcrumb, ns.Premise, relFile(ns.File), ns.Layer})
+		r.Namespaces = append(r.Namespaces, JNamespace{ns.Namespace, ns.Breadcrumb, ns.Premise, ns.File})
 	}
 	for _, fe := range f.Entries {
 		r.Words = append(r.Words, fe.jword())
