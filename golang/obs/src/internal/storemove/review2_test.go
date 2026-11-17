@@ -13,6 +13,9 @@ func kubeFixture(calls *[]string, bodies map[string]string) Kubernetes {
 	return Kubernetes{Command: func(_ context.Context, args ...string) ([]byte, error) {
 		s := strings.Join(args, " ")
 		*calls = append(*calls, s)
+		if b, ok := liveAnswer(s); ok {
+			return b, nil
+		}
 		for resource, body := range bodies {
 			if strings.Contains(s, "get "+resource+" ") {
 				return []byte(body), nil
@@ -110,6 +113,7 @@ func TestReview2R2RoutingManifestsOnlyRouters(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := config()
 			cfg.RoutingManifest, cfg.OriginalRoutingManifest = tc.routing, tc.original
+			setLive(t, true, cfg.OriginalRoutingManifest)
 			var calls []string
 			err := reviewKube(&calls).Execute(context.Background(), tc.step, "victoriametrics", cfg)
 			if tc.ok && err != nil {
@@ -130,6 +134,7 @@ func TestReview2R2RoutingManifestsOnlyRouters(t *testing.T) {
 func TestReview2R4RollbackPatchesSingleTemplateBeforeScaleUp(t *testing.T) {
 	cfg := config()
 	cfg.SingleManifest = reviewManifest(t, "kind: StatefulSet\nmetadata: {name: single}\nspec: {replicas: 1}\n")
+	setLive(t, true, cfg.SingleManifest)
 	var calls []string
 	k := reviewKube(&calls)
 	for _, s := range Plan("tempo", true) {

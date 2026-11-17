@@ -39,10 +39,11 @@ func TestCorrelation3DedupOnlyExactSettingOnVmstorage(t *testing.T) {
 		{"1ms added on vmstorage with the new nodes", routers("a:8400,b:8400") + "---\n" + vmstorage(`"-retentionPeriod=1", `+dedup), routers("a:8400") + "---\n" + vmstorage(`"-retentionPeriod=1"`), true},
 		{"vmstorage unchanged", routers("a:8400,b:8400") + "---\n" + vmstorage(`"-retentionPeriod=1"`), routers("a:8400") + "---\n" + vmstorage(`"-retentionPeriod=1"`), true},
 		{"1ms already there on both sides", routers("a:8400,b:8400") + "---\n" + vmstorage(dedup), routers("a:8400") + "---\n" + vmstorage(dedup), true},
-		{"1h on vmstorage", routers("a:8400,b:8400") + "---\n" + vmstorage(`"-dedup.minScrapeInterval=1h"`), routers("a:8400") + "---\n" + vmstorage(`"-retentionPeriod=1"`), false},
-		{"1ms duplicated on vmstorage", routers("a:8400,b:8400") + "---\n" + vmstorage(dedup+", "+dedup), routers("a:8400") + "---\n" + vmstorage(`"-retentionPeriod=1"`), false},
-		{"changed from 1ms to 1h on vmstorage", routers("a:8400,b:8400") + "---\n" + vmstorage(`"-dedup.minScrapeInterval=1h"`), routers("a:8400") + "---\n" + vmstorage(dedup), false},
-		{"removed from vmstorage", routers("a:8400,b:8400") + "---\n" + vmstorage(`"-retentionPeriod=1"`), routers("a:8400") + "---\n" + vmstorage(dedup), false},
+		{"1h on vmstorage", routers("a:8400,b:8400") + "---\n" + vmstorage(`"-retentionPeriod=1", "-dedup.minScrapeInterval=1h"`), routers("a:8400") + "---\n" + vmstorage(`"-retentionPeriod=1"`), false},
+		{"1ms duplicated on vmstorage (only the dedup count differs)", routers("a:8400,b:8400") + "---\n" + vmstorage(`"-retentionPeriod=1", `+dedup+", "+dedup), routers("a:8400") + "---\n" + vmstorage(`"-retentionPeriod=1"`), false},
+		{"1ms duplicated where one was (only the dedup count differs)", routers("a:8400,b:8400") + "---\n" + vmstorage(`"-retentionPeriod=1", `+dedup+", "+dedup), routers("a:8400") + "---\n" + vmstorage(`"-retentionPeriod=1", `+dedup), false},
+		{"changed from 1ms to 1h on vmstorage", routers("a:8400,b:8400") + "---\n" + vmstorage(`"-retentionPeriod=1", "-dedup.minScrapeInterval=1h"`), routers("a:8400") + "---\n" + vmstorage(`"-retentionPeriod=1", `+dedup), false},
+		{"removed from vmstorage (only the dedup argument differs)", routers("a:8400,b:8400") + "---\n" + vmstorage(`"-retentionPeriod=1"`), routers("a:8400") + "---\n" + vmstorage(`"-retentionPeriod=1", `+dedup), false},
 		{"exact 1ms on the insert router", strings.Replace(routers("a:8400,b:8400"), "\"-storageNode", dedup+", \"-storageNode", 1) + "---\n" + vmstorage(`"-retentionPeriod=1"`), routers("a:8400") + "---\n" + vmstorage(`"-retentionPeriod=1"`), false},
 		{"1ms removed from the insert router", routers("a:8400,b:8400") + "---\n" + vmstorage(`"-retentionPeriod=1"`), strings.Replace(routers("a:8400"), "\"-storageNode", dedup+", \"-storageNode", 1) + "---\n" + vmstorage(`"-retentionPeriod=1"`), false},
 		{"another vmstorage flag changed", routers("a:8400,b:8400") + "---\n" + vmstorage(`"-retentionPeriod=2", `+dedup), routers("a:8400") + "---\n" + vmstorage(`"-retentionPeriod=1"`), false},
@@ -55,6 +56,7 @@ func TestCorrelation3DedupOnlyExactSettingOnVmstorage(t *testing.T) {
 				cfg := vmConfig()
 				cfg.RoutingManifest = reviewManifest(t, tc.routing)
 				cfg.OriginalRoutingManifest = reviewManifest(t, tc.original)
+				setLive(t, true, cfg.OriginalRoutingManifest)
 				var calls []string
 				err := reviewKube(&calls).Execute(context.Background(), step, "victoriametrics", cfg)
 				if tc.ok && (err != nil || len(calls) == 0) {
@@ -97,6 +99,7 @@ func TestCorrelation3EndpointsPerContainerAndOccurrence(t *testing.T) {
 				cfg.Routers = []string{"deployment/insert"}
 				cfg.RoutingManifest = reviewManifest(t, tc.routing)
 				cfg.OriginalRoutingManifest = reviewManifest(t, tc.original)
+				setLive(t, true, cfg.OriginalRoutingManifest)
 				var calls []string
 				err := reviewKube(&calls).Execute(context.Background(), step, "victoriametrics", cfg)
 				if tc.ok && (err != nil || len(calls) == 0) {
@@ -126,6 +129,7 @@ func TestCorrelation3ObjectSetsMatchBothDirections(t *testing.T) {
 				cfg := vmConfig()
 				cfg.RoutingManifest = reviewManifest(t, tc.routing)
 				cfg.OriginalRoutingManifest = reviewManifest(t, tc.original)
+				setLive(t, true, cfg.OriginalRoutingManifest)
 				var calls []string
 				if err := reviewKube(&calls).Execute(context.Background(), step, "victoriametrics", cfg); err == nil || len(calls) != 0 {
 					t.Fatalf("mismatched object sets applied: err=%v calls=%v", err, calls)
@@ -185,6 +189,7 @@ func TestCorrelation3RandomExtraFieldInAnyRoutingManifestRefused(t *testing.T) {
 		cfg := vmConfig()
 		cfg.RoutingManifest = reviewManifest(t, fwd)
 		cfg.OriginalRoutingManifest = reviewManifest(t, orig)
+		setLive(t, true, cfg.OriginalRoutingManifest)
 		var calls []string
 		err := reviewKube(&calls).Execute(context.Background(), step, "victoriametrics", cfg)
 		if err != nil && len(calls) != 0 {
@@ -252,26 +257,28 @@ func TestCorrelation3RandomExtraFieldInAnyRoutingManifestRefused(t *testing.T) {
 	}
 }
 
-// The other three manifests carry no baseline, so their allow-list is the object set:
-// only listed kinds, only the listed workloads, never a stable Service.
+// The other three manifests: scaled_manifest may carry only the scaled workloads and the
+// store's own supporting objects (headless Service, ConfigMap); single_manifest and
+// metastore_manifest only the single. Never a stable Service or another kind.
 func TestCorrelation3OtherManifestsAllowListObjects(t *testing.T) {
-	scaledOK := "kind: StatefulSet\nmetadata: {name: new}\nspec: {replicas: 1}\n"
+	scaledOK := "kind: StatefulSet\nmetadata: {name: new, labels: {obs.diene/store-move: tempo}}\nspec: {replicas: 1}\n"
 	singleOK := "kind: StatefulSet\nmetadata: {name: single}\nspec: {replicas: 1}\n"
 	extras := map[string]string{
-		"ClusterRole":      "kind: ClusterRole\nmetadata: {name: x}\n",
-		"Namespace":        "kind: Namespace\nmetadata: {name: x}\n",
-		"CronJob":          "kind: CronJob\nmetadata: {name: x}\n",
-		"Ingress":          "kind: Ingress\nmetadata: {name: x}\n",
-		"NetworkPolicy":    "kind: NetworkPolicy\nmetadata: {name: x}\n",
+		"ClusterRole":      "kind: ClusterRole\nmetadata: {name: new-x}\n",
+		"Namespace":        "kind: Namespace\nmetadata: {name: new-x}\n",
+		"CronJob":          "kind: CronJob\nmetadata: {name: new-x}\n",
+		"Ingress":          "kind: Ingress\nmetadata: {name: new-x}\n",
+		"NetworkPolicy":    "kind: NetworkPolicy\nmetadata: {name: new-x}\n",
+		"PVC":              "kind: PersistentVolumeClaim\nmetadata: {name: new-data, labels: {obs.diene/store-move: tempo}}\n",
+		"Secret":           "kind: Secret\nmetadata: {name: new-secret, labels: {obs.diene/store-move: tempo}}\n",
 		"stable Service":   "kind: Service\nmetadata: {name: tempo-query}\n",
 		"alloy workload":   "kind: Deployment\nmetadata: {name: alloy}\nspec: {replicas: 1}\n",
 		"unlisted sts":     "kind: StatefulSet\nmetadata: {name: other}\nspec: {replicas: 1}\n",
 		"stable endpoints": "kind: Endpoints\nmetadata: {name: tempo-distributor}\n",
 	}
-	allowed := map[string]string{
-		"headless Service": "kind: Service\nmetadata: {name: new-headless}\n",
-		"ConfigMap":        "kind: ConfigMap\nmetadata: {name: new-config}\n",
-		"PVC":              "kind: PersistentVolumeClaim\nmetadata: {name: new-data}\n",
+	supporting := map[string]string{
+		"headless Service": "kind: Service\nmetadata: {name: new-headless, labels: {obs.diene/store-move: tempo}}\nspec: {clusterIP: None, publishNotReadyAddresses: true}\n",
+		"ConfigMap":        "kind: ConfigMap\nmetadata: {name: new-config, labels: {obs.diene/store-move: tempo}}\n",
 	}
 	type target struct {
 		name string
@@ -285,23 +292,36 @@ func TestCorrelation3OtherManifestsAllowListObjects(t *testing.T) {
 		{"single", singleOK, func(c *Config, f string) { c.SingleManifest = f }, Restore},
 	}
 	for _, tg := range targets {
+		run := func(t *testing.T, body string) ([]string, error) {
+			cfg := config()
+			tg.set(&cfg, reviewManifest(t, body))
+			if tg.name != "scaled" {
+				setLive(t, true, reviewManifest(t, singleOK))
+			}
+			var calls []string
+			err := reviewKube(&calls).Execute(context.Background(), tg.step, "tempo", cfg)
+			return calls, err
+		}
+		t.Run(tg.name+" baseline", func(t *testing.T) {
+			if _, err := run(t, tg.ok); err != nil {
+				t.Fatalf("unchanged baseline refused: %v", err)
+			}
+		})
 		for name, extra := range extras {
 			t.Run(tg.name+" refuses "+name, func(t *testing.T) {
-				cfg := config()
-				tg.set(&cfg, reviewManifest(t, tg.ok+"---\n"+extra))
-				var calls []string
-				if err := reviewKube(&calls).Execute(context.Background(), tg.step, "tempo", cfg); err == nil || len(calls) != 0 {
+				if calls, err := run(t, tg.ok+"---\n"+extra); err == nil || len(calls) != 0 {
 					t.Fatalf("extra object applied: err=%v calls=%v", err, calls)
 				}
 			})
 		}
-		for name, extra := range allowed {
-			t.Run(tg.name+" allows "+name, func(t *testing.T) {
-				cfg := config()
-				tg.set(&cfg, reviewManifest(t, tg.ok+"---\n"+extra))
-				var calls []string
-				if err := reviewKube(&calls).Execute(context.Background(), tg.step, "tempo", cfg); err != nil {
-					t.Fatalf("listed object refused: %v", err)
+		for name, extra := range supporting {
+			t.Run(tg.name+" supporting "+name, func(t *testing.T) {
+				calls, err := run(t, tg.ok+"---\n"+extra)
+				if tg.name == "scaled" && err != nil {
+					t.Fatalf("store's own new object refused: %v", err)
+				}
+				if tg.name != "scaled" && (err == nil || len(calls) != 0) {
+					t.Fatalf("%s manifest may carry only the single; applied: err=%v calls=%v", tg.name, err, calls)
 				}
 			})
 		}
@@ -329,13 +349,14 @@ func TestCorrelation3OtherManifestsAllowListObjects(t *testing.T) {
 // template roles are patched and the explicit scale-up.
 func TestCorrelation3RestoreAppliesSingleAtZeroReplicas(t *testing.T) {
 	for name, body := range map[string]string{
-		"replicas 1":      "kind: StatefulSet\nmetadata: {name: single, labels: {keep: me}}\nspec:\n  replicas: 1\n  serviceName: s\n  template:\n    metadata:\n      labels: {app: x}\n---\nkind: ConfigMap\nmetadata: {name: single-config}\ndata: {a: b}\n",
+		"replicas 1":      "kind: StatefulSet\nmetadata: {name: single, labels: {keep: me}}\nspec:\n  replicas: 1\n  serviceName: s\n  template:\n    metadata:\n      labels: {app: x}\n",
 		"replicas absent": "kind: StatefulSet\nmetadata: {name: single}\nspec:\n  serviceName: s\n",
 		"inside a List":   "kind: List\nitems:\n  - kind: StatefulSet\n    metadata: {name: single}\n    spec: {replicas: 3, serviceName: s}\n",
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg := config()
 			cfg.SingleManifest = reviewManifest(t, body)
+			setLive(t, true, cfg.SingleManifest)
 			var calls []string
 			base := reviewKube(&calls)
 			var applied string
@@ -379,7 +400,7 @@ func TestCorrelation3RestoreAppliesSingleAtZeroReplicas(t *testing.T) {
 				t.Fatalf("applied single replicas = %v, want explicit 0:\n%s", r, applied)
 			}
 			if name == "replicas 1" {
-				if others != 1 || !strings.Contains(applied, "single-config") || !strings.Contains(applied, "keep: me") || !strings.Contains(applied, "serviceName: s") {
+				if others != 0 || !strings.Contains(applied, "keep: me") || !strings.Contains(applied, "serviceName: s") {
 					t.Fatalf("rewrite dropped other fields/objects:\n%s", applied)
 				}
 			}

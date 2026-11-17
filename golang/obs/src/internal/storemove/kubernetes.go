@@ -272,7 +272,12 @@ func (k Kubernetes) Execute(ctx context.Context, s Step, store string, c Config)
 	c = c.normalized()
 	switch s {
 	case Prepare, AddNodes:
-		if err := validateScaledManifest(c); err != nil {
+		objs, err := validateScaledManifest(c, store)
+		if err != nil {
+			return err
+		}
+		// Read-only cluster checks after every static check, before the first change.
+		if err := k.liveScaled(ctx, c, store, objs); err != nil {
 			return err
 		}
 		if err := k.apply(ctx, c, c.ScaledManifest); err != nil {
@@ -291,8 +296,13 @@ func (k Kubernetes) Execute(ctx context.Context, s Step, store string, c Config)
 		}
 		return k.roll(ctx, c, []string{c.Alloy})
 	case StorageRoute, RestoreRoute:
-		// Both manifests are checked before either is applied.
-		if err := validateRoutingManifests(c); err != nil {
+		// Both manifests are checked (with each other, then with the live objects)
+		// before either is applied.
+		fwd, orig, err := validateRoutingManifests(c)
+		if err != nil {
+			return err
+		}
+		if err := k.liveRouting(ctx, c, s, fwd, orig); err != nil {
 			return err
 		}
 		file := c.RoutingManifest
@@ -306,10 +316,11 @@ func (k Kubernetes) Execute(ctx context.Context, s Step, store string, c Config)
 	case Step("stop compaction"):
 		return k.compaction(ctx, c, false)
 	case Step("retain single as metastore"):
-		if err := validateSingleManifest(c.MetastoreManifest, c); err != nil {
+		single, err := validateSingleManifest(c.MetastoreManifest, c, true)
+		if err != nil {
 			return err
 		}
-		if err := validateIsolatedManifest(c.MetastoreManifest, c); err != nil {
+		if err := k.liveSingle(ctx, c, store, c.MetastoreManifest, single, true); err != nil {
 			return err
 		}
 		if err := k.apply(ctx, c, c.MetastoreManifest); err != nil {
@@ -330,10 +341,11 @@ func (k Kubernetes) Execute(ctx context.Context, s Step, store string, c Config)
 		patch, _ := json.Marshal(map[string]any{"spec": map[string]any{"template": map[string]any{"metadata": map[string]any{"labels": labels}}}})
 		return k.call(ctx, c, "patch", c.Single, "--type=merge", "-p", string(patch))
 	case Restore:
-		if err := validateSingleManifest(c.SingleManifest, c); err != nil {
+		single, err := validateSingleManifest(c.SingleManifest, c, false)
+		if err != nil {
 			return err
 		}
-		if err := validateIsolatedManifest(c.SingleManifest, c); err != nil {
+		if err := k.liveSingle(ctx, c, store, c.SingleManifest, single, false); err != nil {
 			return err
 		}
 		// Apply a copy with the single at replicas 0: a manifest saying replicas 1 (or

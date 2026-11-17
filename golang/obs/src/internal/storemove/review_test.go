@@ -2,6 +2,7 @@ package storemove
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,6 +23,9 @@ func reviewKube(calls *[]string) Kubernetes {
 	return Kubernetes{Command: func(_ context.Context, args ...string) ([]byte, error) {
 		s := strings.Join(args, " ")
 		*calls = append(*calls, s)
+		if b, ok := liveAnswer(s); ok {
+			return b, nil
+		}
 		if strings.Contains(s, "jsonpath") {
 			return []byte("2"), nil
 		}
@@ -47,6 +51,7 @@ func TestReview1TempoRealRangeResponse(t *testing.T) {
 func TestReview2RollbackClearsScaledTemplates(t *testing.T) {
 	cfg := config()
 	cfg.SingleManifest = reviewManifest(t, "kind: StatefulSet\nmetadata: {name: single}\nspec: {replicas: 1}\n")
+	setLive(t, true, cfg.SingleManifest)
 	var calls []string
 	k := reviewKube(&calls)
 	for _, s := range Plan("tempo", true) {
@@ -84,6 +89,7 @@ func TestReview3MetastoreCannotRetainServiceRoles(t *testing.T) {
 		t.Fatalf("active metastore role accepted: %v %v", err, calls)
 	}
 	cfg.MetastoreManifest = reviewManifest(t, "kind: StatefulSet\nmetadata: {name: single}\nspec: {replicas: 1}\n")
+	setLive(t, true, cfg.MetastoreManifest)
 	calls = nil
 	if err = reviewKube(&calls).Execute(context.Background(), Step("retain single as metastore"), "pyroscope", cfg); err != nil {
 		t.Fatal(err)
@@ -100,8 +106,8 @@ func TestReview3MetastoreCannotRetainServiceRoles(t *testing.T) {
 }
 func TestReview5HeadlessServiceAllowed(t *testing.T) {
 	cfg := config()
-	cfg.ScaledManifest = reviewManifest(t, "kind: StatefulSet\nmetadata: {name: new}\nspec: {replicas: 1}\n---\nkind: Service\nmetadata: {name: tempo-headless}\nspec: {clusterIP: None, publishNotReadyAddresses: true}\n")
-	if err := validateScaledManifest(cfg); err != nil {
+	cfg.ScaledManifest = reviewManifest(t, "kind: StatefulSet\nmetadata: {name: new}\nspec: {replicas: 1}\n---\nkind: Service\nmetadata: {name: new-headless, labels: {obs.diene/store-move: tempo}}\nspec: {clusterIP: None, publishNotReadyAddresses: true}\n")
+	if _, err := validateScaledManifest(cfg, "tempo"); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -121,7 +127,7 @@ func TestReview5ProtectedEndpointsAlloyAndAliases(t *testing.T) {
 	cfg.Single = "sts/single"
 	cfg.Scaled = append(cfg.Scaled, "statefulset/single")
 	cfg.ScaledManifest = reviewManifest(t, "kind: StatefulSet\nmetadata: {name: new}\nspec: {replicas: 1}\n---\nkind: StatefulSet\nmetadata: {name: single}\nspec: {replicas: 1}\n")
-	if err := validateScaledManifest(cfg); err == nil || !strings.Contains(err.Error(), "old single") {
+	if _, err := validateScaledManifest(cfg, "tempo"); err == nil || !strings.Contains(err.Error(), "old single") {
 		t.Fatalf("kind alias bypassed old-single protection: %v", err)
 	}
 }
@@ -143,4 +149,88 @@ func TestReview8RolesMakeBeforeBreak(t *testing.T) {
 	if target < 0 || source < 0 || target >= source {
 		t.Fatalf("break before make: %v", calls)
 	}
+}
+
+// liveObjects is the fake cluster's live state, answered for
+// `get <resource> -o json --ignore-not-found` (kubectl prints nothing for an absent
+// object). Tests set it with setLive/setLiveJSON; tests here never run in parallel.
+var liveObjects = map[string]string{}
+
+func liveAnswer(s string) ([]byte, bool) {
+	if !strings.Contains(s, "--ignore-not-found") {
+		return nil, false
+	}
+	for res, body := range liveObjects {
+		if strings.Contains(s, " get "+res+" ") {
+			return []byte(body), true
+		}
+	}
+	return []byte(""), true
+}
+
+// serverize adds what the API server adds to a stored object (uid, status, defaulted
+// container and pod fields), so the live checks are tested against realistic objects.
+func serverize(m map[string]any) {
+	meta, _ := m["metadata"].(map[string]any)
+	if meta == nil {
+		meta = map[string]any{}
+		m["metadata"] = meta
+	}
+	meta["uid"], meta["resourceVersion"], meta["generation"] = "0000-fixture", "42", 3
+	meta["namespace"] = "obs-test"
+	m["status"] = map[string]any{"replicas": 1, "readyReplicas": 1}
+	if spec, _ := m["spec"].(map[string]any); spec != nil {
+		if tpl, _ := spec["template"].(map[string]any); tpl != nil {
+			if pod, _ := tpl["spec"].(map[string]any); pod != nil {
+				pod["dnsPolicy"], pod["restartPolicy"], pod["schedulerName"] = "ClusterFirst", "Always", "default-scheduler"
+				for _, group := range []string{"initContainers", "containers"} {
+					cs, _ := pod[group].([]any)
+					for _, c := range cs {
+						if cm, _ := c.(map[string]any); cm != nil {
+							cm["terminationMessagePath"], cm["imagePullPolicy"] = "/dev/termination-log", "IfNotPresent"
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// setLive makes every object of the given manifests exist live (as the server would
+// store it); lastApplied also records the object as its kubectl last-applied-configuration.
+func setLive(t *testing.T, lastApplied bool, files ...string) {
+	t.Helper()
+	for _, f := range files {
+		objs, err := parseManifest(f, "obs-test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, o := range objs {
+			stored, _ := deepCopy(o.Raw).(map[string]any)
+			if lastApplied {
+				b, err := json.Marshal(o.Raw)
+				if err != nil {
+					t.Fatal(err)
+				}
+				meta, _ := stored["metadata"].(map[string]any)
+				ann, _ := meta["annotations"].(map[string]any)
+				if ann == nil {
+					ann = map[string]any{}
+					meta["annotations"] = ann
+				}
+				ann[lastAppliedAnnotation] = string(b)
+			}
+			serverize(stored)
+			b, err := json.Marshal(stored)
+			if err != nil {
+				t.Fatal(err)
+			}
+			setLiveJSON(t, kubectlResource(o), string(b))
+		}
+	}
+}
+func setLiveJSON(t *testing.T, resource, body string) {
+	t.Helper()
+	liveObjects[resource] = body
+	t.Cleanup(func() { delete(liveObjects, resource) })
 }

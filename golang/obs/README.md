@@ -393,11 +393,30 @@ query: '{} | count_over_time()' # known immutable dataset; aggregate to one seri
 The scaled manifest must contain every listed workload with positive explicit replicas, initially
 without active role labels; every workload in the manifest must be listed for readiness checks.
 It cannot change the old single, Alloy configuration, or the eight stable Services (including
-their Endpoints/EndpointSlices). Headless Services are allowed, including Tempo's
-`publishNotReadyAddresses: true` and Pyroscope's metastore Service. List custom-named Alloy
-ConfigMaps/Secrets in `alloy_config_objects` (for example `[configmap/collector-config]`);
-Alloy names/labels are also protected. Kind aliases such as `sts/tempo` are normalized.
+their Endpoints/EndpointSlices). List custom-named Alloy ConfigMaps/Secrets in
+`alloy_config_objects` (for example `[configmap/collector-config]`); Alloy names/labels are also
+protected. Kind aliases such as `sts/tempo` are normalized in the config; manifests must spell
+each Kind exactly (`StatefulSet`, not `sts`) with its built-in apiVersion.
 Include all parts (Tempo: Kafka-compatible queue and `tempo-traces` topic).
+
+Besides the workloads, the scaled manifest may carry only the store's own supporting objects
+(concept 10.5): headless Services (`clusterIP: None`; Tempo also `publishNotReadyAddresses: true`;
+no external IPs, load balancer or node ports), the scaled form's ConfigMaps and, for Pyroscope's
+`kubernetes:///` metastore discovery only, a ServiceAccount, a Role limited to get/list/watch on
+pods, endpoints and endpointslices, and a RoleBinding of that Role to that ServiceAccount. Their
+names must be a scaled workload's, the single's or a storage workload's name, alone or followed by
+`-` (`tempo-live-store-headless`, `pyroscope-metastore-discovery`). Secrets, PVCs, other kinds and
+app objects (such as `checkout-env`) are refused. New workloads take storage only from
+`volumeClaimTemplates` (no `persistentVolumeClaim` or `hostPath` volume), so a scaled pod never
+opens the single's data. Every object the move creates carries the label
+`obs.diene/store-move: <store>`; before applying, each object is read live (`kubectl get -o json
+--ignore-not-found`): absent is new, labelled is the move's own (a re-run), and anything else
+already in the namespace is refused, so the move never overwrites an object it did not create.
+The one exception is VictoriaLogs/VictoriaMetrics adding storage nodes to the existing storage
+StatefulSet: it may only gain replicas and must otherwise equal the live object.
+Manifest shapes that kubectl reads differently are refused: `items` on any kind but `List`
+(kubectl applies them as a list), typed lists such as `ServiceList`, another namespace,
+`generateName`, the same object twice.
 Render the §10.4/10.5 store settings in the
 manifests, including object storage from day one. Every workload must have a nonempty `matchLabels`
 selector without expressions; role labels must not appear in that immutable selector. The tool
@@ -427,6 +446,17 @@ its PVC and stable raft identity; no drain or deletion occurs. Set `profile_type
 The metastore manifest must contain no active read/write labels; the tool explicitly persists
 false labels on its pod template after conversion so a restart cannot rejoin those Services.
 
+The metastore manifest and the rollback's single manifest contain only the single, which must
+exist live. Before applying, the tool reads it and allows exactly these differences: Pyroscope's
+`-target` value (`all` to `metastore`; back to `all` on rollback, same flag spelling), the role
+labels of the pod template and, on rollback only, `spec.replicas` (applied as 0, see below).
+Everything else must equal the live single: the metastore's replicas (explicit, at least 1), PVC
+retention policy (never `Delete`, in the manifest or live, because the rollback scales the single to
+0), `volumeClaimTemplates`, volume mounts and data path, raft server id/advertise address, image,
+env and labels. When the live single has a kubectl `last-applied-configuration`, the manifest must
+also keep every field it sets (kubectl apply deletes an applied field the manifest omits). Write
+quantities as the server stores them (`1Gi`, `500m`).
+
 Tempo/Pyroscope rollback applies the single manifest, sets the single's template roles to true while
 it has no pods, scales it up (so the first Ready pod already has the roles and never restarts after
 taking traffic), waits for Ready, clears both scaled pod and template roles, rolls Alloy, checks scaled receive counters stay flat,
@@ -443,10 +473,15 @@ anything is applied: both files carry exactly the same objects, all of them decl
 exists at the same place of the same container (each container and each flag occurrence keeps its own
 endpoints); a vmstorage workload may differ only by one exact `-dedup.minScrapeInterval=1ms` argument added
 (concept 10.6: copies added). Any other dedup value or form, removing the flag, Alloy or app workloads,
-Services and any other field change are refused. `scaled_manifest`, `metastore_manifest` and
-`single_manifest` may carry only statefulset, deployment, daemonset, service, configmap, secret,
-persistentvolumeclaim, serviceaccount, role and rolebinding objects; the latter two only the single as
-workload. Rollback applies a copy of `single_manifest` with the single at replicas 0 (the file on disk is
+Services and any other field change are refused. Flags are read with Go flag syntax, as
+VictoriaMetrics and VictoriaLogs read them (`lib/envflag`): one or two leading dashes, `=` or the
+next argument as value; a flag after `--` or after a positional argument is not read. Each
+`-storageNode` must keep its exact spelling; positional `storageNode=…`, `---storageNode=…`, a
+missing value, an empty endpoint or an `%{ENV}` endpoint are refused. Before either file is
+applied, each router/storage workload is read live: the file describing the current state (the
+original before the move, the forward one before the rollback; the other one on a re-run) must
+equal the live object, including its `last-applied-configuration`, so a field both files share
+but the cluster does not have is refused. Rollback applies a copy of `single_manifest` with the single at replicas 0 (the file on disk is
 not touched), so nothing starts before its template roles exist. There is no drain,
 rebalance, PVC deletion, or Alloy restart. VL checks the OTLP received counter rising and remote
 send errors flat; VM checks inserted rows rising. Read URLs end in `/select/logsql/stats_query_range`

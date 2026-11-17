@@ -106,6 +106,9 @@ func TestKubernetesArguments(t *testing.T) {
 	k := Kubernetes{Command: func(_ context.Context, args ...string) ([]byte, error) {
 		cmd := strings.Join(args, " ")
 		calls = append(calls, cmd)
+		if b, ok := liveAnswer(cmd); ok {
+			return b, nil
+		}
 		if strings.Contains(cmd, "jsonpath=") {
 			return []byte("2"), nil
 		}
@@ -117,7 +120,7 @@ func TestKubernetesArguments(t *testing.T) {
 	}}
 	cfg := config()
 	cfg.ScaledManifest = filepath.Join(t.TempDir(), "scaled.yaml")
-	if err := os.WriteFile(cfg.ScaledManifest, []byte("kind: StatefulSet\nmetadata: {name: new}\nspec: {replicas: 2}\n"), 0600); err != nil {
+	if err := os.WriteFile(cfg.ScaledManifest, []byte("kind: StatefulSet\nmetadata: {name: new, labels: {obs.diene/store-move: tempo}}\nspec: {replicas: 2}\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	for _, step := range []Step{Prepare, Route, Reconnect, "stop compaction", "stop single"} {
@@ -162,7 +165,7 @@ func TestScaledManifestIsolation(t *testing.T) {
 	if err := os.WriteFile(cfg.ScaledManifest, []byte(good), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateScaledManifest(cfg); err != nil {
+	if _, err := validateScaledManifest(cfg, "tempo"); err != nil {
 		t.Fatal(err)
 	}
 	for _, bad := range []string{
@@ -175,7 +178,7 @@ func TestScaledManifestIsolation(t *testing.T) {
 		if err := os.WriteFile(cfg.ScaledManifest, []byte(bad), 0600); err != nil {
 			t.Fatal(err)
 		}
-		if err := validateScaledManifest(cfg); err == nil {
+		if _, err := validateScaledManifest(cfg, "tempo"); err == nil {
 			t.Fatalf("unsafe scaled manifest accepted: %s", bad)
 		}
 	}

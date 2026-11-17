@@ -44,6 +44,7 @@ func TestCorrelation2RoutingRejectsArbitraryDedup(t *testing.T) {
 func TestCorrelation2RestoreDoesNotStartBeforeRoles(t *testing.T) {
 	cfg := config()
 	cfg.SingleManifest = reviewManifest(t, "kind: StatefulSet\nmetadata: {name: single}\nspec:\n  replicas: 1\n  template:\n    metadata:\n      labels: {obs.diene/tempo-read: 'false', obs.diene/tempo-write: 'false'}\n")
+	setLive(t, true, cfg.SingleManifest)
 	var calls []string
 	base := reviewKube(&calls)
 	roles := false
