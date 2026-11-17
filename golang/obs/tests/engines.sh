@@ -78,6 +78,12 @@ run engines --check-chart "$fx/tempo-chart-tag-ok"
 expect 0 'tempo.tempo.tag' 'ok: 1 match(es)'
 run engines --check-chart "$fx/tempo-chart-tag-drift"
 expect 1 'values.yaml:3 tempo.tempo.tag' 'chart 3.1.0' 'Tempo 3.1.1'
+# Only the dependency's own engine image proves it: a Tempo image in a Grafana sidecar does not hide the missing Grafana version,
+# and an empty own image string fails like an empty map.
+run engines --check-chart "$fx/foreign-sidecar"
+expect 1 'Chart.yaml:' ' grafana:' '[engine-pin-missing]' 'cannot prove version 13.3.0'
+run engines --check-chart "$fx/empty-string"
+expect 1 'values.yaml:' 'victoria-metrics-cluster.vmselect.image' '[engine-pin-missing]'
 # Only the engine's own image keys count: a sidecar or renderer tag is never compared as Grafana.
 run engines --check-chart "$fx/sidecar-tag"
 expect 0 'ok: 1 match(es)'

@@ -468,3 +468,62 @@ func TestTempoChartTagOverrideAtTempoTempo(t *testing.T) {
 		t.Fatalf("a drifted tag-only override must name tempo.tempo.tag: %v %+v", err, res)
 	}
 }
+
+// ---- round 4: only the context's own engine image proves it; empty strings fail ------------------
+
+func TestForeignEngineImageDoesNotProveTheDependency(t *testing.T) {
+	// A Grafana dependency whose only engine image is a Tempo image in a sidecar: the Grafana
+	// version is still unproven.
+	dep := "  - name: grafana\n    version: 9.0.0\n"
+	tp := pins.All()["Tempo"].Version
+	res, err := Check(depChart(t, dep, "grafana:\n  sidecar:\n    image:\n      repository: grafana/tempo\n      tag: "+tp+"\n"), pins.All())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var missing *Finding
+	for i := range res.Findings {
+		if res.Findings[i].Kind == KindMissing && res.Findings[i].Engine == "Grafana" {
+			missing = &res.Findings[i]
+		}
+	}
+	if missing == nil || missing.Key != "grafana" || missing.File != "Chart.yaml" {
+		t.Fatalf("the missing Grafana version must still be reported at the dependency: %+v", res.Findings)
+	}
+	// With Grafana's own image set, the foreign image is compared as what it is and does not hide anything.
+	g := pins.All()["Grafana"].Version
+	res, err = Check(depChart(t, dep, "grafana:\n  image:\n    tag: "+g+"\n  sidecar:\n    image:\n      repository: grafana/tempo\n      tag: 3.0.0\n"), pins.All())
+	if err != nil || len(res.Findings) != 1 || res.Findings[0].Engine != "Tempo" || res.Findings[0].ChartValue != "3.0.0" {
+		t.Fatalf("a foreign engine image is compared with its own pin: %v %+v", err, res)
+	}
+}
+
+func TestEmptyOwnImageStringFails(t *testing.T) {
+	dep := "  - name: victoria-metrics-cluster\n    version: 0.99.0\n"
+	vm := pins.All()["VictoriaMetrics"].Version
+	for name, empty := range map[string]string{"empty string": `""`, "blank string": `"  "`, "null": "null", "no value": ""} {
+		t.Run(name, func(t *testing.T) {
+			values := "victoria-metrics-cluster:\n  vmstorage:\n    image:\n      tag: " + vm + "-cluster\n  vmselect:\n    image: " + empty + "\n"
+			res, err := Check(depChart(t, dep, values), pins.All())
+			if err != nil || len(res.Findings) != 1 {
+				t.Fatalf("an empty own image must fail like {}: %v %+v", err, res)
+			}
+			if f := res.Findings[0]; f.Kind != KindMissing || f.Key != "victoria-metrics-cluster.vmselect.image" || f.Line == 0 {
+				t.Fatalf("finding must name the component image: %+v", f)
+			}
+		})
+	}
+}
+
+func TestOwnImagePathWithAMirrorRepositoryIsStillTheEngine(t *testing.T) {
+	dep := "  - name: victoria-metrics-cluster\n    version: 0.99.0\n"
+	vm := pins.All()["VictoriaMetrics"].Version
+	mk := func(tag string) string {
+		return "victoria-metrics-cluster:\n  vmstorage:\n    image:\n      repository: mirror.example/team/storage-build\n      tag: " + tag + "\n"
+	}
+	if res, err := Check(depChart(t, dep, mk(vm+"-cluster")), pins.All()); err != nil || len(res.Findings) != 0 || len(res.Matches) != 1 {
+		t.Fatalf("a mirrored own image with the right tag: %v %+v", err, res)
+	}
+	if res, err := Check(depChart(t, dep, mk("v1.0.0-cluster")), pins.All()); err != nil || len(res.Findings) != 1 || res.Findings[0].Key != "victoria-metrics-cluster.vmstorage.image.tag" {
+		t.Fatalf("a mirrored own image with a drifted tag: %v %+v", err, res)
+	}
+}

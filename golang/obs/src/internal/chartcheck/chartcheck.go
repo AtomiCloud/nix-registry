@@ -268,7 +268,7 @@ func (s *scan) walk(n *yaml.Node, path []string, ctx, parent string) {
 				}
 			}
 			if key.Value == "image" && val.Kind == yaml.ScalarNode {
-				s.imageString(val.Value, strings.Join(p, "."), key.Line, sub)
+				s.imageString(val.Value, p, key.Line, sub)
 				continue
 			}
 			s.walk(val, p, sub, key.Value)
@@ -287,14 +287,18 @@ func (s *scan) imageMap(n *yaml.Node, path []string, ctx, parent string) {
 	rk, repo := mapGet(n, "repository")
 	tk, tag := mapGet(n, "tag")
 	dk, dg := mapGet(n, "digest")
+	own := s.isOwn(ctx, path)
 	var e string
 	switch {
 	case repo != nil && repo.Kind == yaml.ScalarNode:
 		var ok bool
 		if e, ok = engineOfRepo(repo.Value); !ok {
-			return // some other image
+			if !own {
+				return // some other image
+			}
+			e = s.deps[ctx].engine // the engine's own image path, with a mirror repository name
 		}
-	case ctx != "" && isOwnImage(s.deps[ctx].name, path[1:]):
+	case own:
 		e = s.deps[ctx].engine
 	default:
 		return
@@ -331,14 +335,22 @@ func (s *scan) imageMap(n *yaml.Node, path []string, ctx, parent string) {
 
 // imageString handles `image: repo[:tag][@digest]`. The tag starts after the last ':' that
 // follows the last '/', so a registry port is not a tag.
-func (s *scan) imageString(ref, key string, line int, ctx string) {
+func (s *scan) imageString(ref string, path []string, line int, ctx string) {
+	key := strings.Join(path, ".")
+	own := s.isOwn(ctx, path)
 	ref, digest, _ := strings.Cut(strings.TrimSpace(ref), "@")
 	repo, tag := ref, ""
 	if i := strings.LastIndex(ref, ":"); i > strings.LastIndex(ref, "/") {
 		repo, tag = ref[:i], ref[i+1:]
 	}
 	e, ok := engineOfRepo(repo)
-	if !ok || s.pin[e].Version == "" {
+	if !ok {
+		if !own {
+			return
+		}
+		e = s.deps[ctx].engine // the engine's own image path: empty, or a mirror repository name
+	}
+	if s.pin[e].Version == "" {
 		return
 	}
 	s.occurrence(e, key, line, ctx)
@@ -352,11 +364,16 @@ func (s *scan) imageString(ref, key string, line int, ctx string) {
 // occurrence records that an engine image was found: for its dependency (every alias needs its own
 // proof) or, outside any dependency, for the engine.
 func (s *scan) occurrence(engine, key string, line int, ctx string) {
-	if ctx != "" {
-		s.proved[ctx] = true
+	if ctx != "" && s.deps[ctx].engine == engine {
+		s.proved[ctx] = true // only the dependency's own engine image proves it
 		return
 	}
 	s.see(engine, "values.yaml", key, line)
+}
+
+// isOwn reports whether path is one of the engine's own image paths inside dependency ctx.
+func (s *scan) isOwn(ctx string, path []string) bool {
+	return ctx != "" && len(path) > 1 && isOwnImage(s.deps[ctx].name, path[1:])
 }
 
 // missing reports an engine image with no tag and no digest.
