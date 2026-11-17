@@ -147,5 +147,6 @@ fi
 # shellcheck source=/dev/null
 . "$here/sandbox.sh"
 
+bash "$here/links.sh" "$OBS" "${OUT:-}"
 echo "obs tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
