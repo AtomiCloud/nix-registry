@@ -8,6 +8,33 @@ import (
 
 const marker = "<!-- obs-look -->"
 
+// cleanup is the exact command that removes this run's sandbox: the project and the runtime
+// it used, so a non-default --project or --runtime is not left running.
+func cleanup(p *Plan) string {
+	c := "obs sandbox down"
+	proj := p.Project
+	if p.Sandbox != nil && p.Sandbox.Project != "" {
+		proj = p.Sandbox.Project
+	}
+	if proj != "" {
+		c += " --project " + proj
+	}
+	if p.Runtime != "" {
+		c += " --runtime " + p.Runtime
+	}
+	return c
+}
+
+// noDataItem names the checklist item about "No data" (C1 in the standard).
+func noDataItem(items []string) string {
+	for i, it := range items {
+		if strings.Contains(strings.ToLower(it), "no data") {
+			return fmt.Sprintf("C%d", i+1)
+		}
+	}
+	return "C1"
+}
+
 // render writes the prompt for the calling agent. It is plain text, stable for a given
 // plan (the golden test pins it), and carries every fact the agent needs.
 func render(p *Plan) string {
@@ -19,7 +46,7 @@ func render(p *Plan) string {
 		for _, x := range p.Warnings {
 			w("  note: %s", x)
 		}
-		w("  next: fix the cause above and run `obs look` again. If the sandbox is half up, `obs sandbox down` clears it (it removes only containers, volumes and the network labelled obs.sandbox=<project>).")
+		w("  next: fix the cause above and run `obs look` again. If the sandbox is half up, `" + cleanup(p) + "` clears it (it removes only containers, volumes and the network labelled obs.sandbox=<project>).")
 		return b.String()
 	}
 	if len(p.Dashboards) == 0 {
@@ -59,7 +86,7 @@ func render(p *Plan) string {
 	w("     If the pull request already has a comment that starts with %s, edit that one instead of adding a second.", marker)
 	w("     GitHub has no image-upload API: paste or drag each PNG into the comment box in the browser (GitHub uploads it and inserts the link),")
 	w("     or upload it where the repo keeps assets and link it. If you cannot attach images, say so in the comment and give the file names.")
-	w("  4. When done, `obs sandbox down` stops the stack (only the containers, volumes and network labelled obs.sandbox=%s).", p.Sandbox.Project)
+	w("  4. When done, `%s` stops the stack (only the containers, volumes and network labelled obs.sandbox=%s).", cleanup(p), p.Sandbox.Project)
 	w("")
 	w("DASHBOARDS")
 	for i, d := range p.Dashboards {
@@ -75,9 +102,23 @@ func render(p *Plan) string {
 			w("     every other variable keeps Grafana's default; check that each populates and changes the view")
 		}
 		if len(d.Panels) > 0 {
+			var empty []string
+			for _, pn := range d.Panels {
+				if pn.ExpectedEmpty != "" {
+					empty = append(empty, fmt.Sprintf("panel %d %q (%s)", pn.ID, pn.Title, pn.ExpectedEmpty))
+				}
+			}
+			if len(empty) > 0 {
+				w("     expected empty in the sandbox; mark %s n/a for these panels (no trace or profile seed is loaded): %s", noDataItem(p.Checklist), strings.Join(empty, "; "))
+				w("     judge %s on the other panels, and judge every other item on these panels too", noDataItem(p.Checklist))
+			}
 			w("     panels (open one only when the board shot is not enough):")
 			for _, pn := range d.Panels {
-				w("       - panel %d %q (%s): %s -> %s", pn.ID, pn.Title, pn.Type, pn.URL, pn.Shot)
+				mark := ""
+				if pn.ExpectedEmpty != "" {
+					mark = " [expected empty: " + pn.ExpectedEmpty + "]"
+				}
+				w("       - panel %d %q (%s)%s: %s -> %s", pn.ID, pn.Title, pn.Type, mark, pn.URL, pn.Shot)
 			}
 		}
 	}

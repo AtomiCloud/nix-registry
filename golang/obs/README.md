@@ -186,7 +186,7 @@ e.g. `ERROR`) and `severity_number`, `trace_id`, `span_id`. Stream fields are th
 
 ```text
 obs sandbox up     [--dir observability] [--seed seed.yaml] [--project name] [--port-base n] [--runtime docker|podman] [--reseed]
-obs sandbox down   [--dir observability] [--project name]
+obs sandbox down   [--dir observability] [--project name] [--runtime docker|podman]
 obs sandbox status [--dir observability] [--project name]
 ```
 
@@ -210,7 +210,18 @@ VictoriaMetrics and VictoriaLogs. No check depends on it; it is for looking at t
 - **Safe removal.** Every container, volume and network carries the label `obs.sandbox=<project>` and a name
   that starts with `obs-sandbox-<project>`. `down` lists by label, double-checks the name, removes only
   those, and says what it skipped. obs never runs a prune: other teams' images and containers live on the
-  same machine. `--project` defaults to the repo folder's name.
+  same machine. `--project` defaults to the repo folder's name. Every VOLUME an image declares is mounted
+  from a labelled named volume (Pyroscope 2.4.3 declares three: `/data`, `/data-compactor`,
+  `/data-metastore`; the list is in `pins.go` next to the pins, and `up` refuses an image that declares one
+  the list does not know), and `down` removes containers with `rm -f -v`: no anonymous volume is left behind.
+- **Single-instance settings** (concept §10.4): VictoriaMetrics `-retentionPeriod=30d`,
+  `-maxLabelsPerTimeseries=30`, `-search.maxConcurrentRequests=4`, `-memory.allowedPercent=60`;
+  VictoriaLogs `-retentionPeriod=30d`, `-retention.maxDiskSpaceUsageBytes=17179869184` (the 16 GiB laptop cap),
+  `-search.maxConcurrentRequests=4`, `-search.maxQueueDuration=10s`, `-search.maxQueryDuration=30s`,
+  `-memory.allowedPercent=60`; Tempo `distributor.max_attribute_bytes: 16384` and
+  `live_store.max_block_duration: 5m`. Left out on purpose: the cluster-only and per-pod settings (vmstorage
+  `-storage.maxDailySeries`/`-maxHourlySeries` have no value in §10.4, Pyroscope's retention and raft names
+  are for the cluster, S3 backends and resource requests do not exist on a laptop).
 - **Ports** are bound to `127.0.0.1` only. `--port-base 18300` moves Grafana to 18300 and the others to
   18301 to 18304 when the defaults are taken.
 - **Data.** The seed's time line ends now, so a "last hours" view has data. Grafana is open to an anonymous
@@ -232,10 +243,14 @@ obs look [--base origin/main] [--all] [--file dashboards/x.json] [--checklist do
 
 1. finds the changed dashboards: `observability/dashboards/*.json` that differ from the merge base with
    `--base` (committed, edited or new), or all of them (`--all`), or the ones named with `--file`;
-2. brings up the sandbox, or reuses the running one (it stays up for the browser; `obs sandbox down` ends it);
+2. brings up the sandbox, or reuses the running one (it stays up for the browser; the prompt prints the exact
+   `obs sandbox down --project <project> --runtime <runtime>` that ends it, with the values this run used);
 3. prints, for each dashboard, the Grafana URL (time range fixed to the seed window, template variables
-   filled: the dashboard's own current value, else the sandbox datasource, the first option, the first
-   value on the seed, or All), the viewport and the path to save the screenshot, plus one URL per panel;
+   filled: a datasource variable is resolved against the sandbox's datasources first (a saved uid is kept only
+   when the sandbox has it); the others take the dashboard's own current value, the first option, the first
+   value on the seed, or All), the viewport and the path to save the screenshot, plus one URL per panel.
+   Panels whose datasources are all Tempo or Pyroscope are listed as "expected empty in the sandbox; mark C1 n/a"
+   (the seed has no traces or profiles yet), so the reviewer does not fail the No-data item for them;
 4. prints the items of the visual checklist (the bullets under the "Visual checklist" heading of the
    `--checklist` file) and the layout of the one pull request comment the agent writes: the images and a
    verdict (pass, fail, unclear) with one line of evidence per item.
@@ -243,8 +258,8 @@ obs look [--base origin/main] [--all] [--file dashboards/x.json] [--checklist do
 The agent opens each URL in a browser, takes the screenshots, judges them and posts the comment. `--json`
 prints the same content (`ok`, `error`, `warnings`, `sandbox`, `dashboards`, `checklist`, `prompt`).
 
-**Exit 0 on any failure of the setup** (no runtime, a pin mismatch, git cannot find the base): it prints
-what failed and `ok: false` in JSON. Only a bad flag is exit 2.
+**Always exit 0**: a failed setup (no runtime, a pin mismatch, git cannot find the base), a bad flag and
+`--help` print what failed (or the usage) and `ok: false` in JSON, and never fail the CI job that calls it.
 
 ## `obs scrape`: an app's own metrics into the sandbox
 

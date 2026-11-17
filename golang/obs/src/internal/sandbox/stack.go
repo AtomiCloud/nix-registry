@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -152,6 +153,7 @@ func checkExisting(c *Config, have map[string]existing) error {
 const tempoConfig = `server:
   http_listen_port: 3200
 distributor:
+  max_attribute_bytes: 16384
   receivers:
     otlp:
       protocols:
@@ -166,7 +168,26 @@ storage:
       path: /var/tempo/wal
     local:
       path: /var/tempo/blocks
+live_store:
+  max_block_duration: 5m
 `
+
+// mount is one named volume of a component.
+type mount struct{ Name, Path string }
+
+// volumes lists every labelled named volume a component gets: the data directory (named
+// obs-sandbox-<project>-<component>) and every other VOLUME the image declares
+// (<that name><path with / as ->). Nothing is left to become an anonymous volume.
+func (c *Config) volumes(k Component) []mount {
+	name := containerName(c.Project, k)
+	out := []mount{{name, k.Data}}
+	for _, p := range k.Declared {
+		if p != k.Data {
+			out = append(out, mount{name + strings.ReplaceAll(p, "/", "-"), p})
+		}
+	}
+	return out
+}
 
 // createArgs is the `create` command line of one component.
 func (c *Config) createArgs(k Component) []string {
@@ -174,8 +195,10 @@ func (c *Config) createArgs(k Component) []string {
 	a := []string{"create", "--name", name}
 	a = append(a, c.labelArgs(k.Name)...)
 	a = append(a, "--network", Prefix(c.Project),
-		"-p", fmt.Sprintf("127.0.0.1:%d:%d", hostPort(c.PortBase, k), k.Port),
-		"-v", name+":"+k.Data)
+		"-p", fmt.Sprintf("127.0.0.1:%d:%d", hostPort(c.PortBase, k), k.Port))
+	for _, v := range c.volumes(k) {
+		a = append(a, "-v", v.Name+":"+v.Path)
+	}
 	switch k.Name {
 	case "grafana":
 		for _, e := range []string{
@@ -190,9 +213,17 @@ func (c *Config) createArgs(k Component) []string {
 	a = append(a, k.Ref())
 	switch k.Name {
 	case "vm":
-		a = append(a, "-retentionPeriod=1y", "-storageDataPath="+k.Data)
+		// Concept section 10.4 single-instance settings: 30 d retention, 30 labels per series,
+		// 4 concurrent queries, 60 % of memory for caches.
+		a = append(a, "-retentionPeriod=30d", "-storageDataPath="+k.Data,
+			"-maxLabelsPerTimeseries=30", "-search.maxConcurrentRequests=4", "-memory.allowedPercent=60")
 	case "vl":
-		a = append(a, "-retentionPeriod=1y", "-storageDataPath="+k.Data)
+		// Concept section 10.4: 30 d retention and the 16 GiB laptop disk cap (oldest days go first),
+		// 4 concurrent queries, queue 10 s and query 30 s (the query bounds), 60 % of memory.
+		a = append(a, "-retentionPeriod=30d", "-storageDataPath="+k.Data,
+			fmt.Sprintf("-retention.maxDiskSpaceUsageBytes=%d", int64(LaptopVLDiskCap)),
+			"-search.maxConcurrentRequests=4", "-search.maxQueueDuration=10s", "-search.maxQueryDuration=30s",
+			"-memory.allowedPercent=60")
 	case "tempo":
 		a = append(a, "-config.file=/etc/tempo.yaml", "-target=all")
 	case "pyroscope":
@@ -245,8 +276,13 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 				return nil, err
 			}
 		}
-		if _, err := cfg.Runner.Run(ctx, append([]string{"volume", "create"}, append(cfg.labelArgs(""), name)...)...); err != nil {
+		if err := cfg.checkDeclaredVolumes(ctx, k); err != nil {
 			return nil, err
+		}
+		for _, v := range cfg.volumes(k) {
+			if _, err := cfg.Runner.Run(ctx, append([]string{"volume", "create"}, append(cfg.labelArgs(""), v.Name)...)...); err != nil {
+				return nil, err
+			}
 		}
 		if _, err := cfg.Runner.Run(ctx, cfg.createArgs(k)...); err != nil {
 			return nil, err
@@ -327,6 +363,34 @@ func loadSeed(ctx context.Context, cfg *Config, info *Info) error {
 	return nil
 }
 
+// checkDeclaredVolumes refuses an image that declares a VOLUME the pin list does not know:
+// that path would become an anonymous volume no label finds. It guards a pin bump.
+func (c *Config) checkDeclaredVolumes(ctx context.Context, k Component) error {
+	out, err := c.Runner.Run(ctx, "image", "inspect", "--format", "{{json .Config.Volumes}}", k.Ref())
+	if err != nil {
+		return nil // the earlier image inspect already proved the image exists; a runtime that cannot format is not a reason to stop
+	}
+	var have map[string]json.RawMessage
+	if json.Unmarshal([]byte(strings.TrimSpace(out)), &have) != nil {
+		return nil // "null" or empty: no VOLUME
+	}
+	known := map[string]bool{k.Data: true}
+	for _, p := range k.Declared {
+		known[p] = true
+	}
+	var extra []string
+	for p := range have {
+		if !known[p] {
+			extra = append(extra, p)
+		}
+	}
+	sort.Strings(extra)
+	if len(extra) > 0 {
+		return fmt.Errorf("refusing: image %s declares VOLUME %s that obs does not mount from a named volume (add it to Declared in pins.go)", k.Ref(), strings.Join(extra, ", "))
+	}
+	return nil
+}
+
 func copyIn(ctx context.Context, r Runner, container, dest, content string) error {
 	dir, err := os.MkdirTemp("", "obs-sandbox-")
 	if err != nil {
@@ -373,7 +437,7 @@ func Down(ctx context.Context, cfg Config) error {
 		}
 	}
 	label := "label=" + LabelKey + "=" + cfg.Project
-	rm("container", []string{"ps", "-a", "--filter", label, "--format", "{{.Names}}"}, "rm", "-f")
+	rm("container", []string{"ps", "-a", "--filter", label, "--format", "{{.Names}}"}, "rm", "-f", "-v")
 	rm("network", []string{"network", "ls", "--filter", label, "--format", "{{.Name}}"}, "network", "rm")
 	rm("volume", []string{"volume", "ls", "--filter", label, "--format", "{{.Name}}"}, "volume", "rm")
 	removeState(cfg)

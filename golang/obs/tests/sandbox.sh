@@ -26,7 +26,7 @@ PATH="$stub:$PATH" OBS_CONTAINER_RUNTIME=docker "$OBS" sandbox down --project de
 rc=$?
 set -e
 [ "$rc" -eq 0 ] && ok "sandbox down exit 0 (stub runtime)" || bad "sandbox down rc=$rc: $(cat "$work/out.txt")"
-for want in "rm -f obs-sandbox-demo-vm" "rm -f obs-sandbox-demo-grafana" "network rm obs-sandbox-demo" "volume rm obs-sandbox-demo-vm"; do
+for want in "rm -f -v obs-sandbox-demo-vm" "rm -f -v obs-sandbox-demo-grafana" "network rm obs-sandbox-demo" "volume rm obs-sandbox-demo-vm"; do
   grep -qxF -- "$want" "$STUB_LOG" && ok "down ran: $want" || bad "down did not run: $want"
 done
 # Planted: the runtime also lists a container, a network and a volume that are not ours.
@@ -68,7 +68,13 @@ rc=$?
 set -e
 [ "$rc" -eq 0 ] && grep -q '"ok": false' "$work/out.txt" && grep -q '"prompt":' "$work/out.txt" && ok "look --json: same failure, as JSON, exit 0" || bad "look --json rc=$rc"
 run look --nope
-[ "$rc" -eq 2 ] && ok "look: a bad flag is a usage error (exit 2)" || bad "look bad flag rc=$rc"
+[ "$rc" -eq 0 ] && grep -q 'usage error' "$work/out.txt" && grep -q 'flag provided but not defined: -nope' "$work/out.txt" &&
+  ok "look: a bad flag exits 0 and prints the usage error" || bad "look bad flag rc=$rc: $(cat "$work/out.txt")"
+run look --help
+[ "$rc" -eq 0 ] && grep -q -- '-checklist' "$work/out.txt" && ok "look --help exits 0 and prints the usage" || bad "look --help rc=$rc"
+run look --json --nope
+[ "$rc" -eq 0 ] && grep -q '"ok": false' "$work/out.txt" && grep -q 'flag provided but not defined' "$work/out.txt" &&
+  ok "look --json with a bad flag: ok:false JSON, exit 0" || bad "look --json bad flag rc=$rc"
 
 # ---- scrape: usage ------------------------------------------------------------------
 run scrape

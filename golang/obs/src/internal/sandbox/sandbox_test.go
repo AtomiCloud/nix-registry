@@ -62,6 +62,8 @@ type fakeRunner struct {
 	// networkExists makes `network inspect` succeed.
 	networkExists bool
 	lists         map[string]string // first args ("network ls") -> output
+	// imageVolumes is what `image inspect --format ...Volumes` answers (default: none declared).
+	imageVolumes string
 }
 
 func (f *fakeRunner) Run(_ context.Context, args ...string) (string, error) {
@@ -69,6 +71,11 @@ func (f *fakeRunner) Run(_ context.Context, args ...string) (string, error) {
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, args)
 	switch {
+	case args[0] == "image" && args[1] == "inspect" && len(args) > 2 && args[2] == "--format":
+		if strings.Contains(args[len(args)-1], "pyroscope") {
+			return f.imageVolumes, nil
+		}
+		return "null", nil
 	case args[0] == "ps":
 		return f.ps, nil
 	case args[0] == "network" && args[1] == "inspect":
@@ -166,7 +173,7 @@ func TestDownRemovesOnlyItsOwnAndNeverPrunes(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range [][]string{
-		{"rm", "-f", "obs-sandbox-demo-grafana"}, {"rm", "-f", "obs-sandbox-demo-vm"},
+		{"rm", "-f", "-v", "obs-sandbox-demo-grafana"}, {"rm", "-f", "-v", "obs-sandbox-demo-vm"},
 		{"network", "rm", "obs-sandbox-demo"}, {"volume", "rm", "obs-sandbox-demo-vm"}, {"volume", "rm", "obs-sandbox-demo-grafana"},
 	} {
 		if !fr.has(want...) {
@@ -389,5 +396,120 @@ func TestUpRefusesWhenAComponentRunsAnotherVersion(t *testing.T) {
 func TestDetectRuntimeRejectsOthers(t *testing.T) {
 	if _, err := DetectRuntime("nerdctl"); err == nil {
 		t.Error("nerdctl accepted")
+	}
+}
+
+// Every VOLUME an image declares must be mounted from a labelled named volume; a declared
+// VOLUME left alone becomes an anonymous volume that `down` cannot find by label (Pyroscope
+// 2.4.3 declares /data, /data-compactor and /data-metastore; MEASURED with docker image inspect).
+func TestEveryDeclaredImageVolumeIsMountedFromANamedVolume(t *testing.T) {
+	cfg := Config{Project: "demo"}
+	cfg.defaults()
+	for _, k := range Pins {
+		a := cfg.createArgs(k)
+		mounts := map[string]string{} // container path -> volume name
+		for i, x := range a {
+			if x == "-v" && i+1 < len(a) {
+				p := strings.SplitN(a[i+1], ":", 2)
+				mounts[p[1]] = p[0]
+			}
+		}
+		if mounts[k.Data] == "" {
+			t.Errorf("%s: data dir %s is not mounted: %v", k.Name, k.Data, a)
+		}
+		for _, v := range k.Declared {
+			name := mounts[v]
+			if name == "" {
+				t.Errorf("%s: image VOLUME %s is not mounted: %v", k.Name, v, a)
+			} else if name != Prefix("demo") && !strings.HasPrefix(name, Prefix("demo")+"-") {
+				t.Errorf("%s: VOLUME %s mounts %q, not a name under %s", k.Name, v, name, Prefix("demo"))
+			}
+		}
+		for p, name := range mounts {
+			if strings.HasPrefix(name, "/") || !strings.HasPrefix(name, Prefix("demo")+"-") {
+				t.Errorf("%s: mount of %s is not a named obs volume: %q", k.Name, p, name)
+			}
+		}
+	}
+	py, _ := ByName("pyroscope")
+	want := []string{"/data", "/data-compactor", "/data-metastore"}
+	if strings.Join(py.Declared, ",") != strings.Join(want, ",") {
+		t.Errorf("pyroscope declared volumes %v, want %v", py.Declared, want)
+	}
+}
+
+func TestUpCreatesEveryLabelledVolumeAndDownRemovesWithDashV(t *testing.T) {
+	s := newStackServer(t)
+	fr := &fakeRunner{}
+	if _, err := Up(context.Background(), s.cfg(t, fr)); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range []string{"obs-sandbox-demo-pyroscope", "obs-sandbox-demo-pyroscope-data-compactor", "obs-sandbox-demo-pyroscope-data-metastore"} {
+		if !fr.has("volume", "create", "--label", "obs.sandbox=demo", v) {
+			t.Errorf("volume %s not created with the label: %v", v, fr.calls)
+		}
+	}
+	// Down removes the container together with its volumes.
+	fr2 := &fakeRunner{ps: "obs-sandbox-demo-pyroscope\n", lists: map[string]string{}}
+	if err := Down(context.Background(), Config{Project: "demo", Runner: fr2, StateDir: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	if !fr2.has("rm", "-f", "-v", "obs-sandbox-demo-pyroscope") {
+		t.Errorf("container removal lacks -v: %v", fr2.calls)
+	}
+}
+
+// §10.4 single-instance settings that change what data and queries return.
+func TestCreateArgsCarryTheSingleInstanceSettings(t *testing.T) {
+	cfg := Config{Project: "demo"}
+	cfg.defaults()
+	want := map[string][]string{
+		"vm": {"-retentionPeriod=30d", "-maxLabelsPerTimeseries=30", "-search.maxConcurrentRequests=4", "-memory.allowedPercent=60"},
+		"vl": {"-retentionPeriod=30d", "-retention.maxDiskSpaceUsageBytes=17179869184", "-search.maxConcurrentRequests=4",
+			"-search.maxQueueDuration=10s", "-search.maxQueryDuration=30s", "-memory.allowedPercent=60"},
+	}
+	for name, flags := range want {
+		k, _ := ByName(name)
+		args := cfg.createArgs(k)
+		for _, f := range flags {
+			found := false
+			for _, a := range args {
+				if a == f {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("%s: create args lack %s: %v", name, f, args)
+			}
+		}
+		for _, a := range args {
+			if a == "-retentionPeriod=1y" {
+				t.Errorf("%s keeps the 1y retention: %v", name, args)
+			}
+		}
+	}
+	// A 16 GiB cap is 16 * 1024^3 bytes.
+	if LaptopVLDiskCap != 16*1024*1024*1024 {
+		t.Errorf("laptop VL cap %d", LaptopVLDiskCap)
+	}
+	for _, want := range []string{"max_attribute_bytes: 16384", "max_block_duration: 5m"} {
+		if !strings.Contains(tempoConfig, want) {
+			t.Errorf("tempo config lacks %q:\n%s", want, tempoConfig)
+		}
+	}
+}
+
+func TestUpRefusesAnImageThatDeclaresAnUnknownVolume(t *testing.T) {
+	s := newStackServer(t)
+	fr := &fakeRunner{imageVolumes: `{"/data":{},"/data-compactor":{},"/data-metastore":{},"/data-new":{}}`}
+	_, err := Up(context.Background(), s.cfg(t, fr))
+	if err == nil || !strings.Contains(err.Error(), "/data-new") || !strings.Contains(err.Error(), "refusing") {
+		t.Fatalf("want a refusal naming /data-new, got %v", err)
+	}
+	// A declared set the pins know passes.
+	fr = &fakeRunner{imageVolumes: `{"/data":{},"/data-compactor":{},"/data-metastore":{}}`}
+	s2 := newStackServer(t)
+	if _, err := Up(context.Background(), s2.cfg(t, fr)); err != nil {
+		t.Fatalf("known volumes refused: %v", err)
 	}
 }

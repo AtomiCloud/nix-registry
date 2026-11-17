@@ -18,7 +18,7 @@ STEPS
      If the pull request already has a comment that starts with <!-- obs-look -->, edit that one instead of adding a second.
      GitHub has no image-upload API: paste or drag each PNG into the comment box in the browser (GitHub uploads it and inserts the link),
      or upload it where the repo keeps assets and link it. If you cannot attach images, say so in the comment and give the file names.
-  4. When done, `obs sandbox down` stops the stack (only the containers, volumes and network labelled obs.sandbox=demo).
+  4. When done, `obs sandbox down --project demo --runtime docker` stops the stack (only the containers, volumes and network labelled obs.sandbox=demo).
 
 DASHBOARDS
   1. Payments overview  (dashboards/overview.json)

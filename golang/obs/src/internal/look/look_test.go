@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -101,7 +102,7 @@ var testInfo = &sandbox.Info{
 
 func TestPromptGolden(t *testing.T) {
 	dir, cl := project(t)
-	p := Setup(context.Background(), Options{Dir: dir, Base: "origin/main", Checklist: cl, Out: "obs-look",
+	p := Setup(context.Background(), Options{Dir: dir, Base: "origin/main", Checklist: cl, Out: "obs-look", Project: "demo", Runtime: "docker",
 		Files: []string{"dashboards/overview.json", "dashboards/nouid.json"}}, fakeUp(testInfo, nil))
 	if !p.OK || len(p.Dashboards) != 2 {
 		t.Fatalf("plan: ok=%v err=%q dashboards=%d warnings=%v", p.OK, p.Error, len(p.Dashboards), p.Warnings)
@@ -260,5 +261,104 @@ func TestEmptySandboxWindowOmitsTimeRange(t *testing.T) {
 	p := Setup(context.Background(), Options{Dir: dir, Checklist: cl, Files: []string{"dashboards/overview.json"}}, fakeUp(&info, nil))
 	if strings.Contains(p.Dashboards[0].URL, "from=") || !strings.Contains(p.Prompt, "no seed was loaded") {
 		t.Errorf("%s\n%s", p.Dashboards[0].URL, p.Prompt)
+	}
+}
+
+// A saved "current" datasource uid that the sandbox does not provision must not reach the URL:
+// the sandbox's own datasource is used. A current uid that IS provisioned stays.
+func TestDatasourceVariableResolvesAgainstTheSandboxFirst(t *testing.T) {
+	dir, cl := project(t)
+	for name, tc := range map[string]struct{ current, want, source string }{
+		"stale":       {"grafana-prod-metrics", "payments-metrics", "sandbox datasource"},
+		"provisioned": {"payments-metrics", "payments-metrics", "current"},
+		"empty":       {"", "payments-metrics", "sandbox datasource"},
+	} {
+		dash := fmt.Sprintf(`{"uid":"ds-%s","title":"Ds","templating":{"list":[{"type":"datasource","name":"ds","query":"prometheus","current":{"value":%q}}]},"panels":[]}`, name, tc.current)
+		if err := os.WriteFile(filepath.Join(dir, "dashboards", name+".json"), []byte(dash), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		p := Setup(context.Background(), Options{Dir: dir, Checklist: cl, Files: []string{"dashboards/" + name + ".json"}}, fakeUp(testInfo, nil))
+		if len(p.Dashboards) != 1 || len(p.Dashboards[0].Vars) != 1 {
+			t.Fatalf("%s: plan %+v warnings %v", name, p.Dashboards, p.Warnings)
+		}
+		v := p.Dashboards[0].Vars[0]
+		if len(v.Values) != 1 || v.Values[0] != tc.want || v.Source != tc.source {
+			t.Errorf("%s: $ds = %v (%s), want %s (%s)", name, v.Values, v.Source, tc.want, tc.source)
+		}
+		if strings.Contains(p.Dashboards[0].URL, tc.current) && tc.current != tc.want && tc.current != "" {
+			t.Errorf("%s: the stale uid %s is in the URL: %s", name, tc.current, p.Dashboards[0].URL)
+		}
+	}
+}
+
+// The cleanup instruction names the exact project and runtime of this run.
+func TestCleanupCommandNamesProjectAndRuntime(t *testing.T) {
+	dir, cl := project(t)
+	info := *testInfo
+	info.Project = "my-repo"
+	p := Setup(context.Background(), Options{Dir: dir, Checklist: cl, Project: "my-repo", Runtime: "podman", Files: []string{"dashboards/overview.json"}}, fakeUp(&info, nil))
+	if want := "`obs sandbox down --project my-repo --runtime podman`"; !strings.Contains(p.Prompt, want) {
+		t.Errorf("prompt lacks %s:\n%s", want, p.Prompt)
+	}
+	if strings.Contains(p.Prompt, "`obs sandbox down` ") {
+		t.Errorf("a bare `obs sandbox down` is left in the prompt")
+	}
+	// The failure text names them too (the sandbox may be half up).
+	f := Setup(context.Background(), Options{Dir: dir, Checklist: cl, Project: "my-repo", Runtime: "podman", Files: []string{"dashboards/overview.json"}}, fakeUp(nil, fmt.Errorf("boom")))
+	if want := "obs sandbox down --project my-repo --runtime podman"; !strings.Contains(f.Prompt, want) {
+		t.Errorf("failure prompt lacks %s:\n%s", want, f.Prompt)
+	}
+}
+
+const tracesDash = `{"uid":"svc-traces","title":"Service traces","time":{"from":"now-3h","to":"now"},
+"templating":{"list":[{"type":"datasource","name":"tdb","query":"tempo"},{"type":"datasource","name":"pdb","query":"grafana-pyroscope-datasource"}]},
+"panels":[
+ {"id":1,"title":"Request rate","type":"timeseries","datasource":{"type":"prometheus","uid":"payments-metrics"},"targets":[{"refId":"A","expr":"up"}]},
+ {"id":2,"title":"Slow traces","type":"traces","datasource":{"type":"tempo","uid":"obs-traces"},"targets":[{"refId":"A","queryType":"traceql","query":"{}"}]},
+ {"id":3,"title":"Trace table","type":"table","datasource":{"type":"datasource","uid":"${tdb}"},"targets":[{"refId":"A","datasource":{"type":"tempo","uid":"${tdb}"}}]},
+ {"id":4,"title":"CPU flame graph","type":"flamegraph","datasource":{"type":"grafana-pyroscope-datasource","uid":"${pdb}"},"targets":[{"refId":"A"}]},
+ {"id":5,"title":"Mixed","type":"timeseries","datasource":{"type":"datasource","uid":"-- Mixed --"},"targets":[{"refId":"A","datasource":{"type":"tempo","uid":"obs-traces"}},{"refId":"B","datasource":{"type":"prometheus","uid":"payments-metrics"}}]},
+ {"id":6,"title":"Uid only","type":"table","datasource":{"uid":"primordial-tempo"},"targets":[{"refId":"A"}]}
+]}`
+
+func TestTraceAndProfilePanelsAreExpectedEmpty(t *testing.T) {
+	dir, cl := project(t)
+	if err := os.WriteFile(filepath.Join(dir, "dashboards", "traces.json"), []byte(tracesDash), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := Setup(context.Background(), Options{Dir: dir, Checklist: cl, Project: "demo", Runtime: "docker", Files: []string{"dashboards/traces.json"}}, fakeUp(testInfo, nil))
+	if len(p.Dashboards) != 1 {
+		t.Fatalf("plan: %v %v", p.Error, p.Warnings)
+	}
+	got := map[int64]string{}
+	for _, pn := range p.Dashboards[0].Panels {
+		got[pn.ID] = pn.ExpectedEmpty
+	}
+	want := map[int64]string{1: "", 2: "traces", 3: "traces", 4: "profiles", 5: "", 6: "traces"}
+	for id, w := range want {
+		if got[id] != w {
+			t.Errorf("panel %d expected-empty %q, want %q", id, got[id], w)
+		}
+	}
+	for _, w := range []string{
+		`expected empty in the sandbox; mark C1 n/a`, `panel 2 "Slow traces"`, `panel 4 "CPU flame graph"`,
+	} {
+		if !strings.Contains(p.Prompt, w) {
+			t.Errorf("prompt lacks %q:\n%s", w, p.Prompt)
+		}
+	}
+	got2 := strings.ReplaceAll(p.Prompt, cl, "docs/standards/grafana-dashboards/index.md")
+	golden := filepath.Join("testdata", "prompt-traces.golden")
+	if *update {
+		if err := os.WriteFile(golden, []byte(got2), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wantB, err := os.ReadFile(golden)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got2 != string(wantB) {
+		t.Errorf("prompt differs from %s (run go test ./internal/look -update to rewrite it)\n--- got ---\n%s", golden, got2)
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AtomiCloud/obs/internal/files"
 	"github.com/AtomiCloud/obs/internal/sandbox"
 	"github.com/AtomiCloud/obs/internal/seed"
 )
@@ -33,6 +34,8 @@ type Options struct {
 	Out       string   // where the screenshots go (as printed in the prompt)
 	Width     int
 	Height    int
+	Project   string                                           // sandbox project (the obs.sandbox label), as printed in the cleanup command
+	Runtime   string                                           // container runtime name (docker or podman), as printed in the cleanup command
 	Git       func(dir string, args ...string) (string, error) // default: the git binary
 }
 
@@ -56,6 +59,9 @@ type Panel struct {
 	Type  string `json:"type"`
 	URL   string `json:"url"`
 	Shot  string `json:"screenshot"`
+	// ExpectedEmpty is set when every datasource of the panel is traces or profiles: the sandbox has no
+	// trace or profile seed, so No data is expected there (the reviewer marks the No-data item n/a).
+	ExpectedEmpty string `json:"expected_empty,omitempty"` // traces or profiles
 }
 
 // Dashboard is one dashboard to review.
@@ -76,6 +82,8 @@ type Plan struct {
 	Warnings      []string      `json:"warnings,omitempty"`
 	Base          string        `json:"base,omitempty"`
 	Sandbox       *sandbox.Info `json:"sandbox,omitempty"`
+	Project       string        `json:"project,omitempty"` // the sandbox project and runtime of this run: the cleanup command names them
+	Runtime       string        `json:"runtime,omitempty"`
 	Viewport      Viewport      `json:"viewport"`
 	ChecklistFile string        `json:"checklist_file"`
 	Checklist     []string      `json:"checklist"`
@@ -98,7 +106,7 @@ func Setup(ctx context.Context, o Options, up func(context.Context) (*sandbox.In
 	if o.Git == nil {
 		o.Git = gitRun
 	}
-	p := &Plan{Base: o.Base, Viewport: Viewport{o.Width, o.Height}, ChecklistFile: o.Checklist, Checklist: []string{}, Dashboards: []Dashboard{}}
+	p := &Plan{Base: o.Base, Viewport: Viewport{o.Width, o.Height}, Project: o.Project, Runtime: o.Runtime, ChecklistFile: o.Checklist, Checklist: []string{}, Dashboards: []Dashboard{}}
 	defer func() { p.Prompt = render(p) }()
 
 	items, err := ReadChecklist(o.Checklist)
@@ -193,9 +201,13 @@ type dashJSON struct {
 }
 
 type panelJSON struct {
-	ID     int64       `json:"id"`
-	Title  string      `json:"title"`
-	Type   string      `json:"type"`
+	ID         int64           `json:"id"`
+	Title      string          `json:"title"`
+	Type       string          `json:"type"`
+	Datasource json.RawMessage `json:"datasource"`
+	Targets    []struct {
+		Datasource json.RawMessage `json:"datasource"`
+	} `json:"targets"`
 	Panels []panelJSON `json:"panels"`
 }
 
@@ -244,6 +256,12 @@ func buildDashboard(o Options, info *sandbox.Info, ds *seed.Dataset, rel string)
 			d.Vars = append(d.Vars, *vv)
 		}
 	}
+	dsVars := map[string]string{} // datasource variable name -> plugin type it lists
+	for _, v := range dj.Templating.List {
+		if v.Type == "datasource" {
+			dsVars[v.Name] = strings.ToLower(str(v.Query))
+		}
+	}
 	q := func(extra ...string) string {
 		parts := []string{"orgId=1"}
 		if info.From != 0 {
@@ -266,7 +284,7 @@ func buildDashboard(o Options, info *sandbox.Info, ds *seed.Dataset, rel string)
 		for _, p := range ps {
 			if p.Type != "row" {
 				d.Panels = append(d.Panels, Panel{
-					ID: p.ID, Title: p.Title, Type: p.Type,
+					ID: p.ID, Title: p.Title, Type: p.Type, ExpectedEmpty: expectedEmpty(p, dsVars),
 					URL:  info.Grafana + path + "?" + q(fmt.Sprintf("viewPanel=panel-%d", p.ID), "kiosk"),
 					Shot: filepath.ToSlash(filepath.Join(o.Out, fmt.Sprintf("%s-panel-%d.png", base, p.ID))),
 				})
@@ -301,6 +319,9 @@ var labelValuesRe = regexp.MustCompile(`label_values\(\s*(?:([^,]+?)\s*,\s*)?([a
 // value, else the datasource of the sandbox, else the first option or the first value on
 // the seed (all values when the variable can be All), else nothing (Grafana decides).
 func fillVar(v varJSON, info *sandbox.Info, ds *seed.Dataset) *Var {
+	if v.Type == "datasource" {
+		return fillDatasourceVar(v, info)
+	}
 	out := &Var{Name: v.Name}
 	switch cur := v.Current.Value.(type) {
 	case string:
@@ -322,12 +343,6 @@ func fillVar(v varJSON, info *sandbox.Info, ds *seed.Dataset) *Var {
 	}
 	query := str(v.Query)
 	switch v.Type {
-	case "datasource":
-		kind := map[string]string{"prometheus": "metrics", "victoriametrics-logs-datasource": "logs", "tempo": "traces", "grafana-pyroscope-datasource": "profiles"}[strings.ToLower(query)]
-		if us := info.Datasources[kind]; len(us) > 0 {
-			return &Var{Name: v.Name, Values: []string{us[0]}, Source: "sandbox datasource"}
-		}
-		return nil
 	case "custom":
 		for _, s := range strings.Split(query, ",") {
 			if s = strings.TrimSpace(s); s != "" {
@@ -364,4 +379,115 @@ func fillVar(v varJSON, info *sandbox.Info, ds *seed.Dataset) *Var {
 		}
 	}
 	return nil
+}
+
+// datasourceKinds maps the plugin type a datasource variable lists to the sandbox's datasource kind.
+var datasourceKinds = map[string]string{"prometheus": "metrics", "victoriametrics-logs-datasource": "logs", "tempo": "traces", "grafana-pyroscope-datasource": "profiles"}
+
+// fillDatasourceVar resolves a datasource variable against the sandbox first. A saved current
+// uid is kept only when the sandbox provisioned it (a stale uid from another Grafana would send
+// every panel to a datasource that does not exist here); otherwise the sandbox's own datasource
+// of that kind is used.
+func fillDatasourceVar(v varJSON, info *sandbox.Info) *Var {
+	provisioned := map[string]bool{}
+	for _, us := range info.Datasources {
+		for _, u := range us {
+			provisioned[u] = true
+		}
+	}
+	var cur []string
+	switch c := v.Current.Value.(type) {
+	case string:
+		cur = []string{c}
+	case []any:
+		for _, x := range c {
+			cur = append(cur, str(x))
+		}
+	}
+	keep := len(cur) > 0
+	for _, u := range cur {
+		if u == "" || !provisioned[u] {
+			keep = false
+		}
+	}
+	if keep {
+		return &Var{Name: v.Name, Values: cur, Source: "current"}
+	}
+	if us := info.Datasources[datasourceKinds[strings.ToLower(str(v.Query))]]; len(us) > 0 {
+		return &Var{Name: v.Name, Values: []string{us[0]}, Source: "sandbox datasource"}
+	}
+	return nil
+}
+
+// dsRef reads a datasource reference (an object {type, uid} or a bare string uid).
+func dsRef(raw json.RawMessage, dsVars map[string]string) (typ, uid string) {
+	if len(raw) == 0 {
+		return "", ""
+	}
+	var o struct{ Type, UID string }
+	if json.Unmarshal(raw, &o) != nil {
+		var s string
+		if json.Unmarshal(raw, &s) != nil {
+			return "", ""
+		}
+		o.UID = s
+	}
+	typ, uid = o.Type, o.UID
+	name := strings.Trim(uid, "$[]{}")
+	if strings.HasPrefix(uid, "$") || strings.HasPrefix(uid, "[[") {
+		if t, ok := dsVars[name]; ok {
+			return t, uid // the variable lists one plugin type: that is the type
+		}
+	}
+	return typ, uid
+}
+
+// refKind says what a datasource reference holds in the sandbox: "traces" and "profiles"
+// (no seed for either), "data" (metrics or logs, seeded) or "" (expressions, mixed, unknown).
+func refKind(typ, uid string) string {
+	t, u := strings.ToLower(typ), strings.ToLower(uid)
+	switch {
+	case strings.Contains(t, "pyroscope"), strings.Contains(t, "phlare"):
+		return "profiles"
+	case (t == "" || t == "datasource") && (strings.Contains(u, "pyroscope") || strings.Contains(u, "profil")):
+		return "profiles"
+	case t == "mixed" || t == "grafana" || t == "__expr__" || u == "__expr__" || strings.HasPrefix(u, "-- "):
+		return ""
+	}
+	k, err := files.Classify(typ, uid)
+	switch {
+	case err != nil:
+		return ""
+	case k == files.Traces:
+		return "traces"
+	case k == files.Metrics || k == files.Logs || k == files.Loki:
+		return "data"
+	}
+	return ""
+}
+
+// expectedEmpty says "traces" or "profiles" when every datasource of the panel is one of those
+// (the sandbox seeds only metrics and logs), "traces and profiles" for both, else "".
+func expectedEmpty(p panelJSON, dsVars map[string]string) string {
+	kinds := map[string]bool{}
+	add := func(raw json.RawMessage) {
+		if k := refKind(dsRef(raw, dsVars)); k != "" {
+			kinds[k] = true
+		}
+	}
+	add(p.Datasource)
+	for _, t := range p.Targets {
+		add(t.Datasource)
+	}
+	switch {
+	case kinds["data"]:
+		return ""
+	case kinds["traces"] && kinds["profiles"]:
+		return "traces and profiles"
+	case kinds["traces"]:
+		return "traces"
+	case kinds["profiles"]:
+		return "profiles"
+	}
+	return ""
 }

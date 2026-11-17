@@ -18,6 +18,9 @@ type Component struct {
 	Offset int    // host port = port base + Offset
 	Data   string // data directory mounted from a named volume
 	Health string // HTTP path that answers 200 when ready
+	// Declared lists every VOLUME the pinned image declares (docker image inspect .Config.Volumes).
+	// Each one is mounted from a labelled named volume, so none becomes an anonymous volume.
+	Declared []string
 }
 
 // Ref is the image reference the container runs.
@@ -30,7 +33,8 @@ var Pins = []Component{
 	{Name: "vm", Image: "victoriametrics/victoria-metrics", Tag: "v1.156.0", Port: 8428, Offset: 1, Data: "/victoria-metrics-data", Health: "/health"},
 	{Name: "vl", Image: "victoriametrics/victoria-logs", Tag: "v1.54.0", Port: 9428, Offset: 2, Data: "/victoria-logs-data", Health: "/health"},
 	{Name: "tempo", Image: "grafana/tempo", Tag: "3.1.1", Port: 3200, Offset: 3, Data: "/var/tempo", Health: "/ready"},
-	{Name: "pyroscope", Image: "grafana/pyroscope", Tag: "2.4.3", Port: 4040, Offset: 4, Data: "/data", Health: "/ready"},
+	{Name: "pyroscope", Image: "grafana/pyroscope", Tag: "2.4.3", Port: 4040, Offset: 4, Data: "/data", Health: "/ready",
+		Declared: []string{"/data", "/data-compactor", "/data-metastore"}},
 }
 
 // The Grafana VictoriaLogs datasource plugin (concept section 1).
@@ -58,3 +62,6 @@ func PinLines() []string {
 	out = append(out, fmt.Sprintf("sandbox Grafana plugin %s %s", PluginID, "v"+PluginVersion))
 	return out
 }
+
+// LaptopVLDiskCap is the VictoriaLogs disk cap on a laptop (concept section 10.4, 16 GiB).
+const LaptopVLDiskCap = 16 * 1024 * 1024 * 1024

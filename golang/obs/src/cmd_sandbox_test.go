@@ -63,9 +63,25 @@ func TestLookExitsZeroWhenSetupFails(t *testing.T) {
 	if rc != 0 || json.Unmarshal([]byte(out), &j) != nil || j.OK || j.Error == "" || !strings.Contains(j.Prompt, "setup failed") {
 		t.Errorf("json: rc=%d out=%s", rc, out)
 	}
-	// Only a bad flag is an error: it is a mistake in the caller's own script.
-	if rc, _ := obs("look", "--nope"); rc != 2 {
-		t.Errorf("bad flag rc=%d", rc)
+	// A bad flag, a missing flag value and --help do not fail CI either: exit 0 with the usage error.
+	rc, out = obs("look", "--nope")
+	if rc != 0 || !strings.Contains(out, "usage error") || !strings.Contains(out, "flag provided but not defined: -nope") || !strings.Contains(out, "obs look exits 0 on purpose") {
+		t.Errorf("bad flag rc=%d out=%s", rc, out)
+	}
+	rc, out = obs("look", "--width", "wide")
+	if rc != 0 || !strings.Contains(out, "usage error") || !strings.Contains(out, "width") {
+		t.Errorf("bad flag value rc=%d out=%s", rc, out)
+	}
+	rc, out = obs("look", "--help")
+	if rc != 0 || !strings.Contains(out, "-base") || !strings.Contains(out, "-checklist") {
+		t.Errorf("--help rc=%d out=%s", rc, out)
+	}
+	// With --json the usage error is an ok:false object, wherever --json sits in the line.
+	for _, args := range [][]string{{"look", "--json", "--nope"}, {"look", "--nope", "--json"}} {
+		rc, out = obs(args...)
+		if rc != 0 || json.Unmarshal([]byte(out), &j) != nil || j.OK || !strings.Contains(j.Error, "flag provided but not defined: -nope") || !strings.Contains(j.Prompt, "usage error") {
+			t.Errorf("%v: rc=%d out=%s", args, rc, out)
+		}
 	}
 }
 
