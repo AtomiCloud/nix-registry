@@ -10,12 +10,16 @@ import (
 
 // Frame is one stack frame: the function name and the file it lives in (either may be empty).
 type Frame struct {
-	Name string
-	File string
-	Line int64 // declaration's start line (one based); 0 when unavailable
+	Name   string
+	File   string
+	Line   int64 // declaration's start line (one based); 0 when unavailable
+	Column int64 // one based; 0 when unavailable
 }
 
-func functionName(name, file string, line int64) string {
+func functionName(name, file string, line int64, column ...int64) string {
+	if len(column) > 0 && column[0] > 0 {
+		return fmt.Sprintf("%s (%s:%d:%d)", name, file, line, column[0])
+	}
 	if file == "" && line == 0 {
 		return name
 	}
@@ -26,7 +30,7 @@ func functionName(name, file string, line int64) string {
 }
 
 // Sample is one CPU sample. Stack is leaf first, root last. Count is the number of samples
-// the entry stands for (1 for a speedscope sample or positive evented stack interval;
+// the entry stands for (1 for a speedscope sample; CPU time / sampling period for evented;
 // hit counts for .cpuprofile, the "samples" value for pprof);
 // Weight is the CPU weight (nanoseconds for pprof, 1 per sample or the speedscope weight).
 // Span is set when the reader found a span label on the sample (pprof label span_name).
@@ -39,9 +43,13 @@ type Sample struct {
 
 // Profile is a parsed profile: only what the summary needs.
 type Profile struct {
-	Format  string
-	Samples []Sample
+	Format         string
+	Samples        []Sample
+	SamplePeriodNs float64
 }
+
+// DefaultSamplePeriodNs is EventPipe's default 1ms sample-profiler period.
+const DefaultSamplePeriodNs = 1e6
 
 // Formats obs profile reads.
 const (

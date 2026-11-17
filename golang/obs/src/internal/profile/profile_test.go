@@ -334,10 +334,10 @@ func TestCompareSlowerFasterAndNoise(t *testing.T) {
 	if r := rowOf(rows, "function", "svc/cache.Get"); r.Failed() || !r.Faster {
 		t.Errorf("faster row %+v", r)
 	}
-	// A function that vanished is faster, not a failure.
+	// A hot baseline function with no matching samples is an error requiring review/update.
 	gone := summarizeSpec(t, variant(baseSpec(), map[string]float64{"svc/cache.Get": 0}), quietMeta(1.0))
 	rows, _ = Compare(b, gone, nil)
-	if r := rowOf(rows, "function", "svc/cache.Get"); r.Failed() || !r.Missing {
+	if r := rowOf(rows, "function", "svc/cache.Get"); !r.Failed() || !r.Missing || r.Faster {
 		t.Errorf("vanished row %+v", r)
 	}
 }

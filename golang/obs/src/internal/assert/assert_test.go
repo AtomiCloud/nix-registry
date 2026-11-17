@@ -221,18 +221,21 @@ func TestUnderfilledExportsStillCheckLabels(t *testing.T) {
 	if r := Check(c, []Series{sr("checkout_charges_total", "payment_provider", "stripe")}, Options{}); r.Failures() != 0 {
 		t.Fatalf("green underfilled export: %+v", r.Findings)
 	}
-	for _, tc := range []struct{ label, value, rule string }{
-		{"k8s_pod_name", "review-pod", "pod-label-on-business-metric"},
-		{"user_id", "review-user", "label-not-in-contract"},
-		{"payment_provider", "review-provider", "label-value-outside-type"},
+	for _, tc := range []struct {
+		label, value, rule string
+		level              Level
+	}{
+		{"k8s_pod_name", "review-pod", "pod-label-on-business-metric", Fail},
+		{"user_id", "review-user", "label-not-in-contract", Warn},
+		{"payment_provider", "review-provider", "label-value-outside-type", Fail},
 	} {
 		t.Run(tc.rule, func(t *testing.T) {
 			r := Check(c, []Series{sr("checkout_charges_total", tc.label, tc.value)}, Options{})
 			if find(r, "series-over-worst-case") != nil {
 				t.Fatal("fixture must stay under capacity")
 			}
-			if f := find(r, tc.rule); f == nil || !strings.Contains(f.Msg, tc.label) {
-				t.Fatalf("underfilled export must fail %s: %+v", tc.rule, r.Findings)
+			if f := find(r, tc.rule); f == nil || f.Level != tc.level || !strings.Contains(f.Msg, tc.label) {
+				t.Fatalf("underfilled export must report %s at %s: %+v", tc.rule, tc.level, r.Findings)
 			}
 		})
 	}
@@ -245,8 +248,25 @@ func TestPlatformLabelsCheckedWithoutCardinalityLimit(t *testing.T) {
 		t.Fatalf("platform metrics retain pod keys: %+v", r.Findings)
 	}
 	red := sr("http_server_request_duration_seconds_count", "http_route", "/a", "user_id", "review-user")
-	if r := Check(c, []Series{red}, Options{}); find(r, "label-not-in-contract") == nil {
-		t.Fatalf("platform declared labels must be enforced: %+v", r.Findings)
+	red2 := sr("http_server_request_duration_seconds_count", "http_route", "/b", "user_id", "another-user")
+	if r := Check(c, []Series{red, red2}, Options{}); r.Failures() != 1 || find(r, "label-not-in-contract") == nil {
+		t.Fatalf("varying platform labels must be enforced: %+v", r.Findings)
+	}
+}
+
+func TestOTelSDKResourceLabelsOnlyFailWhenTheySplitSeries(t *testing.T) {
+	c := loadC(t)
+	series := []Series{
+		sr("checkout_charges_total", "payment_provider", "stripe", "telemetry_sdk_language", "go", "telemetry_sdk_name", "opentelemetry", "telemetry_sdk_version", "1.47.0"),
+		sr("checkout_charges_total", "payment_provider", "adyen", "telemetry_sdk_language", "go", "telemetry_sdk_name", "opentelemetry", "telemetry_sdk_version", "1.47.0"),
+	}
+	if r := Check(c, series, Options{}); r.Failures() != 0 {
+		t.Fatalf("constant SDK resource labels must only warn: %+v", r.Findings)
+	}
+	series[1].Labels["telemetry_sdk_version"] = "1.48.0"
+	r := Check(c, series, Options{})
+	if f := find(r, "label-not-in-contract"); r.Failures() != 1 {
+		t.Fatalf("varying SDK label must fail exactly once: %+v (%+v)", r.Findings, f)
 	}
 }
 

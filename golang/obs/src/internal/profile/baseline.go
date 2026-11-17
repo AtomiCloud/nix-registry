@@ -4,36 +4,41 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"sort"
 )
 
 // BaselineVersion is the file format version.
-const BaselineVersion = 2
+const BaselineVersion = 3
 
 // MinFunctionShare is the smallest share of the baseline's CPU a function needs to be a row.
 const MinFunctionShare = 0.03
 
 // Row of a baseline: a function or a span with its median share and median sample count.
 type Row struct {
-	Name  string  `json:"name"`
-	File  string  `json:"file,omitempty"`
-	Line  int64   `json:"line,omitempty"`
-	Share float64 `json:"share"`
-	N     int64   `json:"n"`
+	Name   string  `json:"name"`
+	File   string  `json:"file,omitempty"`
+	Line   int64   `json:"line,omitempty"`
+	Column int64   `json:"column,omitempty"`
+	Share  float64 `json:"share"`
+	N      int64   `json:"n"`
 }
 
 // Baseline is e2e/profile-baseline/<service>.<scenario>.json: median of 3 runs, a few KB,
 // deterministic (no times, sorted rows, rounded shares).
 type Baseline struct {
-	Version  int      `json:"version"`
-	Service  string   `json:"service"`
-	Scenario string   `json:"scenario"`
-	Format   string   `json:"format"`
-	Profiler string   `json:"profiler,omitempty"` // e.g. dotnet-trace
-	Runs     int      `json:"runs"`
-	Own      []string `json:"own,omitempty"`
+	Version            int      `json:"version"`
+	Service            string   `json:"service"`
+	Scenario           string   `json:"scenario"`
+	Format             string   `json:"format"`
+	Profiler           string   `json:"profiler,omitempty"` // e.g. dotnet-trace
+	Runs               int      `json:"runs"`
+	Own                []string `json:"own,omitempty"`
+	SamplePeriodNs     float64  `json:"sample_period_ns,omitempty"`
+	SourceRoot         string   `json:"source_root,omitempty"`
+	SourceRootExplicit bool     `json:"source_root_explicit,omitempty"`
 	// Samples is the median number of samples per run; Requests the median requests per run.
 	Samples  int64 `json:"samples"`
 	Requests int64 `json:"requests,omitempty"`
@@ -41,6 +46,10 @@ type Baseline struct {
 	CPUPerRequestNs float64 `json:"cpu_per_request_ns,omitempty"`
 	Functions       []Row   `json:"functions"`
 	Spans           []Row   `json:"spans"`
+}
+
+func (b *Baseline) PrintSourceRoot(w io.Writer) {
+	printSourceRoot(w, "baseline ", b.SourceRoot, b.SourceRootExplicit)
 }
 
 func round6(x float64) float64 { return math.Round(x*1e6) / 1e6 }
@@ -65,8 +74,14 @@ func BuildBaseline(service, scenario, profiler string, own []string, runs []*Sum
 		return nil, fmt.Errorf("a baseline requires at least one --own expression for the service's own code")
 	}
 	b := &Baseline{Version: BaselineVersion, Service: service, Scenario: scenario, Format: runs[0].Format,
-		Profiler: profiler, Runs: 3, Own: own, Functions: []Row{}, Spans: []Row{}}
+		Profiler: profiler, Runs: 3, Own: own, Functions: []Row{}, Spans: []Row{}, SamplePeriodNs: runs[0].SamplePeriodNs, SourceRoot: runs[0].SourceRoot, SourceRootExplicit: runs[0].SourceRootExplicit}
 	for _, r := range runs {
+		if (b.SourceRootExplicit || r.SourceRootExplicit) && (b.SourceRootExplicit != r.SourceRootExplicit || b.SourceRoot != r.SourceRoot) {
+			return nil, fmt.Errorf("the 3 runs have different explicit source roots")
+		}
+		if r.SamplePeriodNs != b.SamplePeriodNs {
+			return nil, fmt.Errorf("the 3 runs have different sample periods (%g and %g ns)", b.SamplePeriodNs, r.SamplePeriodNs)
+		}
 		if r.Format != runs[0].Format {
 			return nil, fmt.Errorf("the 3 runs are in different formats (%s and %s)", runs[0].Format, r.Format)
 		}
@@ -86,20 +101,43 @@ func BuildBaseline(service, scenario, profiler string, own []string, runs []*Sum
 	if c := median(cpu); c > 0 && cpu[0] > 0 && cpu[1] > 0 && cpu[2] > 0 {
 		b.CPUPerRequestNs = math.Round(c)
 	}
-	// Functions: own share per run, absent = 0.
-	fshare := map[Frame][]float64{}
-	fn := map[Frame][]float64{}
+	// Align declarations across runs; line shifts do not manufacture new functions.
+	var declarations []Row
+	var ownRuns [][]FuncRow
+	for _, r := range runs {
+		var functions []FuncRow
+		for _, f := range r.Functions {
+			if f.Own && f.OwnShare > 0 {
+				functions = append(functions, f)
+			}
+		}
+		matched := matchFunctions(declarations, functions)
+		used := map[int]bool{}
+		for _, ni := range matched {
+			used[ni] = true
+		}
+		for ni, f := range functions {
+			if !used[ni] {
+				declarations = append(declarations, Row{Name: f.Name, File: f.File, Line: f.Line, Column: f.Column})
+			}
+		}
+		ownRuns = append(ownRuns, functions)
+	}
+	shares, counts := make([][]float64, len(declarations)), make([][]float64, len(declarations))
+	for _, functions := range ownRuns {
+		matched := matchFunctions(declarations, functions)
+		for bi := range declarations {
+			var share, count float64
+			if ni, ok := matched[bi]; ok {
+				share, count = functions[ni].OwnShare, float64(functions[ni].OwnN)
+			}
+			shares[bi] = append(shares[bi], share)
+			counts[bi] = append(counts[bi], count)
+		}
+	}
 	sshare := map[string][]float64{}
 	sn := map[string][]float64{}
 	for _, r := range runs {
-		for _, f := range r.Functions {
-			if !f.Own || f.OwnShare <= 0 {
-				continue
-			}
-			key := Frame{Name: f.Name, File: f.File, Line: f.Line}
-			fshare[key] = append(fshare[key], f.OwnShare)
-			fn[key] = append(fn[key], float64(f.OwnN))
-		}
 		for _, s := range r.Spans {
 			sshare[s.Name] = append(sshare[s.Name], s.Share)
 			sn[s.Name] = append(sn[s.Name], float64(s.N))
@@ -111,10 +149,10 @@ func BuildBaseline(service, scenario, profiler string, own []string, runs []*Sum
 		}
 		return xs
 	}
-	for f, xs := range fshare {
-		m := median(pad(xs))
+	for i, f := range declarations {
+		m := median(shares[i])
 		if m >= MinFunctionShare {
-			b.Functions = append(b.Functions, Row{Name: f.Name, File: f.File, Line: f.Line, Share: round6(m), N: int64(median(pad(fn[f])) + 0.5)})
+			b.Functions = append(b.Functions, Row{Name: f.Name, File: f.File, Line: f.Line, Column: f.Column, Share: round6(m), N: int64(median(counts[i]) + 0.5)})
 		}
 	}
 	for name, xs := range sshare {
@@ -140,7 +178,10 @@ func sortRows(r []Row) {
 		if r[i].File != r[j].File {
 			return r[i].File < r[j].File
 		}
-		return r[i].Line < r[j].Line
+		if r[i].Line != r[j].Line {
+			return r[i].Line < r[j].Line
+		}
+		return r[i].Column < r[j].Column
 	})
 }
 

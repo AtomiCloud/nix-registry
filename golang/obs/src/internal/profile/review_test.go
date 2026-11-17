@@ -51,7 +51,7 @@ func TestSameNameFunctionsKeepIdentity(t *testing.T) {
 	if n := PrintCompare(&out, "same-name.baseline.json", rows, nil); n != 1 {
 		t.Fatalf("planted +50%% must fail exactly one function: %d\n%s", n, out.String())
 	}
-	for _, needle := range []string{"same-name.baseline.json", "/app/a.js:10", "+50.0%", "5.0%"} {
+	for _, needle := range []string{"same-name.baseline.json", "a.js:10", "+50.0%", "5.0%"} {
 		if !strings.Contains(out.String(), needle) {
 			t.Errorf("missing %q: %s", needle, out.String())
 		}
@@ -84,7 +84,7 @@ func TestFunctionSourceThroughPprofRecursion(t *testing.T) {
 		t.Fatalf("instruction lines split a function, or files merged: %+v", s.Functions)
 	}
 	for _, f := range s.Functions {
-		if f.InclShare != 1 || (f.File == a.Filename && f.Line != 10) || (f.File == b.Filename && f.Line != 20) {
+		if f.InclShare != 1 || (strings.HasSuffix(f.File, "/a.go") && f.Line != 10) || (strings.HasSuffix(f.File, "/b.go") && f.Line != 20) {
 			t.Errorf("recursion must deduplicate declaration identity: %+v", f)
 		}
 	}
@@ -165,7 +165,7 @@ func TestDotnetEventedGreenAndRed(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if s.Samples != 1000 {
+		if s.Samples != 2000 {
 			t.Fatalf("CPU interval count = %d; wait must be dropped", s.Samples)
 		}
 		return s
@@ -200,7 +200,7 @@ func TestEventedOpenTimeThreadsAndBadEvents(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if s.Samples != 2 || len(s.Functions) != 2 || s.Functions[0].Name != "app/leaf" || s.Functions[0].OwnShare != .75 {
+	if s.Samples != 4 || len(s.Functions) != 2 || s.Functions[0].Name != "app/leaf" || s.Functions[0].OwnShare != .75 {
 		t.Fatalf("open-time weighting / wait removal: %+v", s)
 	}
 	// A 1 ms CPU sample in another thread must have the same weight as 0.001 s.

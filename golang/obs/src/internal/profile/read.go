@@ -16,6 +16,14 @@ import (
 // Read parses a profile file in the given format (pprof, cpuprofile or speedscope).
 // Gzip-compressed JSON is accepted for the two JSON formats; pprof is gzip or raw protobuf.
 func Read(path, format string) (*Profile, error) {
+	return ReadWithSamplePeriod(path, format, DefaultSamplePeriodNs)
+}
+
+// ReadWithSamplePeriod uses the collection period to recover evented sample counts.
+func ReadWithSamplePeriod(path, format string, periodNs float64) (*Profile, error) {
+	if periodNs <= 0 || math.IsInf(periodNs, 0) || math.IsNaN(periodNs) {
+		return nil, inputErr(path, "sample period must be positive")
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -27,7 +35,7 @@ func Read(path, format string) (*Profile, error) {
 	case FormatCPUProfile:
 		p, err = readCPUProfile(path, gunzipIfNeeded(data))
 	case FormatSpeedscope:
-		p, err = readSpeedscope(path, gunzipIfNeeded(data))
+		p, err = readSpeedscopeWithPeriod(path, gunzipIfNeeded(data), periodNs)
 	default:
 		return nil, fmt.Errorf("unknown --format %q: want pprof, cpuprofile or speedscope", format)
 	}
@@ -117,6 +125,7 @@ type cpuProfileDoc struct {
 			FunctionName string `json:"functionName"`
 			URL          string `json:"url"`
 			LineNumber   *int64 `json:"lineNumber"` // Chrome uses zero-based declaration lines
+			ColumnNumber *int64 `json:"columnNumber"`
 		} `json:"callFrame"`
 		HitCount int   `json:"hitCount"`
 		Children []int `json:"children"`
@@ -157,7 +166,11 @@ func readCPUProfile(path string, data []byte) (*Profile, error) {
 				if cf.LineNumber != nil && *cf.LineNumber >= 0 {
 					line = *cf.LineNumber + 1
 				}
-				st = append(st, Frame{Name: cf.FunctionName, File: cf.URL, Line: line})
+				var column int64
+				if cf.ColumnNumber != nil && *cf.ColumnNumber >= 0 {
+					column = *cf.ColumnNumber + 1
+				}
+				st = append(st, Frame{Name: cf.FunctionName, File: cf.URL, Line: line, Column: column})
 			}
 			p, ok := parent[id]
 			if !ok {
@@ -204,9 +217,10 @@ func readCPUProfile(path string, data []byte) (*Profile, error) {
 type speedscopeDoc struct {
 	Shared struct {
 		Frames []struct {
-			Name string `json:"name"`
-			File string `json:"file"`
-			Line int64  `json:"line"`
+			Name   string `json:"name"`
+			File   string `json:"file"`
+			Line   int64  `json:"line"`
+			Column int64  `json:"col"`
 		} `json:"frames"`
 	} `json:"shared"`
 	Profiles []speedscopeProfile `json:"profiles"`
@@ -240,6 +254,10 @@ func waitStack(stack []Frame) bool {
 }
 
 func readSpeedscope(path string, data []byte) (*Profile, error) {
+	return readSpeedscopeWithPeriod(path, data, DefaultSamplePeriodNs)
+}
+
+func readSpeedscopeWithPeriod(path string, data []byte, periodNs float64) (*Profile, error) {
 	var doc speedscopeDoc
 	if err := json.Unmarshal(data, &doc); err != nil {
 		return nil, inputErr(path, "not a speedscope file (JSON): %v", err)
@@ -271,11 +289,15 @@ func readSpeedscope(path string, data []byte) (*Profile, error) {
 					return nil, inputErr(path, "profiles[%d] names frame %d, but there are %d frames", pi, fi, len(doc.Shared.Frames))
 				}
 				f := doc.Shared.Frames[fi]
-				frames = append(frames, Frame{Name: f.Name, File: f.File, Line: f.Line})
+				frames = append(frames, Frame{Name: f.Name, File: f.File, Line: f.Line, Column: f.Column})
 			}
 			return frames, nil
 		}
 		if pr.Type == "evented" {
+			if pr.Unit == "" || pr.Unit == "none" {
+				return nil, inputErr(path, "profiles[%d] evented profile needs a time unit to apply the sample period", pi)
+			}
+			out.SamplePeriodNs = periodNs
 			if len(pr.Events) == 0 {
 				return nil, inputErr(path, "profiles[%d] evented profile has no events", pi)
 			}
@@ -292,7 +314,8 @@ func readSpeedscope(path string, data []byte) (*Profile, error) {
 				// Every positive interval is charged to the stack open during it,
 				// never once per frame: nested frames must not double count CPU.
 				if ev.At > last && len(frames) > 0 && !waitStack(frames) {
-					out.Samples = append(out.Samples, Sample{Stack: frames, Count: 1, Weight: (ev.At - last) * scale})
+					weight := (ev.At - last) * scale
+					out.Samples = append(out.Samples, Sample{Stack: frames, Count: weight * 1e9 / periodNs, Weight: weight})
 				}
 				if ev.Frame < 0 || ev.Frame >= len(doc.Shared.Frames) {
 					return nil, inputErr(path, "profiles[%d] event %d: invalid frame %d", pi, ei, ev.Frame)

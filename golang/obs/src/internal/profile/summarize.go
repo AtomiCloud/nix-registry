@@ -64,6 +64,7 @@ type FuncRow struct {
 	Name      string  `json:"name"`
 	File      string  `json:"file,omitempty"`
 	Line      int64   `json:"line,omitempty"`
+	Column    int64   `json:"column,omitempty"`
 	SelfShare float64 `json:"self"`
 	InclShare float64 `json:"inclusive"`
 	// OwnShare is the CPU attributed to the function: its own time plus the time of callees
@@ -83,11 +84,15 @@ type SpanRow struct {
 
 // Summary is what `obs profile summarize` prints and what baselines are built from.
 type Summary struct {
-	Format    string    `json:"format"`
-	Samples   int64     `json:"samples"`
-	Functions []FuncRow `json:"functions"`
-	Spans     []SpanRow `json:"spans"`
-	Run       *RunMeta  `json:"run,omitempty"`
+	Format             string    `json:"format"`
+	Samples            int64     `json:"samples"`
+	SamplePeriodNs     float64   `json:"sample_period_ns,omitempty"`
+	SourceRoot         string    `json:"source_root,omitempty"`
+	SourceRootExplicit bool      `json:"source_root_explicit,omitempty"`
+	SourceRootNote     string    `json:"source_root_note,omitempty"`
+	Functions          []FuncRow `json:"functions"`
+	Spans              []SpanRow `json:"spans"`
+	Run                *RunMeta  `json:"run,omitempty"`
 	// CPUPerRequestNs is OS CPU per request: Run.OSCPUNs / Run.Requests (0 when unknown).
 	CPUPerRequestNs float64 `json:"cpu_per_request_ns"`
 }
@@ -96,7 +101,8 @@ type Summary struct {
 type Options struct {
 	// Own: regular expressions; a frame is the service's own code when its function name or
 	// file matches one. Empty: every frame is own code.
-	Own []string
+	Own        []string
+	SourceRoot string // optional explicit checkout root; empty: infer from own sources
 }
 
 type ownMatcher struct{ res []*regexp.Regexp }
@@ -118,7 +124,7 @@ func (m *ownMatcher) match(f Frame) bool {
 		return true
 	}
 	for _, re := range m.res {
-		if re.MatchString(f.Name) || (f.File != "" && re.MatchString(f.File)) {
+		if re.MatchString(f.Name) || (f.File != "" && (re.MatchString(f.File) || re.MatchString(sourceFile(f.File)))) {
 			return true
 		}
 	}
@@ -137,11 +143,23 @@ func Summarize(p *Profile, meta *RunMeta, o Options) (*Summary, error) {
 	if err != nil {
 		return nil, err
 	}
+	root := sourceRoot(p, own)
+	var rootNote string
+	if o.SourceRoot != "" {
+		root, err = explicitSourceRoot(o.SourceRoot)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		rootNote = inferredRootNote(p, own, root)
+	}
+	identity := func(f Frame) Frame { f.File = relativeSource(f.File, root); return f }
 	var total, totalN float64
 	fn := map[Frame]*acc{}
 	spanW := map[string]float64{}
 	spanN := map[string]float64{}
 	get := func(f Frame) *acc {
+		f = identity(f)
 		a := fn[f]
 		if a == nil {
 			a = &acc{}
@@ -163,8 +181,8 @@ func Summarize(p *Profile, meta *RunMeta, o Options) (*Summary, error) {
 			spans[s.Span] = true
 		}
 		for _, f := range s.Stack {
-			if !seen[f] {
-				seen[f] = true
+			if key := identity(f); !seen[key] {
+				seen[key] = true
 				get(f).incl += s.Weight
 			}
 			if sp, ok := spanOfFrame(f.Name); ok {
@@ -190,10 +208,10 @@ func Summarize(p *Profile, meta *RunMeta, o Options) (*Summary, error) {
 	if total <= 0 {
 		return nil, fmt.Errorf("the profile has no CPU weight")
 	}
-	sum := &Summary{Format: p.Format, Samples: int64(totalN + 0.5), Run: meta}
+	sum := &Summary{Format: p.Format, Samples: int64(totalN + 0.5), Run: meta, SamplePeriodNs: p.SamplePeriodNs, SourceRoot: root, SourceRootExplicit: o.SourceRoot != "", SourceRootNote: rootNote}
 	for f, a := range fn {
 		sum.Functions = append(sum.Functions, FuncRow{
-			Name: f.Name, File: f.File, Line: f.Line, SelfShare: a.self / total, InclShare: a.incl / total,
+			Name: f.Name, File: f.File, Line: f.Line, Column: f.Column, SelfShare: a.self / total, InclShare: a.incl / total,
 			OwnShare: a.own / total, OwnN: int64(a.ownN + 0.5), Own: a.isOwn,
 		})
 	}
@@ -211,7 +229,10 @@ func Summarize(p *Profile, meta *RunMeta, o Options) (*Summary, error) {
 		if a.File != b.File {
 			return a.File < b.File
 		}
-		return a.Line < b.Line
+		if a.Line != b.Line {
+			return a.Line < b.Line
+		}
+		return a.Column < b.Column
 	})
 	for name, w := range spanW {
 		sum.Spans = append(sum.Spans, SpanRow{Name: name, Share: w / total, N: int64(spanN[name] + 0.5)})
@@ -231,6 +252,10 @@ func Summarize(p *Profile, meta *RunMeta, o Options) (*Summary, error) {
 // Print writes the summary as text: top functions, spans, OS CPU per request.
 func (s *Summary) Print(w io.Writer, top int) {
 	fmt.Fprintf(w, "profile (%s): %d samples\n", s.Format, s.Samples)
+	s.PrintSourceRoot(w)
+	if s.SamplePeriodNs > 0 {
+		fmt.Fprintf(w, "evented sampling period: %s (sample counts = CPU time / period)\n", fmtNs(s.SamplePeriodNs))
+	}
 	if s.CPUPerRequestNs > 0 {
 		fmt.Fprintf(w, "OS CPU per request: %s (%d requests)\n", fmtNs(s.CPUPerRequestNs), s.Run.Requests)
 	} else {
@@ -246,7 +271,7 @@ func (s *Summary) Print(w io.Writer, top int) {
 		if f.Own {
 			own = pct(f.OwnShare)
 		}
-		fmt.Fprintf(w, "%-8s %-9s %-9s  %s\n", pct(f.SelfShare), pct(f.InclShare), own, functionName(f.Name, f.File, f.Line))
+		fmt.Fprintf(w, "%-8s %-9s %-9s  %s\n", pct(f.SelfShare), pct(f.InclShare), own, functionName(f.Name, f.File, f.Line, f.Column))
 	}
 	if len(s.Spans) > 0 {
 		fmt.Fprintf(w, "\n%-8s %-8s  %s\n", "share", "samples", "span")
@@ -255,6 +280,25 @@ func (s *Summary) Print(w io.Writer, top int) {
 		}
 	} else {
 		fmt.Fprintln(w, "\nno spans in this profile (no span_name label, no span__ or UserTag frames)")
+	}
+}
+
+func printSourceRoot(w io.Writer, label, root string, explicit bool) {
+	mode := "inferred"
+	if explicit {
+		mode = "explicit"
+	}
+	if root == "" {
+		root = "(no source paths)"
+	}
+	fmt.Fprintf(w, "%ssource root: %s (%s)\n", label, root, mode)
+}
+
+// PrintSourceRoot reports normalization provenance before the CPU table.
+func (s *Summary) PrintSourceRoot(w io.Writer) {
+	printSourceRoot(w, "", s.SourceRoot, s.SourceRootExplicit)
+	if s.SourceRootNote != "" {
+		fmt.Fprintf(w, "note: %s\n", s.SourceRootNote)
 	}
 }
 

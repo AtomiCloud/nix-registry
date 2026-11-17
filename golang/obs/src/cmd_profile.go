@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/AtomiCloud/obs/internal/profile"
 )
@@ -18,7 +19,9 @@ const profileUsage = `usage:
   obs profile compare   --format F (--baseline FILE | --service S --scenario N [--dir DIR]) [--limits e2e/profile-limits.yaml] [--run run.json] FILE
 
 A run's OS CPU and runner signal come from <FILE>.run.json next to the profile (or --run).
-exit 0 when no row is slower than its limit, 1 when one is, 2 on a usage or input error.
+All subcommands accept --sample-period DURATION for evented profiles (default 1ms for dotnet-trace).
+--source-root DIR overrides inferred checkout-root normalization; baselines store the root used.
+exit 0 when clean, 1 on a regression or missing baseline function, 2 on a usage or input error.
 `
 
 type stringList []string
@@ -63,8 +66,8 @@ func runProfile(args []string, stdout, stderr io.Writer) int {
 }
 
 // loadRun reads one profile and its run meta (explicit path, else <file>.run.json).
-func loadRun(file, format, runPath string, own []string) (*profile.Summary, error) {
-	p, err := profile.Read(file, format)
+func loadRun(file, format, runPath string, own []string, samplePeriod time.Duration, sourceRoot string) (*profile.Summary, error) {
+	p, err := profile.ReadWithSamplePeriod(file, format, float64(samplePeriod))
 	if err != nil {
 		return nil, err
 	}
@@ -83,13 +86,15 @@ func loadRun(file, format, runPath string, own []string) (*profile.Summary, erro
 	if ok {
 		meta = &m
 	}
-	return profile.Summarize(p, meta, profile.Options{Own: own})
+	return profile.Summarize(p, meta, profile.Options{Own: own, SourceRoot: sourceRoot})
 }
 
 func runProfileSummarize(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("obs profile summarize", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	format := fs.String("format", "", "pprof, cpuprofile or speedscope")
+	samplePeriod := fs.Duration("sample-period", time.Millisecond, "evented sampling period used for collection (default 1ms, dotnet-trace)")
+	sourceRoot := fs.String("source-root", "", "explicit checkout root (default: infer from own sources)")
 	var own stringList
 	fs.Var(&own, "own", "regular expression: a function or file matching it is the service's own code (repeatable; default: all code)")
 	runPath := fs.String("run", "", "run meta file (default <FILE>.run.json)")
@@ -103,7 +108,7 @@ func runProfileSummarize(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprint(stderr, "obs profile summarize: give --format and exactly one profile file\n\n"+profileUsage)
 		return 2
 	}
-	sum, err := loadRun(pos[0], *format, *runPath, own)
+	sum, err := loadRun(pos[0], *format, *runPath, own, *samplePeriod, *sourceRoot)
 	if err != nil {
 		fmt.Fprintf(stderr, "obs profile summarize: %v\n", err)
 		return 2
@@ -122,6 +127,8 @@ func runProfileBaseline(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("obs profile baseline", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	format := fs.String("format", "", "pprof, cpuprofile or speedscope")
+	samplePeriod := fs.Duration("sample-period", time.Millisecond, "evented sampling period used for collection (stored in the baseline)")
+	sourceRoot := fs.String("source-root", "", "explicit checkout root (stored in the baseline)")
 	service := fs.String("service", "", "service name")
 	scenario := fs.String("scenario", "", "scenario name (e2e/profile-scenarios/<name>.json)")
 	profiler := fs.String("profiler", "", "profiler the runs used; dotnet-trace gives every row the 30 % tolerance")
@@ -156,7 +163,7 @@ func runProfileBaseline(args []string, stdout, stderr io.Writer) int {
 	}
 	var runs []*profile.Summary
 	for _, f := range pos {
-		sum, err := loadRun(f, *format, "", own)
+		sum, err := loadRun(f, *format, "", own, *samplePeriod, *sourceRoot)
 		if err != nil {
 			fmt.Fprintf(stderr, "obs profile baseline: %v\n", err)
 			return 2
@@ -179,6 +186,10 @@ func runProfileBaseline(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintf(stdout, "obs profile baseline: wrote %s: median of 3 runs, %d samples, %d functions, %d spans, %d bytes\n",
 		out, b.Samples, len(b.Functions), len(b.Spans), len(data))
+	b.PrintSourceRoot(stdout)
+	if runs[0].SourceRootNote != "" {
+		fmt.Fprintf(stdout, "note: %s\n", runs[0].SourceRootNote)
+	}
 	if b.CPUPerRequestNs == 0 {
 		fmt.Fprintln(stdout, "note: the runs had no run meta (requests, os_cpu_ns): the baseline has no total CPU per request")
 	}
@@ -189,6 +200,8 @@ func runProfileCompare(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("obs profile compare", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	format := fs.String("format", "", "pprof, cpuprofile or speedscope")
+	samplePeriod := fs.Duration("sample-period", time.Millisecond, "evented sampling period used for this collection (must match baseline)")
+	sourceRoot := fs.String("source-root", "", "explicit checkout root (default: baseline explicit root, otherwise infer)")
 	basePath := fs.String("baseline", "", "baseline file")
 	service := fs.String("service", "", "service name (with --scenario: finds <dir>/<service>.<scenario>.json)")
 	scenario := fs.String("scenario", "", "scenario name")
@@ -220,15 +233,28 @@ func runProfileCompare(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "obs profile compare: %v\n", err)
 		return 2
 	}
-	now, err := loadRun(pos[0], *format, *runPath, b.Own)
+	if *sourceRoot == "" && b.SourceRootExplicit {
+		*sourceRoot = b.SourceRoot
+	}
+	now, err := loadRun(pos[0], *format, *runPath, b.Own, *samplePeriod, *sourceRoot)
 	if err != nil {
 		fmt.Fprintf(stderr, "obs profile compare: %v\n", err)
 		return 2
 	}
+	if b.SamplePeriodNs != now.SamplePeriodNs {
+		fmt.Fprintf(stderr, "obs profile compare: %s: sample period differs: baseline %g ns, now %g ns; pass the actual --sample-period used for collection\n", *basePath, b.SamplePeriodNs, now.SamplePeriodNs)
+		return 2
+	}
+	if (b.SourceRootExplicit || now.SourceRootExplicit) && (b.SourceRootExplicit != now.SourceRootExplicit || b.SourceRoot != now.SourceRoot) {
+		fmt.Fprintf(stderr, "obs profile compare: %s: explicit source roots differ: baseline %q, now %q; use the baseline's --source-root or regenerate with --update\n", *basePath, b.SourceRoot, now.SourceRoot)
+		return 2
+	}
+	b.PrintSourceRoot(stdout)
+	now.PrintSourceRoot(stdout)
 	rows, extra := profile.Compare(b, now, limits)
 	failed := profile.PrintCompare(stdout, *basePath, rows, extra)
 	if failed > 0 {
-		fmt.Fprintf(stdout, "obs profile compare: FAILED: %d of %d rows slower than their limit (%s, %s)\n", failed, len(rows), b.Service, b.Scenario)
+		fmt.Fprintf(stdout, "obs profile compare: FAILED: %d of %d rows failed (%s, %s)\n", failed, len(rows), b.Service, b.Scenario)
 		return 1
 	}
 	fmt.Fprintf(stdout, "obs profile compare: ok: %d rows, none slower than its limit (%s, %s)\n", len(rows), b.Service, b.Scenario)

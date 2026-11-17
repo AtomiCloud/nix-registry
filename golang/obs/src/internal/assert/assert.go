@@ -205,8 +205,12 @@ func holes(c *contract.Contract, g *group) []Finding {
 			out = append(out, Finding{Level: Fail, Metric: g.metric, Rule: "pod-label-on-business-metric",
 				Msg: fmt.Sprintf("label %q (%d values) is a pod key and the metric is not per_pod: the aggregation must drop it", l, len(vs))})
 		case !allowed[l]:
-			out = append(out, Finding{Level: Fail, Metric: g.metric, Rule: "label-not-in-contract",
-				Msg: fmt.Sprintf("label %q is not a label of this metric in the contract (%d values, e.g. %s)", l, len(vs), quoteN(vs, 3))})
+			level, detail := Warn, "constant resource label does not split series"
+			if len(vs) > 1 {
+				level, detail = Fail, "varying label splits series"
+			}
+			out = append(out, Finding{Level: level, Metric: g.metric, Rule: "label-not-in-contract",
+				Msg: fmt.Sprintf("label %q is not a label of this metric in the contract (%d values, e.g. %s); %s", l, len(vs), quoteN(vs, 3), detail)})
 		default:
 			if t, ok := c.LabelType(g.sm.Metric, l); ok {
 				if bad := outside(t, vs); len(bad) > 0 {

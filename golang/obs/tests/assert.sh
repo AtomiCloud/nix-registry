@@ -45,10 +45,19 @@ run --series "$work/sparse-pod.json"
 expect 1 "RED underfilled: business pod key" "FAIL $work/sparse-pod.json metric checkout.charges: [pod-label-on-business-metric]" '"k8s_pod_name"'
 sed 's/"outcome":"success"/"outcome":"success","user_id":"review-user"/' "$work/sparse-ok.json" >"$work/sparse-label.json"
 run --series "$work/sparse-label.json"
-expect 1 "RED underfilled: undeclared label" "FAIL $work/sparse-label.json metric checkout.charges: [label-not-in-contract]" '"user_id"'
+expect 0 "underfilled constant undeclared label warns without splitting series" "warn $work/sparse-label.json metric checkout.charges: [label-not-in-contract]" '"user_id"'
 sed 's/stripe/review-provider/' "$work/sparse-ok.json" >"$work/sparse-value.json"
 run --series "$work/sparse-value.json"
 expect 1 "RED underfilled: enum value outside type" "FAIL $work/sparse-value.json metric checkout.charges: [label-value-outside-type]" '"review-provider"'
+
+cat >"$work/sdk-ok.json" <<'JSON'
+{"status":"success","data":[{"__name__":"checkout_charges_total","payment_provider":"stripe","outcome":"success","telemetry_sdk_language":"go","telemetry_sdk_name":"opentelemetry","telemetry_sdk_version":"1.47.0"},{"__name__":"checkout_charges_total","payment_provider":"adyen","outcome":"success","telemetry_sdk_language":"go","telemetry_sdk_name":"opentelemetry","telemetry_sdk_version":"1.47.0"}]}
+JSON
+run --series "$work/sdk-ok.json"
+expect 0 "OTel export: constant SDK resource labels are warnings" "obs assert: ok:" '"telemetry_sdk_version"' "constant resource label"
+sed 's/"adyen","outcome":"success","telemetry_sdk_language":"go","telemetry_sdk_name":"opentelemetry","telemetry_sdk_version":"1.47.0"/"adyen","outcome":"success","telemetry_sdk_language":"go","telemetry_sdk_name":"opentelemetry","telemetry_sdk_version":"1.48.0"/' "$work/sdk-ok.json" >"$work/sdk-red.json"
+run --series "$work/sdk-red.json"
+expect 1 "RED OTel export: varying SDK version splits series under capacity" "FAIL $work/sdk-red.json metric checkout.charges: [label-not-in-contract]" '"telemetry_sdk_version"' '"1.48.0"' "varying label splits series"
 
 run --series "$s/series-ok.json" --pods 2
 expect 0 "/api/v1/series within the worst case (counter 6, histogram 3 x 14 = 42, per-pod gauge 2 pods, platform metric)" \

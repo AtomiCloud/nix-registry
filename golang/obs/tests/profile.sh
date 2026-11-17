@@ -79,13 +79,21 @@ bl="$b/checkout.browse.json"
 # TraceEvent's dotnet-trace export is evented, with wait intervals removed by obs.
 dn_event="$work/dotnet-evented"
 run profile summarize --format speedscope --own '^App\.' "$fx/dotnet-base.speedscope.json.gz"
-expect 0 "dotnet evented open time read; huge wait interval dropped" "1000 samples" "App.Render" "20.0%"
+expect 0 "dotnet evented open time read; huge wait interval dropped" "2000 samples" "App.Render" "20.0%"
 run profile baseline --format speedscope --service dotnet --scenario load --own '^App\.' --profiler dotnet-trace --dir "$dn_event" "$fx/dotnet-base.speedscope.json.gz" "$fx/dotnet-base.speedscope.json.gz" "$fx/dotnet-base.speedscope.json.gz"
 expect 0 "dotnet evented baseline" "3 functions"
 run profile compare --format speedscope --baseline "$dn_event/dotnet.load.json" "$fx/dotnet-base.speedscope.json.gz"
 expect 0 "dotnet evented green control" "none slower than its limit"
 run profile compare --format speedscope --baseline "$dn_event/dotnet.load.json" "$fx/dotnet-slow.speedscope.json.gz"
 expect 1 "dotnet evented red twin: render +50%, limit 30%" "FAIL $dn_event/dotnet.load.json function \"App.Render\"" "20.0% -> 30.0%" "+50.0%" "limit of 30.0%"
+run profile compare --format speedscope --baseline "$dn_event/dotnet.load.json" --sample-period 2ms "$fx/dotnet-base.speedscope.json.gz"
+expect 2 "evented period mismatch is refused" "sample period differs" "--sample-period"
+run profile baseline --format speedscope --service coalesced --scenario load --own '^App\.' --profiler dotnet-trace --dir "$dn_event" "$fx/coalesced-base.speedscope.json.gz" "$fx/coalesced-base.speedscope.json.gz" "$fx/coalesced-base.speedscope.json.gz"
+expect 0 "coalesced evented baseline uses 1ms sampling period" "10000 samples"
+run profile compare --format speedscope --baseline "$dn_event/coalesced.load.json" "$fx/coalesced-base.speedscope.json.gz"
+expect 0 "coalesced intervals green control" "none slower than its limit"
+run profile compare --format speedscope --baseline "$dn_event/coalesced.load.json" "$fx/coalesced-slow.speedscope.json.gz"
+expect 1 "RED coalesced CPU +50% exceeds .NET 30%" "FAIL $dn_event/coalesced.load.json function \"App.Render\"" "+50.0%" "limit of 30.0%"
 
 # ---- compare: green and red ------------------------------------------------------------------
 cmpr() { run profile compare --format pprof --baseline "$bl" "$@"; }

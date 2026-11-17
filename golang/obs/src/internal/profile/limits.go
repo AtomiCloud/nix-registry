@@ -29,6 +29,7 @@ type Override struct {
 	Name     string  `yaml:"name"`     // function or span name; empty: every row of the kind
 	File     string  `yaml:"file"`     // optional function source file (exact match)
 	Line     int64   `yaml:"line"`     // optional one-based function declaration line
+	Column   int64   `yaml:"column"`   // optional one-based declaration column
 	Limit    float64 `yaml:"limit"`    // the tolerance, as a fraction (0.10 = 10 %)
 	Why      string  `yaml:"why"`      // required
 }
@@ -68,8 +69,8 @@ func LoadLimits(path string) (*Limits, error) {
 		default:
 			return nil, inputErr(path, "%s: kind %q: want function, span or total", where, o.Kind)
 		}
-		if o.Line < 0 || ((o.File != "" || o.Line != 0) && o.Kind != "function") {
-			return nil, inputErr(path, "%s: file/line selectors require kind: function and a nonnegative line", where)
+		if o.Line < 0 || o.Column < 0 || ((o.File != "" || o.Line != 0 || o.Column != 0) && o.Kind != "function") {
+			return nil, inputErr(path, "%s: file/line/column selectors require kind: function and nonnegative locations", where)
 		}
 	}
 	return &l, nil
@@ -78,14 +79,14 @@ func LoadLimits(path string) (*Limits, error) {
 // tolerance picks the tolerance of one row: the most specific override, else the default.
 // why is the override's reason (empty for a default).
 func (l *Limits) tolerance(b *Baseline, kind, name string) (tol float64, why string) {
-	return l.rowTolerance(b, kind, name, "", 0)
+	return l.rowTolerance(b, kind, name, "", 0, 0)
 }
 
 func (l *Limits) functionTolerance(b *Baseline, r Row) (float64, string) {
-	return l.rowTolerance(b, "function", r.Name, r.File, r.Line)
+	return l.rowTolerance(b, "function", r.Name, r.File, r.Line, r.Column)
 }
 
-func (l *Limits) rowTolerance(b *Baseline, kind, name, file string, line int64) (tol float64, why string) {
+func (l *Limits) rowTolerance(b *Baseline, kind, name, file string, line, column int64) (tol float64, why string) {
 	tol = TolFunction
 	switch kind {
 	case "total":
@@ -103,7 +104,7 @@ func (l *Limits) rowTolerance(b *Baseline, kind, name, file string, line int64) 
 	for _, o := range l.Overrides {
 		if o.Service != b.Service || (o.Scenario != "" && o.Scenario != b.Scenario) ||
 			(o.Kind != "" && o.Kind != kind) || (o.Name != "" && o.Name != name) ||
-			(o.File != "" && o.File != file) || (o.Line != 0 && o.Line != line) {
+			(o.File != "" && sourceFile(o.File) != sourceFile(file)) || (o.Line != 0 && o.Line != line) || (o.Column != 0 && o.Column != column) {
 			continue
 		}
 		spec := 0
@@ -120,6 +121,9 @@ func (l *Limits) rowTolerance(b *Baseline, kind, name, file string, line int64) 
 			spec++
 		}
 		if o.Line != 0 {
+			spec++
+		}
+		if o.Column != 0 {
 			spec++
 		}
 		if spec > best {

@@ -224,6 +224,15 @@ func TestWriteFixtures(t *testing.T) {
 		}
 		w(name, buf.String())
 	}
+	for name, body := range map[string]string{"coalesced-base.speedscope.json.gz": coalescedEventedJSON(200, 800), "coalesced-slow.speedscope.json.gz": coalescedEventedJSON(300, 700)} {
+		var buf bytes.Buffer
+		zw := gzip.NewWriter(&buf)
+		_, _ = zw.Write([]byte(body))
+		if err := zw.Close(); err != nil {
+			t.Fatal(err)
+		}
+		w(name, buf.String())
+	}
 }
 
 // quick structural check that the JSON fixtures are valid JSON.
