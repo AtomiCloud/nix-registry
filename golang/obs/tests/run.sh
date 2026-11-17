@@ -144,6 +144,10 @@ if [ -n "${OUT:-}" ]; then
   [ -s "$lic/github.com/VictoriaMetrics/VictoriaLogs/LICENSE" ] && ok "VictoriaLogs LICENSE ships" || bad "VictoriaLogs LICENSE missing"
 fi
 
+# ---- obs check, obs gen, generated code (gen.sh)
+# shellcheck disable=SC1091 # path is dynamic; gen.sh is checked on its own
+. "$here/gen.sh"
+
 echo "obs tests: $pass passed, $fail failed"
 bash "$here/alerts.sh" "$OBS"
 [ "$fail" -eq 0 ]

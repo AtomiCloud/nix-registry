@@ -1,0 +1,5 @@
+service: checkout
+types:
+  user_id: { kind: free }
+logs:
+  ChargeFailed: { event: checkout.charge.failed, level: error, stream_labels: { who: user_id } }
