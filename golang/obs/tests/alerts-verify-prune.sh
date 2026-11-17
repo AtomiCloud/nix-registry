@@ -63,8 +63,23 @@ sed -i 's/from: { metric: fixture.requests, where: { outcome: error } } }\]/from
 sed -i 's#_stream:{"service.name"="checkout"} "durian.cloud/event":=fixture.failed customer_tier:=gold "timeout" | stats count() as hits#"durian.cloud/event":=fixture.failed | union ("durian.cloud/event":=fixture.ok) | stats count() as hits#' "$u/alerts/logs/critical.yaml"
 grep -qF 'union ("durian.cloud/event":=fixture.ok)' "$u/alerts/logs/critical.yaml"
 grep -qF 'fixture.ok' "$u/seed.yaml"
+# Correct union evaluation fires on the baseline: this planted rule must be red.
+# Unknown events and stored-value stats in nested queries must also be refused.
+cp "$u/alerts/logs/critical.yaml" "$work/union-rule"
+sed -i 's#union ("durian.cloud/event":=fixture.ok)#union ("durian.cloud/event":=fixture.typo amount:>100)#' "$u/alerts/logs/critical.yaml"
+run query --static --dir "$u"
+expect 1 'alerts/logs/critical.yaml' 'rule logs query A' 'fixture.typo' '[contract-undeclared-event]'
+OBS_VERIFY_PRUNE=1 run alerts --dir "$u" --base "$base"
+expect 1 'alerts/logs/critical.yaml' 'rule logs query A' 'fixture.typo'
+cp "$work/union-rule" "$u/alerts/logs/critical.yaml"
+sed -i 's#union ("durian.cloud/event":=fixture.ok)#union ("durian.cloud/event":=fixture.ok | stats sum(amount) as n)#' "$u/alerts/logs/critical.yaml"
+run query --static --dir "$u"
+expect 1 'alerts/logs/critical.yaml' 'rule logs query A' 'sum(amount)'
+cp "$work/union-rule" "$u/alerts/logs/critical.yaml"
 run alerts --dir "$u" --base "$base" --steps "$work/union-pruned.json"
+expect 1 'alerts/logs/critical.yaml rule logs window baseline expect quiet' 'union ("durian.cloud/event":=fixture.ok)'
 OBS_NO_PRUNE=1 run alerts --dir "$u" --base "$base" --steps "$work/union-full.json"
+expect 1 'alerts/logs/critical.yaml rule logs window baseline expect quiet'
 OBS_VERIFY_PRUNE=1 run alerts --dir "$u" --base "$base"
 if cmp -s "$work/union-pruned.json" "$work/union-full.json"; then
   grep -qE 'verify prune: .*mismatches=0' "$work/out" || {
@@ -79,4 +94,4 @@ else
   echo 'alerts-verify-prune: union rows dropped by lazy loading: pruned != full, red as required'
 fi
 
-echo 'obs alerts verify-prune tests: baseline green, seed plant red, union consistent'
+echo 'obs alerts verify-prune tests: baseline green; seed, union and nested-policy plants red'

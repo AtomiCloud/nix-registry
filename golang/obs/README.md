@@ -514,7 +514,10 @@ LogsQL queries use each rule's `relativeTimeRange.from/to`, parse at the resulti
 end time and add the exclusive `[start, end)` range. Final `stats by (...)` fields
 are instance labels, alongside `__name__` for each stats output column. A numeric
 null keeps that instance's labels and evaluates as NoData. With a contract, `durian.cloud/event` filters are checked
-against its event list. Other field-value filters are printed as assumptions and
+against its event list (exact/phrase names, matching prefixes, regex and in selectors).
+Subqueries, including union/join and in queries, receive the same recursive policy.
+Opaque row-producing forms are refused; pruning retains every event whenever a
+query can read additional sources. Other field-value filters are printed as assumptions and
 removed from the parsed AST; event filters in `_stream` or `or`, unknown events
 and stats reading field values are refused. Seed events must be declared too.
 Without a contract, one event-rule-skipped note is printed for each log query.

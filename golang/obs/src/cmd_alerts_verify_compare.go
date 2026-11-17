@@ -198,6 +198,9 @@ func normalizeSteps(raw []byte, base time.Time) (map[string]any, error) {
 			if k == "alert" || k == "run" || k == "steps" {
 				continue
 			}
+			if k == "transitions" {
+				val = sortedPruneItems(val)
+			}
 			rec[k] = val
 		}
 		steps := map[string]any{}
@@ -214,6 +217,9 @@ func normalizeSteps(raw []byte, base time.Time) (map[string]any, error) {
 				entry := map[string]any{}
 				for k, val := range sm {
 					if k != "t" {
+						if k == "err" {
+							val = sortedPruneItems(val)
+						}
 						entry[k] = val
 					}
 				}
@@ -262,7 +268,11 @@ func normalizeRecorded(raw []byte) (map[string]any, error) {
 		if !ok {
 			return nil, fmt.Errorf("recorded JSON: row %d is not an object", i)
 		}
-		key := "series " + render(m["labels"])
+		labels, err := json.Marshal(m["labels"])
+		if err != nil {
+			return nil, err
+		}
+		key := "series " + string(labels)
 		if ts, ok := m["timestamps"].([]any); ok && len(ts) > 0 {
 			key += " from t=" + render(ts[0])
 		}
@@ -283,4 +293,19 @@ func baseFromOut(raw []byte) (ms int64, ok bool) {
 		return 0, false
 	}
 	return *o.BaseMs, true
+}
+
+// Cross-instance transitions and simultaneous errors have no iteration order.
+func sortedPruneItems(v any) any {
+	items, ok := v.([]any)
+	if !ok {
+		return v
+	}
+	out := append([]any(nil), items...)
+	sort.Slice(out, func(i, j int) bool {
+		a, _ := json.Marshal(out[i])
+		b, _ := json.Marshal(out[j])
+		return string(a) < string(b)
+	})
+	return out
 }

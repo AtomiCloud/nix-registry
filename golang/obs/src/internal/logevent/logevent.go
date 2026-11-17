@@ -43,7 +43,8 @@ func AnalyzeAt(expr string, events Events, at time.Time) (Analysis, error) {
 		out.Skipped = true
 		return out, nil
 	}
-	names := append([]string{}, events.EventNames()...)
+	declared := append([]string{}, events.EventNames()...)
+	names := append([]string{}, declared...)
 	sort.Strings(names)
 	known := map[string]bool{}
 	for _, n := range names {
@@ -77,7 +78,7 @@ func AnalyzeAt(expr string, events Events, at time.Time) (Analysis, error) {
 					if len(n.Values) > 0 {
 						value = n.Values[0]
 					}
-					return "", fmt.Errorf("event %q is not in the contract%s", value, hint(value, names))
+					return "", fmt.Errorf("event %q is not in the contract%s", value, hint(value, declared))
 				}
 				matches = append(matches, n.Values[0])
 			case "prefix":
@@ -91,7 +92,7 @@ func AnalyzeAt(expr string, events Events, at time.Time) (Analysis, error) {
 					}
 				}
 				if len(matches) == 0 {
-					return "", fmt.Errorf("event prefix %q matches no contract event", prefix)
+					return "", fmt.Errorf("event prefix %q matches no contract event (contract/events.json: %s)%s", prefix+"*", strings.Join(declared, ", "), hint(prefix, declared))
 				}
 			case "regexp":
 				re, err := regexp.Compile(n.Pattern)
@@ -218,36 +219,37 @@ func unique(xs []string) []string {
 }
 
 func hint(name string, names []string) string {
-	best, distance := "", len(name)+1
+	best, distance := "", 4
 	for _, s := range names {
 		d := editDistance(name, s)
 		if d < distance {
 			best, distance = s, d
 		}
 	}
-	if best != "" && distance <= max(2, len(name)/3) {
-		return fmt.Sprintf("; did you mean %q?", best)
+	if best != "" {
+		return fmt.Sprintf("; did you mean %q", best)
 	}
 	return ""
 }
 func editDistance(a, b string) int {
-	prev := make([]int, len(b)+1)
+	ra, rb := []rune(a), []rune(b)
+	prev := make([]int, len(rb)+1)
 	for j := range prev {
 		prev[j] = j
 	}
-	for i := 1; i <= len(a); i++ {
-		cur := make([]int, len(b)+1)
+	for i := 1; i <= len(ra); i++ {
+		cur := make([]int, len(rb)+1)
 		cur[0] = i
-		for j := 1; j <= len(b); j++ {
+		for j := 1; j <= len(rb); j++ {
 			cost := 0
-			if a[i-1] != b[j-1] {
+			if ra[i-1] != rb[j-1] {
 				cost = 1
 			}
 			cur[j] = min(cur[j-1]+1, prev[j]+1, prev[j-1]+cost)
 		}
 		prev = cur
 	}
-	return prev[len(b)]
+	return prev[len(rb)]
 }
 
 // ValidateSeed refuses an undeclared seed event before any engine is started.

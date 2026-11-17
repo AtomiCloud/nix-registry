@@ -15,6 +15,7 @@ func TestSubqueryPolicyCannotBeBypassed(t *testing.T) {
 		{"in subquery unknown", `"durian.cloud/event":=checkout.failed user:in("durian.cloud/event":=checkout.typo | fields user) | stats count()`, `event "checkout.typo" is not in the contract`},
 		{"event in subquery unknown", `"durian.cloud/event":in("durian.cloud/event":=checkout.typo | fields "durian.cloud/event") | stats count()`, `event "checkout.typo" is not in the contract`},
 		{"nested stored stats", `"durian.cloud/event":=checkout.failed | union ("durian.cloud/event":=checkout.ok | stats sum(amount) as n) | stats count()`, "sum(amount)"},
+		{"conditional pipe unknown", `"durian.cloud/event":=checkout.failed | unpack_json if ("durian.cloud/event":=checkout.typo) | stats count()`, `event "checkout.typo" is not in the contract`},
 		{"inline rows", `"durian.cloud/event":=checkout.failed | union rows({"durian.cloud/event":"checkout.typo"}) | stats count()`, "pipe form not checkable"},
 		{"stream context", `"durian.cloud/event":=checkout.failed | stream_context before 1 after 1 | stats count()`, "pipe form not checkable"},
 	} {
@@ -40,5 +41,15 @@ func TestNestedAssumptionsAreStripped(t *testing.T) {
 	}
 	if strings.Join(a.Events, ",") != "checkout.failed,checkout.ok" {
 		t.Fatalf("nested events absent: %+v", a)
+	}
+}
+
+func TestConditionalPipeAssumptionsAreStripped(t *testing.T) {
+	a, err := Analyze(`"durian.cloud/event":=checkout.failed | unpack_json if (customer_tier:=gold) | stats count()`, events{"checkout.failed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(a.Expr, "customer_tier") || len(a.Assumed) != 1 {
+		t.Fatalf("conditional pipe escaped assumption policy: %+v", a)
 	}
 }

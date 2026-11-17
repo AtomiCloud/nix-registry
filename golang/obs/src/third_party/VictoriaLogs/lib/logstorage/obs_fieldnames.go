@@ -152,11 +152,40 @@ func (q *Query) ObsNeedsFullSeed() bool {
 		}
 	})
 	for _, p := range q.pipes {
-		if obsAlertOpaquePipe(p) {
+		if slot := obsAlertPipeCondition(p); obsAlertOpaquePipe(p) || (slot != nil && *slot != nil) {
 			extra = true
 		}
 	}
 	return extra
+}
+
+// Conditional transforms also carry filters, not only stats/filter pipes.
+func obsAlertPipeCondition(p pipe) **ifFilter {
+	switch t := p.(type) {
+	case *pipeExtract:
+		return &t.iff
+	case *pipeExtractRegexp:
+		return &t.iff
+	case *pipeUnpackJSON:
+		return &t.iff
+	case *pipeUnpackLogfmt:
+		return &t.iff
+	case *pipeUnpackSyslog:
+		return &t.iff
+	case *pipeUnroll:
+		return &t.iff
+	case *pipeFormat:
+		return &t.iff
+	case *pipeSetStreamFields:
+		return &t.iff
+	case *pipeReplace:
+		return &t.iff
+	case *pipeReplaceRegexp:
+		return &t.iff
+	case *pipeCollapseNums:
+		return &t.iff
+	}
+	return nil
 }
 
 func obsAlertOpaquePipe(p pipe) bool {
@@ -241,7 +270,18 @@ func (q *Query) obsAlertTransformOne(transform func(ObsFilterTree) (string, erro
 				}
 			case *pipeStats, *pipeFilter:
 			default:
-				return nil, fmt.Errorf("log alert pipe form not checkable: %s", p.String())
+				if obsAlertPipeCondition(p) == nil {
+					return nil, fmt.Errorf("log alert pipe form not checkable: %s", p.String())
+				}
+			}
+		}
+		if !seenStats {
+			if slot := obsAlertPipeCondition(p); slot != nil && *slot != nil {
+				f, err := rewrite((*slot).f)
+				if err != nil {
+					return nil, err
+				}
+				*slot = newIfFilter(f)
 			}
 		}
 		switch ps := p.(type) {

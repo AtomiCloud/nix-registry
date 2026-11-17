@@ -184,7 +184,7 @@ func Check(o Options, stdout, stderr io.Writer) int {
 		// Generate only seed metrics required by metric selectors or seeded log events.
 		names := neededMetricNames(used)
 		selected := sd.Metrics
-		if names != nil {
+		if names != nil && !noPrune {
 			selected = map[string]seed.MetricDef{}
 			logMetrics := map[string]bool{}
 			for _, l := range sd.Logs {

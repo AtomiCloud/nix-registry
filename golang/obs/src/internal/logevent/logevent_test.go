@@ -75,8 +75,8 @@ func TestEventRefusals(t *testing.T) {
 		{`"durian.cloud/event":~nomatch | stats count()`, `matches no contract event`},
 		{`"durian.cloud/event":in(nope, typo) | stats count()`, `matches no contract event`},
 		{`"durian.cloud/event":"checkout.faile" | stats count()`, `did you mean "checkout.failed"`},
-		{`"durian.cloud/event":nomatch* | stats count()`, `prefix "nomatch" matches no contract event`},
-		{`-"durian.cloud/event":=nomatch* | stats count()`, `prefix "nomatch" matches no contract event`},
+		{`"durian.cloud/event":nomatch* | stats count()`, `prefix "nomatch*" matches no contract event`},
+		{`-"durian.cloud/event":=nomatch* | stats count()`, `prefix "nomatch*" matches no contract event`},
 		{`"durian.cloud/event":>0 | stats count()`, `event filter form not checkable`},
 		{`"durian.cloud/event":=checkout.failed | stats sum(amount)`, `sum(amount)`},
 		{`"durian.cloud/event":=checkout.failed | stats quantile(0.9, latency)`, `latency`},
@@ -103,5 +103,13 @@ func TestNoContractAndSeed(t *testing.T) {
 	}
 	if err := ValidateSeed([]string{"checkout.faile"}, events{"checkout.failed"}); err == nil || !strings.Contains(err.Error(), "did you mean") {
 		t.Fatalf("bad seed passed: %v", err)
+	}
+}
+
+func TestPrefixDiagnosticMatchesContractOrder(t *testing.T) {
+	_, err := Analyze(`"durian.cloud/event":pay.failedd* | stats count()`, events{"pay.ok", "pay.failed"})
+	want := `event prefix "pay.failedd*" matches no contract event (contract/events.json: pay.ok, pay.failed); did you mean "pay.failed"`
+	if err == nil || err.Error() != want {
+		t.Fatalf("got %v want %s", err, want)
 	}
 }
