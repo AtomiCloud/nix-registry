@@ -1,7 +1,5 @@
-// obs: the observability check tool. This release (0.1.0) ships `obs query --static`,
-// `obs query --live` and `obs version`: every alert and dashboard query is parsed by
-// the embedded VictoriaMetrics and VictoriaLogs parsers and run on a seed, with no
-// network and no containers.
+// obs checks observability queries and links with embedded store engines,
+// seeded data, no network and no containers.
 package main
 
 import (
@@ -32,6 +30,8 @@ usage:
   obs alerts [--dir observability] [--seed seed.yaml] [--base unix] [--out results.json]
   obs check [--dir observability] [--pods n] [--landscapes n]
   obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
+
+  obs links [--dir observability] [--seed seed.yaml] [--base unix]
   obs version
 
 exit 0 when clean, 1 when a check failed, 2 on a usage or input error.
@@ -50,6 +50,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "alerts":
 		return runAlerts(args[1:], stdout, stderr)
+
+	case "links":
+		return runLinks(args[1:], stdout, stderr)
 	case "query":
 		return runQuery(args[1:], stdout, stderr)
 	case "check":
@@ -66,6 +69,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func printVersion(w io.Writer) {
 	fmt.Fprintf(w, "obs %s\n", version)
+	fmt.Fprintln(w, "engine Tempo 3.1.1 (commit 9db7df79d2af, TraceQL)")
 	fmt.Fprintf(w, "engine VictoriaMetrics %s (MetricsQL)\n", pinVictoriaMetrics)
 	fmt.Fprintf(w, "engine VictoriaLogs %s (LogsQL)\n", pinVictoriaLogs)
 	fmt.Fprintln(w, "engine Grafana 13.3.0 (commit 752e3462; alert math and state machine)")

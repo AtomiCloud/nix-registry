@@ -221,6 +221,9 @@ func (s *Set) readAlert(rel string, b []byte) {
 				qt = t
 			}
 			expr, _ := q.Model["expr"].(string)
+			if expr == "" && (dsType == "tempo" || strings.Contains(dsUID, "tempo") || strings.Contains(dsUID, "traces")) {
+				expr, _ = q.Model["query"].(string)
+			}
 			qu := Query{
 				File: rel, IsAlert: true, Expr: expr, RangeSecs: q.RelativeTimeRange.From,
 				QueryType: qt, DSType: dsType, DSUID: dsUID,
@@ -281,6 +284,7 @@ type targetDoc struct {
 	Datasource any    `json:"datasource"`
 	Expr       string `json:"expr"`
 	Expression string `json:"expression"`
+	Query      string `json:"query"` // Tempo's TraceQL query model
 	QueryType  string `json:"queryType"`
 	Hide       bool   `json:"hide"`
 }
@@ -350,7 +354,7 @@ func (s *Set) readDashboard(rel string, b []byte) {
 					expr = t.Expression
 				}
 				if expr == "" {
-					continue
+					expr = t.Query
 				}
 				ref := t.RefID
 				if ref == "" {
@@ -376,6 +380,9 @@ func (s *Set) readDashboard(rel string, b []byte) {
 					Where: fmt.Sprintf("panel %d %q target %s", p.ID, p.Title, ref),
 				}
 				kind, err := Classify(dsType, dsUID)
+				if expr == "" && (kind != Traces || t.QueryType == "") {
+					continue
+				}
 				qu.Kind = kind
 				if err != nil {
 					qu.Problem = err.Error()

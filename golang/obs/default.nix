@@ -14,7 +14,7 @@ let
     pname = "obs";
     inherit version;
     src = ./src;
-    vendorHash = "sha256-/o3phli1cSfw7Taznw7ayNwZoh2cTc6sQCrdCYVZWF4=";
+    vendorHash = "sha256-mcPpQV9ka4BaVDyke3RdIP8PIOvaEw0Y4vAl+ieUR2c=";
     env.CGO_ENABLED = "0";
     ldflags = [ "-w" "-s" "-X main.version=${version}" ];
     # third_party/VictoriaLogs is its own Go module (wired by a go.mod replace), not part of this one.
