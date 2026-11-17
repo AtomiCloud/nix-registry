@@ -1,0 +1,232 @@
+package storemove
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+)
+
+type fakeCluster struct {
+	calls []Step
+	fail  Step
+}
+
+func (f *fakeCluster) Execute(_ context.Context, s Step, _ string, _ Config) error {
+	f.calls = append(f.calls, s)
+	if f.fail == s {
+		return errors.New("planted readiness failure")
+	}
+	return nil
+}
+
+type fakeMetrics struct {
+	counters map[string][]float64
+	calls    []string
+	counts   int
+	corrupt  bool
+	end      time.Time
+}
+
+func (f *fakeMetrics) Counter(_ context.Context, _ string, name string) (float64, error) {
+	f.calls = append(f.calls, name)
+	vs := f.counters[name]
+	if len(vs) == 0 {
+		return 0, fmt.Errorf("missing fake metric %s", name)
+	}
+	v := vs[0]
+	if len(vs) > 1 {
+		f.counters[name] = vs[1:]
+	}
+	return v, nil
+}
+func (f *fakeMetrics) Counts(_ context.Context, _ string, _ Config, end time.Time) ([]float64, error) {
+	if !f.end.IsZero() && f.end != end {
+		return nil, errors.New("verification window shifted")
+	}
+	f.end = end
+	f.counts++
+	v := make([]float64, 60)
+	for i := range v {
+		v[i] = float64(i + 1)
+	}
+	if f.corrupt && f.counts > 1 {
+		v[17]++
+	}
+	return v, nil
+}
+func config() Config {
+	return Config{Context: "fixture", Namespace: "obs-test", ScaledManifest: "scaled.yaml", SingleManifest: "single.yaml", MetastoreManifest: "metastore.yaml", RoutingManifest: "routing.yaml", OriginalRoutingManifest: "original.yaml", Scaled: []string{"statefulset/new"}, Routers: []string{"deployment/insert", "deployment/select"}, Single: "statefulset/single", Alloy: "deployment/alloy", RoleLabels: []string{"obs.diene/tempo-read", "obs.diene/tempo-write"}, RoleWorkloads: map[string][]string{"statefulset/new": {"obs.diene/tempo-read", "obs.diene/tempo-write"}}, StopCompaction: []string{"control", "stop-compaction"}, ResumeCompaction: []string{"control", "resume-compaction"}, MetricsURL: "http://fixture/metrics", SingleMetricsURL: "http://single/metrics", ReadURL: "http://fixture/range", Query: "sum(count_over_time())", ProfileType: "process_cpu:cpu:nanoseconds:cpu:nanoseconds"}
+}
+func runFake(c *fakeCluster, m *fakeMetrics) Runner {
+	return Runner{Cluster: c, Metrics: m, Pause: func(context.Context, time.Duration) error { return nil }, Now: func() time.Time { return time.Unix(1700000000, 0) }}
+}
+func TestMoves(t *testing.T) {
+	for _, store := range []string{"tempo", "pyroscope", "victorialogs", "victoriametrics"} {
+		t.Run(store, func(t *testing.T) {
+			c := &fakeCluster{}
+			m := &fakeMetrics{counters: map[string][]float64{received(store): {12, 12}, "tempo_live_store_blocks_completed_total": {5, 6}, "tempo_live_store_local_blocks_flushed_total": {5, 6}, "vl_insert_remote_send_errors_total": {0, 0}}}
+			if storage(store) {
+				m.counters[received(store)] = []float64{12, 13}
+			}
+			cfg := config()
+			if store == "pyroscope" {
+				cfg.RoleLabels = []string{"obs.diene/pyroscope-write", "obs.diene/pyroscope-query"}
+				cfg.RoleWorkloads = map[string][]string{"statefulset/new": cfg.RoleLabels}
+			}
+			if err := runFake(c, m).Run(context.Background(), store, cfg, false, false); err != nil {
+				t.Fatal(err)
+			}
+			if m.counts != 2 {
+				t.Fatalf("baseline and verify not both run: %d", m.counts)
+			}
+			want := []Step{Prepare, Route, Reconnect, "stop compaction", "stop single"}
+			if storage(store) {
+				want = []Step{AddNodes, StorageRoute}
+			}
+			if store == "pyroscope" {
+				want = []Step{Prepare, Route, Reconnect, "retain single as metastore"}
+			}
+			if !reflect.DeepEqual(c.calls, want) {
+				t.Fatalf("steps %v, want %v", c.calls, want)
+			}
+		})
+	}
+}
+func TestFailureNeverSkips(t *testing.T) {
+	for _, failure := range []Step{Prepare, Route, Reconnect, "stop compaction", "stop single"} {
+		t.Run(string(failure), func(t *testing.T) {
+			c := &fakeCluster{fail: failure}
+			m := &fakeMetrics{counters: map[string][]float64{received("tempo"): {5, 5}, "tempo_live_store_blocks_completed_total": {5, 6}, "tempo_live_store_local_blocks_flushed_total": {5, 6}}}
+			err := runFake(c, m).Run(context.Background(), "tempo", config(), false, false)
+			if err == nil || !strings.Contains(err.Error(), "planted readiness failure") {
+				t.Fatalf("failure skipped: %v", err)
+			}
+			if c.calls[len(c.calls)-1] != failure {
+				t.Fatalf("ran past %s: %v", failure, c.calls)
+			}
+			if m.counts != 1 {
+				t.Fatal("verification ran after failed step")
+			}
+		})
+	}
+}
+func TestMetricsFailures(t *testing.T) {
+	cases := []struct {
+		name, store, metric string
+		values              []float64
+	}{
+		{"single still receives", "tempo", received("tempo"), []float64{2, 3}},
+		{"counter reset", "tempo", received("tempo"), []float64{2, 0}},
+		{"writes stopped", "victorialogs", received("victorialogs"), []float64{2, 2}},
+		{"send errors", "victorialogs", "vl_insert_remote_send_errors_total", []float64{0, 1}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &fakeCluster{}
+			m := &fakeMetrics{counters: map[string][]float64{received(tc.store): {1, 2}, "vl_insert_remote_send_errors_total": {0, 0}}}
+			m.counters[tc.metric] = tc.values
+			err := runFake(c, m).Run(context.Background(), tc.store, config(), false, false)
+			if err == nil || !strings.Contains(err.Error(), tc.metric) {
+				t.Fatalf("bad counter accepted: %v", err)
+			}
+			for _, call := range c.calls {
+				if call == Step("stop single") {
+					t.Fatal("stopped while receiving")
+				}
+			}
+		})
+	}
+}
+func TestDrainWaitsForAllFlushes(t *testing.T) {
+	c := &fakeCluster{}
+	m := &fakeMetrics{counters: map[string][]float64{received("tempo"): {1, 1}, "tempo_live_store_blocks_completed_total": {5, 7, 7}, "tempo_live_store_local_blocks_flushed_total": {5, 6, 7}}}
+	if err := runFake(c, m).Run(context.Background(), "tempo", config(), false, false); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.counters["tempo_live_store_local_blocks_flushed_total"]) != 1 {
+		t.Fatal("stopped before all completed blocks flushed")
+	}
+}
+func TestNoFlushDoesNotStop(t *testing.T) {
+	c := &fakeCluster{}
+	m := &fakeMetrics{counters: map[string][]float64{received("tempo"): {1, 1}, "tempo_live_store_blocks_completed_total": {5, 6}, "tempo_live_store_local_blocks_flushed_total": {5, 5}}}
+	r := runFake(c, m)
+	n := 0
+	r.Pause = func(context.Context, time.Duration) error {
+		n++
+		if n > 3 {
+			return context.DeadlineExceeded
+		}
+		return nil
+	}
+	if err := r.Run(context.Background(), "tempo", config(), false, false); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("missing flush accepted: %v", err)
+	}
+	for _, s := range c.calls {
+		if s == Step("stop single") {
+			t.Fatal("undrained single stopped")
+		}
+	}
+}
+func TestKnownDataMismatch(t *testing.T) {
+	c := &fakeCluster{}
+	m := &fakeMetrics{counters: map[string][]float64{received("victoriametrics"): {1, 2}}, corrupt: true}
+	err := runFake(c, m).Run(context.Background(), "victoriametrics", config(), false, false)
+	if err == nil || !strings.Contains(err.Error(), "minute 17") {
+		t.Fatalf("bad known data accepted: %v", err)
+	}
+}
+func TestDryRunHasNoEffects(t *testing.T) {
+	var b bytes.Buffer
+	r := Runner{Out: &b}
+	if err := r.Run(context.Background(), "tempo", config(), false, true); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(b.String(), "completed and flushed") {
+		t.Fatal(b.String())
+	}
+}
+func TestRollbackRetainsStorage(t *testing.T) {
+	for _, store := range []string{"tempo", "victorialogs"} {
+		c := &fakeCluster{}
+		m := &fakeMetrics{}
+		var b bytes.Buffer
+		r := runFake(c, m)
+		r.Out = &b
+		if err := r.Run(context.Background(), store, config(), true, false); err != nil {
+			t.Fatal(err)
+		}
+		want := Restore
+		if storage(store) {
+			want = RestoreRoute
+			if !strings.Contains(b.String(), "unreadable") {
+				t.Fatal("lost-data warning missing")
+			}
+		}
+		if !reflect.DeepEqual(c.calls, []Step{want}) {
+			t.Fatal(c.calls)
+		}
+	}
+}
+func TestConfigRefusals(t *testing.T) {
+	cfg := config()
+	cfg.StopCompaction = nil
+	if err := cfg.Validate("tempo", false); err == nil {
+		t.Fatal("missing compaction control accepted")
+	}
+	cfg = config()
+	cfg.Compactor = cfg.Single
+	if err := cfg.Validate("tempo", false); err == nil {
+		t.Fatal("undrained single accepted as compactor")
+	}
+	cfg = config()
+	cfg.RoleLabels = []string{"app"}
+	if err := cfg.Validate("tempo", false); err == nil {
+		t.Fatal("arbitrary role label accepted")
+	}
+}

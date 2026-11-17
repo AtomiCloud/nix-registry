@@ -253,3 +253,130 @@ replaces this by hand run.
 - Seeded log rows against a real VictoriaLogs fed through Alloy (field names are FROM SOURCE).
 - LogsQL `_time:[start, end)` handling against real Grafana (the nightly parity job, a later release).
 - aarch64 and macOS builds are in CI; only x86_64 Linux was run by hand.
+
+## obs store
+
+`obs store move <tempo|pyroscope|victorialogs|victoriametrics> --config move.yaml --dry-run`
+prints the mandatory steps without commands or HTTP requests. Remove `--dry-run` to execute;
+`--rollback` restores routing. Kubernetes access uses `kubectl` on PATH with the explicit context
+and namespace from the config. Nothing runs automatically after a failed step; inspect the
+reported state and request rollback explicitly. There is no skip/resume-step option.
+
+The move config is a chart/operator adapter, not a chart generator. Paths are relative to the
+config file. For example (fixture names only):
+
+```yaml
+context: fixture-only
+namespace: observability-fixture
+scaled_manifest: scaled.yaml
+single_manifest: single.yaml # rollback; start with role labels false
+scaled:
+  - deployment/tempo-distributor
+  - deployment/tempo-query
+  - statefulset/tempo-live-store
+  - statefulset/redpanda
+single: statefulset/tempo
+alloy: deployment/alloy
+role_labels: [obs.diene/tempo-write, obs.diene/tempo-read]
+role_workloads:
+  deployment/tempo-distributor: [obs.diene/tempo-write]
+  deployment/tempo-query: [obs.diene/tempo-read]
+# Provide the actual verified adapter executable and argv in the single pod.
+stop_compaction: [operator-control, stop-compaction]
+resume_compaction: [operator-control, resume-compaction]
+single_metrics_url: http://tempo-single.fixture.invalid:3200/metrics
+read_url: http://tempo-query.fixture.invalid:3200/api/metrics/query_range
+query: '{} | count_over_time()' # known immutable dataset; aggregate to one series
+```
+
+The scaled manifest must contain every listed workload with positive explicit replicas, initially
+without active role labels. It cannot change the old single, Alloy, or any Service. Include all
+parts (Tempo: Kafka-compatible queue and `tempo-traces` topic; headless Services with
+`publishNotReadyAddresses: true` must already exist). Render the §10.4/10.5 store settings in the
+manifests, including object storage from day one. Every workload must have a nonempty `matchLabels`
+selector without expressions; role labels must not appear in that immutable selector. The tool
+assigns each target only its configured role labels; it never labels Kafka as a read/write pod.
+The old single is never rolled by changing its template before its drain. Suspend external GitOps
+reconciliation of these workloads while moving so it cannot undo a step.
+
+Alloy must have at least two replicas. Tempo requires a verified compaction-control adapter
+(`kubectl exec` with argv, no local shell), or a **separate** `compactor: deployment/backend-worker`
+that can safely scale to zero (also set its original positive `compactor_replicas` for rollback). Using the old single itself as `compactor` is refused. Its drain
+waits for `tempo_live_store_blocks_completed_total` and
+`tempo_live_store_local_blocks_flushed_total` to rise and for flushed blocks to catch up with
+completed blocks before scaling the single to zero. No `/flush` endpoint is assumed. Source:
+Tempo 3.1.1 `modules/livestore/complete_block_lifecycle.go:18–22`; its downscale routes in
+`cmd/tempo/app/modules.go:725–730` only change ring/shutdown state
+(`modules/livestore/downscale.go:130–234`), so they do not replace this durability check.
+An idle store that produces no new completed block times out safely; feed a known dataset before moving.
+
+For Pyroscope, use `obs.diene/pyroscope-write` and `obs.diene/pyroscope-query` roles. Add
+`metastore_manifest: metastore.yaml`: the old StatefulSet becomes the v2 metastore, retaining
+its PVC and stable raft identity; no drain or deletion occurs. Set `profile_type` (for example
+`process_cpu:cpu:nanoseconds:cpu:nanoseconds`) and a label selector in `query`;
+`read_url` ends in `/querier.v1.QuerierService/SelectSeries`.
+
+For VictoriaLogs and VictoriaMetrics omit the single/Alloy/role fields. Provide `scaled` storage
+workloads, `routers` insert/select workloads, `routing_manifest`, `original_routing_manifest`,
+and `metrics_url` (the insert-side `/metrics`). Routing manifests change only the `-storageNode`
+lists (plus `-dedup.minScrapeInterval=1ms` for VM copies) and keep the first node. There is no drain,
+rebalance, PVC deletion, or Alloy restart. VL checks the OTLP received counter rising and remote
+send errors flat; VM checks inserted rows rising. Read URLs end in `/select/logsql/stats_query_range`
+(VL) or `/select/0/prometheus/api/v1/query_range` (VM). Supply a query counting the known dataset
+per minute, aggregated to one series. Rollback removes the new endpoints and **retains the pods
+and PVCs**; data written there is unreadable until they are added back.
+
+Verification takes one fixed, closed 60-minute window before the move and queries the same
+window through the read Service afterward. Missing minutes, empty/all-zero baselines, errors,
+and unequal counts fail. `tenant` optionally sets `X-Scope-OrgID` on range queries. Counter
+endpoints must expose only the intended old single or insert tier; absent/reset counters fail.
+`--interval` defaults to 15s and `--timeout` to 15m. **NOT TESTED:** real cluster moves/rollback,
+chart compaction adapters, Tempo/Pyroscope drain durability, or live store HTTP endpoints.
+Unit tests use fake Kubernetes and HTTP transports; they never contact a real cluster.
+
+## obs symbols
+
+```text
+obs symbols put --store .obs/symbols --kind native --build-id <gnu-id> --app service --file service.dbg
+obs symbols put --store .obs/symbols --kind jit --build-id <module-MVID> --app service --file service.pdb
+obs symbols put --store .obs/symbols --kind dart --build-id <id> --file app.symbols --obfuscation-map map.json
+obs symbols decode --store .obs/symbols --file stack.txt
+```
+
+Native keys are `<gnu-build-id>/<app>.dbg`, JIT keys `<module-MVID>/<app>.pdb`, and Dart keys
+`<build_id>.symbols` with `<build_id>.obfuscation-map.json`. IDs are normalized to lowercase.
+Keys are immutable: uploading identical bytes is idempotent; different bytes under an existing
+key fail. Uploaders must supply the identity obtained from the build (GNU/Dart note or module
+MVID); this command does not infer it. Keep this private directory and symbols for as long as
+that release can send data. An exported `Backend` interface supports object-store adapters;
+no object-store implementation or remote bucket is claimed as tested.
+
+The native/Dart decoder recognizes `at <module>+0x<offset>` frames with a `build-id: <id>` footer,
+then runs stock `llvm-symbolizer` (the Nix wrapper supplies it; `--symbolizer` can override it).
+Unknown identities and unresolved addresses are preserved. Decode cause stacks with different
+build identities separately; ambiguous conflicting footers are refused. Split-debug ELF files
+retain real Dart names; the obfuscation map is stored for other consumers, not applied as a text
+substitution over stack traces.
+
+JIT frames use `at <module>!0x06000001+0x<IL-offset> mvid:<module-MVID>`. The decoder reads
+Portable PDB Document and MethodDebugInformation sequence points directly and appends `file:line`.
+The exporter must supply an IL offset, never a raw JIT native PC. Unknown MVIDs pass through;
+Windows/MSF PDBs are explicitly refused. **MEASURED:** a Go-built ELF resolves to function plus
+source line using LLVM; a small Portable PDB fixture resolves IL offsets and rejects corruption.
+**NOT TESTED:** actual NativeAOT/Flutter release artifacts or a compiler-produced .NET PDB.
+
+## obs size
+
+`obs size --req-per-second 1000 --services 30 --pods 90 --profiled-pods 30` prints deterministic
+JSON: incremental traffic cores/GiB, pod-index MiB, typical stored series, metrics ingest memory
+and disk GB/day, bucket GB/day and Class A/B requests/day. For that input: 0.27 traffic cores,
+0.3 GiB, 81,000 series and 25.7 GB/day to the bucket. Idle base memory, query peaks, applications
+and the control plane are excluded; these components are deliberately reported separately.
+
+These are the concept §10.7 **Loki-era estimates**, not measured VictoriaLogs capacity. VictoriaLogs
+has no bucket. The rounded bucket unit is 21 GB/day per 1,000 req/s (logs 16.6, traces 4.0), plus
+4.7 GB/day per 30 profiled pods; Class A/B are 17k/28k per 1,000 req/s for the traffic write path
+only. Series use §3.2 (2,520/service + 60/pod), and metrics RAM/disk use §10.4
+(0.6–1.1 KB/series; 5.3 GB/day/M series at 30s). Profile operations and interactive object reads
+have no measured unit cost. Three checked-in golden cases cover idle, typical and busy shapes;
+invalid, non-finite and negative inputs fail.

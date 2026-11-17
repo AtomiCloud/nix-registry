@@ -1,0 +1,19 @@
+context: fixture-only
+namespace: observability-fixture
+scaled_manifest: scaled.yaml
+single_manifest: single.yaml
+scaled: [statefulset/tempo-live-store, deployment/tempo-distributor, deployment/tempo-query, statefulset/redpanda]
+single: statefulset/tempo
+alloy: deployment/alloy
+role_labels: [obs.diene/tempo-read, obs.diene/tempo-write]
+# Fixture argv only; a deployment must supply its verified control adapter.
+stop_compaction: [fixture-control, stop-compaction]
+resume_compaction: [fixture-control, resume-compaction]
+single_metrics_url: http://single.fixture.invalid/metrics
+read_url: http://tempo-query.fixture.invalid:3200/api/metrics/query_range
+query: '{} | count_over_time()'
+
+role_workloads:
+  statefulset/tempo-live-store: [obs.diene/tempo-read]
+  deployment/tempo-distributor: [obs.diene/tempo-write]
+  deployment/tempo-query: [obs.diene/tempo-read]

@@ -144,5 +144,6 @@ if [ -n "${OUT:-}" ]; then
   [ -s "$lic/github.com/VictoriaMetrics/VictoriaLogs/LICENSE" ] && ok "VictoriaLogs LICENSE ships" || bad "VictoriaLogs LICENSE missing"
 fi
 
+bash "$here/store-symbols-sizing.sh" "$OBS" && ok "store/symbols/size fixtures" || bad "store/symbols/size fixtures"
 echo "obs tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
