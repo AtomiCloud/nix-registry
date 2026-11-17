@@ -15,5 +15,15 @@
         { type: counter, series: [{ where: { outcome: ok }, share: 1 }, { where: { outcome: error }, share: 0 }] },
     },
   logs: [{ event: fixture.failed, level: error, from: { metric: fixture.requests, where: { outcome: error } } }],
+  traces:
+    [
+      {
+        from: { metric: fixture.requests },
+        server: POST /charge,
+        route: /charge,
+        error_when: { outcome: error },
+        median_s: 0.05,
+      },
+    ],
   incidents: [spike],
 }

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/AtomiCloud/obs/internal/check"
 	"github.com/AtomiCloud/obs/internal/files"
 	"github.com/AtomiCloud/obs/internal/seed"
 )
@@ -70,3 +71,51 @@ func TestNoRealNames(t *testing.T) {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+func TestTraceSetsLoadAndPassStaticChecks(t *testing.T) {
+	out := t.TempDir()
+	if err := Write(out); err != nil {
+		t.Fatal(err)
+	}
+	if len(traceBase) != 20 {
+		t.Fatalf("%d base trace rules, want 20", len(traceBase))
+	}
+	for _, n := range TraceSizes {
+		dir := filepath.Join(out, "t"+itoa(n))
+		s, err := files.Load(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(s.Problems) != 0 || s.Alerts != n {
+			t.Fatalf("t%d: %d alert files, problems %v", n, s.Alerts, s.Problems)
+		}
+		for _, q := range s.Queries {
+			if q.Kind != files.Traces {
+				t.Errorf("t%d %s: not a trace query: %s", n, q.Where, q.Expr)
+			}
+		}
+		// Contract names, Tempo routing (metrics query, instant or exemplar-free range) and syntax.
+		if r := check.Static(s, check.Options{Dir: dir}); r.Failures() != 0 {
+			t.Fatalf("t%d static: %+v", n, r.Findings)
+		}
+		for _, l := range Lengths {
+			sd, err := seed.Load(filepath.Join(dir, "seed."+l+".yaml"))
+			if err != nil {
+				t.Fatalf("t%d %s: %v", n, l, err)
+			}
+			if defs, err := sd.TraceDefs(); err != nil || len(defs) != 2 {
+				t.Fatalf("t%d %s: trace definitions %v %v", n, l, defs, err)
+			}
+		}
+	}
+	// Every rule fires in at least one incident or is a declared always-quiet rule.
+	quiet := 0
+	for _, r := range traceBase {
+		if len(r.fire) == 0 {
+			quiet++
+		}
+	}
+	if quiet != 3 {
+		t.Fatalf("%d always-quiet trace rules, want 3 (traffic-low, refund-errors, slow-provider-calls)", quiet)
+	}
+}

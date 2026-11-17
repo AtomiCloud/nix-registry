@@ -1,7 +1,16 @@
 {
-  story: Synthetic failure burst,
+  story: Synthetic failure burst; successful charges slow down,
   window: { start: 10m, duration: 10m },
-  change: [{ metric: fixture.requests, where: { outcome: error }, rate: 2/s }],
+  change:
+    [
+      { metric: fixture.requests, where: { outcome: error }, rate: 2/s },
+      { metric: fixture.requests, where: { outcome: ok }, latency_x: 20 },
+    ],
   expect:
-    { fire: [metric, logs, recorded, range, hyst, keep], quiet: [nodata, error], fire_within: 5m, resolve_within: 5m },
+    {
+      fire: [metric, logs, recorded, range, hyst, keep, traces-errors, traces-latency],
+      quiet: [nodata, error],
+      fire_within: 5m,
+      resolve_within: 5m,
+    },
 }

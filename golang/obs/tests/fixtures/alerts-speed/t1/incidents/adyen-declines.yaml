@@ -1,0 +1,9 @@
+story: Adyen declines a burst of cards for 20 minutes.
+window: { start: 60m, duration: 20m }
+change:
+  - { metric: checkout.charges, where: { payment.provider: adyen, outcome: declined }, rate: 0.8/s }
+expect:
+  fire: []
+  quiet: [traces-errors-rate]
+  fire_within: 30m
+  resolve_within: 20m

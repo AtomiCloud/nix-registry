@@ -52,6 +52,17 @@ OBS_VERIFY_PRUNE_PLANT_SEED="$work/seed-planted.yaml" OBS_VERIFY_PRUNE=1 run ale
 expect 1 'MISMATCH ' 'alert ' 'run baseline' 'minute ' 'rule '
 grep -qE 'verify prune: .*mismatches=[1-9][0-9]*' "$work/out"
 
+# Planted red (traces): only the span durations differ, which only the TraceQL rules read.
+# The self-check compares the raw Tempo answers, so it names the trace query input.
+sed "s/median_s: 0.05/median_s: 0.07/" "$work/ok/seed.yaml" >"$work/seed-planted-traces.yaml"
+cmp -s "$work/ok/seed.yaml" "$work/seed-planted-traces.yaml" && {
+  echo 'alerts-verify-prune: trace plant did not change the seed'
+  exit 1
+}
+OBS_VERIFY_PRUNE_PLANT_SEED="$work/seed-planted-traces.yaml" OBS_VERIFY_PRUNE=1 run alerts --dir "$work/ok" --base "$base"
+expect 1 'MISMATCH query-input' '"Datasource":"traces"' 'quantile_over_time(duration, .9)' '"Run":"baseline"'
+grep -qE 'verify prune: .*mismatches=[1-9][0-9]*' "$work/out"
+
 # Union: a query-bearing pipe reads events the root filter never names (here fixture.ok).
 # If lazy loading drops them, the pruned and the full evaluation differ and the
 # self-check must be red, naming the rule; if it keeps them, both agree and it is green.
@@ -95,4 +106,4 @@ else
   echo 'alerts-verify-prune: union rows dropped by lazy loading: pruned != full, red as required'
 fi
 
-echo 'obs alerts verify-prune tests: baseline green; seed, union and nested-policy plants red'
+echo 'obs alerts verify-prune tests: baseline green; seed, trace, union and nested-policy plants red'

@@ -250,6 +250,7 @@ func BuildIncident(s *Seed, start time.Time, incident *Incident) (*Dataset, erro
 		buckets []float64
 		targets []*Series
 		logs    []LogDef
+		shapes  []*traceShape // the trace definitions of this series, in definition order
 	}
 	accs := make([]*acc, len(gens))
 	for i, g := range gens {
@@ -275,6 +276,11 @@ func BuildIncident(s *Seed, start time.Time, incident *Incident) (*Dataset, erro
 		for _, ld := range s.Logs {
 			if ld.From.Metric == g.metric && matches(g.where, ld.From.Where) {
 				a.logs = append(a.logs, ld)
+			}
+		}
+		for _, td := range traceDefs {
+			if td.From.Metric == g.metric && matches(g.where, td.From.Where) {
+				a.shapes = append(a.shapes, newTraceShape(td, g.where, res))
 			}
 		}
 		accs[i] = a
@@ -350,11 +356,9 @@ func BuildIncident(s *Seed, start time.Time, incident *Incident) (*Dataset, erro
 				if len(traceDefs) > 0 {
 					tr := newRnd(s.RandomSeed, g.k+fmt.Sprint("/trace/", e), sec)
 					hi, lo := tr.next(), tr.next()
-					for _, td := range traceDefs {
-						if td.From.Metric == g.metric && matches(g.where, td.From.Where) {
-							trace = makeTrace(td, g.where, res, hi, lo, uint64(tsNs), tr)
-							ds.Traces = append(ds.Traces, trace)
-						}
+					for _, sh := range a.shapes {
+						trace = sh.trace(hi, lo, uint64(tsNs), latencyX, tr)
+						ds.Traces = append(ds.Traces, trace)
 					}
 				}
 				for _, ld := range a.logs {

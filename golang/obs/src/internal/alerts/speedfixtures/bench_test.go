@@ -7,6 +7,8 @@ package speedfixtures
 //	OBS_BIN=/path/to/obs OBS_FIXTURES=../../../../tests/fixtures/alerts-speed \
 //	  go test -tags speedbench -run TestSpeedTable -v -timeout 1h ./internal/alerts/speedfixtures
 //
+// TestTraceSpeedTable runs the TraceQL sets (t1, t20) the same way.
+//
 // Each run is a fresh process pinned to 2 CPUs (taskset -c 0,1), with an empty result
 // cache (OBS_CACHE_DIR = a new empty folder), on a copy of the set in a RAM-backed
 // folder (/dev/shm). Time is wall clock of the process; peak memory is the process's
@@ -32,7 +34,12 @@ func copyTree(t *testing.T, src, dst string) {
 	}
 }
 
-func TestSpeedTable(t *testing.T) {
+func TestSpeedTable(t *testing.T) { speedTable(t, "n", Sizes) }
+
+// TestTraceSpeedTable is the same table for the TraceQL-only sets t1 and t20.
+func TestTraceSpeedTable(t *testing.T) { speedTable(t, "t", TraceSizes) }
+
+func speedTable(t *testing.T, prefix string, sizes []int) {
 	bin, fix := os.Getenv("OBS_BIN"), os.Getenv("OBS_FIXTURES")
 	if bin == "" || fix == "" {
 		t.Skip("set OBS_BIN and OBS_FIXTURES")
@@ -55,7 +62,7 @@ func TestSpeedTable(t *testing.T) {
 		bad  bool // a run exited non-zero: the timing is not a measurement
 	}
 	res := map[string]cell{}
-	for _, n := range Sizes {
+	for _, n := range sizes {
 		for _, l := range Lengths {
 			var times []float64
 			var peak int64
@@ -65,7 +72,7 @@ func TestSpeedTable(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				src := filepath.Join(fix, fmt.Sprintf("n%d", n))
+				src := filepath.Join(fix, fmt.Sprintf("%s%d", prefix, n))
 				dir := filepath.Join(work, "observability")
 				copyTree(t, src, dir)
 				if err := os.Rename(filepath.Join(dir, "seed."+l+".yaml"), filepath.Join(dir, "seed.yaml")); err != nil {
@@ -94,7 +101,7 @@ func TestSpeedTable(t *testing.T) {
 		}
 	}
 	fmt.Printf("\n| Alerts | %s seed | %s seed | Peak memory %s / %s |\n|---|---|---|---|\n", Lengths[0], Lengths[1], Lengths[0], Lengths[1])
-	for _, n := range Sizes {
+	for _, n := range sizes {
 		a, b := res[fmt.Sprintf("%d/%s", n, Lengths[0])], res[fmt.Sprintf("%d/%s", n, Lengths[1])]
 		show := func(c cell) string {
 			if c.bad {

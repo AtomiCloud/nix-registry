@@ -75,9 +75,9 @@ func (c *queryCache) capturePruneSnapshot(stage string) {
 		}
 		d := e.d
 		key, _ := json.Marshal(struct {
-			Datasource, UID, Expr, Original, Range, Run string
-			FromNS, ToNS, IntervalNS                    int64
-		}{k.ds, k.uid, k.expr, k.original, k.rng, k.run, int64(k.from), int64(k.to), int64(k.interval)})
+			Datasource, UID, Expr, Original, Range, Tempo, Run string
+			FromNS, ToNS, IntervalNS                           int64
+		}{k.ds, k.uid, k.expr, k.original, k.rng, k.tempo, k.run, int64(k.from), int64(k.to), int64(k.interval)})
 		s := pruneQuerySnapshot{Series: snapshotResults(d.res), Range: d.isRange, RangeNS: int64(d.rng), StepNS: int64(d.step)}
 		if d.err != nil {
 			s.Error = d.err.Error()

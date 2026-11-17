@@ -43,6 +43,7 @@ type AlertRun struct {
 
 type qKey struct {
 	ds, uid, expr, original, rng, run string
+	tempo                             string // Tempo datasource options (instant or range, step)
 	from, to                          time.Duration
 	interval                          time.Duration
 }
@@ -58,6 +59,8 @@ type qData struct {
 	labelsOnce sync.Once
 	perTick    map[int64][]Result // fallback when the whole-run query failed (limits are per instant query)
 	tickErr    map[int64]error
+	// seriesFrames: per-tick results are Grafana series frames (Tempo), not numbers.
+	seriesFrames bool
 }
 
 type queryCache struct {
@@ -111,6 +114,9 @@ func (d *qData) at(t time.Time) qTick {
 		if err := d.tickErr[ms]; err != nil {
 			return qTick{err: err}
 		}
+		if d.seriesFrames {
+			return qTick{isRange: true, series: toSorted(d.perTick[ms])}
+		}
 		var out []instVal
 		for _, r := range d.perTick[ms] {
 			for _, v := range r.Points {
@@ -161,7 +167,7 @@ func evalRuleRun(eng Engines, cache *queryCache, cr *cRule, run Run, keepSteps b
 	data := map[string]*qData{}
 	for _, ref := range cr.queries {
 		q := a.Queries[ref]
-		data[ref] = cache.get(qKey{ds: q.Datasource, uid: q.UID, expr: q.Expr, original: q.OriginalExpr, rng: q.Range, run: run.Name, from: q.From, to: q.To, interval: cr.interval}, func() *qData { return fetchQuery(eng, q, run, cr.interval) })
+		data[ref] = cache.get(qKey{ds: q.Datasource, uid: q.UID, expr: q.Expr, original: q.OriginalExpr, rng: q.Range, tempo: tempoKey(q), run: run.Name, from: q.From, to: q.To, interval: cr.interval}, func() *qData { return fetchQuery(eng, q, run, cr.interval) })
 	}
 	rs := newRuleStates(cr)
 	ticks := map[string]qTick{}
