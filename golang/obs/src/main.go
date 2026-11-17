@@ -1,7 +1,5 @@
-// obs: the observability check tool. This release (0.1.0) ships `obs query --static`,
-// `obs query --live` and `obs version`: every alert and dashboard query is parsed by
-// the embedded VictoriaMetrics and VictoriaLogs parsers and run on a seed, with no
-// network and no containers.
+// obs checks observability queries and links with embedded store engines,
+// seeded data, no network and no containers.
 package main
 
 import (
@@ -29,6 +27,7 @@ const usage = `obs: the observability check tool
 usage:
   obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
   obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names]
+  obs links [--dir observability] [--seed seed.yaml] [--base unix]
   obs version
   obs store move <store> --config move.yaml [--dry-run] [--rollback]
   obs symbols put|decode --store <dir> --file <file> [options]
@@ -48,6 +47,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "version", "--version", "-version":
 		printVersion(stdout)
 		return 0
+	case "links":
+		return runLinks(args[1:], stdout, stderr)
 	case "query":
 		return runQuery(args[1:], stdout, stderr)
 	case "store":
@@ -66,6 +67,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func printVersion(w io.Writer) {
 	fmt.Fprintf(w, "obs %s\n", version)
+	fmt.Fprintln(w, "engine Tempo 3.1.1 (commit 9db7df79d2af, TraceQL)")
 	fmt.Fprintf(w, "engine VictoriaMetrics %s (MetricsQL)\n", pinVictoriaMetrics)
 	fmt.Fprintf(w, "engine VictoriaLogs %s (LogsQL)\n", pinVictoriaLogs)
 	fmt.Fprintln(w, "licence AGPL-3.0-only; source: https://github.com/AtomiCloud/nix-registry/tree/main/golang/obs (each release also attaches a source and vendored-modules tarball)")

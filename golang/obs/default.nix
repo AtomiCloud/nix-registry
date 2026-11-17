@@ -14,7 +14,7 @@ let
     pname = "obs";
     inherit version;
     src = ./src;
-    vendorHash = "sha256-E+SO5TfljE7KgJr3l0l/WmzeWbLHYkmVqkkOUSerOw4=";
+    vendorHash = "sha256-cLU+c85kO/LPTBEtDGLbFfKg0EJx0KpeqEGvNfHKjvY=";
     env.CGO_ENABLED = "0";
     env.OBS_REQUIRE_LLVM = "1";
     nativeCheckInputs = [ nixpkgs.llvmPackages.llvm ];
