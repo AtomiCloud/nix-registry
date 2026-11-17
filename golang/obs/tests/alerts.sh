@@ -37,7 +37,7 @@ OBS_VERIFY_FAST=1 OBS_VERIFY_SKIP=1 OBS_VERIFY_PRUNE=1 run alerts --dir "$o" --s
 expect 0 'failed=0' 'mismatches=0' 'assumed true (free-form fields)' 'events=[fixture.failed]'
 grep -qE 'verify fast: compared=[1-9][0-9]* mismatches=0' "$work/out"
 grep -qE 'verify skip: compared=[1-9][0-9]* mismatches=0' "$work/out"
-grep -qE 'verify prune: base=[0-9]+ compared=[1-9][0-9]* query_inputs=[0-9]+ mismatches=0' "$work/out"
+grep -qE 'verify prune: base=[0-9]+ compared=[1-9][0-9]* query_inputs=[1-9][0-9]* mismatches=0' "$work/out"
 for state in Pending Recovering NoData Error; do grep -qF "$state" "$work/steps.json"; done
 grep -qF '"__name__":"fixture_recorded"' "$work/recorded.json"
 

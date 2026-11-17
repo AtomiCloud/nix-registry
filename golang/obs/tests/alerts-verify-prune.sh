@@ -39,6 +39,7 @@ chmod -R u+w "$work/ok"
 OBS_VERIFY_PRUNE=1 run alerts --dir "$work/ok" --base "$base"
 expect 0 'failed=0' 'verify prune: base='"$base"
 grep -qE 'verify prune: .*compared=[1-9][0-9]* .*mismatches=0' "$work/out"
+grep -qE 'verify prune: .*query_inputs=[1-9][0-9]* mismatches=0' "$work/out"
 
 # Planted red (always): the pruned run reads a seed whose error share differs, so the
 # two evaluations disagree. The report names alert, run, minute and the rule's query.
