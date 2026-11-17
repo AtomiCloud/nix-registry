@@ -59,3 +59,34 @@ func TestUnreducedSeriesErrorsHaveOneEmptyInstance(t *testing.T) {
 		t.Fatalf("unreduced series should dedupe to Error {}: %+v", res)
 	}
 }
+
+type contextTimeEngine struct{}
+
+func (contextTimeEngine) Instant(_ Query, at time.Time) ([]Result, error) {
+	return []Result{{Points: map[int64]float64{at.UnixMilli(): float64(at.Unix())}}}, nil
+}
+func (contextTimeEngine) Range(q Query, start, end time.Time, step time.Duration) ([]Result, error) {
+	v := end
+	if q.Expr == "start()" {
+		v = start
+	}
+	points := map[int64]float64{}
+	for at := start; !at.After(end); at = at.Add(step) {
+		points[at.UnixMilli()] = float64(v.Unix())
+	}
+	return []Result{{Points: points}}, nil
+}
+
+func TestContextTimeFunctionsUseInstantBounds(t *testing.T) {
+	start := time.Unix(1700000000, 0)
+	run := Run{Start: start, End: start.Add(2 * time.Minute)}
+	for _, expr := range []string{"start()", "end()"} {
+		d := fetchEngine(contextTimeEngine{}, Query{Datasource: "metrics", Expr: expr}, run, time.Minute)
+		for at := run.Start; !at.After(run.End); at = at.Add(time.Minute) {
+			got := d.at(at)
+			if got.err != nil || len(got.nums) != 1 || got.nums[0].v != float64(at.Unix()) {
+				t.Fatalf("%s at %s used whole-run bounds: %+v", expr, at, got)
+			}
+		}
+	}
+}
