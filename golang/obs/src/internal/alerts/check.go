@@ -10,8 +10,6 @@ import (
 	"sync"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
 	"github.com/AtomiCloud/obs/internal/check"
 	"github.com/AtomiCloud/obs/internal/contract"
 	"github.com/AtomiCloud/obs/internal/engines/vl"
@@ -176,9 +174,6 @@ func Check(o Options, stdout, stderr io.Writer) int {
 		}
 		wantLogs := needsDS(used, "logs")
 		sd := p.Seed
-		// Alerts evaluate metrics/logs. Their pruning may remove a metric used
-		// only by a trace definition; do not build or validate unused traces.
-		sd.Traces = yaml.Node{}
 		if !wantLogs {
 			sd.Logs = nil
 		}
