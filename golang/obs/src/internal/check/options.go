@@ -16,11 +16,11 @@ type Options struct {
 	Names    bool   // print the names each query reads
 	// EventRule says when a LogsQL alert must name a contract event:
 	// "auto" (only when <Dir>/contract.yaml exists; the decided default), "on", "off".
-	EventRule      string
-	SpanAttributes SpanAttributeNames
+	EventRule string
 	// Contract is the parsed <Dir>/contract.yaml; Static loads it when nil and the file exists.
-	Contract *contract.Contract
-	Out      io.Writer
+	Contract       *contract.Contract
+	SpanAttributes SpanAttributeNames
+	Out            io.Writer
 }
 
 func (o *Options) contractPath() string { return filepath.Join(o.Dir, "contract.yaml") }

@@ -7,6 +7,7 @@ require (
 	github.com/VictoriaMetrics/VictoriaMetrics v1.156.0
 	github.com/VictoriaMetrics/metrics v1.45.0
 	github.com/VictoriaMetrics/metricsql v0.87.6
+	github.com/google/pprof v0.0.0-20261111200114-fac431ef4d26
 	github.com/grafana/tempo v1.5.1-0.20261021152436-9db7df79d2af
 	gopkg.in/yaml.v3 v3.0.1
 )

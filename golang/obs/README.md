@@ -17,12 +17,17 @@ linked module ship in `share/licenses/obs`. Design: `concepts/observability.md` 
 | `obs query --static` | Parses every MetricsQL, LogsQL and TraceQL query in the alerts and dashboards with the real parsers and applies the rules below.                                                      |
 | `obs query --live`   | Makes the seed, loads it into the embedded VictoriaMetrics, VictoriaLogs and Tempo, runs every alert and dashboard query on it. Each must return rows. Also applies the static rules. |
 | `obs links`          | Checks trace → logs, metric → traces and backend span → profile labels on the seed.                                                                                                   |
+| `obs check`          | Checks the contract, worst-case metric series and log stream count. |
+| `obs gen`            | Generates bounded types, event constants and aggregation rules; `--check` detects drift. |
+| `obs assert`         | Checks real metric series counts, labels and values against the contract. |
+| `obs profile`        | Summarizes CPU profiles, builds a median baseline and compares function/span shares. |
+| `obs sandbox`        | Starts, stops or inspects the local stack for people. |
+| `obs look`           | Sets up dashboard views and prints the screenshot review prompt. |
+| `obs scrape`         | Scrapes an app's metrics into the sandbox. |
 | `obs version`        | The obs version and every engine pin.                                                                                                                                                 |
 
-Follow-up commands (see the corpus goal): `obs gen`, `obs check`
-(the contract), `obs alerts` (evaluating alerts over incidents), `obs assert`,
-`obs profile`, trace alert evaluation, `obs engines --check-chart`,
-`obs sandbox`, `obs look`, `obs scrape`, `obs store move`.
+Follow-up commands (see the corpus goal): `obs alerts` (evaluating alerts over incidents),
+trace alert evaluation, `obs engines --check-chart`, `obs store move`.
 
 ```text
  1. decide signals        what the service must say: metrics, log events, spans
@@ -510,6 +515,196 @@ copies it into `vendor/`, so the vendor hash covers it.
 The engines run in-process; obs marks the global flag set parsed before the first engine call
 (VictoriaMetrics' `lib/memory` panics otherwise) and caps VictoriaMetrics' cache at 512 MiB
 (it takes 60 % of host memory by default).
+
+## `obs assert`
+
+Step 7 of the workflow (concept §11.4). After e2e, take a series export from the store the e2e run wrote to
+and give it to obs as a file; obs counts the real series per metric and fails when a count is above the
+contract's worst case (a hole: a cast, reflection, a raw OTel call). No network.
+
+```text
+obs assert --series FILE [--dir observability] [--pods n] [--unknown warn|fail|ignore]
+```
+
+- **Input** (`--series`): `/api/v1/series` JSON (`{"status":"success","data":[{"__name__":...}]}`) or
+  `/api/v1/export` lines (`{"metric":{...},"values":[...],"timestamps":[...]}`), for example
+  `curl -g "$VM/api/v1/series?match[]={durian_cloud_service=\"checkout\"}&start=<e2e start>"`. Scope the export to the
+  service under test: obs counts every series it is given. A series repeated in an export counts once.
+  Label names compare with dots and underscores equal (`payment.provider` = `payment_provider`).
+- **Count.** A series belongs to the contract metric whose stored names it carries (`checkout_charges_total`,
+  `checkout_charge_duration_seconds_bucket|_sum|_count`: a histogram counts all three, like the worst case of
+  `obs check`, buckets + 2 per label set). The series are counted **per landscape** (label
+  `durian_cloud_landscape`; none = one group), since the worst case is per landscape.
+- **Limit.** `contract.WorstCase(metric)`; for a `per_pod` metric worst case × `--pods` (the pods per landscape,
+  from the landscape config). Fails with `series-over-worst-case`, naming the series file, the metric, the count,
+  the stored names and the worst case. Platform metrics (`platform_metrics:`) are counted and printed, with no
+  limit.
+- **Label checks run on every known series, even below the worst case.** Platform and `per_pod`
+  metrics may retain pod keys. Findings name the hole:
+  `label-not-in-contract` (a label the contract
+  does not give the metric, with example values), `pod-label-on-business-metric` (a pod key on a metric without
+  `per_pod`), `label-value-outside-type` (a value outside an enum, int or time type).
+  An undeclared label with one value for the metric is a warning: constant OTel SDK resource
+  labels (`telemetry.sdk.language`, `.name`, `.version`) do not split series. More than one value
+  fails `label-not-in-contract`, even below capacity. Pod-key and declared-type violations still fail
+  when constant.
+- **Metrics outside the contract** (neither a contract metric nor in `platform_metrics`; runtime and process metrics
+  of a pod land here) are a `warn` (`metric-not-in-contract`); `--unknown fail` makes them failures, `ignore` hides them.
+- Exit 0 clean, 1 a count over its limit, 2 input error (no contract, unreadable or wrong export, a failed export
+  response). _NOT TESTED: against a real VictoriaMetrics export; the two forms follow the documented API._
+
+## `obs profile summarize|baseline|compare`
+
+Step 7 of the workflow (concept §11.6). An e2e run sends a fixed number of requests, takes a CPU
+profile of the load window and compares each function's and each span's **share** of CPU with a
+stored baseline. Files only: no network.
+
+```text
+obs profile summarize --format pprof|cpuprofile|speedscope [--own REGEX]... [--run run.json] [--top N] [--json] FILE
+obs profile baseline  --format F --service S --scenario N --own REGEX [--own REGEX]... [--profiler P] [--dir e2e/profile-baseline] [--update] RUN1 RUN2 RUN3
+obs profile compare   --format F (--baseline FILE | --service S --scenario N [--dir DIR]) [--limits e2e/profile-limits.yaml] [--run run.json] FILE
+```
+
+Exit 0 when no row is slower than its limit, 1 when one is, 2 on a usage or input error.
+
+**Formats.** `pprof` (Go, gzip or raw; value types `samples` for the count and `cpu` for the weight),
+Chrome `.cpuprofile` (Bun, Flutter web; `samples[]` or `hitCount`; `(idle)` is not CPU) and `speedscope`
+(`sampled` and `evented` profiles). Evented O/C stacks are weighted by elapsed open time per
+thread, with time units normalized before combining threads. _FROM SOURCE:
+[TraceEvent's SpeedScopeStackSourceWriter](https://github.com/microsoft/perfview/blob/main/src/TraceEvent/Stacks/SpeedScopeStackSourceWriter.cs)
+writes dotnet-trace's export as evented O/C profiles per thread._
+_FROM SOURCE: dotnet-trace's
+[TraceFileFormatConverter](https://github.com/dotnet/diagnostics/blob/main/src/Tools/dotnet-trace/TraceFileFormatConverter.cs)
+calls that writer after constructing thread-time stacks._
+obs drops stacks containing `(idle)`, `BLOCKED_TIME`, `AWAIT_TIME` or `UNMANAGED_CODE_TIME`.
+_FROM SOURCE:
+[SampleProfilerThreadTimeComputer](https://github.com/microsoft/perfview/blob/main/src/TraceEvent/Computers/SampleProfilerThreadTimeComputer.cs)
+uses the latter two pseudo-frames for await/native thread time._ Native time can be blocked or
+running; dropping it is conservative, and does not identify every possible wait in arbitrary
+speedscope inputs. For evented input the sampling count is positive CPU stack time divided by
+the collection's sampling period, so coalescing intervals cannot loosen the gate.
+Every profile subcommand accepts `--sample-period DURATION` (for example `2ms`); the default
+assumes dotnet-trace's **1 ms** period. _FROM SOURCE:
+[EventPipe's sample profiler](https://github.com/dotnet/runtime/blob/main/src/native/eventpipe/ep-sample-profiler.c)
+initializes `_sampling_rate_in_ns` to `NUM_NANOSECONDS_IN_1_MS`; collection settings can override it._
+Pass the actual collection period for other settings or exporters. Evented baselines store the
+period in `sample_period_ns`, all three runs must agree, and compare refuses a different period
+(exit 2). These are CPU-time-derived sample counts; no original per-sample timestamps are recovered.
+_MEASURED: a
+dotnet-trace-shaped fixture and planted regression; real dotnet-trace collection NOT TESTED._
+
+**Spans.** A sample is in a span when it has the pprof label `span_name` (Go, `otel-profiling-go`), or
+when its stack holds a frame `span__<name>` (Bun) or `UserTag:<name>` (Dart). Spans count
+children (a sample in two nested spans is in both). A span with no sample has no row (concept §8.2:
+short spans are often empty). _NOT TESTED: `UserTag:<name>` is obs's own converter convention,
+not a native Dart frame spelling. The dart template's CI step must write the converter from
+`vm_service.getCpuSamples`, inserting these frames for UserTag spans. That converter does not
+exist here; this has only been tested on synthetic frames._
+
+**OS CPU per request.** The profile cannot know it, so the load run writes `<profile>.run.json` next to
+it (or pass `--run`): `{"requests": 600, "os_cpu_ns": 6e8, "wall_ns": 20e9, "cores": 2, "steal_ns": 1e6,
+"throttled_ns": 0}`. `os_cpu_ns` is the process's user + system CPU over the load window (cgroup `cpu.stat`
+`usage_usec` delta × 1000, or `/proc/<pid>/stat` utime + stime); `steal_ns` is the `steal` column of
+`/proc/stat` over the window, summed over the pinned cores; `throttled_ns` is the cgroup `cpu.stat`
+`throttled_usec` delta × 1000. Unknown fields are refused.
+
+**Function rows.** `summarize` prints, per function, `self`, `inclusive` and `own`. `own` is the CPU
+attributed to the function: its own samples plus the samples of callees that are not the service's own
+code (a library or runtime frame called from it). Each sample goes to the nearest frame, going from the
+leaf, that is own code, not a closure and not a span frame; so a closure's time belongs to the function that
+contains it, and the `own` shares add up to at most 100 %. **Own code** is what `--own` says (a regular
+expression matched against the function name and file; repeatable). `summarize` defaults to all
+code for inspection. **`baseline` requires at least one `--own`** (exit 2 when absent), stores
+the patterns, and `compare` uses the baseline's. Function identity is **name + normalized file**.
+File URI prefixes and checkout roots are removed: known source directories (`src`, `internal`,
+`cmd`, `pkg`, `lib`, `app`) are retained as relative paths; otherwise the common directory of the
+selected own-code sources is used. A line shift above a function cannot turn it into a new row.
+`--source-root DIR` overrides inference for all three subcommands. The root used is stored in
+`source_root` and printed in the report header; explicit roots are marked as such. Compare
+inherits an explicit baseline root when the flag is omitted and refuses a different explicit
+root (exit 2). A single unanchored source file cannot establish the checkout boundary: obs prints
+a note naming the inferred path and suggesting `--source-root`, without failing the run.
+Declaration line and column are retained only to disambiguate repeated name+file declarations;
+matching uses exact line and column only when the entire group's location set is unchanged.
+Otherwise, it pairs counted declarations in source order (line, then column). A single
+declaration on each side matches regardless of location, including across the three baseline runs.
+Different
+declaration counts are an error when a member is ≥ 3% in either the baseline or the current
+profile, naming the function/file and both counts and suggesting a rename or baseline `--update`.
+Only members with ≥ 1.5% own CPU share in that profile count toward the group; smaller members
+may be unsampled without changing identity. Members from 1.5% to 3% remain below the row cutoff,
+but their count and source locations are retained for disambiguation. Smaller members' locations
+are also retained, so crossing the 1.5% threshold with unchanged locations cannot displace a hot
+match. All-cold baseline groups retain their counts too, so a newly hot duplicate cannot fall
+back to a note.
+Chrome's zero-based
+`lineNumber` and `columnNumber` become one-based; speedscope `line` and `col` are kept, and pprof
+uses `Function.StartLine` rather than instruction lines. This includes separate same-line functions
+in a minified bundle. Baseline format is version 6: regenerate earlier preview baselines from
+three profiles with `--own` and `--update`. **Closures** (never rows): Go `.funcN`,
+`.gowrap`, `-fm`; JS `(anonymous)` and empty names; Dart `<anonymous closure>`; .NET `<>c__`, `>b__`,
+`lambda_method`.
+
+**Known limits for same-name, same-file duplicates:**
+
+- Swapping function bodies while retaining their locations cannot be distinguished from changing
+  those declarations' CPU shares.
+- A simultaneous source shift and threshold crossing can change the counted members' source
+  order. Profiles alone do not establish the bodies' identities in that case; rename declarations
+  or inspect and update the baseline.
+
+**Baseline** = median of exactly 3 runs → `e2e/profile-baseline/<service>.<scenario>.json` (about 1 KB;
+no times, sorted rows, shares rounded to 6 places, so two runs give byte-identical files). Rows:
+functions whose median own share is ≥ 3 %, every span with samples in at least 2 of the 3 runs, the median
+samples and the median OS CPU per request. An existing baseline is replaced only with `--update`
+(baselines change only through a PR). `--profiler dotnet-trace` is stored and gives every row 30 %.
+
+**Compare** prints `what / baseline / now / change (limit)` for every baseline row and exits 1 when a row is
+slower than its limit, or a hot baseline function has no matching samples. The latter is an
+`ERROR` naming the function and suggesting `--update` after inspecting an intentional removal.
+For a function or span row the change is `now share / baseline share − 1`.
+
+- **limit = max(tolerance, 3 × noise)**, noise = sqrt(1/n_base + 1/n_now). _FROM SOURCE: the concept does not say
+  what n counts; obs uses the **row's own** sample count (own samples of the function, samples inside
+  the span) in the baseline (median) and in this run, so small rows get wider limits. For the total-CPU row
+  n is the total sample count of each run._
+- **Tolerances:** 5 % for a function and a span, 15 % for total OS CPU per request, 30 % for every row of
+  a baseline made with `--profiler dotnet-trace`.
+- **Total CPU per request fails only on a quiet runner.** Quiet = during the load window the pinned cores
+  lost at most 1 % of their time: `(steal_ns + throttled_ns) / (wall_ns × cores) ≤ 1 %`. A noisy runner, or
+  a run meta without those four fields, still prints the row (`slower`, with the reason) but does not fail it.
+  A run with no `os_cpu_ns` and `requests` has no total row; a note says so.
+- **Overrides only in config**, `e2e/profile-limits.yaml` (`--limits`; none when the file is absent); each one
+  needs a `why`, otherwise obs exits 2 naming the file:
+
+  ```yaml
+  overrides:
+    - service: checkout # required
+      scenario: browse # optional: every scenario when absent
+      kind: function # optional: function | span | total
+      name: svc/render.Page # optional: one row
+      file: src/render.go # optional: normalized function file from the baseline
+      line: 12 # optional: one-based declaration line; requires kind: function
+      column: 11 # optional: one-based declaration column; requires kind: function
+      limit: 0.10 # a fraction: 0.10 = 10 %
+      why: the page template is being rewritten # required
+  ```
+
+  The most specific matching override wins. A name alone intentionally covers all functions
+  with that name; use file, line and column to select a single declaration. Location selectors refer
+  to the baseline's location, so a new line shift does not disable an agreed override. A failure
+  names the source of the limit.
+
+- **Faster matched rows are reported, never failed.** A span with no samples now is shown as faster;
+  an unmatched hot baseline function is an error requiring inspection/update. A function that is
+  ≥ 3 % of this run, own code, and has no baseline row is printed as a note.
+
+**What a share can and cannot see.** Rows are shares of one run's CPU, so a large win in one function raises
+every sibling's share (a function at 40 % that halves lifts the others by about 25 %, which is over a 5 %
+tolerance). Update the baseline in the same PR as such a change. The total-CPU row is the one that sees a
+whole-service slowdown that leaves the shares alone.
+
+A flag on a re-run is still a flag; raw profiles of every CI run are kept as CI artefacts (CI job, not obs).
 
 ## Toolchain
 
