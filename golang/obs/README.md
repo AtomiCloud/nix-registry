@@ -249,7 +249,8 @@ obs gen --check [--dir observability]
 
 Writes, for a valid contract: one set of **types and constants** per `generate:` target (concept
 §3.4: label value types, one labels type per metric and span, a name carrier per signal, the
-allowed-keys table; no per-metric functions; shared base types are prefixed `DurianSignal`),
+allowed-keys table; no per-metric functions). Shared port/value base types come from the
+language's interfaces library rather than being redefined in each generated file. Also writes
 `<dir>/contract/events.json` (event names, read by the log-alert event check) and
 `<dir>/contract/aggregation.yaml` (the §4.1 VictoriaMetrics stream-aggregation file: counters and
 histogram parts get `total`; gauges get `sum_samples`, `avg`, `max` or `last` with `dedup_interval`;
@@ -260,10 +261,41 @@ and `contract-hash: sha256:<hash of the contract file>`.
 `--check` regenerates into a temp dir and compares with the committed files: a file that differs is
 `[gen-edited]` when its header hash equals the contract's (a hand edit) and `[gen-stale]` when it does
 not (the contract changed and nobody regenerated); a missing file is `[gen-missing]`.
+A header-marked file absent from the output plan is `[gen-orphan]`, including files left after
+dropping a target. Each header names the contract's repository-relative path, so generated files
+owned by another contract in a monorepo are ignored. The check scans the consumer root without
+following symlinks or entering dependency/cache directories. `--lang` checks only the selected languages.
 Golden files: `tests/fixtures/gen/good` is a consumer repo with its generated files committed; the
 Go unit tests and `obs gen --check` compare against it (`OBS_UPDATE_GOLDEN=1 go test ./internal/gen/...`
-rewrites them). The tests find `tests/` in an ancestor of the package (or `OBS_TESTS_DIR`); a build from `src/` alone skips them, and the nix check copies `tests/` next to the source root. The generated code compiles: `tests/typecheck/<lang>.sh` builds a consumer against it and
-runs planted bad consumers that must not compile.
+rewrites them). The tests find `tests/` in an ancestor of the package (or `OBS_TESTS_DIR`); a build from `src/` alone skips them, and the nix check copies `tests/` next to the source root.
+
+**Each language compiles against a stub written from the goal; NOT TESTED against the real library.**
+`tests/typecheck/<lang>/stub/` contains only the assumed interfaces API used by the generated
+code and consumers. The nix check links these stubs, compiles/runs good consumers, and requires
+planted bad consumers to fail for the expected diagnostic. The same stubs support the 36 name-fuzz
+contract/language cases. The .NET harness builds three separate assemblies, Obs, Signals, and App; only Signals
+has access to the library's internal name/event constructors. Dart inherits the library's metric
+methods, so `checkoutCharges.add(labels)` fixes the labels type through its receiver.
+
+Each `generate:` target accepts optional `interfaces:` to override its dependency import:
+
+| Language | Default `interfaces`                             | Assumed API used by generated code / consumers                                                                                                                                                                                                                                                                                                                                                                     |
+| -------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Go       | `github.com/ProtoDurian/diene.go-interfaces/obs` | `Int[Spec]`, `NewInt[Spec](int64)` and `AtTime[Spec](time.Time)` returning `(value, error)`; specs expose `Name/Min/Max/Unit`, with Int64 bounds; `Event[Level]` and level markers; `NewEvent`, `NewCounter`, `NewHistogram`, `NewGauge`, `NewSpan`; `DurianSignal*` carriers/metadata; `Add`, `Record`, `Set`, `Error` ports. Generated `Event`/level and bounded-value names are aliases of these library types. |
+| Bun      | `@atomicloud/diene.interfaces`                   | Structural `Event<level>`; opaque `Bounded<name>` plus `bounded(spec, n): Result`; specs carry literal `name/min/max`; typed `Metrics<MetricLabels>` and `Tracer<SpanAttrs>` plus key tables. Small bounds remain literal unions.                                                                                                                                                                                  |
+| .NET     | `AtomiCloud.Diene.Interfaces`                    | `Int<Spec>.Of/AtTime` returning `Result` with `Ok/Err`; static `IDurianSignalIntSpec` members `Name/Min/Max/Unit` using Int64 for every range; `Event<Level>`, level markers, `DurianSignal*` metadata/carriers/interfaces/label attributes and date specs/values; internal constructors with friend access for the generated Signals assembly; `Port.Add` and `Log.Error`.                                        |
+| Dart     | `diene_interfaces`                               | Public barrel `diene_interfaces.dart`; shared `Event<Level>` interface, level markers, `DurianSignal*` labels/wire/metadata/carriers; public base carrier constructors and inherited `add/record/set` methods; `DurianSignalBoundSpec.of/atTime` returning `Result` with `DurianSignalOk/Err`.                                                                                                                     |
+
+The goals leave these exact base/spec signatures unspecified; the table records assumptions for
+the interfaces nodes to reconcile. The compile fixtures model Result locally and do not validate
+integration with the separately published result libraries. .NET name constructors require the real
+library to grant friend access to the consumer's generated assembly.
+
+Dart's generated event classes are final and have private constructors, while implementing the
+library's shared `Event` interface. An imported private or sealed constructor cannot be called or
+extended across Dart libraries. These private concrete carriers prevent constructing/subclassing
+the generated events; a hand-written implementation of the shared interface remains possible and
+needs a library guard. No real adapter, runtime sink or published package compatibility is claimed.
 
 ## Contract name checks in `obs query --static`
 

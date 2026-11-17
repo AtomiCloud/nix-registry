@@ -8,3 +8,5 @@ bad-wrong-level.cs CS0029
 bad-wrong-labels-for-name.cs CS0029
 bad-missing-label.cs CS7036
 bad-bounded-made-outside.cs CS1729
+bad-raw-event.cs CS1503
+bad-nonobject-fields.cs CS1503

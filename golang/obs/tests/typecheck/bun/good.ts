@@ -1,6 +1,8 @@
 // Consumer sketch of the Bun call surface: everything here must type-check against signals.ts.
 import {
   CheckoutCharges,
+  SequenceSpec,
+  type Sequence,
   CheckoutChargeDuration,
   ChargeFailed,
   eventNames,
@@ -16,14 +18,23 @@ type SpanAttributeMap = { readonly [name: string]: { readonly [key: string]: Spa
 type Fits<M extends SpanAttributeMap> = M;
 export type SpansFit = Fits<SpanAttrs>;
 
-declare function counter<N extends keyof MetricLabels>(name: N, labels: MetricLabels[N]): void;
-declare function logError(ev: { readonly name: string; readonly level: 'error' }): void;
-declare function run<N extends keyof SpanAttrs & string>(name: N, attributes: SpanAttrs[N]): void;
+import { metrics, logWarn, tracer } from '@atomicloud/diene.interfaces';
+const { counter } = metrics<MetricLabels>(metricTable);
+const { run: logSpan } = tracer<import('./signals').SpanAttrs>(spanTable);
+import { logError } from '@atomicloud/diene.interfaces';
+const { run } = tracer<SpanAttrs>(spanTable);
 
 counter(CheckoutCharges, { provider: 'stripe', outcome: 'ok', shard: 3, hour: 5 });
 counter(CheckoutChargeDuration, { provider: 'adyen', outcome: 'declined' });
 logError(ChargeFailed);
-run('checkout.charge', { user_id: 'u-1', provider: 'paypal', shard: 15 });
-run('checkout.queue.consume', {});
+run('checkout.charge', { user_id: 'u-1', provider: 'paypal', shard: 15 }, () => ({ ok: true, value: undefined }));
+run('checkout.queue.consume', {}, () => ({ ok: true, value: undefined }));
 
 export const tables = [metricTable['checkout.charges'].keys, spanTable['checkout.charge'].kind, eventNames.length];
+
+import { bounded } from '@atomicloud/diene.interfaces';
+const result = bounded(SequenceSpec, 3);
+if (result.ok) {
+  const sequence: Sequence = result.value;
+  void sequence;
+}

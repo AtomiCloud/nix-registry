@@ -1,2 +1,3 @@
 using Checkout.Signals;
-var e = new DurianSignalEvent<DurianSignalLevelError>("checkout.nothing");
+using AtomiCloud.Diene.Interfaces;
+var e = new Event<ErrorLevel>("checkout.nothing");

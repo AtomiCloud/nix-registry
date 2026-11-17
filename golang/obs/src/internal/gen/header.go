@@ -2,6 +2,8 @@ package gen
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 
@@ -19,9 +21,57 @@ const HashPrefix = "contract-hash: sha256:"
 func HeaderLines(c *contract.Contract) []string {
 	return []string{
 		Marker,
-		"contract: observability/contract.yaml",
+		"contract: " + ContractPath(c),
 		HashPrefix + c.Hash,
 	}
+}
+
+// ContractPath identifies the source independently of a target or contract hash.
+// In a Git repository it is relative to the repository root, even when invoked
+// from a service subdirectory. Standalone fixture projects have no .git; their
+// contract is relative to the supplied project directory. Synthetic contracts
+// keep their supplied logical filename without inspecting unrelated cwd files.
+func ContractPath(c *contract.Contract) string {
+	name := c.File
+	if name == "" {
+		return "observability/contract.yaml"
+	}
+	abs, err := filepath.Abs(name)
+	if err != nil {
+		return filepath.ToSlash(filepath.Clean(name))
+	}
+	if _, err := os.Stat(abs); err == nil {
+		for dir := filepath.Dir(abs); ; dir = filepath.Dir(dir) {
+			if _, err := os.Stat(filepath.Join(dir, ".git")); err == nil {
+				if rel, err := filepath.Rel(dir, abs); err == nil {
+					return filepath.ToSlash(rel)
+				}
+			}
+			if filepath.Dir(dir) == dir {
+				break
+			}
+		}
+	}
+	if !filepath.IsAbs(name) {
+		return filepath.ToSlash(filepath.Clean(name))
+	}
+	return filepath.ToSlash(filepath.Join(filepath.Base(filepath.Dir(abs)), filepath.Base(abs)))
+}
+
+// ContractOf reads the source path in the generated header, not arbitrary body text.
+func ContractOf(content []byte) string {
+	head := content
+	if len(head) > 600 {
+		head = head[:600]
+	}
+	for _, line := range strings.Split(string(head), "\n") {
+		for _, prefix := range []string{"// contract: ", "# contract: "} {
+			if strings.HasPrefix(line, prefix) {
+				return strings.TrimPrefix(line, prefix)
+			}
+		}
+	}
+	return ""
 }
 
 // Header is HeaderLines with each line prefixed by prefix ("// ", "# ") and a trailing newline.

@@ -8,6 +8,8 @@
 # Runs in the nix check (go, tsc, dotnet and dart are inputs of the obs-tests derivation).
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck disable=SC1091 # helper is relative to this fixture tree
+source "$here/typecheck/stubs.bash"
 OBS=obs
 [ "${1:-}" = "--obs" ] && OBS="$2"
 work="$(mktemp -d)"
@@ -22,9 +24,11 @@ compile() { # compile <lang> <generated folder>; prints the compiler's complaint
   case "$lang" in
   go)
     printf 'module example.com/fuzz\n\ngo 1.24\n' >"$d/go.mod"
+    obs_setup_stub go "$d"
     (cd "$d" && go vet ./...) 2>&1
     ;;
   bun)
+    obs_setup_stub bun "$d"
     (cd "$d" && tsc --noEmit --strict --noUncheckedIndexedAccess --exactOptionalPropertyTypes --target es2022 --module esnext --moduleResolution bundler --skipLibCheck signals.ts) 2>&1
     ;;
   dotnet)
@@ -40,6 +44,7 @@ compile() { # compile <lang> <generated folder>; prints the compiler's complaint
   </PropertyGroup>
 </Project>
 XML
+    obs_setup_stub dotnet "$d"
     local out
     out=$(cd "$d" && dotnet build Signals.csproj --disable-build-servers -p:UseSharedCompilation=false -nologo -v q 2>&1) || {
       grep ' error ' <<<"$out" | head -4
@@ -53,6 +58,7 @@ XML
   dart)
     printf 'name: fuzz_signals\npublish_to: none\nenvironment:\n  sdk: ^3.7.0\n' >"$d/pubspec.yaml"
     printf 'analyzer:\n  language:\n    strict-casts: true\n    strict-inference: true\n    strict-raw-types: true\n' >"$d/analysis_options.yaml"
+    obs_setup_stub dart "$d"
     (cd "$d" && dart pub get --offline >/dev/null 2>&1) || true
     local out
     out=$(cd "$d" && dart analyze 2>&1) || {

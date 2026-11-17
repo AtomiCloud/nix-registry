@@ -31,6 +31,9 @@ func Golden(t *testing.T, lang string) {
 		t.Fatal(err)
 	}
 	root := filepath.Dir(filepath.Dir(cpath)) // folder holding observability/
+	// This fixture is a standalone consumer repository, embedded inside obs's own
+	// Git repository for storage. Its golden identity is relative to that consumer.
+	c.File = "observability/contract.yaml"
 	var target *contract.Target
 	for i := range c.Generate {
 		if c.Generate[i].Lang == lang {
@@ -40,12 +43,12 @@ func Golden(t *testing.T, lang string) {
 	if target == nil {
 		t.Fatalf("fixture contract has no generate target for %s", lang)
 	}
-	files, err := gen.Generate(lang, c, gen.Options{Package: target.Package, Namespace: target.Module})
+	files, err := gen.Generate(lang, c, gen.Options{Package: target.Package, Namespace: target.Module, Interfaces: target.Interfaces})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Determinism: a second run gives the same bytes.
-	again, _ := gen.Generate(lang, c, gen.Options{Package: target.Package, Namespace: target.Module})
+	again, _ := gen.Generate(lang, c, gen.Options{Package: target.Package, Namespace: target.Module, Interfaces: target.Interfaces})
 	for i := range files {
 		if !bytes.Equal(files[i].Content, again[i].Content) {
 			t.Fatalf("%s: two runs differ", files[i].Path)

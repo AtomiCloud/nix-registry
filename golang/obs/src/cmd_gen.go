@@ -75,7 +75,7 @@ func runGen(args []string, stdout, stderr io.Writer) int {
 	}
 	root := gen.Root(*dir)
 	if *check {
-		probs, err := gen.Check(root, outs, c)
+		probs, err := gen.Check(root, outs, c, want...)
 		if err != nil {
 			fmt.Fprintf(stderr, "%s: %v\n", cmd, err)
 			return 2

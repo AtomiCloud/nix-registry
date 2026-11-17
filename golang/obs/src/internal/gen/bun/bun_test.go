@@ -62,7 +62,7 @@ func TestLargeNumberGetsBrand(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, w := range []string{
-		`export type Shard = number & { readonly __durianBounded: 'Shard' };`,
+		`export type Shard = DurianSignalBounded<'Shard'>;`,
 		`export const ShardSpec = { name: 'Shard', min: 0, max: 9999 } as const;`,
 	} {
 		if !strings.Contains(s, w) {

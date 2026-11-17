@@ -17,9 +17,11 @@ void main() {
     shard: shard,
     hour: (hour as DurianSignalOk<Hour>).value,
   );
+  checkoutCharges.add(labels);
+  error(chargeFailedEvent);
   print(labels.entries);
   final CheckoutChargesMetric counter = checkoutCharges;
-  const DurianSignalEvent<DurianSignalLevelError> failed = chargeFailedEvent;
+  const Event<ErrorLevel> failed = chargeFailedEvent;
   print('${counter.name} ${failed.name} ${failed.level}');
   print(BillingDay.of(DateTime.utc(2026, 11, 17)).wire);
   print(metricTable['checkout.charges']!.keys);

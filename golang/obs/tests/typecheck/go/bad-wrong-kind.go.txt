@@ -1,7 +1,10 @@
 package main
 
-import "example.com/app/signals"
+import (
+	"example.com/app/signals"
+	obs "github.com/ProtoDurian/diene.go-interfaces/obs"
+)
 
-var _ signals.DurianSignalHistogram[signals.CheckoutChargesLabels] = signals.CheckoutCharges
+var _ obs.DurianSignalHistogram[signals.CheckoutChargesLabels] = signals.CheckoutCharges
 
 func main() {}

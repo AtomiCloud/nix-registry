@@ -11,7 +11,7 @@
 //     an interface does not fit the Tracer index-signature constraint;
 //   - one name carrier (a string-literal constant) per metric and span.
 //
-// The file has no imports, so it type-checks alone. The output is a pure function of the contract and is
+// Shared event and large bounded value types are imported from the interfaces library. The output is
 // laid out the way biome formats it (2 spaces, double quotes, semicolons, trailing commas, width 100).
 package bun
 
@@ -39,8 +39,8 @@ type generator struct{}
 
 func (generator) Lang() string { return "bun" }
 
-func (generator) Files(c *contract.Contract, _ gen.Options) ([]gen.File, error) {
-	s, err := Render(c)
+func (generator) Files(c *contract.Contract, o gen.Options) ([]gen.File, error) {
+	s, err := renderWithOptions(c, o)
 	if err != nil {
 		return nil, err
 	}
@@ -194,14 +194,29 @@ func (n *names) claim(ident, what string) error {
 }
 
 // Render returns the text of signals.ts for a valid contract.
-func Render(c *contract.Contract) (string, error) {
+func Render(c *contract.Contract) (string, error) { return renderWithOptions(c, gen.Options{}) }
+
+func renderWithOptions(c *contract.Contract, o gen.Options) (string, error) {
 	nm := &names{seen: map[string]string{}}
 	// Names the file declares itself: a contract name that becomes one of them is a collision.
-	for _, id := range []string{"MetricLabels", "SpanAttrs"} {
+	for _, id := range []string{"MetricLabels", "SpanAttrs", "DurianSignalEvent", "DurianSignalBounded"} {
 		nm.seen[id] = "the generated " + id + " map"
 	}
 	var b strings.Builder
 	b.WriteString(gen.Header(c, "// "))
+	interfaces := o.Interfaces
+	if interfaces == "" {
+		interfaces = "@atomicloud/diene.interfaces"
+	}
+	if len(c.LogOrder) > 0 {
+		fmt.Fprintf(&b, "\nimport type { Event as DurianSignalEvent } from %s;\n", q(interfaces))
+	}
+	for _, t := range c.Types {
+		if t.Kind == contract.KindInt && t.Size() > maxUnion {
+			fmt.Fprintf(&b, "\nimport type { Bounded as DurianSignalBounded } from %s;\n", q(interfaces))
+			break
+		}
+	}
 
 	typeName := map[string]string{} // contract type -> TS type
 	b.WriteString("\n// Label value types.\n")
@@ -233,7 +248,7 @@ func Render(c *contract.Contract) (string, error) {
 				if err := nm.claim(spec, "type "+tn+" (spec)"); err != nil {
 					return "", err
 				}
-				fmt.Fprintf(&b, "export type %s = number & { readonly __durianBounded: %s };\n", id, q(id))
+				fmt.Fprintf(&b, "export type %s = DurianSignalBounded<%s>;\n", id, q(id))
 				render(&b, 0, "export const "+spec+" = ", obj{members: []member{
 					{"name", raw(q(id))}, {"min", raw(strconv.Itoa(lo))}, {"max", raw(strconv.Itoa(hi))},
 				}}, " as const;")
@@ -319,7 +334,7 @@ func Render(c *contract.Contract) (string, error) {
 			}
 			render(&b, 0, "export const "+id+" = ", obj{members: []member{
 				{"name", raw(q(e.Event))}, {"level", raw(q(e.Level))},
-			}}, " as const;")
+			}}, " as const satisfies DurianSignalEvent<"+q(e.Level)+">;")
 			evs = append(evs, e.Event)
 		}
 		render(&b, 0, "export const eventNames = ", strArr(evs), " as const;")

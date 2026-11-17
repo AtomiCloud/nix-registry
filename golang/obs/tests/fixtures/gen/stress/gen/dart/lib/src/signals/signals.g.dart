@@ -3,195 +3,15 @@
 // contract-hash: sha256:5060e61bbe64b9238fc7ba07f1c81cb9ee3035981a56ce618ca94aef955d1cb6
 // ignore_for_file: type=lint
 
-// ---- shared base types ----
+import 'package:diene_interfaces/diene_interfaces.dart';
 
-/// A label value that has a wire form.
-abstract interface class DurianSignalWire {
-  String get wire;
-}
-
-/// The labels or attributes of a signal. Only the generated classes below extend it.
-sealed class DurianSignalLabels {
-  const DurianSignalLabels._();
-
-  /// The wire name and value of each label, in contract order.
-  Map<String, Object> get entries;
-}
-
-/// The result of making a bounded number: a value, or the reason it was refused.
-sealed class DurianSignalResult<T> {
-  const DurianSignalResult._();
-}
-
-/// A value.
-final class DurianSignalOk<T> extends DurianSignalResult<T> {
-  const DurianSignalOk(this.value) : super._();
-
-  final T value;
-}
-
-/// The reason a value was refused.
-final class DurianSignalErr<T> extends DurianSignalResult<T> {
-  const DurianSignalErr(this.error) : super._();
-
-  final String error;
-}
-
-/// The range of a bounded number or time bucket. Only this library can make one.
-final class DurianSignalBoundSpec<T> {
-  const DurianSignalBoundSpec._(
-    this.name,
-    this.min,
-    this.max,
-    this.unit,
-    this._make,
-  );
-
-  final String name;
-  final int min;
-  final int max;
-
-  /// hour_of_day or weekday for a time bucket, empty for a bounded number.
-  final String unit;
-
-  final T Function(int) _make;
-
-  /// Makes a value, or says why [n] is refused (works in release builds).
-  DurianSignalResult<T> of(int n) =>
-      n < min || n > max
-          ? DurianSignalErr<T>('$name: $n is outside $min..$max')
-          : DurianSignalOk<T>(_make(n));
-
-  /// The bucket of [t] (always in range for a time bucket).
-  DurianSignalResult<T> atTime(DateTime t) => switch (unit) {
-    'hour_of_day' => of(t.hour),
-    'weekday' => of(t.weekday % 7),
-    _ => DurianSignalErr<T>("$name: unit '$unit' is not a time bucket"),
-  };
-}
+export 'package:diene_interfaces/diene_interfaces.dart';
 
 String _durianSignalDate(DateTime t) {
   final u = t.toUtc();
   final m = u.month.toString().padLeft(2, '0');
   final d = u.day.toString().padLeft(2, '0');
   return '${u.year.toString().padLeft(4, '0')}-$m-$d';
-}
-
-/// The level marker base. Only the markers below extend it.
-sealed class DurianSignalLevel {
-  const DurianSignalLevel._(this.level);
-
-  final String level;
-}
-
-/// A log event: a name carrier whose type includes its level.
-sealed class DurianSignalEvent<L extends DurianSignalLevel> {
-  const DurianSignalEvent._(this.name, this.level);
-
-  /// The event name (the value of the durian.cloud/event field).
-  final String name;
-
-  /// The level the type fixes (trace, debug, info, warn, error or fatal).
-  final String level;
-}
-
-/// A counter name carrier; [L] is its labels class.
-sealed class DurianSignalCounter<L extends DurianSignalLabels> {
-  const DurianSignalCounter._(this.name);
-
-  final String name;
-}
-
-/// A histogram name carrier.
-sealed class DurianSignalHistogram<L extends DurianSignalLabels> {
-  const DurianSignalHistogram._(this.name);
-
-  final String name;
-}
-
-/// A gauge name carrier.
-sealed class DurianSignalGauge<L extends DurianSignalLabels> {
-  const DurianSignalGauge._(this.name);
-
-  final String name;
-}
-
-/// A span name carrier; [A] is its attributes class.
-sealed class DurianSignalSpan<A extends DurianSignalLabels> {
-  const DurianSignalSpan._(this.name, this.kind);
-
-  final String name;
-
-  /// internal, client, server, producer or consumer.
-  final String kind;
-}
-
-/// One row of metricTable.
-final class DurianSignalMetricInfo {
-  const DurianSignalMetricInfo._({
-    required this.kind,
-    required this.unit,
-    required this.budget,
-    required this.acrossPods,
-    required this.perPod,
-    required this.keys,
-  });
-
-  /// counter, histogram or gauge.
-  final String kind;
-
-  /// The stored name suffix (seconds, bytes), or empty.
-  final String unit;
-
-  /// The most series the metric may store per landscape (0: none stated).
-  final int budget;
-
-  /// sum, avg, max or last; empty for counters, histograms and per-pod gauges.
-  final String acrossPods;
-
-  /// True for a gauge that keeps its pod keys.
-  final bool perPod;
-
-  /// The allowed label keys, in contract order.
-  final List<String> keys;
-}
-
-/// One row of spanTable.
-final class DurianSignalSpanInfo {
-  const DurianSignalSpanInfo._({required this.kind, required this.keys});
-
-  final String kind;
-  final List<String> keys;
-}
-
-/// The level marker of trace events.
-final class DurianSignalLevelTrace extends DurianSignalLevel {
-  const DurianSignalLevelTrace._() : super._('trace');
-}
-
-/// The level marker of debug events.
-final class DurianSignalLevelDebug extends DurianSignalLevel {
-  const DurianSignalLevelDebug._() : super._('debug');
-}
-
-/// The level marker of info events.
-final class DurianSignalLevelInfo extends DurianSignalLevel {
-  const DurianSignalLevelInfo._() : super._('info');
-}
-
-/// The level marker of warn events.
-final class DurianSignalLevelWarn extends DurianSignalLevel {
-  const DurianSignalLevelWarn._() : super._('warn');
-}
-
-/// The level marker of error events.
-final class DurianSignalLevelError extends DurianSignalLevel {
-  const DurianSignalLevelError._() : super._('error');
-}
-
-/// The level marker of fatal events.
-final class DurianSignalLevelFatal extends DurianSignalLevel {
-  const DurianSignalLevelFatal._() : super._('fatal');
 }
 
 // ---- label value types ----
@@ -227,7 +47,7 @@ extension type const VeryLongBoundedNumberTypeNameForWrapping._(int value)
 
 /// The range of [VeryLongBoundedNumberTypeNameForWrapping]; of(n) returns a result.
 const veryLongBoundedNumberTypeNameForWrappingSpec =
-    DurianSignalBoundSpec<VeryLongBoundedNumberTypeNameForWrapping>._(
+    DurianSignalBoundSpec<VeryLongBoundedNumberTypeNameForWrapping>(
       'very_long_bounded_number_type_name_for_wrapping',
       -5,
       99,
@@ -244,7 +64,7 @@ extension type const Hour._(int value) implements int {
 }
 
 /// The range of [Hour]; of(n) returns a result.
-const hourSpec = DurianSignalBoundSpec<Hour>._(
+const hourSpec = DurianSignalBoundSpec<Hour>(
   'hour',
   0,
   23,
@@ -281,7 +101,7 @@ final class PaymentsProviderSettlementBatchReconciliationDurationLabels
     required this.default_,
     required this.veryLongBoundedNumberTypeNameForWrapping,
     required this.k8sZone,
-  }) : super._();
+  }) : super();
 
   final Region region;
   final Region default_;
@@ -306,7 +126,7 @@ final class PaymentsProviderSettlementBatchReconciliationDurationMetric
           PaymentsProviderSettlementBatchReconciliationDurationLabels
         > {
   const PaymentsProviderSettlementBatchReconciliationDurationMetric._()
-    : super._('payments.provider.settlement.batch.reconciliation.duration');
+    : super('payments.provider.settlement.batch.reconciliation.duration');
 }
 
 /// The histogram payments.provider.settlement.batch.reconciliation.duration.
@@ -319,7 +139,7 @@ final class PaymentsProviderSettlementBatchReconciliationLateLabels
   const PaymentsProviderSettlementBatchReconciliationLateLabels({
     required this.veryLongCalendarDateTypeNameToWrapTheLine,
     required this.hour,
-  }) : super._();
+  }) : super();
 
   final VeryLongCalendarDateTypeNameToWrapTheLine
   veryLongCalendarDateTypeNameToWrapTheLine;
@@ -340,7 +160,7 @@ final class PaymentsProviderSettlementBatchReconciliationLateMetric
           PaymentsProviderSettlementBatchReconciliationLateLabels
         > {
   const PaymentsProviderSettlementBatchReconciliationLateMetric._()
-    : super._('payments.provider.settlement.batch.reconciliation.late');
+    : super('payments.provider.settlement.batch.reconciliation.late');
 }
 
 /// The counter payments.provider.settlement.batch.reconciliation.late.
@@ -349,7 +169,7 @@ const paymentsProviderSettlementBatchReconciliationLate =
 
 /// The labels of payments.idle.
 final class PaymentsIdleLabels extends DurianSignalLabels {
-  const PaymentsIdleLabels() : super._();
+  const PaymentsIdleLabels() : super();
 
   @override
   Map<String, Object> get entries => const {};
@@ -357,7 +177,7 @@ final class PaymentsIdleLabels extends DurianSignalLabels {
 
 /// The gauge payments.idle.
 final class PaymentsIdleMetric extends DurianSignalGauge<PaymentsIdleLabels> {
-  const PaymentsIdleMetric._() : super._('payments.idle');
+  const PaymentsIdleMetric._() : super('payments.idle');
 }
 
 /// The gauge payments.idle.
@@ -367,7 +187,7 @@ const paymentsIdle = PaymentsIdleMetric._();
 /// label keys.
 const metricTable = <String, DurianSignalMetricInfo>{
   'payments.provider.settlement.batch.reconciliation.duration':
-      DurianSignalMetricInfo._(
+      DurianSignalMetricInfo(
         kind: 'histogram',
         unit: 'seconds',
         budget: 3000000,
@@ -381,7 +201,7 @@ const metricTable = <String, DurianSignalMetricInfo>{
         ],
       ),
   'payments.provider.settlement.batch.reconciliation.late':
-      DurianSignalMetricInfo._(
+      DurianSignalMetricInfo(
         kind: 'counter',
         unit: '',
         budget: 9000000,
@@ -389,7 +209,7 @@ const metricTable = <String, DurianSignalMetricInfo>{
         perPod: false,
         keys: ['very_long_calendar_date_type_name_to_wrap_the_line', 'hour'],
       ),
-  'payments.idle': DurianSignalMetricInfo._(
+  'payments.idle': DurianSignalMetricInfo(
     kind: 'gauge',
     unit: '',
     budget: 0,
@@ -402,16 +222,28 @@ const metricTable = <String, DurianSignalMetricInfo>{
 // ---- log events ----
 
 /// The event payments.class.started at level fatal.
-final class ClassEvent extends DurianSignalEvent<DurianSignalLevelFatal> {
-  const ClassEvent._() : super._('payments.class.started', 'fatal');
+final class ClassEvent implements Event<FatalLevel> {
+  const ClassEvent._();
+
+  @override
+  String get name => 'payments.class.started';
+
+  @override
+  String get level => 'fatal';
 }
 
 /// The event payments.class.started at level fatal.
 const classEvent = ClassEvent._();
 
 /// The event payments.new at level trace.
-final class NewEvent extends DurianSignalEvent<DurianSignalLevelTrace> {
-  const NewEvent._() : super._('payments.new', 'trace');
+final class NewEvent implements Event<TraceLevel> {
+  const NewEvent._();
+
+  @override
+  String get name => 'payments.new';
+
+  @override
+  String get level => 'trace';
 }
 
 /// The event payments.new at level trace.
@@ -419,12 +251,14 @@ const newEvent = NewEvent._();
 
 /// The event payments.provider.settlement.batch.reconciliation.failed at level error.
 final class VeryLongEventKeyNameThatNeedsWrappingInTheGeneratedCodeEvent
-    extends DurianSignalEvent<DurianSignalLevelError> {
-  const VeryLongEventKeyNameThatNeedsWrappingInTheGeneratedCodeEvent._()
-    : super._(
-        'payments.provider.settlement.batch.reconciliation.failed',
-        'error',
-      );
+    implements Event<ErrorLevel> {
+  const VeryLongEventKeyNameThatNeedsWrappingInTheGeneratedCodeEvent._();
+
+  @override
+  String get name => 'payments.provider.settlement.batch.reconciliation.failed';
+
+  @override
+  String get level => 'error';
 }
 
 /// The event payments.provider.settlement.batch.reconciliation.failed at level error.
@@ -447,7 +281,7 @@ final class PaymentsProviderSettlementBatchReconciliationAttributes
     required this.note,
     required this.default_,
     required this.hour,
-  }) : super._();
+  }) : super();
 
   final String note;
   final Region default_;
@@ -468,7 +302,7 @@ final class PaymentsProviderSettlementBatchReconciliationSpan
           PaymentsProviderSettlementBatchReconciliationAttributes
         > {
   const PaymentsProviderSettlementBatchReconciliationSpan._()
-    : super._('payments.provider.settlement.batch.reconciliation', 'server');
+    : super('payments.provider.settlement.batch.reconciliation', 'server');
 }
 
 /// The span payments.provider.settlement.batch.reconciliation.
@@ -477,7 +311,7 @@ const paymentsProviderSettlementBatchReconciliationSpan =
 
 /// The data table of the spans: kind and allowed attribute keys.
 const spanTable = <String, DurianSignalSpanInfo>{
-  'payments.provider.settlement.batch.reconciliation': DurianSignalSpanInfo._(
+  'payments.provider.settlement.batch.reconciliation': DurianSignalSpanInfo(
     kind: 'server',
     keys: ['note', 'default', 'hour'],
   ),
