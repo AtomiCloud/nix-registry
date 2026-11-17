@@ -88,6 +88,7 @@ func Check(o Options, stdout, stderr io.Writer) int {
 	if rep.Failures() > 0 {
 		return 1
 	}
+	logEvents := logEventSets{}
 	for _, group := range [][]Alert{p.Alerts, p.Records} {
 		for i := range group {
 			for ref, q := range group[i].Queries {
@@ -101,6 +102,11 @@ func Check(o Options, stdout, stderr io.Writer) int {
 				}
 				q.Expr = analysis.Expr
 				group[i].Queries[ref] = q
+				if analysis.Skipped {
+					logEvents[q.Expr] = nil
+				} else {
+					logEvents[q.Expr] = analysis.Events
+				}
 			}
 		}
 	}
@@ -148,7 +154,7 @@ func Check(o Options, stdout, stderr io.Writer) int {
 	}
 	var ars []AlertRun
 	var recordedSeries []*Series
-	pruned, recorded := 0, 0
+	pruned, prunedEvents, recorded := 0, 0, 0
 	if len(p.Alerts) > 0 || len(allAlerts) == 0 {
 		var used []*Alert
 		for i := range p.Alerts {
@@ -161,6 +167,9 @@ func Check(o Options, stdout, stderr io.Writer) int {
 		sd := p.Seed
 		if !wantLogs {
 			sd.Logs = nil
+		} else if need := neededLogEvents(used, logEvents); need != nil {
+			// Lazy load for logs: only the events some log query can match.
+			sd.Logs, prunedEvents = keepLogs(sd.Logs, need)
 		}
 		// Generate only seed metrics required by metric selectors or seeded log events.
 		names := neededMetricNames(used)
@@ -207,6 +216,11 @@ func Check(o Options, stdout, stderr io.Writer) int {
 				return 2
 			}
 			defer l.Close()
+			// Rule workers run in parallel (all CPUs by default); one worker per
+			// stats query then. --workers 1 keeps VictoriaLogs' own parallelism.
+			if o.Workers != 1 {
+				l.SetQueryConcurrency(1)
+			}
 			eng.Datasources["logs"] = logsEngine{e: l, guard: o.LogsGuard}
 		}
 		cache := &queryCache{m: map[qKey]*qEntry{}}
@@ -256,7 +270,7 @@ func Check(o Options, stdout, stderr io.Writer) int {
 	if VerifyMismatch.Load() > 0 || SkipMismatch > 0 {
 		failed++
 	}
-	fmt.Fprintf(stdout, "obs alerts: alerts=%d recording=%d runs=%d expectations=%d failed=%d cached=%d pruned=%d recorded_samples=%d\n", len(allAlerts), len(p.Records), len(runs), len(vs), failed, len(cached)/len(runs), pruned, recorded)
+	fmt.Fprintf(stdout, "obs alerts: alerts=%d recording=%d runs=%d expectations=%d failed=%d cached=%d pruned=%d recorded_samples=%d pruned_log_events=%d\n", len(allAlerts), len(p.Records), len(runs), len(vs), failed, len(cached)/len(runs), pruned, recorded, prunedEvents)
 	fmt.Fprintf(stdout, "verify fast: compared=%d mismatches=%d; verify skip: compared=%d mismatches=%d; reused=%d\n", VerifiedTicks.Load(), VerifyMismatch.Load(), SkipChecked, SkipMismatch, SkippedRuns)
 	if o.Out != "" {
 		if err := writeJSON(o.Out, map[string]any{"alert_runs": stripSteps(ars), "verdicts": vs, "failed": failed, "elapsed_ms": time.Since(started).Milliseconds()}); err != nil {
