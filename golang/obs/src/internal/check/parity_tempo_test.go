@@ -1,4 +1,4 @@
-//go:build parity && parity_tempo
+//go:build parity
 
 package check
 

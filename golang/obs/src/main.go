@@ -1,7 +1,5 @@
-// obs: the observability check tool. This release (0.1.0) ships `obs query --static`,
-// `obs query --live` and `obs version`: every alert and dashboard query is parsed by
-// the embedded VictoriaMetrics and VictoriaLogs parsers and run on a seed, with no
-// network and no containers.
+// obs checks observability queries and links with embedded store engines,
+// seeded data, no network and no containers.
 package main
 
 import (
@@ -25,6 +23,7 @@ const usage = `obs: the observability check tool
 usage:
   obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
   obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names]
+  obs links [--dir observability] [--seed seed.yaml] [--base unix]
   obs version
 
 exit 0 when clean, 1 when a check failed, 2 on a usage or input error.
@@ -41,6 +40,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "version", "--version", "-version":
 		printVersion(stdout)
 		return 0
+	case "links":
+		return runLinks(args[1:], stdout, stderr)
 	case "query":
 		return runQuery(args[1:], stdout, stderr)
 	case "help", "-h", "--help":

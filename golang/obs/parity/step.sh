@@ -9,14 +9,6 @@ export OBS_PARITY_OBS="$state/obs"
 cd "$here/../src"
 # A newly available command must not silently turn a missing adapter green.
 tags=parity
-case "$test" in
-TestParityTraceQL | TestParityLinks)
-  tags=parity,parity_tempo
-  # go mod vendor follows every build tag. Keep this optional adapter outside
-  # src until Tempo/links actually exist, so the M1-only package still vendors.
-  cp "$here/tempo_test.go.txt" internal/check/parity_tempo_test.go
-  ;;
-esac
 listed=$("${GO:-go}" test -tags "$tags" -list "^$test\$" ./internal/check)
 command grep -qx "$test" <<<"$listed" || {
   echo "parity adapter $test is missing for an available obs command" >&2
