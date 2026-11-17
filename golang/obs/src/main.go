@@ -31,7 +31,6 @@ usage:
   obs alerts [--dir observability] [--seed seed.yaml] [--base unix] [--out results.json]
   obs check [--dir observability] [--pods n] [--landscapes n]
   obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
-
   obs sandbox up|down|status [--dir observability] [--project name] [--port-base n]
   obs scrape --target <url> [--label name=value] [--interval 15s] [--once]
   obs look [--base origin/main] [--all] [--json]
@@ -54,8 +53,6 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "alerts":
 		return runAlerts(args[1:], stdout, stderr)
-
-
 	case "scrape":
 		return runScrape(args[1:], stdout, stderr)
 	case "sandbox":
@@ -84,7 +81,6 @@ func printVersion(w io.Writer) {
 	fmt.Fprintf(w, "engine VictoriaMetrics %s (MetricsQL)\n", pinVictoriaMetrics)
 	fmt.Fprintf(w, "engine VictoriaLogs %s (LogsQL)\n", pinVictoriaLogs)
 	fmt.Fprintln(w, "engine Grafana 13.3.0 (commit 752e3462; alert math and state machine)")
-
 	for _, l := range sandbox.PinLines() {
 		fmt.Fprintln(w, l)
 	}
