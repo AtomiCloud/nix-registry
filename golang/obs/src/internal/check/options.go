@@ -4,6 +4,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+
+	"github.com/AtomiCloud/obs/internal/contract"
 )
 
 // Options of `obs query`.
@@ -15,7 +17,9 @@ type Options struct {
 	// EventRule says when a LogsQL alert must name a contract event:
 	// "auto" (only when <Dir>/contract.yaml exists; the decided default), "on", "off".
 	EventRule string
-	Out       io.Writer
+	// Contract is the parsed <Dir>/contract.yaml; Static loads it when nil and the file exists.
+	Contract *contract.Contract
+	Out      io.Writer
 }
 
 func (o *Options) contractPath() string { return filepath.Join(o.Dir, "contract.yaml") }
