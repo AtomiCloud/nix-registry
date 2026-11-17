@@ -201,3 +201,11 @@ func TestEscapedSingleQuotedFixedMatcher(t *testing.T) {
 	wantRed(t, `checkout_charges_total{outcome=~'$outcome'} + checkout_charges_total{outcome='er\'ror'}`,
 		`checkout_charges_total{outcome=~'x'} + checkout_charges_total{outcome='er\'ror'}`, "contract-bad-enum-value", "er'ror")
 }
+
+// Round 3 (GPT verifier, finding 2): a fixed single-quoted matcher with an escape decodes the way MetricsQL does.
+func TestEscapedSingleQuotedHexSibling(t *testing.T) {
+	wantRed(t, `checkout_charges_total{outcome=~"$outcome"} + checkout_charges_total{outcome=~'erro\x72s'}`,
+		`checkout_charges_total{outcome=~"x"} + checkout_charges_total{outcome=~'erro\x72s'}`, "contract-bad-enum-value", "errors")
+	wantRed(t, `checkout_charges_total{outcome=~"$outcome"} + checkout_charges_total{outcome='erro\x72s'}`,
+		`checkout_charges_total{outcome=~"x"} + checkout_charges_total{outcome='erro\x72s'}`, "contract-bad-enum-value", "errors")
+}
