@@ -16,3 +16,7 @@ bunWrapper/resolver-smoke/vendor/nix.mjs
 # problemgen test inputs: some are deliberately malformed; bytes must not change
 golang/problemgen/src/testdata/
 golang/problemgen/tests/fixture/
+
+# ul test inputs: the planted failures are deliberately malformed and the golden/UL.md files
+# are the exact bytes `ul` writes; formatting them would change what the tests compare
+golang/ul/src/testdata/

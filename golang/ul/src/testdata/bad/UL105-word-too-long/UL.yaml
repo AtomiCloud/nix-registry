@@ -1,0 +1,7 @@
+namespace: example.org/area/demo
+premise: A demo area
+language:
+  Alpha:
+    desc: The first word.
+  AlphaAlphaAlphaAlphaAlphaAlphaAlphaAlphaAlphaAlphaAlphaAlphaAlphaAlphaAlpha:
+    desc: A name of 75 characters.
