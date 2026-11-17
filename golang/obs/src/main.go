@@ -62,7 +62,7 @@ func printVersion(w io.Writer) {
 	for _, name := range names {
 		fmt.Fprintf(w, "engine %s %s", name, p[name].Version)
 		if p[name].Commit != "" {
-			fmt.Fprintf(w, " (source commit %s)", p[name].Commit)
+			fmt.Fprintf(w, " (tag commit %s)", p[name].Commit)
 		}
 		fmt.Fprintln(w)
 	}
