@@ -1,0 +1,34 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata:
+  name: speed-checkout-v16-mixed-errors-or-latency
+spec:
+  folderRef: speed-checkout-folder
+  interval: 1m
+  rules:
+    - uid: v16-mixed-errors-or-latency
+      title: 'Checkout unhealthy'
+      condition: C
+      for: 5m
+      noDataState: OK
+      execErrState: Error
+      data:
+        - refId: A
+          relativeTimeRange: { from: 420, to: 0 }
+          datasourceUid: speed-metrics
+          model:
+            datasource: { type: prometheus, uid: speed-metrics }
+            expr: 'sum(rate(checkout_charges_total{outcome="error"}[7m]))'
+            instant: true
+        - refId: B
+          relativeTimeRange: { from: 420, to: 0 }
+          datasourceUid: speed-metrics
+          model:
+            datasource: { type: prometheus, uid: speed-metrics }
+            expr: 'histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket[7m])))'
+            instant: true
+        - refId: C
+          datasourceUid: __expr__
+          model: { type: math, expression: '$A > 1.1 || $B > 0.55' }
+      labels: { severity: critical }
+      annotations: { summary: 'Checkout unhealthy' }

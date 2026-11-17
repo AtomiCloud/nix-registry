@@ -1,0 +1,9 @@
+story: The charge route gets 6x slower for 40 minutes.
+window: { start: 150m, duration: 40m }
+change:
+  - { metric: http.server.request.duration, where: { http.route: /charge }, latency_x: 6 }
+expect:
+  fire: []
+  quiet: [charge-errors/critical]
+  fire_within: 20m
+  resolve_within: 20m

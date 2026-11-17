@@ -1,0 +1,73 @@
+story: Adyen declines a burst of cards for 20 minutes.
+window: { start: 60m, duration: 20m }
+change:
+  - { metric: checkout.charges, where: { payment.provider: adyen, outcome: declined }, rate: 0.8/s }
+expect:
+  fire:
+    [
+      declines/adyen-metric,
+      declines/adyen-logs,
+      v2/declines/adyen-metric,
+      v2/declines/adyen-logs,
+      v3/declines/adyen-metric,
+      v3/declines/adyen-logs,
+      v4/declines/adyen-metric,
+      v4/declines/adyen-logs,
+      v5/declines/adyen-metric,
+      v5/declines/adyen-logs,
+      v6/declines/adyen-metric,
+      v6/declines/adyen-logs,
+      v7/declines/adyen-metric,
+      v7/declines/adyen-logs,
+      v8/declines/adyen-metric,
+      v8/declines/adyen-logs,
+      v9/declines/adyen-metric,
+      v9/declines/adyen-logs,
+      v10/declines/adyen-metric,
+      v10/declines/adyen-logs,
+    ]
+  quiet:
+    [
+      charge-errors/critical,
+      charge-errors/ratio,
+      latency/p95-warning,
+      traffic/low,
+      v2/charge-errors/critical,
+      v2/charge-errors/ratio,
+      v2/latency/p95-warning,
+      v2/traffic/low,
+      v3/charge-errors/critical,
+      v3/charge-errors/ratio,
+      v3/latency/p95-warning,
+      v3/traffic/low,
+      v4/charge-errors/critical,
+      v4/charge-errors/ratio,
+      v4/latency/p95-warning,
+      v4/traffic/low,
+      v5/charge-errors/critical,
+      v5/charge-errors/ratio,
+      v5/latency/p95-warning,
+      v5/traffic/low,
+      v6/charge-errors/critical,
+      v6/charge-errors/ratio,
+      v6/latency/p95-warning,
+      v6/traffic/low,
+      v7/charge-errors/critical,
+      v7/charge-errors/ratio,
+      v7/latency/p95-warning,
+      v7/traffic/low,
+      v8/charge-errors/critical,
+      v8/charge-errors/ratio,
+      v8/latency/p95-warning,
+      v8/traffic/low,
+      v9/charge-errors/critical,
+      v9/charge-errors/ratio,
+      v9/latency/p95-warning,
+      v9/traffic/low,
+      v10/charge-errors/critical,
+      v10/charge-errors/ratio,
+      v10/latency/p95-warning,
+      v10/traffic/low,
+    ]
+  fire_within: 15m
+  resolve_within: 20m

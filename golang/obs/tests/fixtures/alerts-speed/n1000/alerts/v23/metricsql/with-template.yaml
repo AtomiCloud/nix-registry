@@ -1,0 +1,27 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata:
+  name: speed-checkout-v23-metricsql-with-template
+spec:
+  folderRef: speed-checkout-folder
+  interval: 1m
+  rules:
+    - uid: v23-metricsql-with-template
+      title: 'Charge errors (MetricsQL WITH)'
+      condition: B
+      for: 5m
+      noDataState: OK
+      execErrState: Error
+      data:
+        - refId: A
+          relativeTimeRange: { from: 180, to: 0 }
+          datasourceUid: speed-metrics
+          model:
+            datasource: { type: prometheus, uid: speed-metrics }
+            expr: 'WITH (errs = checkout_charges_total{outcome="error"}) sum(rate(errs[3m]))'
+            instant: true
+        - refId: B
+          datasourceUid: __expr__
+          model: { type: math, expression: '$A > 1.2' }
+      labels: { severity: warning }
+      annotations: { summary: 'Charge errors (MetricsQL WITH)' }

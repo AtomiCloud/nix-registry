@@ -1,0 +1,27 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata:
+  name: speed-checkout-v43-charge-errors-no-window
+spec:
+  folderRef: speed-checkout-folder
+  interval: 1m
+  rules:
+    - uid: v43-charge-errors-no-window
+      title: 'Charge errors (MetricsQL, no window)'
+      condition: B
+      for: 5m
+      noDataState: OK
+      execErrState: Error
+      data:
+        - refId: A
+          relativeTimeRange: { from: 600, to: 0 }
+          datasourceUid: speed-metrics
+          model:
+            datasource: { type: prometheus, uid: speed-metrics }
+            expr: 'sum(rate(checkout_charges_total{outcome="error"}))'
+            instant: true
+        - refId: B
+          datasourceUid: __expr__
+          model: { type: math, expression: '$A > 1.4' }
+      labels: { severity: warning }
+      annotations: { summary: 'Charge errors (MetricsQL, no window)' }

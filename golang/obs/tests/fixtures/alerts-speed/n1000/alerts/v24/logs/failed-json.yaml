@@ -1,0 +1,27 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata:
+  name: speed-checkout-v24-logs-failed-json
+spec:
+  folderRef: speed-checkout-folder
+  interval: 1m
+  rules:
+    - uid: v24-logs-failed-json
+      title: 'Failed charge log lines (json fields)'
+      condition: B
+      for: 5m
+      noDataState: OK
+      execErrState: Error
+      data:
+        - refId: A
+          relativeTimeRange: { from: 240, to: 0 }
+          datasourceUid: speed-logs
+          model:
+            datasource: { type: victoriametrics-logs-datasource, uid: speed-logs }
+            expr: '_time:4m {durian.cloud.service="checkout"} "durian.cloud/event":in("checkout.charge.failed") | stats count() hits'
+            queryType: stats
+        - refId: B
+          datasourceUid: __expr__
+          model: { type: math, expression: '$A > 120' }
+      labels: { severity: warning }
+      annotations: { summary: 'Failed charge log lines (json fields)' }

@@ -1,0 +1,27 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata:
+  name: speed-checkout-v35-latency-avg
+spec:
+  folderRef: speed-checkout-folder
+  interval: 1m
+  rules:
+    - uid: v35-latency-avg
+      title: 'Average request time high'
+      condition: B
+      for: 5m
+      noDataState: OK
+      execErrState: Error
+      data:
+        - refId: A
+          relativeTimeRange: { from: 360, to: 0 }
+          datasourceUid: speed-metrics
+          model:
+            datasource: { type: prometheus, uid: speed-metrics }
+            expr: 'sum(rate(http_server_request_duration_seconds_sum[6m])) / sum(rate(http_server_request_duration_seconds_count[6m]))'
+            instant: true
+        - refId: B
+          datasourceUid: __expr__
+          model: { type: math, expression: '$A > 0.39' }
+      labels: { severity: warning }
+      annotations: { summary: 'Average request time high' }

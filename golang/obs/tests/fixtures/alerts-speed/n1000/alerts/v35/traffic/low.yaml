@@ -1,0 +1,27 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata:
+  name: speed-checkout-v35-traffic-low
+spec:
+  folderRef: speed-checkout-folder
+  interval: 1m
+  rules:
+    - uid: v35-traffic-low
+      title: 'Checkout traffic dropped'
+      condition: B
+      for: 10m
+      noDataState: OK
+      execErrState: Error
+      data:
+        - refId: A
+          relativeTimeRange: { from: 360, to: 0 }
+          datasourceUid: speed-metrics
+          model:
+            datasource: { type: prometheus, uid: speed-metrics }
+            expr: 'sum(rate(checkout_charges_total[6m]))'
+            instant: true
+        - refId: B
+          datasourceUid: __expr__
+          model: { type: math, expression: '$A < 1.3' }
+      labels: { severity: warning }
+      annotations: { summary: 'Checkout traffic dropped' }
