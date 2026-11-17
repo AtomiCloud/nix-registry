@@ -15,6 +15,7 @@ import (
 
 	"github.com/AtomiCloud/obs/internal/files"
 	"github.com/AtomiCloud/obs/internal/seed"
+	"github.com/VictoriaMetrics/metricsql"
 )
 
 type Label = seed.Label
@@ -75,7 +76,7 @@ func loadProject(dir, seedPath string) (*Project, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &Project{Dir: dir, Seed: *sd, Incidents: incs, Files: map[string][]byte{}, Gap: 24 * time.Hour}
+	p := &Project{Dir: dir, Seed: *sd, Incidents: incs, Files: map[string][]byte{}, Gap: 30 * time.Minute}
 	p.Files["seed.yaml"], err = os.ReadFile(seedPath)
 	if err != nil {
 		return nil, err
@@ -145,9 +146,7 @@ func loadProject(dir, seedPath string) (*Project, error) {
 			if kind == files.Metrics && !instant && (rangeQuery || qt == "range" || q.QueryType == "range") {
 				query.Range = (query.From - query.To).String()
 			}
-			if query.From > p.Gap {
-				p.Gap = query.From + time.Hour
-			}
+			p.Gap = max(p.Gap, queryLookback(query, mustDur(orDefault(a.Interval, "1m"))))
 			a.Queries[q.RefID] = query
 		}
 		if r.Record != nil {
@@ -185,6 +184,33 @@ func loadProject(dir, seedPath string) (*Project, error) {
 	}
 	sort.Slice(p.Alerts, func(i, j int) bool { return p.Alerts[i].ID < p.Alerts[j].ID })
 	return p, nil
+}
+
+// Keep independent runs farther apart than any selector can read. Summing all
+// nested windows and offsets is conservative, including for subqueries and
+// interval-dependent MetricsQL durations; it prevents a long rollup from reading
+// the previous incident's samples or a negative offset from reading the next run.
+func queryLookback(q Query, interval time.Duration) time.Duration {
+	lookback := q.From + 5*time.Minute
+	if q.Datasource != "metrics" {
+		return lookback
+	}
+	e, err := metricsql.Parse(q.Expr)
+	if err != nil {
+		return lookback
+	}
+	metricsql.VisitAll(e, func(x metricsql.Expr) {
+		if r, ok := x.(*metricsql.RollupExpr); ok {
+			for _, d := range []*metricsql.DurationExpr{r.Window, r.Offset} {
+				v := time.Duration(d.Duration(interval.Milliseconds())) * time.Millisecond
+				if v < 0 {
+					v = -v
+				}
+				lookback += v
+			}
+		}
+	})
+	return lookback
 }
 
 func expression(model map[string]any) (ExprDef, error) {

@@ -225,12 +225,12 @@ func (e *teeVL) Stats(qs string, start, end time.Time, drop bool) ([]vl.Result, 
 			}
 		}
 		f, _ := strconv.ParseFloat(r.Value[1].(string), 64)
-		want[labelKey(ls)] = f
+		want[r.Metric["__name__"]+"\x00"+labelKey(ls)] = f
 	}
 	got := map[string]float64{}
 	for _, r := range ours {
 		f, _ := r.Float()
-		got[labelKey(r.Labels[:len(r.Labels)])] = f
+		got[r.Name+"\x00"+labelKey(r.Labels)] = f
 	}
 	if len(got) != len(want) {
 		e.ta.mismatch = append(e.ta.mismatch, fmt.Sprintf("%s: obs %d rows %v, real %d rows %v", what, len(got), got, len(want), want))

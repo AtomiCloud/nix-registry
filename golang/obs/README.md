@@ -388,7 +388,8 @@ baseline reuse by `OBS_VERIFY_SKIP=1`. Any mismatch fails the command. The resul
 cache includes the binary, seed, incidents, recording rules, contract and each
 alert's normalized CR definition. Time-derived queries also include the base
 timestamp and do not reuse shifted baseline results. Storage uses `OBS_TMPDIR`,
-otherwise `/dev/shm` when available; VictoriaMetrics caches are capped at 512 MiB.
+otherwise a writable `/dev/shm` with at least 1 GiB free (else the system temp
+directory); VictoriaMetrics caches are capped at 512 MiB.
 Unused metric series are omitted and VictoriaLogs starts only when needed.
 
 MEASURED: regression tests cover state transitions, numeric light/full parity,

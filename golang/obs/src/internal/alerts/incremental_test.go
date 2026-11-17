@@ -69,6 +69,13 @@ func TestCacheKeysAndShiftedResult(t *testing.T) {
 	}
 }
 
+func TestQueryLookbackSeparatesLongWindows(t *testing.T) {
+	q := Query{Datasource: "metrics", Expr: `avg_over_time(rate(requests_total[30h])[2h:1m] offset 3h)`, From: time.Minute}
+	if got := queryLookback(q, time.Minute); got < 35*time.Hour {
+		t.Fatalf("long rollup can cross incident runs: gap=%s", got)
+	}
+}
+
 func TestVerdictsFailOutOfWindowAndUnlistedFiring(t *testing.T) {
 	inc := &Incident{Name: "spike"}
 	inc.Window.Start = "10m"

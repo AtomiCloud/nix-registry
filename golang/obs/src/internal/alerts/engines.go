@@ -82,11 +82,26 @@ func (l logsEngine) Instant(q Query, at time.Time) ([]Result, error) {
 	}
 	out := make([]Result, 0, len(rs))
 	for _, r := range rs {
+		// The datasource's alertingDataFrames maps an empty stats value to null
+		// (NoData), and preserves the HTTP endpoint's __name__ column label.
+		if r.Value == "" {
+			continue
+		}
 		v, ok := r.Float()
 		if !ok {
 			return nil, fmt.Errorf("LogsQL stats value %q is not numeric: %s", r.Value, q.Expr)
 		}
-		out = append(out, Result{Labels: sortLabels(r.Labels), Points: map[int64]float64{at.UnixMilli(): v}})
+		labels := append([]Label{}, r.Labels...)
+		if r.Name != "" {
+			hasName := false
+			for _, l := range labels {
+				hasName = hasName || l.Name == "__name__"
+			}
+			if !hasName {
+				labels = append(labels, Label{Name: "__name__", Value: r.Name})
+			}
+		}
+		out = append(out, Result{Labels: sortLabels(labels), Points: map[int64]float64{at.UnixMilli(): v}})
 	}
 	return out, nil
 }
