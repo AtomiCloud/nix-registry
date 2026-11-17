@@ -64,6 +64,9 @@ func (k Kubernetes) ready(ctx context.Context, c Config, resources []string) err
 	return nil
 }
 func (k Kubernetes) apply(ctx context.Context, c Config, file string) error {
+	if err := validateNoServices(file); err != nil {
+		return err
+	}
 	return k.call(ctx, c, "apply", "-f", file)
 }
 func (k Kubernetes) scale(ctx context.Context, c Config, w string, n int) error {

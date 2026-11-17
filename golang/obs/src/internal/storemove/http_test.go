@@ -167,6 +167,7 @@ func TestScaledManifestIsolation(t *testing.T) {
 	}
 	for _, bad := range []string{
 		good + "---\nkind: Service\nmetadata: {name: tempo-query}\n",
+		good + "---\nkind: Deployment\nmetadata: {name: unlisted}\nspec: {replicas: 2}\n",
 		strings.Replace(good, "replicas: 2", "replicas: 0", 1),
 		strings.Replace(good, "name: new", "name: single", 1),
 		good + "  template:\n    metadata:\n      labels: {obs.diene/tempo-read: true}\n",
@@ -177,6 +178,20 @@ func TestScaledManifestIsolation(t *testing.T) {
 		if err := validateScaledManifest(cfg); err == nil {
 			t.Fatalf("unsafe scaled manifest accepted: %s", bad)
 		}
+	}
+}
+
+func TestRoutingCannotChangeServices(t *testing.T) {
+	cfg := config()
+	cfg.RoutingManifest = filepath.Join(t.TempDir(), "routing.yaml")
+	if err := os.WriteFile(cfg.RoutingManifest, []byte("kind: Service\nmetadata: {name: vm-select}\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	k := Kubernetes{Command: func(context.Context, ...string) ([]byte, error) { called = true; return nil, nil }}
+	err := k.Execute(context.Background(), StorageRoute, "victoriametrics", cfg)
+	if err == nil || !strings.Contains(err.Error(), "routing.yaml") || !strings.Contains(err.Error(), "Service") || called {
+		t.Fatalf("stable Service changed: %v, command called=%v", err, called)
 	}
 }
 func TestRolesNeverLabelKafkaOrMixComponents(t *testing.T) {

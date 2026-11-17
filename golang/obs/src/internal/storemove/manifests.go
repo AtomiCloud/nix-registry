@@ -63,6 +63,12 @@ func validateScaledManifest(c Config) error {
 				seen[key] = true
 			}
 		}
+		switch obj.Kind {
+		case "Deployment", "StatefulSet", "DaemonSet", "Job", "Pod":
+			if !seen[key] {
+				return fmt.Errorf("%s: workload %s is not listed in scaled; refusing to skip its readiness", c.ScaledManifest, key)
+			}
+		}
 	}
 	for _, w := range c.Scaled {
 		if !seen[w] {
@@ -70,4 +76,28 @@ func validateScaledManifest(c Config) error {
 		}
 	}
 	return nil
+}
+
+// Apply inputs for routing, rollback and metastore conversion must obey the
+// same stable-Service rule as the initial scaled form.
+func validateNoServices(file string) error {
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return err
+	}
+	dec := yaml.NewDecoder(bytes.NewReader(b))
+	for {
+		var obj struct {
+			Kind string `yaml:"kind"`
+		}
+		if err = dec.Decode(&obj); err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("%s: %w", file, err)
+		}
+		if obj.Kind == "Service" || obj.Kind == "List" {
+			return fmt.Errorf("%s: %s is forbidden; stable Services do not change", file, obj.Kind)
+		}
+	}
 }
