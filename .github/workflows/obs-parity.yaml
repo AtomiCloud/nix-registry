@@ -17,6 +17,7 @@ on:
       - 'golang/obs/src/go.sum'
       - 'golang/obs/src/third_party/VictoriaLogs/**'
       - 'golang/obs/src/third_party/VictoriaLogs.source.json'
+      - 'golang/obs/src/third_party/VictoriaLogs.sha256'
       - 'golang/obs/src/internal/alerts/gfexpr/**'
       - 'golang/obs/parity/images.json'
 
@@ -24,7 +25,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: obs-parity-${{ github.ref }}
+  group: obs-parity-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:

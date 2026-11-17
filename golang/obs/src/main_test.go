@@ -114,4 +114,10 @@ func TestEndToEnd(t *testing.T) {
 	if rc, out := obs("version"); rc != 0 || !strings.Contains(out, "VictoriaMetrics v1.156.0") || !strings.Contains(out, "VictoriaLogs v1.54.0") {
 		t.Errorf("version: rc %d\n%s", rc, out)
 	}
+	_, out := obs("version")
+	for _, line := range []string{"engine VictoriaMetrics ", "engine VictoriaLogs ", "reference Grafana ", "reference Pyroscope ", "reference VictoriaLogsDatasource "} {
+		if !strings.Contains(out, line) {
+			t.Errorf("version missing %q: %s", line, out)
+		}
+	}
 }
