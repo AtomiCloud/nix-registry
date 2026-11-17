@@ -55,6 +55,8 @@ run() {
 # ---- version -------------------------------------------------------------------------
 run version
 [ "$rc" -eq 0 ] && grep -q '^obs [0-9]' "$work/out.txt" && ok "version" || bad "version: $(cat "$work/out.txt")"
+# obs's own version, set once in default.nix for the whole obs-full release (not the registry release).
+grep -qx 'obs 0.2.0' "$work/out.txt" && ok "version prints obs 0.2.0" || bad "version is not 0.2.0: $(head -1 "$work/out.txt")"
 grep -q 'VictoriaMetrics v1.156.0' "$work/out.txt" && grep -q 'VictoriaLogs v1.54.0 (tag commit 6433dae5' "$work/out.txt" &&
   ok "version prints every engine pin" || bad "version engine pins"
 run
@@ -168,6 +170,7 @@ bash "$here/store-symbols-sizing.sh" "$OBS" && ok "store/symbols/size fixtures" 
 . "$here/sandbox.sh"
 
 bash "$here/links.sh" "$OBS" "${OUT:-}"
+bash "$here/engines.sh" "$OBS" && ok "engines --check-chart (tests/engines.sh)" || bad "engines --check-chart (tests/engines.sh)"
 echo "obs tests: $pass passed, $fail failed"
 bash "$here/alerts.sh" "$OBS"
 [ "$fail" -eq 0 ]

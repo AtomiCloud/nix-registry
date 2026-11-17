@@ -23,8 +23,8 @@ const usage = `obs: the observability check tool
 
 usage:
   obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
-  obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names]
-  obs alerts [--dir observability] [--seed seed.yaml] [--base unix] [--out results.json]
+  obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names] [--vl-settings victorialogs-settings.yaml]
+  obs alerts [--dir observability] [--seed seed.yaml] [--base unix] [--out results.json] [--vl-settings victorialogs-settings.yaml]
   obs assert --series FILE [--dir observability] [--pods n] [--unknown warn|fail|ignore]
   obs profile summarize|baseline|compare   (obs profile help)
   obs check [--dir observability] [--pods n] [--landscapes n]
@@ -37,6 +37,7 @@ usage:
   obs store move <store> --config move.yaml [--dry-run] [--rollback]
   obs symbols put|decode --store <dir> --file <file> [options]
   obs size --req-per-second <n> --services <n> --pods <n> --profiled-pods <n>
+  obs engines --check-chart <chart folder>
 
 exit 0 when clean, 1 when a check failed, 2 on a usage or input error.
 `
@@ -78,6 +79,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runSymbols(args[1:], stdout, stderr)
 	case "size":
 		return runSize(args[1:], stdout, stderr)
+	case "engines":
+		return runEngines(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
 		return 0
