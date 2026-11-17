@@ -12,9 +12,17 @@ import (
 )
 
 type fakeCluster struct {
-	calls  []Step
-	fail   Step
-	onStep func(Step) // runs when a step is executed, before any planted failure
+	calls    []Step
+	fail     Step
+	onStep   func(Step) // runs when a step is executed, before any planted failure
+	resume   int        // what Check reports
+	checkErr error
+	checked  bool
+}
+
+func (f *fakeCluster) Check(context.Context, string, Config, bool) (int, error) {
+	f.checked = true
+	return f.resume, f.checkErr
 }
 
 func (f *fakeCluster) Execute(_ context.Context, s Step, _ string, _ Config) error {
@@ -68,9 +76,6 @@ func (f *fakeMetrics) Counts(_ context.Context, _ string, _ Config, end time.Tim
 	}
 	return v, nil
 }
-func config() Config {
-	return Config{Context: "fixture", Namespace: "obs-test", ScaledManifest: "scaled.yaml", SingleManifest: "single.yaml", MetastoreManifest: "metastore.yaml", RoutingManifest: "routing.yaml", OriginalRoutingManifest: "original.yaml", Scaled: []string{"statefulset/new"}, Routers: []string{"deployment/insert", "deployment/select"}, Single: "statefulset/single", Alloy: "deployment/alloy", RoleLabels: []string{"obs.diene/tempo-read", "obs.diene/tempo-write"}, RoleWorkloads: map[string][]string{"statefulset/new": {"obs.diene/tempo-read", "obs.diene/tempo-write"}}, StopCompaction: []string{"control", "stop-compaction"}, ResumeCompaction: []string{"control", "resume-compaction"}, MetricsURL: "http://fixture/metrics", SingleMetricsURL: "http://single/metrics", ReadURL: "http://fixture/range", Query: "sum(count_over_time())", ProfileType: "process_cpu:cpu:nanoseconds:cpu:nanoseconds"}
-}
 func runFake(c *fakeCluster, m *fakeMetrics) Runner {
 	return Runner{Cluster: c, Metrics: m, Pause: func(context.Context, time.Duration) error { return nil }, Now: func() time.Time { return time.Unix(1700000000, 0) }}
 }
@@ -82,11 +87,7 @@ func TestMoves(t *testing.T) {
 			if storage(store) {
 				m.counters[received(store)] = []float64{12, 13}
 			}
-			cfg := config()
-			if store == "pyroscope" {
-				cfg.RoleLabels = []string{"obs.diene/pyroscope-write", "obs.diene/pyroscope-query"}
-				cfg.RoleWorkloads = map[string][]string{"statefulset/new": cfg.RoleLabels}
-			}
+			cfg := storeConfig(store)
 			if err := runFake(c, m).Run(context.Background(), store, cfg, false, false); err != nil {
 				t.Fatal(err)
 			}
@@ -139,7 +140,7 @@ func TestMetricsFailures(t *testing.T) {
 			c := &fakeCluster{}
 			m := &fakeMetrics{counters: map[string][]float64{received(tc.store): {1, 2}, "vl_insert_remote_send_errors_total": {0, 0}}}
 			m.counters[tc.metric] = tc.values
-			err := runFake(c, m).Run(context.Background(), tc.store, config(), false, false)
+			err := runFake(c, m).Run(context.Background(), tc.store, storeConfig(tc.store), false, false)
 			if err == nil || !strings.Contains(err.Error(), tc.metric) {
 				t.Fatalf("bad counter accepted: %v", err)
 			}
@@ -200,7 +201,7 @@ func TestNoFlushDoesNotStop(t *testing.T) {
 func TestKnownDataMismatch(t *testing.T) {
 	c := &fakeCluster{}
 	m := &fakeMetrics{counters: map[string][]float64{received("victoriametrics"): {1, 2}}, corrupt: true}
-	err := runFake(c, m).Run(context.Background(), "victoriametrics", config(), false, false)
+	err := runFake(c, m).Run(context.Background(), "victoriametrics", storeConfig("victoriametrics"), false, false)
 	if err == nil || !strings.Contains(err.Error(), "minute 17") {
 		t.Fatalf("bad known data accepted: %v", err)
 	}
@@ -222,7 +223,7 @@ func TestRollbackRetainsStorage(t *testing.T) {
 		var b bytes.Buffer
 		r := runFake(c, m)
 		r.Out = &b
-		if err := r.Run(context.Background(), store, config(), true, false); err != nil {
+		if err := r.Run(context.Background(), store, storeConfig(store), true, false); err != nil {
 			t.Fatal(err)
 		}
 		want := Restore

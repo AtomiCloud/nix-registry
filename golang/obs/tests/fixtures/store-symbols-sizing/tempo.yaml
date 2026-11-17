@@ -1,7 +1,6 @@
 context: fixture-only
 namespace: observability-fixture
 scaled_manifest: scaled.yaml
-single_manifest: single.yaml
 scaled: [statefulset/tempo-live-store, deployment/tempo-distributor, deployment/tempo-query, statefulset/redpanda]
 single: statefulset/tempo
 alloy: deployment/alloy

@@ -24,6 +24,15 @@ if "$obs" store move tempo --config "$fx/bad-tempo.yaml" --dry-run >"$work/bad" 
   exit 1
 fi
 for token in bad-tempo.yaml tempo stop_compaction; do grep -q "$token" "$work/bad"; done
+"$obs" store move victoriametrics --config "$fx/vm.yaml" --dry-run >"$work/plan"
+grep -q '^4. read known data' "$work/plan"
+grep -q 'deployment/vminsert -storageNode += \[vmstorage-b-0.vmstorage-b.observability-fixture.svc.cluster.local:8400 vmstorage-b-1.vmstorage-b.observability-fixture.svc.cluster.local:8400\]' "$work/plan"
+grep -q 'deployment/vmselect -storageNode += \[vmstorage-b-0.vmstorage-b.observability-fixture.svc.cluster.local:8401' "$work/plan"
+if "$obs" store move victoriametrics --config "$fx/bad-vm.yaml" --dry-run >"$work/bad" 2>&1; then
+  echo "FAIL store move accepted a serviceName that is not a headless Service of the manifest"
+  exit 1
+fi
+for token in bad-vm-scaled.yaml statefulset/vmstorage-b serviceName vmstorag-b; do grep -q "$token" "$work/bad"; done
 "$obs" symbols decode --store "$work/symbols" --file "$fx/unknown.stack" >"$work/stack"
 cmp "$fx/unknown.stack" "$work/stack"
 "$obs" symbols put --store "$work/symbols" --file "$fx/symbols.elf" --build-id 00112233445566778899aabbccddeeff --app fixture >"$work/key"
@@ -36,4 +45,4 @@ if "$obs" symbols put --store "$work/symbols" --file "$fx/unknown.stack" --build
   exit 1
 fi
 for token in unknown.stack ../bad; do grep -q "$token" "$work/bad"; done
-echo "PASS store/symbols/size: sizing, dry-run, unknown-id green; 3 named planted failures red"
+echo "PASS store/symbols/size: sizing, dry-runs (Tempo plan, VictoriaMetrics derived endpoints), unknown-id green; 4 named planted failures red"

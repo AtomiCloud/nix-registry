@@ -1,0 +1,10 @@
+context: fixture-only
+namespace: observability-fixture
+scaled_manifest: vm-scaled.yaml
+scaled: [statefulset/vmstorage-b]
+routers:
+  - { workload: deployment/vminsert, role: insert, port: 8400 }
+  - { workload: deployment/vmselect, role: select, port: 8401 }
+metrics_url: http://vminsert.fixture.invalid:8480/metrics
+read_url: http://vm-select.fixture.invalid:8481/select/0/prometheus/api/v1/query_range
+query: 'sum(count_over_time(fixture_known_total[1m]))'

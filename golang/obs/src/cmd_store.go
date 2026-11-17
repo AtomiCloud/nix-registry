@@ -23,7 +23,7 @@ func runStore(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	config := fs.String("config", "", "chart/operator move config YAML")
 	dry := fs.Bool("dry-run", false, "print the fixed plan without running commands or requests")
-	rollback := fs.Bool("rollback", false, "restore original routing; retain volumes")
+	rollback := fs.Bool("rollback", false, "undo the changes obs made (stored, verified inverse patches); retain new pods and volumes")
 	timeout := fs.Duration("timeout", 15*time.Minute, "overall operation deadline")
 	interval := fs.Duration("interval", 15*time.Second, "counter observation interval")
 	if err := fs.Parse(args[2:]); err != nil {
@@ -50,7 +50,7 @@ func runStore(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s: want exactly one YAML document\n", *config)
 		return 2
 	}
-	for _, p := range []*string{&c.ScaledManifest, &c.SingleManifest, &c.MetastoreManifest, &c.RoutingManifest, &c.OriginalRoutingManifest} {
+	for _, p := range []*string{&c.ScaledManifest} {
 		if *p != "" && !filepath.IsAbs(*p) {
 			*p = filepath.Join(filepath.Dir(*config), *p)
 		}

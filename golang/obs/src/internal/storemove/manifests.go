@@ -1,75 +1,31 @@
 package storemove
 
 import (
-	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
-	"io"
 	"os"
-	"reflect"
-	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 )
 
-func canonicalKind(kind string) string {
-	switch strings.ToLower(kind) {
-	case "sts", "statefulset", "statefulsets":
-		return "statefulset"
-	case "deploy", "deployment", "deployments":
-		return "deployment"
-	case "ds", "daemonset", "daemonsets":
-		return "daemonset"
-	case "svc", "service", "services":
-		return "service"
-	case "pvc", "persistentvolumeclaim", "persistentvolumeclaims":
-		return "persistentvolumeclaim"
-	case "sa", "serviceaccount", "serviceaccounts":
-		return "serviceaccount"
-	case "cm", "configmap", "configmaps":
-		return "configmap"
-	case "endpoints", "ep":
-		return "endpoints"
-	case "endpointslice", "endpointslices":
-		return "endpointslice"
-	}
-	return strings.ToLower(kind)
-}
-func canonicalResource(resource string) string {
-	kind, name, ok := strings.Cut(resource, "/")
-	if !ok {
-		return resource
-	}
-	return canonicalKind(kind) + "/" + name
-}
-func (c Config) normalized() Config {
-	c.Single = canonicalResource(c.Single)
-	c.Alloy = canonicalResource(c.Alloy)
-	c.Compactor = canonicalResource(c.Compactor)
-	c.Scaled = append([]string(nil), c.Scaled...)
-	c.Routers = append([]string(nil), c.Routers...)
-	c.Storage = append([]string(nil), c.Storage...)
-	for i := range c.Scaled {
-		c.Scaled[i] = canonicalResource(c.Scaled[i])
-	}
-	for i := range c.Storage {
-		c.Storage[i] = canonicalResource(c.Storage[i])
-	}
-	for i := range c.Routers {
-		c.Routers[i] = canonicalResource(c.Routers[i])
-	}
-	roles := map[string][]string{}
-	for w, labels := range c.RoleWorkloads {
-		roles[canonicalResource(w)] = labels
-	}
-	c.RoleWorkloads = roles
-	return c
-}
+// The scaled manifest holds only NEW objects (the scaled workloads or new storage nodes
+// and their supporting objects). obs creates them with `kubectl create` (never apply):
+// the API server refuses any object that already exists, so the manifest can never
+// change an existing object. Before creating, every object, every claim its
+// volumeClaimTemplates would bind and every pod its selector would adopt must be absent
+// live. obs writes the objects it validated to its own file, adding to each the owner
+// label and a digest of the validated object, so a re-run recognises exactly the
+// objects this manifest created and nothing else.
 
-// ownerLabel marks an object the store move itself created (scaled_manifest). A live
-// object without it is never overwritten (except the VictoriaLogs/VictoriaMetrics
-// storage StatefulSet gaining replicas, see liveScaled).
-const ownerLabel = "obs.diene/store-move"
+// ownerLabel marks an object obs store move created; digestAnnotation binds it to the
+// exact manifest object it was created from.
+const (
+	ownerLabel       = "obs.diene/store-move"
+	digestAnnotation = "obs.diene/store-move-digest"
+)
 
 func stableService(name string) bool {
 	switch name {
@@ -78,82 +34,57 @@ func stableService(name string) bool {
 	}
 	return false
 }
-func stringMap(v any) map[string]string {
-	m, _ := v.(map[string]any)
-	out := map[string]string{}
-	for k, x := range m {
-		out[k] = scalar(x)
-	}
-	return out
-}
-func protectedObject(o object, c Config) bool {
-	kind := canonicalKind(o.Kind)
-	labels := stringMap(mapAt(o.Raw, "metadata")["labels"])
-	if kind == "service" && stableService(o.Name) {
-		return true
-	}
-	if kind == "endpoints" || kind == "endpointslice" {
-		if stableService(o.Name) || stableService(labels["kubernetes.io/service-name"]) {
-			return true
-		}
-		owners, _ := mapAt(o.Raw, "metadata")["ownerReferences"].([]any)
-		for _, owner := range owners {
-			om, _ := owner.(map[string]any)
-			k, _ := om["kind"].(string)
-			n, _ := om["name"].(string)
-			if canonicalKind(k) == "service" && stableService(n) {
-				return true
-			}
-		}
-	}
-	if kind == "configmap" || kind == "secret" {
-		_, alloyName, _ := strings.Cut(c.Alloy, "/")
-		if o.Name == "alloy" || strings.HasPrefix(o.Name, "alloy-") || alloyName != "" && o.Name == alloyName || labels["app.kubernetes.io/name"] == "alloy" {
-			return true
-		}
-		for _, r := range c.AlloyConfigObjects {
-			if canonicalResource(r) == kind+"/"+o.Name {
-				return true
-			}
-		}
-	}
-	return false
-}
-func validateProtectedObjects(file string, objs []object, c Config) error {
-	for _, o := range objs {
-		if protectedObject(o, c) {
-			return fmt.Errorf("%s: protected stable Service/endpoint or Alloy config %s/%s must not change", file, o.Kind, o.Name)
-		}
-	}
-	return nil
-}
-func validateProtectedManifest(file string, c Config) error {
-	objs, err := parseManifest(file, c.Namespace)
-	if err != nil {
-		return err
-	}
-	return validateProtectedObjects(file, objs, c)
-}
-func validateIsolatedObjects(file string, objs []object, c Config) error {
-	for _, o := range objs {
-		tpl := stringMap(mapAt(o.Raw, "spec", "template", "metadata")["labels"])
-		own := stringMap(mapAt(o.Raw, "metadata")["labels"])
-		for _, role := range c.RoleLabels {
-			if tpl[role] == "true" || own[role] == "true" {
-				return fmt.Errorf("%s: %s/%s role %s=true routes before the role step", file, o.Kind, o.Name, role)
-			}
-		}
+
+// stableServices are the concept 10.2 Services whose selectors the role flip relies on.
+func stableServices(store string) []string {
+	switch store {
+	case "tempo":
+		return []string{"tempo-distributor", "tempo-query"}
+	case "pyroscope":
+		return []string{"pyroscope-write", "pyroscope-query"}
 	}
 	return nil
 }
 
+func alloyConfig(o object, c Config) bool {
+	kind := canonicalKind(o.Kind)
+	if kind != "configmap" {
+		return false
+	}
+	labels := stringMap(mapAt(o.Raw, "metadata")["labels"])
+	_, alloyName, _ := strings.Cut(c.Alloy, "/")
+	if o.Name == "alloy" || strings.HasPrefix(o.Name, "alloy-") || alloyName != "" && o.Name == alloyName || labels["app.kubernetes.io/name"] == "alloy" {
+		return true
+	}
+	for _, r := range c.AlloyConfigObjects {
+		if canonicalResource(r) == kind+"/"+o.Name {
+			return true
+		}
+	}
+	return false
+}
+
+// existingRefs are the objects the move changes in place (by obs-built patches only);
+// none of them may appear in the scaled manifest.
+func existingRefs(c Config) map[string]bool {
+	out := map[string]bool{}
+	for _, r := range append([]string{c.Single, c.Alloy, c.Compactor}, c.Storage...) {
+		if r != "" {
+			out[r] = true
+		}
+	}
+	for _, r := range c.Routers {
+		out[r.Workload] = true
+	}
+	return out
+}
+
 // ownNames are the names a supporting object of the scaled form may carry: a scaled
-// workload, the single or a declared storage workload, alone or as a "<name>-" prefix
-// (tempo-live-store-headless, pyroscope-metastore, redpanda-config). Everything else,
-// such as an app's checkout-env or checkout Service, is not the store's.
+// workload or the single, alone or as a "<name>-" prefix (tempo-live-store-headless,
+// pyroscope-metastore). Everything else, such as an app's checkout-env, is not the store's.
 func ownNames(c Config) []string {
 	var names []string
-	for _, r := range append(append(append([]string(nil), c.Scaled...), c.Storage...), c.Single) {
+	for _, r := range append(append([]string(nil), c.Scaled...), c.Single) {
 		if _, n, ok := strings.Cut(r, "/"); ok && n != "" {
 			names = append(names, n)
 		}
@@ -195,14 +126,22 @@ func subsetOf(list []string, allowed ...string) bool {
 	}
 	return true
 }
+func manifestHas(objs []object, kind, name string) bool {
+	for _, o := range objs {
+		if o.Kind == kind && o.Name == name {
+			return true
+		}
+	}
+	return false
+}
 
-// validateSupporting is the per-kind allow-list for the non-workload objects of the
-// scaled form (concept 10.5): headless Services (Tempo: publishNotReadyAddresses true),
-// the scaled form's own ConfigMap, and for Pyroscope only the ServiceAccount, Role and
-// RoleBinding that kubernetes:/// metastore discovery needs (read pods/endpoints only).
+// validateSupporting is the per-kind allow-list for the non-workload objects (concept
+// 10.5): headless Services (Tempo: publishNotReadyAddresses true), ConfigMaps, and for
+// Pyroscope only the ServiceAccount, Role and RoleBinding that kubernetes:/// metastore
+// discovery needs (read pods/endpoints only).
 func validateSupporting(file string, o object, objs []object, store string, c Config) error {
 	if !ownName(o.Name, c) {
-		return fmt.Errorf("%s: %s/%s is not one of the store's own names (a scaled workload, the single or a storage workload, or <name>-...: %s)", file, o.Kind, o.Name, strings.Join(ownNames(c), ", "))
+		return fmt.Errorf("%s: %s/%s is not one of the store's own names (a scaled workload or the single, or <name>-...: %s)", file, o.Kind, o.Name, strings.Join(ownNames(c), ", "))
 	}
 	spec := mapAt(o.Raw, "spec")
 	switch o.Kind {
@@ -271,20 +210,14 @@ func validateSupporting(file string, o object, objs []object, store string, c Co
 	}
 	return nil
 }
-func manifestHas(objs []object, kind, name string) bool {
-	for _, o := range objs {
-		if o.Kind == kind && o.Name == name {
-			return true
-		}
-	}
-	return false
-}
 
-// validateVolumes refuses a new workload that mounts an existing claim or a host path:
-// new storage comes from its own volumeClaimTemplates, so a scaled pod can never open
-// the single's (or an app's) data directory next to its owner.
-func validateVolumes(file string, o object) error {
-	vols, _ := mapAt(o.Raw, "spec", "template", "spec")["volumes"].([]any)
+// validatePod refuses pod-template settings a new store pod never needs and that would
+// reach beyond its own objects: another claim or a host path (new storage comes only
+// from volumeClaimTemplates), the host's network/PID/IPC namespaces, and a ServiceAccount
+// the manifest does not create (running as an existing account would borrow its rights).
+func validatePod(file string, o object, objs []object) error {
+	pod := mapAt(o.Raw, "spec", "template", "spec")
+	vols, _ := pod["volumes"].([]any)
 	for i, v := range vols {
 		vm, _ := v.(map[string]any)
 		for _, k := range []string{"persistentVolumeClaim", "hostPath"} {
@@ -293,11 +226,66 @@ func validateVolumes(file string, o object) error {
 			}
 		}
 	}
+	for _, k := range []string{"hostNetwork", "hostPID", "hostIPC"} {
+		if pod[k] == true {
+			return fmt.Errorf("%s: %s/%s sets %s; a store pod never needs the host's namespaces", file, o.Kind, o.Name, k)
+		}
+	}
+	for _, k := range []string{"serviceAccountName", "serviceAccount"} {
+		sa, _ := pod[k].(string)
+		if sa != "" && sa != "default" && !manifestHas(objs, "ServiceAccount", sa) {
+			return fmt.Errorf("%s: %s/%s %s %q is not created by this manifest; new pods may only run as their own ServiceAccount", file, o.Kind, o.Name, k, sa)
+		}
+	}
 	return nil
 }
 
-// validateScaledManifest is the static allow-list of scaled_manifest (no cluster read;
-// liveScaled checks existence and ownership afterwards).
+// selectorOf reads a workload's matchLabels selector as "k=v,..." (sorted); expressions
+// or an empty selector are refused, and role labels never occur in it (they change).
+func selectorOf(m map[string]any, what string, roles []string) (map[string]string, error) {
+	sel := mapAt(m, "spec", "selector")
+	labels := stringMap(sel["matchLabels"])
+	if len(labels) == 0 || sel["matchExpressions"] != nil {
+		return nil, fmt.Errorf("%s: require a nonempty matchLabels selector without expressions", what)
+	}
+	for _, role := range roles {
+		if _, ok := labels[role]; ok {
+			return nil, fmt.Errorf("%s: role %s must not occur in the immutable workload selector", what, role)
+		}
+	}
+	return labels, nil
+}
+func selectorString(labels map[string]string) string {
+	var parts []string
+	for _, k := range sortedKeys(labels) {
+		parts = append(parts, k+"="+labels[k])
+	}
+	return strings.Join(parts, ",")
+}
+
+// disjoint reports whether no pod can match both selectors (some key differs).
+func disjoint(a, b map[string]string) bool {
+	for k, v := range a {
+		if w, ok := b[k]; ok && w != v {
+			return true
+		}
+	}
+	return false
+}
+
+func intField(v any) (int, bool) {
+	switch x := v.(type) {
+	case int:
+		return x, true
+	case float64:
+		if x == float64(int(x)) {
+			return int(x), true
+		}
+	}
+	return 0, false
+}
+
+// validateScaledManifest is the static allow-list of scaled_manifest (no cluster read).
 func validateScaledManifest(c Config, store string) ([]object, error) {
 	c = c.normalized()
 	file := c.ScaledManifest
@@ -305,34 +293,61 @@ func validateScaledManifest(c Config, store string) ([]object, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err = validateProtectedObjects(file, objs, c); err != nil {
-		return nil, err
-	}
-	if err = validateIsolatedObjects(file, objs, c); err != nil {
-		return nil, err
-	}
 	scaled := map[string]bool{}
 	for _, w := range c.Scaled {
 		scaled[w] = true
 	}
+	existing := existingRefs(c)
 	seen := map[string]bool{}
+	selectors := map[string]map[string]string{}
 	for _, o := range objs {
 		key := o.key()
-		if key == c.Single || key == c.Alloy {
-			return nil, fmt.Errorf("%s: scaled_manifest must not change old single or Alloy %s before routing and drain", file, key)
+		meta := mapAt(o.Raw, "metadata")
+		if canonicalKind(o.Kind) == "service" && stableService(o.Name) || alloyConfig(o, c) {
+			return nil, fmt.Errorf("%s: protected stable Service or Alloy config %s/%s must not change", file, o.Kind, o.Name)
+		}
+		if existing[key] {
+			return nil, fmt.Errorf("%s: %s is an existing object the move changes itself; the scaled manifest holds only new objects", file, key)
+		}
+		if own, ok := stringMap(meta["labels"])[ownerLabel]; ok && own != store {
+			return nil, fmt.Errorf("%s: %s label %s=%s, want %s (obs sets it)", file, key, ownerLabel, own, store)
+		}
+		for _, a := range []string{digestAnnotation, inverseAnnotation} {
+			if _, ok := mapAt(meta, "annotations")[a]; ok {
+				return nil, fmt.Errorf("%s: %s sets annotation %s, which only obs writes", file, key, a)
+			}
+		}
+		tpl := stringMap(mapAt(o.Raw, "spec", "template", "metadata")["labels"])
+		own := stringMap(meta["labels"])
+		for _, role := range c.RoleLabels {
+			if tpl[role] == "true" || own[role] == "true" {
+				return nil, fmt.Errorf("%s: %s role %s=true routes before the role step", file, key, role)
+			}
 		}
 		switch o.Kind {
 		case "StatefulSet", "Deployment":
 			if !scaled[key] {
 				return nil, fmt.Errorf("%s: workload %s is not listed in scaled; refusing to skip its readiness", file, key)
 			}
-			r, ok := mapAt(o.Raw, "spec")["replicas"].(int)
-			if !ok || r < 1 {
+			if storage(store) && o.Kind != "StatefulSet" {
+				return nil, fmt.Errorf("%s: %s: new storage nodes are StatefulSets (stable per-pod names)", file, key)
+			}
+			if r, ok := intField(mapAt(o.Raw, "spec")["replicas"]); !ok || r < 1 {
 				return nil, fmt.Errorf("%s: %s requires positive explicit replicas", file, key)
 			}
-			if err = validateVolumes(file, o); err != nil {
+			if err = validatePod(file, o, objs); err != nil {
 				return nil, err
 			}
+			sel, err := selectorOf(o.Raw, file+": "+key, c.RoleLabels)
+			if err != nil {
+				return nil, err
+			}
+			for other, s := range selectors {
+				if !disjoint(sel, s) {
+					return nil, fmt.Errorf("%s: %s and %s pod selectors may overlap; require distinct component labels", file, key, other)
+				}
+			}
+			selectors[key] = sel
 			seen[key] = true
 		default:
 			if err = validateSupporting(file, o, objs, store, c); err != nil {
@@ -345,429 +360,166 @@ func validateScaledManifest(c Config, store string) ([]object, error) {
 			return nil, fmt.Errorf("%s: scaled workload %s is missing", file, w)
 		}
 	}
+	if storage(store) {
+		if _, err := storageNodes(c, objs); err != nil {
+			return nil, err
+		}
+	}
 	return objs, nil
 }
 
-// validateSingleManifest is the static allow-list of single_manifest (rollback restore)
-// and metastore_manifest (Pyroscope retain): exactly the single, nothing else; the
-// field-level check against the live single is liveSingle.
-func validateSingleManifest(file string, c Config, metastore bool) (object, error) {
-	objs, err := parseManifest(file, c.Namespace)
-	if err != nil {
-		return object{}, err
+// claimNames are the PersistentVolumeClaims a StatefulSet binds: <template>-<name>-<i>
+// for every volumeClaimTemplate and replica index (Kubernetes StatefulSet naming). A
+// claim that already exists would be adopted, so all must be absent before create.
+func claimNames(o object) []string {
+	if o.Kind != "StatefulSet" {
+		return nil
 	}
-	if err = validateProtectedObjects(file, objs, c); err != nil {
-		return object{}, err
-	}
-	if err = validateIsolatedObjects(file, objs, c); err != nil {
-		return object{}, err
-	}
-	var single *object
-	for i, o := range objs {
-		if o.key() != c.Single {
-			return object{}, fmt.Errorf("%s: %s/%s is not the single %s; this manifest may contain only the single (supporting objects of the scaled form belong in scaled_manifest)", file, o.Kind, o.Name, c.Single)
-		}
-		single = &objs[i]
-	}
-	if single == nil {
-		return object{}, fmt.Errorf("%s: does not contain the single %s", file, c.Single)
-	}
-	if single.Kind != "StatefulSet" && single.Kind != "Deployment" || metastore && single.Kind != "StatefulSet" {
-		return object{}, fmt.Errorf("%s: the single %s must be a StatefulSet (Pyroscope metastore) or Deployment/StatefulSet", file, c.Single)
-	}
-	spec := mapAt(single.Raw, "spec")
-	if metastore {
-		r, ok := spec["replicas"].(int)
-		if !ok || r < 1 {
-			return object{}, fmt.Errorf("%s: metastore %s needs explicit replicas >= 1 (it keeps running as the metastore; 0 would stop it)", file, c.Single)
+	n, _ := intField(mapAt(o.Raw, "spec")["replicas"])
+	tpls, _ := mapAt(o.Raw, "spec")["volumeClaimTemplates"].([]any)
+	var out []string
+	for _, t := range tpls {
+		tm, _ := t.(map[string]any)
+		name, _ := mapAt(tm, "metadata")["name"].(string)
+		for i := 0; i < n; i++ {
+			out = append(out, fmt.Sprintf("%s-%s-%d", name, o.Name, i))
 		}
 	}
-	if p := mapAt(spec, "persistentVolumeClaimRetentionPolicy"); p != nil {
-		for _, k := range sortedKeys(p) {
-			if scalar(p[k]) != "Retain" {
-				return object{}, fmt.Errorf("%s: %s persistentVolumeClaimRetentionPolicy.%s=%v; the single's claims are always retained", file, c.Single, k, p[k])
-			}
-		}
-	}
-	return *single, nil
+	return out
 }
 
-// storageSentinel stands in for a -storageNode flag and its value, at the same position,
-// once its endpoints have been read out; the flag's exact spelling is appended, so a
-// changed spelling (dashes, inline or separate value) is a difference.
-const storageSentinel = "<storageNode>"
+// storageNode is one new VictoriaLogs/VictoriaMetrics storage StatefulSet.
+type storageNode struct {
+	obj      object
+	service  string
+	replicas int
+}
 
-// dedupName/dedupExact: the one -dedup.minScrapeInterval setting concept 10.6 documents
-// (vmstorage x2, "=1ms"); no other value or spelling is ever accepted as the change.
-const (
-	dedupName  = "dedup.minScrapeInterval"
-	dedupExact = "-dedup.minScrapeInterval=1ms"
-)
-
-// argSites calls fn for every args/command list of every container and init container
-// of a workload, with a stable site name such as "containers[0](c).args".
-func argSites(o map[string]any, fn func(site string, container map[string]any, field string, args []any) error) error {
-	pod := mapAt(o, "spec", "template", "spec")
-	for _, group := range []string{"initContainers", "containers"} {
-		containers, _ := pod[group].([]any)
-		for i, c := range containers {
-			container, _ := c.(map[string]any)
-			name, _ := container["name"].(string)
-			for _, field := range []string{"command", "args"} {
-				if args, ok := container[field].([]any); ok {
-					if err := fn(fmt.Sprintf("%s[%d](%s).%s", group, i, name, field), container, field, args); err != nil {
-						return err
-					}
+// storageNodes reads the new storage StatefulSets and checks what the endpoints are
+// derived from: spec.serviceName names a headless Service of this manifest that selects
+// the pods (so <pod>.<service> resolves), every router port is a containerPort of the
+// pods, and for two copies every storage container carries -dedup.minScrapeInterval=1ms.
+func storageNodes(c Config, objs []object) ([]storageNode, error) {
+	file := c.ScaledManifest
+	var out []storageNode
+	for _, w := range c.Scaled {
+		var o *object
+		for i := range objs {
+			if objs[i].key() == w {
+				o = &objs[i]
+			}
+		}
+		if o == nil || o.Kind != "StatefulSet" {
+			return nil, fmt.Errorf("%s: storage node %s must be a StatefulSet in the manifest", file, w)
+		}
+		spec := mapAt(o.Raw, "spec")
+		svc, _ := spec["serviceName"].(string)
+		var service *object
+		for i := range objs {
+			if objs[i].Kind == "Service" && objs[i].Name == svc {
+				service = &objs[i]
+			}
+		}
+		if svc == "" || service == nil {
+			return nil, fmt.Errorf("%s: %s spec.serviceName %q must name a headless Service in this manifest (the storage endpoints are <pod>.<service>)", file, w, svc)
+		}
+		sel := stringMap(mapAt(service.Raw, "spec")["selector"])
+		tpl := stringMap(mapAt(spec, "template", "metadata")["labels"])
+		if len(sel) == 0 {
+			return nil, fmt.Errorf("%s: Service/%s needs a selector for %s's pods", file, svc, w)
+		}
+		for k, v := range sel {
+			if tpl[k] != v {
+				return nil, fmt.Errorf("%s: Service/%s selector %s=%s does not select %s's pods", file, svc, k, v, w)
+			}
+		}
+		ports := map[int]bool{}
+		containers, _ := mapAt(spec, "template", "spec")["containers"].([]any)
+		for _, ct := range containers {
+			cm, _ := ct.(map[string]any)
+			ps, _ := cm["ports"].([]any)
+			for _, p := range ps {
+				if n, ok := intField(mapAt(map[string]any{"p": p}, "p")["containerPort"]); ok {
+					ports[n] = true
 				}
 			}
 		}
-	}
-	return nil
-}
-
-func setArgs(container map[string]any, field string, args []any) {
-	if len(args) == 0 {
-		delete(container, field)
-		return
-	}
-	container[field] = args
-}
-
-// scrubStorageNodes replaces every -storageNode flag (in place, same position, with its
-// spelling) by a sentinel and returns the endpoints it held per container, args list and
-// flag occurrence, so the rest of the object can be compared for equality and each
-// endpoint set can be compared with exactly its own counterpart.
-func scrubStorageNodes(o map[string]any) (map[string]map[string]bool, error) {
-	out := map[string]map[string]bool{}
-	err := argSites(o, func(site string, container map[string]any, field string, args []any) error {
-		tokens, err := tokenize(args, field == "command", "storageNode", dedupName)
-		if err != nil {
-			return fmt.Errorf("%s: %w", site, err)
-		}
-		at := map[int]argToken{}
-		for _, t := range tokens {
-			if t.name == "storageNode" {
-				at[t.index] = t
+		for _, r := range c.Routers {
+			if !ports[r.Port] {
+				return nil, fmt.Errorf("%s: %s declares no containerPort %d, the port router %s dials", file, w, r.Port, r.Workload)
 			}
 		}
-		var rest []any
-		occurrence := 0
-		for i := 0; i < len(args); i++ {
-			t, ok := at[i]
-			if !ok {
-				rest = append(rest, args[i])
-				continue
-			}
-			nodes := map[string]bool{}
-			for _, n := range strings.Split(t.value, ",") {
-				n = strings.TrimSpace(n)
-				if n == "" || strings.Contains(n, "%{") {
-					return fmt.Errorf("%s: -storageNode %q: empty or %%{ENV} endpoint (envflag expands it at start-up); write every endpoint literally", site, t.value)
+		if c.Copies == 2 {
+			for i, ct := range containers {
+				cm, _ := ct.(map[string]any)
+				hits, err := findFlags(map[string]any{"spec": map[string]any{"template": map[string]any{"spec": map[string]any{"containers": []any{cm}}}}}, dedupName)
+				if err != nil {
+					return nil, fmt.Errorf("%s: %s containers[%d]: %w", file, w, i, err)
 				}
-				nodes[n] = true
-			}
-			out[fmt.Sprintf("%s#%d", site, occurrence)] = nodes
-			occurrence++
-			rest = append(rest, storageSentinel+t.spelling())
-			if t.consume {
-				i++
+				if len(hits) != 1 || hits[0].tok.value != "1ms" {
+					return nil, fmt.Errorf("%s: %s containers[%d]: two copies need exactly one -%s=1ms on every vmstorage (concept 10.5)", file, w, i, dedupName)
+				}
 			}
 		}
-		setArgs(container, field, rest)
-		return nil
-	})
-	return out, err
-}
-
-// scrubDedup removes the exact dedup argument (single dash, inline "=1ms", inside the
-// flag zone) from every args list (in place) and returns how many each list held. Any
-// other dedup spelling or value stays in the object, so it must then be equal on both
-// sides.
-func scrubDedup(o map[string]any) (map[string]int, error) {
-	out := map[string]int{}
-	err := argSites(o, func(site string, container map[string]any, field string, args []any) error {
-		tokens, err := tokenize(args, field == "command", "storageNode", dedupName)
-		if err != nil {
-			return fmt.Errorf("%s: %w", site, err)
-		}
-		drop := map[int]bool{}
-		for _, t := range tokens {
-			if s, _ := args[t.index].(string); s == dedupExact {
-				drop[t.index] = true
-				out[site]++
-			}
-		}
-		var rest []any
-		for i, a := range args {
-			if !drop[i] {
-				rest = append(rest, a)
-			}
-		}
-		setArgs(container, field, rest)
-		return nil
-	})
-	return out, err
-}
-
-func sortedKeys[V any](m map[string]V) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
-}
-
-// compareRouter allows an insert/select router to differ from its counterpart ONLY by
-// endpoints added to a -storageNode flag that already existed at the same place of
-// the same container, spelled the same way; every original endpoint must survive in
-// its own flag.
-func compareRouter(key, fwdFile, origFile string, n, o map[string]any) error {
-	newNodes, err := scrubStorageNodes(n)
-	if err != nil {
-		return fmt.Errorf("%s: router %s %w", fwdFile, key, err)
-	}
-	oldNodes, err := scrubStorageNodes(o)
-	if err != nil {
-		return fmt.Errorf("%s: router %s %w", origFile, key, err)
-	}
-	for _, site := range sortedKeys(oldNodes) {
-		have, ok := newNodes[site]
-		if !ok {
-			return fmt.Errorf("%s: router %s lost its %s flag that %s has", fwdFile, key, site, origFile)
-		}
-		for _, node := range sortedKeys(oldNodes[site]) {
-			if !have[node] {
-				return fmt.Errorf("%s: router %s drops original storage endpoint %q from %s", fwdFile, key, node, site)
-			}
-		}
-	}
-	for _, site := range sortedKeys(newNodes) {
-		if _, ok := oldNodes[site]; !ok {
-			return fmt.Errorf("%s: router %s adds %s, which %s does not have; only endpoints of an existing -storageNode flag may be added", fwdFile, key, site, origFile)
-		}
-	}
-	if !reflect.DeepEqual(n, o) {
-		return fmt.Errorf("%s: router %s changes more than its -storageNode endpoints compared with %s (or the flag spelling); first difference %v", fwdFile, key, origFile, firstDiff(n, o))
-	}
-	return nil
-}
-
-// firstDiff names the first differing path in either direction, for error messages.
-func firstDiff(a, b map[string]any) string {
-	if err := within(a, b, "", nil); err != nil {
-		return err.Error()
-	}
-	if err := within(b, a, "", nil); err != nil {
-		return "(other side) " + err.Error()
-	}
-	return "types differ"
-}
-
-// compareStorage allows a declared vmstorage workload to differ from its counterpart
-// ONLY by one exact -dedup.minScrapeInterval=1ms argument added (concept 10.6, copies
-// added). Removal, repetition, any other value or spelling, or any other field is refused.
-func compareStorage(key, fwdFile, origFile string, n, o map[string]any) error {
-	newDedup, err := scrubDedup(n)
-	if err != nil {
-		return fmt.Errorf("%s: %s %w", fwdFile, key, err)
-	}
-	oldDedup, err := scrubDedup(o)
-	if err != nil {
-		return fmt.Errorf("%s: %s %w", origFile, key, err)
-	}
-	sites := map[string]bool{}
-	for s := range newDedup {
-		sites[s] = true
-	}
-	for s := range oldDedup {
-		sites[s] = true
-	}
-	for _, site := range sortedKeys(sites) {
-		if newDedup[site] > 1 || newDedup[site] < oldDedup[site] {
-			return fmt.Errorf("%s: %s %s: only a single %s may be added (found %d, %s has %d); removing or repeating it is refused", fwdFile, key, site, dedupExact, newDedup[site], origFile, oldDedup[site])
-		}
-	}
-	if !reflect.DeepEqual(n, o) {
-		return fmt.Errorf("%s: %s changes more than the %s argument compared with %s; first difference %v", fwdFile, key, dedupExact, origFile, firstDiff(n, o))
-	}
-	return nil
-}
-
-// routingObjects parses one routing manifest into a map by canonical key.
-func routingObjects(file string, c Config) (map[string]object, error) {
-	objs, err := parseManifest(file, c.Namespace)
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]object{}
-	for _, o := range objs {
-		out[o.key()] = o
+		n, _ := intField(spec["replicas"])
+		out = append(out, storageNode{*o, svc, n})
 	}
 	return out, nil
 }
 
-// deepCopy copies a decoded YAML/JSON tree so scrubbing never edits the original.
-func deepCopy(v any) any {
-	switch x := v.(type) {
-	case map[string]any:
-		m := make(map[string]any, len(x))
-		for k, c := range x {
-			m[k] = deepCopy(c)
+// endpoints are the derived -storageNode values for one router port: every pod of every
+// new storage StatefulSet by its stable DNS name. Nobody types them.
+func endpoints(c Config, nodes []storageNode, port int) []string {
+	var out []string
+	for _, n := range nodes {
+		for i := 0; i < n.replicas; i++ {
+			out = append(out, fmt.Sprintf("%s-%d.%s.%s.svc.%s:%d", n.obj.Name, i, n.service, c.Namespace, c.ClusterDomain, port))
 		}
-		return m
-	case []any:
-		l := make([]any, len(x))
-		for i, c := range x {
-			l[i] = deepCopy(c)
-		}
-		return l
 	}
-	return v
+	return out
 }
 
-// validateRoutingManifests is the static allow-list for the two storage routing
-// manifests (forward and original). Allowed objects: exactly the declared insert/select
-// routers and the declared storage_workloads (VictoriaMetrics vmstorage). Both files must
-// carry the same objects, so the rollback applies nothing the forward move was not
-// checked against, and the only differences are the ones concept 10.6 documents (see
-// compareRouter, compareStorage). Alloy, app workloads, Services and anything else are
-// refused before any cluster call. liveRouting then checks the files against the live
-// objects. It returns both files' objects by key (unscrubbed).
-func validateRoutingManifests(c Config) (fwd, orig map[string]object, err error) {
-	// The stable Service/endpoint/Alloy-config refusal comes first (clearest message).
-	for _, file := range []string{c.RoutingManifest, c.OriginalRoutingManifest} {
-		if err = validateProtectedManifest(file, c); err != nil {
-			return nil, nil, err
-		}
-	}
-	routers, storage := map[string]bool{}, map[string]bool{}
-	for _, r := range c.Routers {
-		routers[canonicalResource(r)] = true
-	}
-	for _, r := range c.Storage {
-		storage[canonicalResource(r)] = true
-	}
-	if fwd, err = routingObjects(c.RoutingManifest, c); err != nil {
-		return nil, nil, err
-	}
-	if orig, err = routingObjects(c.OriginalRoutingManifest, c); err != nil {
-		return nil, nil, err
-	}
-	for _, side := range []struct {
-		file string
-		objs map[string]object
-	}{{c.RoutingManifest, fwd}, {c.OriginalRoutingManifest, orig}} {
-		for _, key := range sortedKeys(side.objs) {
-			if !routers[key] && !storage[key] {
-				return nil, nil, fmt.Errorf("%s: %s is not a declared router or storage workload (routers: %s; storage_workloads: %s); routing manifests may only change those", side.file, key, strings.Join(c.Routers, ", "), strings.Join(c.Storage, ", "))
-			}
-			if k := side.objs[key].Kind; k != "Deployment" && k != "StatefulSet" {
-				return nil, nil, fmt.Errorf("%s: %s must be a Deployment or StatefulSet", side.file, key)
-			}
-		}
-	}
-	for _, key := range sortedKeys(fwd) {
-		if _, ok := orig[key]; !ok {
-			return nil, nil, fmt.Errorf("%s: %s has no counterpart in %s; the rollback could not restore it", c.RoutingManifest, key, c.OriginalRoutingManifest)
-		}
-	}
-	for _, key := range sortedKeys(orig) {
-		if _, ok := fwd[key]; !ok {
-			return nil, nil, fmt.Errorf("%s: %s has no counterpart in %s; the rollback would apply an object the forward move was never checked against", c.OriginalRoutingManifest, key, c.RoutingManifest)
-		}
-	}
-	for _, key := range sortedKeys(fwd) {
-		n, _ := deepCopy(fwd[key].Raw).(map[string]any)
-		o, _ := deepCopy(orig[key].Raw).(map[string]any)
-		if storage[key] {
-			err = compareStorage(key, c.RoutingManifest, c.OriginalRoutingManifest, n, o)
-		} else {
-			err = compareRouter(key, c.RoutingManifest, c.OriginalRoutingManifest, n, o)
-		}
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-	return fwd, orig, nil
+// digest identifies one validated manifest object (map keys marshal sorted).
+func digest(o object) string {
+	b, _ := json.Marshal(norm(o.Raw))
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }
 
-// singleAtZero writes a copy of single_manifest in which the single is explicitly at
-// replicas 0 (an absent replicas field would default to 1), so applying it starts no
-// pod: the template roles are patched first, then the single is scaled up. The file
-// on disk is never modified. The caller removes the returned path.
-func singleAtZero(file, single string) (string, error) {
-	b, err := os.ReadFile(file)
-	if err != nil {
-		return "", err
-	}
-	dec := yaml.NewDecoder(bytes.NewReader(b))
-	var docs []map[string]any
-	found := false
-	var visit func(m map[string]any) error
-	visit = func(m map[string]any) error {
-		kind, _ := m["kind"].(string)
-		if canonicalKind(kind) == "list" {
-			items, _ := m["items"].([]any)
-			for _, item := range items {
-				if im, ok := item.(map[string]any); ok {
-					if err := visit(im); err != nil {
-						return err
-					}
-				}
-			}
-			return nil
-		}
-		meta, _ := m["metadata"].(map[string]any)
-		name, _ := meta["name"].(string)
-		if canonicalKind(kind)+"/"+name != single {
-			return nil
-		}
-		if k := canonicalKind(kind); k != "statefulset" && k != "deployment" {
-			return fmt.Errorf("%s: the single %s must be a statefulset or deployment to restore it at replicas 0", file, single)
-		}
-		spec, _ := m["spec"].(map[string]any)
-		if spec == nil {
-			spec = map[string]any{}
-			m["spec"] = spec
-		}
-		spec["replicas"] = 0
-		found = true
-		return nil
-	}
-	for {
-		var m map[string]any
-		if err = dec.Decode(&m); err == io.EOF {
-			break
-		}
-		if err != nil {
-			return "", fmt.Errorf("%s: %w", file, err)
-		}
-		if m == nil {
-			continue
-		}
-		if err = visit(m); err != nil {
-			return "", err
-		}
-		docs = append(docs, m)
-	}
-	if !found {
-		return "", fmt.Errorf("%s: does not contain the single %s", file, single)
-	}
-	tmp, err := os.CreateTemp("", "obs-single-at-zero-*.yaml")
+// createFile writes the objects obs creates: exactly the validated objects (Lists
+// flattened), in the configured namespace, each with the owner label and its digest.
+// The caller removes the file.
+func createFile(c Config, store string, objs []object) (string, error) {
+	tmp, err := os.CreateTemp("", "obs-store-move-create-*.yaml")
 	if err != nil {
 		return "", err
 	}
 	enc := yaml.NewEncoder(tmp)
-	for _, d := range docs {
-		if err = enc.Encode(d); err != nil {
-			tmp.Close()
-			os.Remove(tmp.Name())
-			return "", err
+	for _, o := range objs {
+		m, _ := deepCopy(o.Raw).(map[string]any)
+		meta, _ := m["metadata"].(map[string]any)
+		meta["namespace"] = c.Namespace
+		labels, _ := meta["labels"].(map[string]any)
+		if labels == nil {
+			labels = map[string]any{}
+			meta["labels"] = labels
+		}
+		labels[ownerLabel] = store
+		ann, _ := meta["annotations"].(map[string]any)
+		if ann == nil {
+			ann = map[string]any{}
+			meta["annotations"] = ann
+		}
+		ann[digestAnnotation] = digest(o)
+		if err = enc.Encode(m); err != nil {
+			break
 		}
 	}
-	if err = enc.Close(); err == nil {
-		err = tmp.Close()
+	if err == nil {
+		err = enc.Close()
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
 	}
 	if err != nil {
 		os.Remove(tmp.Name())
