@@ -147,7 +147,9 @@ func TestParityAlertEval(t *testing.T) {
 		{"uid": "parity-normal", "title": "parity normal", "condition": "C", "for": "0s", "data": instantAlertData("vector(1)", "$A > 2")},
 	}
 	event := "parity.failed." + strconv.FormatInt(time.Now().UnixNano(), 10)
-	logData := instantAlertData(`"durian.cloud/event":=`+strconv.Quote(event)+` | stats by (outcome) count() n`, "$A > 1")
+	// Keep the numeric stats value as the condition so the parity verdict checks
+	// actual alert query counts as well as their instance states and labels.
+	logData := instantAlertData(`"durian.cloud/event":=`+strconv.Quote(event)+` | stats by (outcome) count() n`, "$A")
 	logQuery := logData[0].(map[string]any)
 	logQuery["datasourceUid"] = "parity-logs"
 	model := logQuery["model"].(map[string]any)
