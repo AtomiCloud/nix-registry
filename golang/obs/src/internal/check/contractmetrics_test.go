@@ -209,3 +209,11 @@ func TestEscapedSingleQuotedHexSibling(t *testing.T) {
 	wantRed(t, `checkout_charges_total{outcome=~"$outcome"} + checkout_charges_total{outcome='erro\x72s'}`,
 		`checkout_charges_total{outcome=~"x"} + checkout_charges_total{outcome='erro\x72s'}`, "contract-bad-enum-value", "errors")
 }
+
+// Round 4 (GPT re-check): a bare $ is a regex end anchor, not a dashboard variable.
+func TestAnchoredTypoIsNotAVariable(t *testing.T) {
+	wantRed(t, `checkout_charges_total{outcome=~"erorr$"}`, `checkout_charges_total{outcome=~"erorr$"}`, "contract-bad-enum-value", "erorr")
+	wantGreen(t, `checkout_charges_total{outcome=~"error$"}`, `checkout_charges_total{outcome=~"error$"}`)
+	wantGreen(t, `checkout_charges_total{outcome=~"${outcome:regex}"}`, `checkout_charges_total{outcome=~"x"}`)
+	wantGreen(t, `checkout_charges_total{outcome=~"[[outcome]]"}`, `checkout_charges_total{outcome=~"x"}`)
+}
