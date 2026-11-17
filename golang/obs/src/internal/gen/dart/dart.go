@@ -55,6 +55,8 @@ type emitter struct {
 	typeRef  map[string]string   // contract type -> the Dart type of a label value
 	enumVals map[string][]string // enum type -> member identifiers
 	props    map[string][]string // "metrics.x" / "spans.x" -> field identifiers, in label order
+	consts   map[string]string   // metric -> the top-level constant that carries it
+	hasDate  bool                // the contract has a calendar date type, so the date helper is used
 }
 
 // Names the generated file declares itself.
@@ -66,6 +68,27 @@ var baseNames = []string{
 	"DurianSignalLevelDebug", "DurianSignalLevelInfo", "DurianSignalLevelWarn",
 	"DurianSignalLevelError", "DurianSignalLevelFatal", "metricTable", "spanTable", "eventNames",
 	"_durianSignalDate",
+}
+
+// topReserved are the words a lowercase top-level constant may not take: Dart's reserved words and
+// built-in identifiers, and the lowercase names dart:core (or the generated file) uses itself, which
+// a constant would shadow (const int breaks every int annotation, const override breaks @override).
+var topReserved = map[string]bool{
+	"abstract": true, "as": true, "base": true, "covariant": true, "deferred": true, "dynamic": true,
+	"export": true, "extension": true, "external": true, "factory": true, "get": true, "implements": true,
+	"import": true, "interface": true, "late": true, "library": true, "mixin": true, "of": true,
+	"on": true, "operator": true, "part": true, "set": true, "sealed": true, "show": true, "hide": true,
+	"static": true, "typedef": true, "when": true, "async": true, "sync": true, "type": true,
+	"int": true, "num": true, "bool": true, "double": true, "override": true, "deprecated": true,
+	"pragma": true, "print": true, "identical": true, "identityHashCode": true,
+}
+
+// topName makes a lowercase top-level identifier safe: a reserved or shadowing word gets a trailing _.
+func topName(id string) string {
+	if reserved[id] || topReserved[id] {
+		return id + "_"
+	}
+	return id
 }
 
 // dart:core (and the generated file's own) names a generated type may not take: it would shadow them.
@@ -159,6 +182,7 @@ func (g *emitter) plan() error {
 	g.typeRef = map[string]string{}
 	g.enumVals = map[string][]string{}
 	g.props = map[string][]string{}
+	g.consts = map[string]string{}
 	for _, b := range baseNames {
 		g.declared[b] = "a generated base type"
 	}
@@ -185,6 +209,7 @@ func (g *emitter) plan() error {
 			}
 			g.typeRef[n] = pascal(n)
 		case contract.KindDate:
+			g.hasDate = true
 			if err := g.declare(pascal(n), from); err != nil {
 				return err
 			}
@@ -195,7 +220,8 @@ func (g *emitter) plan() error {
 	}
 	for _, m := range c.MetricOrder {
 		p := "metrics." + m
-		for _, id := range []string{pascal(m) + "Labels", pascal(m) + "Metric", camel(m)} {
+		g.consts[m] = topName(camel(m))
+		for _, id := range []string{pascal(m) + "Labels", pascal(m) + "Metric", g.consts[m]} {
 			if err := g.declare(id, p); err != nil {
 				return err
 			}
@@ -458,7 +484,12 @@ func (g *emitter) render() string {
 	x.blank()
 	x.line("// ---- shared base types ----")
 	x.blank()
-	x.b.WriteString(baseCode)
+	// The date helper is used by a calendar date type only: without one it would be an unused element.
+	helper := ""
+	if g.hasDate {
+		helper = dateHelper
+	}
+	x.b.WriteString(strings.Replace(baseCode, dateMarker, helper, 1))
 	for _, l := range contract.Levels {
 		x.blank()
 		x.line("/// The level marker of %s events.", l)
@@ -486,7 +517,7 @@ func (g *emitter) render() string {
 		x.line("}")
 		x.blank()
 		x.line("/// The %s %s.", c.Metrics[m].Kind, m)
-		x.assign(0, "const "+camel(m), pascal(m)+"Metric._()")
+		x.assign(0, "const "+g.consts[m], pascal(m)+"Metric._()")
 	}
 	x.blank()
 	x.line("/// The data table of the metrics: kind, unit, budget, pod handling and the allowed")
@@ -730,14 +761,7 @@ final class DurianSignalBoundSpec<T> {
   };
 }
 
-String _durianSignalDate(DateTime t) {
-  final u = t.toUtc();
-  final m = u.month.toString().padLeft(2, '0');
-  final d = u.day.toString().padLeft(2, '0');
-  return '${u.year.toString().padLeft(4, '0')}-$m-$d';
-}
-
-/// The level marker base. Only the markers below extend it.
+@@DATE-HELPER@@/// The level marker base. Only the markers below extend it.
 sealed class DurianSignalLevel {
   const DurianSignalLevel._(this.level);
 
@@ -823,4 +847,16 @@ final class DurianSignalSpanInfo {
   final String kind;
   final List<String> keys;
 }
+`
+
+// dateMarker is where baseCode takes dateHelper, which is emitted only when the contract has a calendar date type.
+const dateMarker = "@@DATE-HELPER@@"
+
+const dateHelper = `String _durianSignalDate(DateTime t) {
+  final u = t.toUtc();
+  final m = u.month.toString().padLeft(2, '0');
+  final d = u.day.toString().padLeft(2, '0');
+  return '${u.year.toString().padLeft(4, '0')}-$m-$d';
+}
+
 `

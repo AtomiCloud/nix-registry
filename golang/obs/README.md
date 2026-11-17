@@ -57,7 +57,6 @@ obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
 obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names]
 obs check [--dir observability] [--pods n] [--landscapes n]
 obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
-
 obs links [--dir observability] [--seed seed.yaml] [--base unix]
 obs version
 ```

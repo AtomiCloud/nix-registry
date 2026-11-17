@@ -30,7 +30,6 @@ usage:
   obs alerts [--dir observability] [--seed seed.yaml] [--base unix] [--out results.json]
   obs check [--dir observability] [--pods n] [--landscapes n]
   obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
-
   obs links [--dir observability] [--seed seed.yaml] [--base unix]
   obs version
 

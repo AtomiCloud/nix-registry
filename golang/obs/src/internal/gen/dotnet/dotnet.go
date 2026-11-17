@@ -23,6 +23,7 @@ package dotnet
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"unicode"
 
@@ -57,6 +58,37 @@ type emitter struct {
 	typeRef  map[string]string   // contract type -> the C# type of a label value
 	enumVals map[string][]string // enum type -> member identifiers
 	props    map[string][]string // "metrics.x" / "spans.x" -> property identifiers, in label order
+	carrier  map[string][]string // "metrics" / "logs" / "spans" -> member identifiers of Names / Events / Spans
+	wide     bool                // a bound, window or budget does not fit Int32: the numbers are long
+}
+
+// intType is the C# type of the bounded numbers, windows and budgets: int, or long when the
+// contract has a value that does not fit Int32.
+func (g *emitter) intType() string {
+	if g.wide {
+		return "long"
+	}
+	return "int"
+}
+
+// needsLong reports whether the contract has a bound, window or budget outside Int32.
+func needsLong(c *contract.Contract) bool {
+	out := func(n int) bool { return int64(n) < math.MinInt32 || int64(n) > math.MaxInt32 }
+	for _, n := range c.TypeOrder {
+		t := c.Types[n]
+		if t.Kind == contract.KindInt && t.Min != nil && t.Max != nil && (out(*t.Min) || out(*t.Max)) {
+			return true
+		}
+		if t.Kind == contract.KindDate && out(t.WindowDays) {
+			return true
+		}
+	}
+	for _, n := range c.MetricOrder {
+		if out(c.Metrics[n].Budget) {
+			return true
+		}
+	}
+	return false
 }
 
 // Base types the generated file declares, so a contract name may not take them.
@@ -142,6 +174,8 @@ func (g *emitter) plan() error {
 	g.typeRef = map[string]string{}
 	g.enumVals = map[string][]string{}
 	g.props = map[string][]string{}
+	g.carrier = map[string][]string{}
+	g.wide = needsLong(c)
 	for _, b := range baseTypes {
 		g.declared[b] = "a generated base type"
 	}
@@ -178,7 +212,7 @@ func (g *emitter) plan() error {
 		if err := g.declare(ident(m)+"Labels", p); err != nil {
 			return err
 		}
-		ps, err := members(p+".labels", c.Metrics[m].LabelOrder, reservedMember, "")
+		ps, err := members(p+".labels", c.Metrics[m].LabelOrder, reservedMember, ident(m)+"Labels")
 		if err != nil {
 			return err
 		}
@@ -189,20 +223,23 @@ func (g *emitter) plan() error {
 		if err := g.declare(ident(s)+"Attributes", p); err != nil {
 			return err
 		}
-		ps, err := members(p+".attributes", c.Spans[s].AttrOrder, reservedMember, "")
+		ps, err := members(p+".attributes", c.Spans[s].AttrOrder, reservedMember, ident(s)+"Attributes")
 		if err != nil {
 			return err
 		}
 		g.props[p] = ps
 	}
 	// static members of Names, Events and Spans
+	// (a member can not take the name of its enclosing class, so the container's own name is the self name)
 	for _, set := range []struct {
-		path  string
-		names []string
-	}{{"metrics", c.MetricOrder}, {"spans", c.SpanOrder}, {"logs", c.LogOrder}} {
-		if _, err := members(set.path, set.names, nil, ""); err != nil {
+		path, self string
+		names      []string
+	}{{"metrics", "Names", c.MetricOrder}, {"spans", "Spans", c.SpanOrder}, {"logs", "Events", c.LogOrder}} {
+		ms, err := members(set.path, set.names, reservedMember, set.self)
+		if err != nil {
 			return err
 		}
+		g.carrier[set.path] = ms
 	}
 	return nil
 }
@@ -284,7 +321,7 @@ func (g *emitter) render() string {
 
 	x.line("// ---- shared base types ----")
 	x.blank()
-	x.b.WriteString(baseCode)
+	x.b.WriteString(strings.ReplaceAll(baseCode, "@@INT@@", g.intType()))
 	for _, l := range contract.Levels {
 		x.blank()
 		x.line("/// <summary>The level marker of %s events.</summary>", l)
@@ -319,8 +356,8 @@ func (g *emitter) render() string {
 		x.line("/// <summary>The metrics of the contract.</summary>")
 		x.line("public static class Names")
 		x.line("{")
-		for _, m := range c.MetricOrder {
-			x.line("    public static readonly %s<%sLabels> %s = new(%s);", metricBase[c.Metrics[m].Kind], ident(m), ident(m), cs(m))
+		for i, m := range c.MetricOrder {
+			x.line("    public static readonly %s<%sLabels> %s = new(%s);", metricBase[c.Metrics[m].Kind], ident(m), g.carrier["metrics"][i], cs(m))
 		}
 		x.line("}")
 	}
@@ -329,9 +366,9 @@ func (g *emitter) render() string {
 		x.line("/// <summary>The log events of the contract; each carrier's type fixes its level.</summary>")
 		x.line("public static class Events")
 		x.line("{")
-		for _, k := range c.LogOrder {
+		for i, k := range c.LogOrder {
 			e := c.Logs[k]
-			x.line("    public static readonly DurianSignalEvent<%s> %s = new(%s);", levelIdent(e.Level), ident(k), cs(e.Event))
+			x.line("    public static readonly DurianSignalEvent<%s> %s = new(%s);", levelIdent(e.Level), g.carrier["logs"][i], cs(e.Event))
 		}
 		x.line("}")
 	}
@@ -340,8 +377,8 @@ func (g *emitter) render() string {
 		x.line("/// <summary>The spans of the contract.</summary>")
 		x.line("public static class Spans")
 		x.line("{")
-		for _, s := range c.SpanOrder {
-			x.line("    public static readonly DurianSignalSpan<%sAttributes> %s = new(%s, %s);", ident(s), ident(s), cs(s), cs(spanKind(c.Spans[s])))
+		for i, s := range c.SpanOrder {
+			x.line("    public static readonly DurianSignalSpan<%sAttributes> %s = new(%s, %s);", ident(s), g.carrier["spans"][i], cs(s), cs(spanKind(c.Spans[s])))
 		}
 		x.line("}")
 	}
@@ -435,7 +472,7 @@ func (g *emitter) typeDecl(x *w, name string, t contract.Type) {
 		x.line("{")
 		x.line("    public static string Name => %s;", cs(name))
 		x.blank()
-		x.line("    public static int WindowDays => %d;", t.WindowDays)
+		x.line("    public static %s WindowDays => %d;", g.intType(), t.WindowDays)
 		x.line("}")
 	case contract.KindFree:
 		x.line("// %s is a free value (a string): log fields and span attributes only.", name)
@@ -447,9 +484,9 @@ func (g *emitter) intSpec(x *w, id, name string, min, max int, unit string) {
 	x.line("{")
 	x.line("    public static string Name => %s;", cs(name))
 	x.blank()
-	x.line("    public static int Min => %d;", min)
+	x.line("    public static %s Min => %d;", g.intType(), min)
 	x.blank()
-	x.line("    public static int Max => %d;", max)
+	x.line("    public static %s Max => %d;", g.intType(), max)
 	x.blank()
 	x.line("    public static string Unit => %s;", cs(unit))
 	x.line("}")
@@ -502,9 +539,9 @@ public interface IDurianSignalIntSpec
 {
     static abstract string Name { get; }
 
-    static abstract int Min { get; }
+    static abstract @@INT@@ Min { get; }
 
-    static abstract int Max { get; }
+    static abstract @@INT@@ Max { get; }
 
     static abstract string Unit { get; }
 }
@@ -514,7 +551,7 @@ public interface IDurianSignalDateSpec
 {
     static abstract string Name { get; }
 
-    static abstract int WindowDays { get; }
+    static abstract @@INT@@ WindowDays { get; }
 }
 
 /// <summary>The wire name of a labels or attributes property.</summary>
@@ -545,10 +582,10 @@ public abstract record DurianSignalResult<T>
 public readonly struct DurianSignalInt<TSpec> : IDurianSignalWire
     where TSpec : IDurianSignalIntSpec
 {
-    private readonly int _value;
+    private readonly @@INT@@ _value;
     private readonly bool _valid;
 
-    private DurianSignalInt(int value)
+    private DurianSignalInt(@@INT@@ value)
     {
         _value = value;
         _valid = true;
@@ -556,11 +593,11 @@ public readonly struct DurianSignalInt<TSpec> : IDurianSignalWire
 
     public bool Valid => _valid;
 
-    public int Value => _value;
+    public @@INT@@ Value => _value;
 
     public string Wire => _valid ? _value.ToString(CultureInfo.InvariantCulture) : string.Empty;
 
-    public static DurianSignalResult<DurianSignalInt<TSpec>> Of(int n) =>
+    public static DurianSignalResult<DurianSignalInt<TSpec>> Of(@@INT@@ n) =>
         n < TSpec.Min || n > TSpec.Max
             ? new DurianSignalResult<DurianSignalInt<TSpec>>.Err(
                 $"{TSpec.Name}: {n} is outside {TSpec.Min}..{TSpec.Max}")
@@ -679,7 +716,7 @@ public sealed class DurianSignalSpan<TAttributes>
 public sealed record DurianSignalMetricInfo(
     string Kind,
     string Unit,
-    int Budget,
+    @@INT@@ Budget,
     string AcrossPods,
     bool PerPod,
     IReadOnlyList<string> Keys);

@@ -1,0 +1,31 @@
+# Lowercase top-level carriers that are Dart keywords or dart:core names, and enum values that are keywords.
+service: fuzz
+types:
+  {
+    provider:
+      { kind: enum, values: [factory, operator, static, covariant, default, class, int, void, new, null, true, in] },
+  }
+metrics:
+  default: { kind: counter }
+  class: { kind: counter }
+  int: { kind: counter }
+  num: { kind: counter }
+  bool: { kind: counter }
+  double: { kind: counter }
+  dynamic: { kind: counter }
+  override: { kind: counter }
+  print: { kind: counter }
+  void: { kind: counter }
+  enum: { kind: counter }
+  switch: { kind: counter }
+  async: { kind: counter }
+  type: { kind: counter }
+  string: { kind: counter }
+  object: { kind: counter }
+  list: { kind: counter }
+  with_labels: { kind: counter, budget: 12, labels: { default: provider } }
+generate:
+  - { lang: go, out: gen/go }
+  - { lang: dotnet, out: gen/dotnet, namespace: Fuzz.Signals }
+  - { lang: dart, out: gen/dart, package: fuzz_signals }
+  - { lang: bun, out: gen/bun }

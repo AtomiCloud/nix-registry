@@ -223,8 +223,9 @@ func Render(c *contract.Contract) (string, error) {
 			lo, hi := *t.Min, *t.Max
 			if t.Size() <= maxUnion {
 				var ms []string
-				for i := lo; i <= hi; i++ {
-					ms = append(ms, strconv.Itoa(i))
+				// count by index: a range that ends at MaxInt must not be walked with i <= hi; i++ (it wraps)
+				for k := 0; k < t.Size(); k++ {
+					ms = append(ms, strconv.FormatInt(int64(lo)+int64(k), 10))
 				}
 				union(&b, id, ms)
 			} else {
