@@ -29,6 +29,8 @@ usage:
   obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
   obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names]
   obs alerts [--dir observability] [--seed seed.yaml] [--base unix] [--out results.json]
+  obs assert --series FILE [--dir observability] [--pods n] [--unknown warn|fail|ignore]
+  obs profile summarize|baseline|compare   (obs profile help)
   obs check [--dir observability] [--pods n] [--landscapes n]
   obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
   obs sandbox up|down|status [--dir observability] [--project name] [--port-base n]
@@ -56,6 +58,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "alerts":
 		return runAlerts(args[1:], stdout, stderr)
+	case "profile":
+		return runProfile(args[1:], stdout, stderr)
 	case "scrape":
 		return runScrape(args[1:], stdout, stderr)
 	case "sandbox":
@@ -66,6 +70,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runLinks(args[1:], stdout, stderr)
 	case "query":
 		return runQuery(args[1:], stdout, stderr)
+	case "assert":
+		return runAssert(args[1:], stdout, stderr)
 	case "check":
 		return runCheck(args[1:], stdout, stderr)
 	case "gen":

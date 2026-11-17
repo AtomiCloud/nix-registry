@@ -1,0 +1,29 @@
+# The assert fixture's contract: one counter (2 x 3 = 6 series), one histogram (3 x 14 = 42 series),
+# one per-pod gauge (2 series per pod) and one platform metric.
+service: checkout
+
+types:
+  provider: { kind: enum, values: [stripe, adyen] }
+  outcome: { kind: enum, values: [success, declined, error] }
+
+metrics:
+  checkout.charges:
+    kind: counter
+    budget: 20
+    labels: { payment.provider: provider, outcome: outcome }
+  checkout.charge.duration:
+    kind: histogram
+    unit: seconds
+    budget: 50
+    labels: { outcome: outcome }
+  checkout.queue.depth:
+    kind: gauge
+    per_pod: true
+    budget: 10
+    labels: { payment.provider: provider }
+
+logs:
+  ChargeFailed: { event: checkout.charge.failed, level: error }
+
+platform_metrics:
+  http.server.request.duration: [http.route, http.response.status_code]
