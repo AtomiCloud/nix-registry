@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"reflect"
 	"runtime"
 	"sort"
 	"strconv"
@@ -30,6 +31,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unsafe"
 
 	tqregexp "github.com/grafana/tempo/pkg/regexp"
 	"github.com/grafana/tempo/pkg/tempopb"
@@ -155,6 +157,28 @@ func (e *TempoEngine) sortedAttrs(m map[string]TAttrVal, extra ...tqAttr) []tqAt
 // NewTempoEngine indexes the traces. The input is not modified.
 func NewTempoEngine(traces []*TTrace) *TempoEngine {
 	e := &TempoEngine{SpansPerSpanSet: 100, Workers: runtime.GOMAXPROCS(0), ids: map[string]int32{}}
+	// Spans of one seeded series share their attribute maps: index each map once and
+	// share the sorted slice (read-only after indexing), keyed by the map itself.
+	type attrKey struct {
+		m   unsafe.Pointer
+		svc string
+		res bool
+	}
+	memo := map[attrKey][]tqAttr{}
+	sorted := func(m map[string]TAttrVal, res bool, svc string) []tqAttr {
+		k := attrKey{reflect.ValueOf(m).UnsafePointer(), svc, res}
+		if v, ok := memo[k]; ok {
+			return v
+		}
+		var v []tqAttr
+		if res {
+			v = e.sortedAttrs(m, tqAttr{name: "service.name", val: traceql.NewStaticString(svc)})
+		} else {
+			v = e.sortedAttrs(m)
+		}
+		memo[k] = v
+		return v
+	}
 	e.traces = make([]*tqTrace, 0, len(traces))
 	for _, in := range traces {
 		if len(in.Spans) == 0 {
@@ -170,8 +194,8 @@ func NewTempoEngine(traces []*TTrace) *TempoEngine {
 			sp.id, sp.parentID = s.SpanID, s.ParentID
 			sp.start, sp.dur = s.StartNs, s.DurNs
 			sp.name, sp.kind, sp.status = s.Name, tqKind(s.Kind), tqStatus(s.Status)
-			sp.attrs = e.sortedAttrs(s.Attrs)
-			sp.res = e.sortedAttrs(s.Resource, tqAttr{name: "service.name", val: traceql.NewStaticString(s.Service)})
+			sp.attrs = sorted(s.Attrs, false, "")
+			sp.res = sorted(s.Resource, true, s.Service)
 			if t.start == 0 || s.StartNs < t.start {
 				t.start = s.StartNs
 			}
@@ -1043,6 +1067,12 @@ func (e *TempoEngine) metricsRaw(q string, start, end time.Time, step time.Durat
 	req := &tempopb.QueryRangeRequest{Query: q, Start: uint64(start.UnixNano()), End: uint64(end.UnixNano()), Step: uint64(step)}
 	req.SetInstant(false)
 	traceql.AlignRequest(req)
+	return e.metricsReq(req)
+}
+
+// metricsReq runs a prepared (already aligned) request, range or instant, over the
+// shards and combines the shard results with Tempo's "final" aggregation.
+func (e *TempoEngine) metricsReq(req *tempopb.QueryRangeRequest) (*tempopb.QueryRangeResponse, error) {
 	// spans counted must start in (req.Start, req.End]; their traces overlap that window
 	lo, hi := e.window(req.Start, req.End)
 	shards := tqShards(lo, hi, e.Workers)

@@ -20,6 +20,7 @@ func runAlerts(args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&o.Out, "out", "", "write JSON results")
 	fs.StringVar(&o.Steps, "steps", "", "write per-minute JSON results; bypasses the result cache")
 	fs.StringVar(&o.Recorded, "recorded", "", "write recording-rule samples as JSON; bypasses the result cache")
+	fs.StringVar(&o.TempoConfig, "tempo-config", "", "Tempo config file whose query_frontend end cutoff and metrics limits trace rules run under (default Tempo 3.1.1: 30s, 24h, 10000)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}

@@ -15,6 +15,7 @@ import (
 
 	"github.com/AtomiCloud/obs/internal/check"
 	"github.com/AtomiCloud/obs/internal/contract"
+	"github.com/AtomiCloud/obs/internal/engines/tempo"
 	"github.com/AtomiCloud/obs/internal/engines/vl"
 	"github.com/AtomiCloud/obs/internal/engines/vm"
 	"github.com/AtomiCloud/obs/internal/files"
@@ -24,10 +25,17 @@ import (
 
 type Options struct {
 	Dir, SeedPath, Out, Steps, Recorded, VLSettings string
-	Base                                            int64
-	Workers                                         int
-	LogsGuard                                       QueryGuard
+	// TempoConfig is a Tempo config file whose query_frontend settings (end
+	// cutoff, metrics max_duration and max_intervals) trace rules run under;
+	// empty means Tempo 3.1.1's defaults.
+	TempoConfig string
+	Base        int64
+	Workers     int
+	LogsGuard   QueryGuard
 }
+
+// TempoAlertingNote is printed once per obs alerts run that has trace rules.
+const TempoAlertingNote = "note: Grafana 13.3.0 runs Tempo alerts only with feature toggle tempoAlerting enabled (FROM SOURCE: without it the Tempo plugin's alerting flag is false); enable it in the Grafana chart"
 
 // Check evaluates each rule at every minute on the baseline and each incident.
 func Check(o Options, stdout, stderr io.Writer) int {
@@ -58,6 +66,25 @@ func Check(o Options, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintln(stderr, "obs alerts:", err)
 		return 2
+	}
+	var tempoFrontend *tempo.Frontend
+	if o.TempoConfig != "" {
+		b, err := os.ReadFile(o.TempoConfig)
+		if err != nil {
+			fmt.Fprintln(stderr, "obs alerts: --tempo-config:", err)
+			return 2
+		}
+		fe, err := tempo.ParseFrontend(b)
+		if err != nil {
+			fmt.Fprintf(stderr, "obs alerts: --tempo-config %s: %v\n", o.TempoConfig, err)
+			return 2
+		}
+		tempoFrontend = &fe
+		// Part of every cached result's key: the settings change what trace rules read.
+		p.Files["tempo-frontend"] = []byte(fmt.Sprintf("%+v", fe))
+	}
+	if hasTraceRules(p) {
+		fmt.Fprintln(stdout, TempoAlertingNote)
 	}
 	var events logevent.Events
 	contractPath := filepath.Join(o.Dir, "contract.yaml")
@@ -191,6 +218,7 @@ func Check(o Options, stdout, stderr io.Writer) int {
 			used = append(used, &p.Records[i])
 		}
 		wantLogs := needsDS(used, "logs")
+		wantTraces := needsDS(used, "traces")
 		noPrune := os.Getenv("OBS_NO_PRUNE") != ""
 		sd := p.Seed
 		if !wantLogs && !noPrune {
@@ -207,6 +235,12 @@ func Check(o Options, stdout, stderr io.Writer) int {
 			logMetrics := map[string]bool{}
 			for _, l := range sd.Logs {
 				logMetrics[l.From.Metric] = true
+			}
+			if wantTraces {
+				// A trace rule can match any seeded span: keep every trace source.
+				for m := range traceSourceMetrics(&p.Seed) {
+					logMetrics[m] = true
+				}
 			}
 			for name, def := range p.Seed.Metrics {
 				needed := logMetrics[name]
@@ -230,7 +264,7 @@ func Check(o Options, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "obs alerts: %s: %v\n", seedPath, err)
 			return 2
 		}
-		if !wantLogs && !noPrune {
+		if !wantLogs && !wantTraces && !noPrune {
 			// Metric-only evaluations never consume trace data. Validate above first.
 			sd.Traces = yaml.Node{}
 		}
@@ -286,6 +320,18 @@ func Check(o Options, stdout, stderr io.Writer) int {
 			}
 			eng.Datasources["logs"] = logsEngine{e: l, guard: checkedLogsGuard{limits, o.LogsGuard}, onRefusal: onRefusal}
 		}
+		if wantTraces {
+			te := tempo.NewTempoEngine(ds.Traces)
+			ds.Traces = nil // the index holds what queries read; let the seed spans go
+			// Rule workers already use every CPU; one Tempo worker per query then.
+			if o.Workers != 1 {
+				te.Workers = 1
+			}
+			eng.Datasources["traces"] = tracesEngine{e: te, fe: tempoFrontend}
+			if verifyFast {
+				fmt.Fprintln(stdout, "verify fast: trace rules always take the full Grafana path (Tempo answers with series frames; the light path reads numbers only), nothing to compare for them")
+			}
+		}
 		cache := &queryCache{m: map[qKey]*qEntry{}}
 		recorded, err = runRecording(p, runs, eng, cache, &recordedSeries)
 		if err != nil {
@@ -293,7 +339,7 @@ func Check(o Options, stdout, stderr io.Writer) int {
 			fmt.Fprintln(stderr, "obs alerts:", err)
 			return 1
 		}
-		ars, _ = evaluateAll(p, runs, eng, cache, o.Workers, o.Steps != "", skipPlan(p))
+		ars, _ = evaluateAll(p, runs, eng, cache, o.Workers, o.Steps != "", skipPlan(p, runs))
 		if reportRefusals() {
 			return 1
 		}
@@ -438,6 +484,7 @@ func buildRuns(sd *seed.Seed, runs []Run) (*Dataset, error) {
 				ds.Streams[k] = s
 			}
 		}
+		ds.Traces = append(ds.Traces, part.Traces...)
 	}
 	return ds, nil
 }

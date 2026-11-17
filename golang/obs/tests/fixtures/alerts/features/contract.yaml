@@ -3,5 +3,6 @@
   types: { outcome: { kind: enum, values: [ok, error] } },
   metrics: { fixture.requests: { kind: counter, budget: 2, labels: { outcome: outcome } } },
   logs: { Failed: { event: fixture.failed, level: error } },
+  spans: { fixture.charge: { attributes: { outcome: outcome } } },
   platform_metrics: { fixture_recorded: [outcome] },
 }

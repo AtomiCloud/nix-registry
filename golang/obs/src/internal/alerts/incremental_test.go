@@ -78,7 +78,7 @@ func TestTimestampInputsNeverReuseShiftedConditions(t *testing.T) {
 	inc := &Incident{Name: "spike"}
 	runs := []Run{{Name: "baseline", Start: base, End: base.Add(20 * time.Minute)}, {Name: "spike", Start: base.Add(time.Hour), End: base.Add(80 * time.Minute), Incident: inc}}
 	eng := Engines{Datasources: map[string]DatasourceEngine{"metrics": timestampEngine{}}}
-	ars, _ := evaluateAll(p, runs, eng, &queryCache{m: map[qKey]*qEntry{}}, 1, false, skipPlan(p))
+	ars, _ := evaluateAll(p, runs, eng, &queryCache{m: map[qKey]*qEntry{}}, 1, false, skipPlan(p, runs))
 	if ars[0].Fired || !ars[1].Fired || ars[1].Reused != "" || SkipMismatch != 0 {
 		t.Fatalf("shifted timestamp condition reused: %+v mismatches=%d", ars, SkipMismatch)
 	}

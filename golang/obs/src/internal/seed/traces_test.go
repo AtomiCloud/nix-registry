@@ -143,3 +143,73 @@ traces:
 		t.Fatal("overlap accepted", err)
 	}
 }
+
+// An incident changes traces the way it changes metrics: extra requests inside the
+// window make extra (error) spans, latency_x stretches span durations there, and
+// every trace outside the window keeps its ID and duration.
+func TestIncidentChangesTracesOnlyInsideItsWindow(t *testing.T) {
+	const doc = `length: 10m
+random_seed: 5
+resource: {durian.cloud.service: checkout}
+traffic: {requests: 2/s}
+metrics:
+  requests:
+    series: [{where: {outcome: ok}, share: 1}, {where: {outcome: error}, share: 0}]
+traces:
+  - {from: {metric: requests}, server: POST /charge, error_when: {outcome: error}, median_s: 0.05}
+`
+	var s Seed
+	if err := yaml.Unmarshal([]byte(doc), &s); err != nil {
+		t.Fatal(err)
+	}
+	inc := &Incident{Change: []Change{
+		{Metric: "requests", Where: map[string]string{"outcome": "ok"}, LatencyX: 10},
+		{Metric: "requests", Where: map[string]string{"outcome": "error"}, Rate: "1/s"},
+	}}
+	inc.Window.Start, inc.Window.Duration = "4m", "2m"
+	start := time.Unix(1800000000, 0)
+	base, err := Build(&s, start)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spike, err := BuildIncident(&s, start, inc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inWindow := func(tr *TTrace) bool {
+		at := time.Duration(int64(tr.Spans[0].StartNs) - start.UnixNano())
+		return at >= 4*time.Minute && at < 6*time.Minute
+	}
+	byID := map[[16]byte]*TTrace{}
+	for _, tr := range base.Traces {
+		byID[tr.TraceID] = tr
+	}
+	errorsIn, slower := 0, 0
+	for _, tr := range spike.Traces {
+		sp := tr.Spans[0]
+		old := byID[tr.TraceID]
+		switch {
+		case sp.Status == 2:
+			if !inWindow(tr) || old != nil {
+				t.Fatalf("error span outside the window or reusing a baseline ID: %+v", sp)
+			}
+			errorsIn++
+		case !inWindow(tr):
+			if old == nil || !reflect.DeepEqual(old, tr) {
+				t.Fatalf("trace outside the window changed: %+v vs %+v", old, tr)
+			}
+		default:
+			if old == nil || old.Spans[0].StartNs != sp.StartNs {
+				t.Fatalf("latency_x must keep IDs and start times: %+v", tr)
+			}
+			ratio := float64(sp.DurNs) / float64(old.Spans[0].DurNs)
+			if ratio < 9.99 || ratio > 10.01 {
+				t.Fatalf("duration x%.3f, want x10", ratio)
+			}
+			slower++
+		}
+	}
+	if errorsIn < 60 || slower < 120 {
+		t.Fatalf("incident made %d error spans and %d slower spans", errorsIn, slower)
+	}
+}

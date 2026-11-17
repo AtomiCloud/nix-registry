@@ -1,0 +1,33 @@
+story: Stripe returns 502 for 40% of charges for 30 minutes.
+window: { start: 90m, duration: 30m }
+change:
+  - { metric: checkout.charges, where: { payment.provider: stripe, outcome: error }, rate: 1.2/s }
+expect:
+  fire:
+    [
+      traces-errors-rate,
+      traces-errors-by-provider,
+      traces-errors-count,
+      traces-errors-ratio,
+      traces-errors-range,
+      traces-client-errors,
+      traces-errors-structural,
+      traces-errors-by-service,
+    ]
+  quiet:
+    [
+      traces-latency-p95,
+      traces-latency-p50,
+      traces-latency-p99,
+      traces-latency-avg,
+      traces-latency-max,
+      traces-latency-sum,
+      traces-latency-range,
+      traces-declines-adyen,
+      traces-declines-by-provider,
+      traces-traffic-low,
+      traces-refund-errors,
+      traces-slow-provider-calls,
+    ]
+  fire_within: 30m
+  resolve_within: 20m

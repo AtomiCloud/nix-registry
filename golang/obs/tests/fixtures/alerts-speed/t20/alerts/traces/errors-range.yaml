@@ -1,0 +1,33 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata:
+  name: speed-checkout-traces-errors-range
+spec:
+  folderRef: speed-checkout-folder
+  interval: 1m
+  rules:
+    - uid: traces-errors-range
+      title: 'Error spans per minute (range)'
+      condition: E
+      for: 5m
+      noDataState: OK
+      execErrState: Error
+      data:
+        - refId: A
+          queryType: traceql
+          relativeTimeRange: { from: 600, to: 0 }
+          datasourceUid: speed-traces
+          model:
+            datasource: { type: tempo, uid: speed-traces }
+            queryType: traceql
+            metricsQueryType: range
+            step: 1m
+            query: '{ status = error } | count_over_time() with (exemplars=false)'
+        - refId: B
+          datasourceUid: __expr__
+          model: { type: reduce, expression: A, reducer: max, settings: { mode: dropNN } }
+        - refId: E
+          datasourceUid: __expr__
+          model: { type: threshold, expression: B, conditions: [{ evaluator: { type: gt, params: [40] } }] }
+      labels: { severity: warning }
+      annotations: { summary: 'Error spans per minute (range)' }

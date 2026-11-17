@@ -274,8 +274,8 @@ func contains(l []string, s string) bool {
 // Seed returns the seed file of a given length.
 func Seed(length string) string { return strings.Replace(seedTmpl, "LEN", length, 1) }
 
-// Write writes the whole fixture tree under out: n<N>/ (alerts + incidents + seed.4h.yaml
-// + seed.24h.yaml). The runner copies one set and one seed to <dir>/seed.yaml per run.
+// Write writes the whole fixture tree under out: n<N>/ and the trace sets t<N>/ (alerts +
+// incidents + seed.4h.yaml + seed.24h.yaml). The runner copies one set and one seed to <dir>/seed.yaml per run.
 func Write(out string) error {
 	for _, n := range Sizes {
 		root := filepath.Join(out, fmt.Sprintf("n%d", n))
@@ -300,7 +300,7 @@ func Write(out string) error {
 			}
 		}
 	}
-	return nil
+	return writeTraceSets(out)
 }
 
 // contract is the checkout contract every set carries (it names every metric label and log

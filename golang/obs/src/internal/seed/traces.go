@@ -91,51 +91,80 @@ func attrValue(v any) (TAttrVal, error) {
 	return TAttrVal{}, fmt.Errorf("attribute %v must be an OTLP string, int, double or bool", v)
 }
 
-func makeTrace(td TraceDef, where, res map[string]string, hi, lo, start uint64, r *rnd) *TTrace {
-	t := &TTrace{}
-	binary.BigEndian.PutUint64(t.TraceID[:8], hi)
-	binary.BigEndian.PutUint64(t.TraceID[8:], lo)
-	median := td.MedianS
-	if median == 0 {
-		median = 0.08
-	}
-	dur := max(uint64(median*math.Exp(0.5*r.normal())*1e9), 2000)
-	status := 1
+// traceShape is everything a trace definition fixes for one seeded series: span
+// names, status and attribute maps. Every trace of the series shares the maps
+// (nothing mutates a span's maps), so a long seed holds one copy per series, not
+// one per span.
+type traceShape struct {
+	td              TraceDef
+	status          int
+	service, client string
+	attrs, resource map[string]TAttrVal
+}
+
+func newTraceShape(td TraceDef, where, res map[string]string) *traceShape {
+	sh := &traceShape{td: td, status: 1, service: res["service.name"], attrs: map[string]TAttrVal{}, resource: map[string]TAttrVal{}}
 	if len(td.ErrorWhen) > 0 && matches(where, td.ErrorWhen) {
-		status = 2
+		sh.status = 2
 	}
-	attrs, resource := map[string]TAttrVal{}, map[string]TAttrVal{}
 	for k, v := range res {
 		if k != "service.name" {
-			resource[k] = TStr(v)
+			sh.resource[k] = TStr(v)
 		}
 	}
 	for k, v := range where {
-		attrs[k] = TStr(v)
+		sh.attrs[k] = TStr(v)
 		// Standard semantic-convention HTTP status codes are OTLP ints.
 		if k == "http.response.status_code" {
 			if n, err := strconv.ParseInt(v, 10, 64); err == nil {
-				attrs[k] = TInt(n)
+				sh.attrs[k] = TInt(n)
 			}
 		}
 	}
 	for k, v := range td.Attributes {
-		attrs[k], _ = attrValue(v)
+		sh.attrs[k], _ = attrValue(v)
 	}
 	if td.Route != "" {
-		attrs["http.route"] = TStr(td.Route)
+		sh.attrs["http.route"] = TStr(td.Route)
 	}
-	server := &TSpan{Name: td.Server, Kind: 2, Status: status, StartNs: start, DurNs: dur, Service: res["service.name"], Resource: resource, Attrs: attrs}
+	if td.Client != "" {
+		sh.client = td.Client
+		for k, v := range where {
+			sh.client = strings.ReplaceAll(sh.client, "{"+k+"}", v)
+		}
+	}
+	return sh
+}
+
+func makeTrace(td TraceDef, where, res map[string]string, hi, lo, start uint64, latencyX float64, r *rnd) *TTrace {
+	return newTraceShape(td, where, res).trace(hi, lo, start, latencyX, r)
+}
+
+// trace makes one trace. latencyX scales span durations inside an incident window
+// (the same latency_x that scales a histogram metric); 1 keeps the baseline
+// duration bit for bit.
+func (sh *traceShape) trace(hi, lo, start uint64, latencyX float64, r *rnd) *TTrace {
+	t := &TTrace{}
+	binary.BigEndian.PutUint64(t.TraceID[:8], hi)
+	binary.BigEndian.PutUint64(t.TraceID[8:], lo)
+	median := sh.td.MedianS
+	if median == 0 {
+		median = 0.08
+	}
+	dur := max(uint64(median*latencyX*math.Exp(0.5*r.normal())*1e9), 2000)
+	server := &TSpan{Name: sh.td.Server, Kind: 2, Status: sh.status, StartNs: start, DurNs: dur, Service: sh.service, Resource: sh.resource, Attrs: sh.attrs}
 	binary.BigEndian.PutUint64(server.SpanID[:], r.next())
 	t.Spans = []*TSpan{server}
-	if td.Client != "" {
-		name := td.Client
-		for k, v := range where {
-			name = strings.ReplaceAll(name, "{"+k+"}", v)
-		}
-		client := &TSpan{ParentID: server.SpanID, Name: name, Kind: 3, Status: status, StartNs: start + 1000, DurNs: dur * 8 / 10, Service: server.Service, Resource: resource, Attrs: attrs}
+	if sh.client != "" {
+		client := &TSpan{ParentID: server.SpanID, Name: sh.client, Kind: 3, Status: sh.status, StartNs: start + 1000, DurNs: dur * 8 / 10, Service: server.Service, Resource: sh.resource, Attrs: sh.attrs}
 		binary.BigEndian.PutUint64(client.SpanID[:], r.next())
 		t.Spans = append(t.Spans, client)
 	}
 	return t
 }
+
+// TraceDefs returns the seed's checked trace definitions (nil when it has none).
+func (s *Seed) TraceDefs() ([]TraceDef, error) { return s.traceDefs() }
+
+// Matches reports whether a series' where-labels hold every pair of where.
+func Matches(series, where map[string]string) bool { return matches(series, where) }
