@@ -16,7 +16,6 @@ let
     src = ./src;
     vendorHash = "sha256-E+SO5TfljE7KgJr3l0l/WmzeWbLHYkmVqkkOUSerOw4=";
     env.CGO_ENABLED = "0";
-    nativeBuildInputs = [ nixpkgs.makeWrapper ];
     nativeCheckInputs = [ nixpkgs.llvmPackages.llvm ];
     ldflags = [ "-w" "-s" "-X main.version=${version}" ];
     # third_party/VictoriaLogs is its own Go module (wired by a go.mod replace), not part of this one.
@@ -25,7 +24,6 @@ let
     # `obs` end to end on temp projects.
     doCheck = true;
     postInstall = ''
-      wrapProgram "$out/bin/obs" --prefix PATH : ${nixpkgs.lib.makeBinPath [ nixpkgs.llvmPackages.llvm ]}
       # Third-party notices: every LICENSE/NOTICE/COPYING/PATENTS file of the vendored modules,
       # kept under its module path (Apache-2.0 requires NOTICE files to travel with binaries),
       # and the AGPL-3.0 text of obs itself.
@@ -44,7 +42,7 @@ let
   # End-to-end run of the built binary in the sandbox (no network): the good fixtures run green,
   # every planted failure runs red naming file + rule + token, the vendored tree equals its tag.
   tests = nixpkgs.runCommand "obs-tests"
-    { nativeBuildInputs = [ obs nixpkgs.bash nixpkgs.gnugrep nixpkgs.gnused nixpkgs.coreutils nixpkgs.findutils nixpkgs.diffutils ]; }
+    { nativeBuildInputs = [ obs nixpkgs.bash nixpkgs.gnugrep nixpkgs.gnused nixpkgs.coreutils nixpkgs.findutils nixpkgs.diffutils nixpkgs.llvmPackages.llvm ]; }
     ''
       bash ${./tests}/run.sh --obs ${obs}/bin/obs --src ${./src} --out ${obs}
       mkdir -p "$out"

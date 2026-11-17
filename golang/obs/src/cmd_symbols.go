@@ -24,7 +24,11 @@ func runSymbols(args []string, stdout, stderr io.Writer) int {
 	id := fs.String("build-id", "", "GNU build id, Dart build id, or module MVID")
 	app := fs.String("app", "", "module name (no path)")
 	obfuscation := fs.String("obfuscation-map", "", "Dart obfuscation map JSON")
-	exe := fs.String("symbolizer", "llvm-symbolizer", "llvm-symbolizer executable")
+	defaultSymbolizer := os.Getenv("OBS_SYMBOLIZER")
+	if defaultSymbolizer == "" {
+		defaultSymbolizer = "llvm-symbolizer"
+	}
+	exe := fs.String("symbolizer", defaultSymbolizer, "llvm-symbolizer executable (default OBS_SYMBOLIZER or PATH)")
 	if err := fs.Parse(args[1:]); err != nil {
 		return 2
 	}
@@ -61,7 +65,7 @@ func runSymbols(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, key)
 		return 0
 	}
-	decoded, err := (symbols.Decoder{Store: store, Symbolizer: symbols.LLVM{Executable: *exe}}).Decode(ctx, string(data))
+	decoded, err := (symbols.Decoder{Store: store, Symbolizer: symbols.LLVM{Executable: *exe}, Notes: stderr}).Decode(ctx, string(data))
 	if err != nil {
 		fmt.Fprintf(stderr, "obs symbols decode %s: %v\n", *file, err)
 		return 1

@@ -221,3 +221,20 @@ func TestPDBMalformedDoesNotPanic(t *testing.T) {
 		PDBLocation(bad, 0x06000001, 1)
 	}
 }
+
+func TestMissingLLVMKeepsNativeLinesAndNotesOnce(t *testing.T) {
+	ctx := context.Background()
+	store := Directory{Root: t.TempDir()}
+	if _, err := Put(ctx, store, Ref{"native", "aabb", "app"}, []byte("fixture bytes"), nil); err != nil {
+		t.Fatal(err)
+	}
+	stack := "at app+0x123\nat app+0x456\nbuild-id: aabb\n"
+	var notes bytes.Buffer
+	got, err := (Decoder{Store: store, Symbolizer: LLVM{Executable: filepath.Join(t.TempDir(), "missing-symbolizer")}, Notes: &notes}).Decode(ctx, stack)
+	if err != nil || got != stack {
+		t.Fatalf("missing tool changed input or status: %q %v", got, err)
+	}
+	if strings.Count(notes.String(), "llvm-symbolizer") != 1 || !strings.Contains(notes.String(), "kept as is") {
+		t.Fatalf("want one clear note: %q", notes.String())
+	}
+}

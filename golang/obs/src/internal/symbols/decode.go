@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -19,7 +20,20 @@ type Symbolizer interface {
 }
 type LLVM struct{ Executable string }
 
+var ErrSymbolizerUnavailable = errors.New("llvm-symbolizer unavailable")
+
 func (l LLVM) Resolve(ctx context.Context, data []byte, offset uint64) (string, error) {
+	exe := l.Executable
+	if exe == "" {
+		exe = "llvm-symbolizer"
+	}
+	resolvedExe, err := exec.LookPath(exe)
+	if errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
+		return "", ErrSymbolizerUnavailable
+	}
+	if err != nil {
+		return "", err
+	}
 	f, err := os.CreateTemp("", "obs-symbol-*.dbg")
 	if err != nil {
 		return "", err
@@ -32,11 +46,7 @@ func (l LLVM) Resolve(ctx context.Context, data []byte, offset uint64) (string, 
 	if err = f.Close(); err != nil {
 		return "", err
 	}
-	exe := l.Executable
-	if exe == "" {
-		exe = "llvm-symbolizer"
-	}
-	out, err := exec.CommandContext(ctx, exe, "--inlining=false", "--demangle", "--obj="+f.Name(), fmt.Sprintf("0x%x", offset)).Output()
+	out, err := exec.CommandContext(ctx, resolvedExe, "--inlining=false", "--demangle", "--obj="+f.Name(), fmt.Sprintf("0x%x", offset)).Output()
 	if err != nil {
 		return "", fmt.Errorf("llvm-symbolizer: %w", err)
 	}
@@ -54,6 +64,7 @@ var jitFrame = regexp.MustCompile(`^(\s*(?:at )?)([A-Za-z0-9_][A-Za-z0-9_.-]*)!0
 type Decoder struct {
 	Store      Backend
 	Symbolizer Symbolizer
+	Notes      io.Writer
 }
 
 func (d Decoder) Decode(ctx context.Context, stack string) (string, error) {
@@ -66,6 +77,7 @@ func (d Decoder) Decode(ctx context.Context, stack string) (string, error) {
 		id = m[1]
 	}
 	lines := strings.Split(stack, "\n")
+	unavailable := false
 	cache := map[string][]byte{}
 	load := func(key string) ([]byte, error) {
 		if b, ok := cache[key]; ok {
@@ -136,6 +148,9 @@ func (d Decoder) Decode(ctx context.Context, stack string) (string, error) {
 		if b == nil {
 			continue
 		}
+		if unavailable {
+			continue
+		}
 		off, err := strconv.ParseUint(m[3], 16, 64)
 		if err != nil {
 			return "", fmt.Errorf("offset 0x%s: %w", m[3], err)
@@ -145,6 +160,13 @@ func (d Decoder) Decode(ctx context.Context, stack string) (string, error) {
 			s = LLVM{}
 		}
 		resolved, err := s.Resolve(ctx, b, off)
+		if errors.Is(err, ErrSymbolizerUnavailable) {
+			unavailable = true
+			if d.Notes != nil {
+				fmt.Fprintln(d.Notes, "obs symbols: llvm-symbolizer is unavailable; native/Dart frames kept as is (set --symbolizer or OBS_SYMBOLIZER)")
+			}
+			continue
+		}
 		if err != nil {
 			return "", fmt.Errorf("%s: %w", key, err)
 		}

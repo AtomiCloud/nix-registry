@@ -24,6 +24,11 @@ fi
 for token in bad-tempo.yaml tempo stop_compaction; do grep -q "$token" "$work/bad"; done
 "$obs" symbols decode --store "$work/symbols" --file "$fx/unknown.stack" >"$work/stack"
 cmp "$fx/unknown.stack" "$work/stack"
+"$obs" symbols put --store "$work/symbols" --file "$fx/unknown.stack" --build-id 00112233445566778899aabbccddeeff --app fixture >"$work/key"
+OBS_SYMBOLIZER="$work/missing-llvm" "$obs" symbols decode --store "$work/symbols" --file "$fx/unknown.stack" >"$work/stack" 2>"$work/note"
+cmp "$fx/unknown.stack" "$work/stack"
+[ "$(grep -c llvm-symbolizer "$work/note")" -eq 1 ]
+grep -q 'kept as is' "$work/note"
 if "$obs" symbols put --store "$work/symbols" --file "$fx/unknown.stack" --build-id ../bad --app fixture >"$work/bad" 2>&1; then
   echo "FAIL symbols put accepted ../bad"
   exit 1

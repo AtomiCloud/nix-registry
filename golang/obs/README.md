@@ -352,7 +352,9 @@ that release can send data. An exported `Backend` interface supports object-stor
 no object-store implementation or remote bucket is claimed as tested.
 
 The native/Dart decoder recognizes `at <module>+0x<offset>` frames with a `build-id: <id>` footer,
-then runs stock `llvm-symbolizer` (the Nix wrapper supplies it; `--symbolizer` can override it).
+then runs stock `llvm-symbolizer` found on PATH (`--symbolizer` or `OBS_SYMBOLIZER` can override it).
+LLVM is a test-only dependency, not part of the obs runtime closure. If it is unavailable, decoding
+prints one note to stderr, preserves native/Dart frames and keeps exit status zero; JIT decoding still works.
 Unknown identities and unresolved addresses are preserved. Decode cause stacks with different
 build identities separately; ambiguous conflicting footers are refused. Split-debug ELF files
 retain real Dart names; the obfuscation map is stored for other consumers, not applied as a text
