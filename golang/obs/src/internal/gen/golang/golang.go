@@ -97,11 +97,36 @@ func (w *writer) render(pkg string) string {
 	for _, n := range c.MetricOrder {
 		w.metric(n, c.Metrics[n])
 	}
-	w.f("\n// MetricTable is the data table of the metrics: kind, unit, budget, pod handling and the allowed label keys.\n")
+	w.f("\n// MetricTable is the data table of the metrics: kind, unit, budget, pod handling, the allowed label keys,\n")
+	w.f("// the generated labels type, and the allowed values (enums) and ranges (bounded numbers) the port checks.\n")
 	w.f("var MetricTable = map[string]obs.DurianSignalMetricInfo{\n")
 	for _, n := range c.MetricOrder {
 		m := c.Metrics[n]
-		w.f("\t%q: {Kind: %q, Unit: %q, Budget: %d, AcrossPods: %q, PerPod: %v, Keys: %s},\n", n, m.Kind, m.Unit, m.Budget, m.AcrossPod, m.PerPod, strList(m.LabelOrder))
+		w.f("\t%q: {\n\t\tKind: %q, Unit: %q, Budget: %d, AcrossPods: %q, PerPod: %v, Keys: %s,\n", n, m.Kind, m.Unit, m.Budget, m.AcrossPod, m.PerPod, strList(m.LabelOrder))
+		w.f("\t\tLabels: %sLabels{},\n", gen.Pascal(n))
+		var values, ranges []string
+		for _, l := range m.LabelOrder {
+			t := c.Types[m.Labels[l]]
+			switch t.Kind {
+			case contract.KindEnum:
+				values = append(values, fmt.Sprintf("%q: %s", l, strings.TrimPrefix(strList(t.Values), "[]string")))
+			case contract.KindInt:
+				ranges = append(ranges, fmt.Sprintf("%q: {%d, %d}", l, *t.Min, *t.Max))
+			case contract.KindTime:
+				hi := 23
+				if t.Unit == contract.UnitWeekday {
+					hi = 6
+				}
+				ranges = append(ranges, fmt.Sprintf("%q: {0, %d}", l, hi))
+			}
+		}
+		if len(values) > 0 {
+			w.f("\t\tValues: map[string][]string{%s},\n", strings.Join(values, ", "))
+		}
+		if len(ranges) > 0 {
+			w.f("\t\tRanges: map[string][2]int64{%s},\n", strings.Join(ranges, ", "))
+		}
+		w.f("\t},\n")
 	}
 	w.f("}\n")
 
@@ -134,8 +159,10 @@ func (w *writer) render(pkg string) string {
 		w.f("\t%q: {Kind: %q, Keys: %s},\n", n, spanKind(s), strList(s.AttrOrder))
 	}
 	w.f("}\n")
-	w.f("\n// init registers the tables with the port: it refuses names, kinds, levels and label keys not in them.\n")
-	w.f("func init() {\n\tobs.Register(obs.DurianSignalTables{Metrics: MetricTable, Events: EventTable, Spans: SpanTable})\n}\n")
+	w.f("\n// init registers the tables with the port, once per process (it runs before any code of a package that\n")
+	w.f("// imports this one; a later Register is refused). The port refuses names, kinds, levels, label types,\n")
+	w.f("// keys and values not in them.\n")
+	w.f("func init() {\n\t_ = obs.Register(obs.DurianSignalTables{Metrics: MetricTable, Events: EventTable, Spans: SpanTable})\n}\n")
 	return w.String()
 }
 

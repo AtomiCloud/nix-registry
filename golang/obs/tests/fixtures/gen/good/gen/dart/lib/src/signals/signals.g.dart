@@ -354,6 +354,15 @@ const metricTable = <String, DurianSignalMetricInfo>{
     acrossPods: '',
     perPod: false,
     keys: ['provider', 'outcome', 'shard', 'hour'],
+    labels: CheckoutChargesLabels,
+    values: {
+      'provider': ['stripe', 'adyen', 'paypal'],
+      'outcome': ['ok', 'declined', 'error'],
+    },
+    ranges: {
+      'shard': [0, 15],
+      'hour': [0, 23],
+    },
   ),
   'checkout.charge.duration': DurianSignalMetricInfo(
     kind: 'histogram',
@@ -362,6 +371,11 @@ const metricTable = <String, DurianSignalMetricInfo>{
     acrossPods: '',
     perPod: false,
     keys: ['provider', 'outcome'],
+    labels: CheckoutChargeDurationLabels,
+    values: {
+      'provider': ['stripe', 'adyen', 'paypal'],
+      'outcome': ['ok', 'declined', 'error'],
+    },
   ),
   'checkout.invoices': DurianSignalMetricInfo(
     kind: 'counter',
@@ -370,6 +384,10 @@ const metricTable = <String, DurianSignalMetricInfo>{
     acrossPods: '',
     perPod: false,
     keys: ['billing_day', 'provider'],
+    labels: CheckoutInvoicesLabels,
+    values: {
+      'provider': ['stripe', 'adyen', 'paypal'],
+    },
   ),
   'checkout.queue.depth': DurianSignalMetricInfo(
     kind: 'gauge',
@@ -378,6 +396,10 @@ const metricTable = <String, DurianSignalMetricInfo>{
     acrossPods: 'sum',
     perPod: false,
     keys: ['lane'],
+    labels: CheckoutQueueDepthLabels,
+    ranges: {
+      'lane': [1, 3],
+    },
   ),
   'checkout.worker.lag': DurianSignalMetricInfo(
     kind: 'gauge',
@@ -386,6 +408,7 @@ const metricTable = <String, DurianSignalMetricInfo>{
     acrossPods: 'max',
     perPod: false,
     keys: [],
+    labels: CheckoutWorkerLagLabels,
   ),
   'checkout.config.generation': DurianSignalMetricInfo(
     kind: 'gauge',
@@ -394,6 +417,7 @@ const metricTable = <String, DurianSignalMetricInfo>{
     acrossPods: 'last',
     perPod: false,
     keys: [],
+    labels: CheckoutConfigGenerationLabels,
   ),
   'checkout.cache.entries': DurianSignalMetricInfo(
     kind: 'gauge',
@@ -402,6 +426,10 @@ const metricTable = <String, DurianSignalMetricInfo>{
     acrossPods: 'avg',
     perPod: false,
     keys: ['day'],
+    labels: CheckoutCacheEntriesLabels,
+    ranges: {
+      'day': [0, 6],
+    },
   ),
   'checkout.runtime.memory': DurianSignalMetricInfo(
     kind: 'gauge',
@@ -410,6 +438,7 @@ const metricTable = <String, DurianSignalMetricInfo>{
     acrossPods: '',
     perPod: true,
     keys: [],
+    labels: CheckoutRuntimeMemoryLabels,
   ),
 };
 
@@ -463,6 +492,11 @@ const eventTable = <String, String>{
   'checkout.charge.failed': 'error',
   'checkout.worker.started': 'debug',
 };
+
+/// Builds the telemetry port from this contract's tables, once per process (call it at
+/// start-up; a second install is refused).
+Result<DurianSignalPort> installSignals() =>
+    DurianSignalPort.install(metrics: metricTable, events: eventTable);
 
 // ---- spans ----
 

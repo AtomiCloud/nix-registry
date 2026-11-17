@@ -5,7 +5,7 @@
 import 'package:checkout_signals/src/signals/signals.g.dart';
 
 void main() {
-  final port = DurianSignalPort.install(metrics: metricTable, events: eventTable);
+  final port = (installSignals() as DurianSignalOk<DurianSignalPort>).value;
   const shard = Shard(3);
   final hour = hourSpec.atTime(DateTime.utc(2026, 11, 17, 4));
   if (shardSpec.of(16) is! DurianSignalErr<Shard>) {

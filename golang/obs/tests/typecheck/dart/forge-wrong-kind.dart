@@ -9,7 +9,7 @@ final class ForgedCounter extends DurianSignalCounter<CheckoutChargeDurationLabe
 }
 
 void main() {
-  final port = DurianSignalPort.install(metrics: metricTable, events: eventTable);
+  final port = (installSignals() as DurianSignalOk<DurianSignalPort>).value;
   final result = DurianSignalPort.add(const ForgedCounter(), const CheckoutChargeDurationLabels(provider: Provider.stripe, outcome: Outcome.ok));
   print('result: ${result is DurianSignalErr<bool> ? result.error : 'ok'}');
   if (result is! DurianSignalErr<bool> || port.dropped['unknown_metric'] != 1) {

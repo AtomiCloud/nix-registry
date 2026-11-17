@@ -132,8 +132,11 @@ public static class SignalTables
     public static readonly IReadOnlyDictionary<string, DurianSignalMetricInfo> Metrics =
         new Dictionary<string, DurianSignalMetricInfo>
         {
-            ["payments.provider.settlement.batch.reconciliation.duration"] = new("histogram", "seconds", 3000000, "", false, new string[] { "region", "default", "very_long_bounded_number_type_name_for_wrapping", "k8s.zone" }),
-            ["payments.provider.settlement.batch.reconciliation.late"] = new("counter", "", 9000000, "", false, new string[] { "very_long_calendar_date_type_name_to_wrap_the_line", "hour" }),
+            ["payments.provider.settlement.batch.reconciliation.duration"] = new("histogram", "seconds", 3000000, "", false, new string[] { "region", "default", "very_long_bounded_number_type_name_for_wrapping", "k8s.zone" },
+                Values: new Dictionary<string, string[]> { ["region"] = new string[] { "us-east-1", "default", "class", "1xx", "it's", "a$b", "Wire", "All", "region" }, ["default"] = new string[] { "us-east-1", "default", "class", "1xx", "it's", "a$b", "Wire", "All", "region" } },
+                Ranges: new Dictionary<string, long[]> { ["very_long_bounded_number_type_name_for_wrapping"] = new long[] { -5, 99 }, ["k8s.zone"] = new long[] { 0, 23 } }),
+            ["payments.provider.settlement.batch.reconciliation.late"] = new("counter", "", 9000000, "", false, new string[] { "very_long_calendar_date_type_name_to_wrap_the_line", "hour" },
+                Ranges: new Dictionary<string, long[]> { ["hour"] = new long[] { 0, 23 } }),
             ["payments.idle"] = new("gauge", "", 0, "last", false, new string[] { }),
         };
 

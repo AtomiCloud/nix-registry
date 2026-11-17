@@ -12,7 +12,7 @@ final class ForgedEvent extends Event<ErrorLevel> {
 }
 
 void main() {
-  final port = DurianSignalPort.install(metrics: metricTable, events: eventTable);
+  final port = (installSignals() as DurianSignalOk<DurianSignalPort>).value;
   final result = error(const ForgedEvent());
   print('result: ${result is DurianSignalErr<bool> ? result.error : 'ok'}');
   if (result is! DurianSignalErr<bool> || port.dropped['unknown_event'] != 1) {

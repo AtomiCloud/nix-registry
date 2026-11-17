@@ -16,7 +16,7 @@ final class ForgedMetric extends DurianSignalCounter<FreeLabels> {
 }
 
 void main() {
-  final port = DurianSignalPort.install(metrics: metricTable, events: eventTable);
+  final port = (installSignals() as DurianSignalOk<DurianSignalPort>).value;
   final result = DurianSignalPort.add(const ForgedMetric(), const FreeLabels());
   print('result: ${result is DurianSignalErr<bool> ? result.error : 'ok'}');
   if (result is! DurianSignalErr<bool> || port.dropped['unknown_metric'] != 1) {

@@ -175,6 +175,9 @@ final class DurianSignalMetricInfo {
     required this.acrossPods,
     required this.perPod,
     required this.keys,
+    required this.labels,
+    this.values = const {},
+    this.ranges = const {},
   });
 
   /// counter, histogram or gauge.
@@ -194,6 +197,15 @@ final class DurianSignalMetricInfo {
 
   /// The allowed label keys, in contract order.
   final List<String> keys;
+
+  /// The generated labels class of this metric: the port refuses any other runtime type.
+  final Type labels;
+
+  /// The allowed wire values per enum label.
+  final Map<String, List<String>> values;
+
+  /// The [min, max] per bounded-number label.
+  final Map<String, List<int>> ranges;
 }
 
 /// One row of spanTable.
@@ -211,20 +223,36 @@ final class DurianSignalPort {
 
   static DurianSignalPort? _current;
 
-  /// Builds the port from the generated metricTable and eventTable and makes it the one in use.
-  static DurianSignalPort install({
+  /// Builds the port from the generated tables, once per process. The generated installSignals() calls
+  /// it; the lint rule forbids calling it anywhere else. A second call is refused and counted in
+  /// dropped.register; the first tables stay. The tables are copied.
+  static Result<DurianSignalPort> install({
     required Map<String, DurianSignalMetricInfo> metrics,
     required Map<String, String> events,
-  }) => _current = DurianSignalPort._(metrics, events);
+  }) {
+    final p = _current;
+    if (p != null) {
+      p.dropped['register'] = p.dropped['register']! + 1;
+      return const DurianSignalErr(
+        'dropped.register: the port is already installed (installSignals runs once per process)',
+      );
+    }
+    return DurianSignalOk(
+      _current = DurianSignalPort._(Map.of(metrics), Map.of(events)),
+    );
+  }
 
   final Map<String, DurianSignalMetricInfo> _metrics;
   final Map<String, String> _events;
 
-  /// dropped.<reason>: unknown_event, unknown_metric, unknown_key.
+  /// dropped.<reason>: unknown_event, unknown_metric, unknown_key, unknown_value, register, guard_error.
   final Map<String, int> dropped = {
     'unknown_event': 0,
     'unknown_metric': 0,
     'unknown_key': 0,
+    'unknown_value': 0,
+    'register': 0,
+    'guard_error': 0,
   };
 
   Result<bool> _drop(String reason, String why) {
@@ -257,6 +285,16 @@ final class DurianSignalPort {
   ) {
     final p = _current;
     if (p == null) return const DurianSignalErr('no port installed');
+    try {
+      return p._check(kind, name, labels);
+    } catch (e) {
+      // Last resort: a hand-made labels class can throw from its entries getter. Never rethrow.
+      return p._drop('guard_error', 'metric "$name": $e');
+    }
+  }
+
+  Result<bool> _check(String kind, String name, DurianSignalLabels labels) {
+    final p = this;
     final info = p._metrics[name];
     if (info == null) {
       return p._drop(
@@ -270,12 +308,37 @@ final class DurianSignalPort {
         'metric "$name" is a ${info.kind} in the generated metric table, not a $kind',
       );
     }
-    final keys = labels.entries.keys.toList();
+    if (labels.runtimeType != info.labels) {
+      return p._drop(
+        'unknown_key',
+        'metric "$name" labels type ${labels.runtimeType} is not its generated type ${info.labels}',
+      );
+    }
+    final entries = labels.entries;
+    final keys = entries.keys.toList();
     if (keys.join(' ') != info.keys.join(' ')) {
       return p._drop(
         'unknown_key',
         'metric "$name" labels [${keys.join(' ')}] are not its generated keys [${info.keys.join(' ')}]',
       );
+    }
+    for (final MapEntry(:key, :value) in entries.entries) {
+      final allowed = info.values[key];
+      final wire = value is DurianSignalWire ? value.wire : '$value';
+      if (allowed != null && !allowed.contains(wire)) {
+        return p._drop(
+          'unknown_value',
+          'metric "$name" label $key value "$wire" is not one of $allowed',
+        );
+      }
+      final range = info.ranges[key];
+      if (range != null &&
+          (value is! int || value < range[0] || value > range[1])) {
+        return p._drop(
+          'unknown_value',
+          'metric "$name" label $key value $value is outside ${range[0]}..${range[1]}',
+        );
+      }
     }
     return const DurianSignalOk(true);
   }

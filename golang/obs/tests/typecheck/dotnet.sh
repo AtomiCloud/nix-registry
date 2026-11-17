@@ -62,8 +62,9 @@ if out=$(build "$d/App/App.csproj") && run=$("$DOTNET" "$d/App/bin/Debug/net10.0
   grep -q 'label shard=3 valid=True' <<<"$run" &&
   grep -q 'checkout.charges checkout.charge.failed error 2026-11-17 provider,outcome,shard,hour' <<<"$run" &&
   grep -q 'client default-valid=False' <<<"$run" &&
-  grep -q 'guard: dropped.unknown_event: event "checkout.charge.failed" is not in the generated event table' <<<"$run"; then
-  echo "PASS good.cs builds, runs: valid calls Ok, nothing dropped, default/null! refused, the port refuses what its tables lack"
+  grep -q 'guard: dropped.unknown_event: event "checkout.charge.failed" is not in the generated event table' <<<"$run" &&
+  grep -q 'guard-value: dropped.unknown_value: metric "checkout.charges" label provider value "visa" is not one of \[stripe adyen paypal\]' <<<"$run"; then
+  echo "PASS good.cs builds, runs: valid calls Ok, nothing dropped, default/null! refused, a reflection-made value refused, the port refuses what its tables lack"
 else
   echo "FAIL good.cs: $(grep ' error ' <<<"${out:-}" | head -3) ${run:-}"
   fail=1

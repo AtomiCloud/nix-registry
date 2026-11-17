@@ -219,6 +219,35 @@ const metricTable = <String, DurianSignalMetricInfo>{
           'very_long_bounded_number_type_name_for_wrapping',
           'k8s.zone',
         ],
+        labels: PaymentsProviderSettlementBatchReconciliationDurationLabels,
+        values: {
+          'region': [
+            'us-east-1',
+            'default',
+            'class',
+            '1xx',
+            'it\'s',
+            'a\$b',
+            'Wire',
+            'All',
+            'region',
+          ],
+          'default': [
+            'us-east-1',
+            'default',
+            'class',
+            '1xx',
+            'it\'s',
+            'a\$b',
+            'Wire',
+            'All',
+            'region',
+          ],
+        },
+        ranges: {
+          'very_long_bounded_number_type_name_for_wrapping': [-5, 99],
+          'k8s.zone': [0, 23],
+        },
       ),
   'payments.provider.settlement.batch.reconciliation.late':
       DurianSignalMetricInfo(
@@ -228,6 +257,10 @@ const metricTable = <String, DurianSignalMetricInfo>{
         acrossPods: '',
         perPod: false,
         keys: ['very_long_calendar_date_type_name_to_wrap_the_line', 'hour'],
+        labels: PaymentsProviderSettlementBatchReconciliationLateLabels,
+        ranges: {
+          'hour': [0, 23],
+        },
       ),
   'payments.idle': DurianSignalMetricInfo(
     kind: 'gauge',
@@ -236,6 +269,7 @@ const metricTable = <String, DurianSignalMetricInfo>{
     acrossPods: 'last',
     perPod: false,
     keys: [],
+    labels: PaymentsIdleLabels,
   ),
 };
 
@@ -282,6 +316,11 @@ const eventTable = <String, String>{
   'payments.new': 'trace',
   'payments.provider.settlement.batch.reconciliation.failed': 'error',
 };
+
+/// Builds the telemetry port from this contract's tables, once per process (call it at
+/// start-up; a second install is refused).
+Result<DurianSignalPort> installSignals() =>
+    DurianSignalPort.install(metrics: metricTable, events: eventTable);
 
 // ---- spans ----
 

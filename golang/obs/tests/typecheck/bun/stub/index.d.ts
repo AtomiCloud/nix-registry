@@ -14,14 +14,22 @@ export declare function bounded<const N extends string>(
   n: number,
 ): Result<Bounded<N>>;
 export type MetricTable<M> = {
-  readonly [N in keyof M]: { readonly kind: string; readonly keys: readonly (keyof M[N])[] };
+  readonly [N in keyof M]: {
+    readonly kind: string;
+    readonly keys: readonly (keyof M[N])[];
+    /** Allowed values per enum label. */
+    readonly values?: { readonly [K in keyof M[N]]?: readonly string[] };
+    /** [min, max] per bounded-number label. */
+    readonly ranges?: { readonly [K in keyof M[N]]?: readonly number[] };
+  };
 };
 export interface Metrics<M> {
   counter<N extends keyof M>(name: N, labels: M[N]): Result<void>;
   histogram<N extends keyof M>(name: N, labels: M[N]): Result<void>;
   gauge<N extends keyof M>(name: N, labels: M[N]): Result<void>;
 }
-/** The port refuses a name not in the table, a kind that differs and keys not in the name's key list. */
+/** The port refuses a name not in the table, a kind that differs, keys not in the name's key list and values
+ * outside the table's allowed values or ranges. */
 export declare function metrics<M>(table: MetricTable<M>): Metrics<M>;
 /** The generated event table: event name -> level. */
 export type EventTable = { readonly [name: string]: Level };
@@ -34,7 +42,7 @@ export interface Log {
 /** The port refuses an event whose name is not in the table or whose level differs from it. */
 export declare function logger(events: EventTable): Log;
 /** The dropped.<reason> counter. */
-export declare function dropped(reason: 'unknown_event' | 'unknown_metric' | 'unknown_key'): number;
+export declare function dropped(reason: 'unknown_event' | 'unknown_metric' | 'unknown_key' | 'unknown_value'): number;
 export type SpanAttributeValue = string | number | boolean | readonly string[] | readonly number[] | readonly boolean[];
 export type SpanAttributeMap = { readonly [name: string]: { readonly [key: string]: SpanAttributeValue | undefined } };
 export type DurianSignalSpanTable<M> = {

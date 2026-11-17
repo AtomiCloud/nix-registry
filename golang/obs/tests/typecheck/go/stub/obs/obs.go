@@ -128,10 +128,17 @@ func Set[L any](_ context.Context, n DurianSignalGauge[L], labels L) error {
 }
 
 // emit is the run-time guard of every metric call: the name must be in the registered table with
-// this kind, the labels struct must carry exactly the table's keys, and no label may be unset.
-func emit(kind, name string, labels any) error {
+// this kind, the labels value must be of the generated labels type recorded for that name (checked
+// before any field is read), no label may be unset, and every enum value and bounded number must be
+// inside what the table allows. It never panics: a panic is recovered and counted as a last resort.
+func emit(kind, name string, labels any) (err error) {
 	mu.Lock()
 	defer mu.Unlock()
+	defer func() {
+		if r := recover(); r != nil {
+			err = dropLocked("guard_panic", "metric %q: %v", name, r)
+		}
+	}()
 	if name == "" {
 		return dropLocked("unknown_metric", "unset metric name")
 	}
@@ -142,10 +149,10 @@ func emit(kind, name string, labels any) error {
 	if info.Kind != kind {
 		return dropLocked("unknown_metric", "metric %q is a %s in the generated metric table, not a %s", name, info.Kind, kind)
 	}
-	v := reflect.ValueOf(labels)
-	if v.Kind() != reflect.Struct {
-		return dropLocked("unknown_key", "metric %q labels are not a generated labels struct", name)
+	if got, want := reflect.TypeOf(labels), reflect.TypeOf(info.Labels); got != want || want == nil {
+		return dropLocked("unknown_key", "metric %q labels type %v is not its generated type %v", name, got, want)
 	}
+	v := reflect.ValueOf(labels)
 	keys := make([]string, 0, v.NumField())
 	for i := 0; i < v.NumField(); i++ {
 		keys = append(keys, v.Type().Field(i).Tag.Get("obs"))
@@ -154,8 +161,21 @@ func emit(kind, name string, labels any) error {
 		return dropLocked("unknown_key", "metric %q labels %v are not its generated keys %v", name, keys, info.Keys)
 	}
 	for i := 0; i < v.NumField(); i++ {
-		if b, ok := v.Field(i).Interface().(interface{ Valid() bool }); ok && !b.Valid() {
+		f := v.Field(i).Interface()
+		if b, ok := f.(interface{ Valid() bool }); ok && !b.Valid() {
 			return dropLocked("unset_label", "metric %q label %s is unset", name, keys[i])
+		}
+		if allowed, ok := info.Values[keys[i]]; ok {
+			s, isStr := f.(fmt.Stringer)
+			if !isStr || !slices.Contains(allowed, s.String()) {
+				return dropLocked("unknown_value", "metric %q label %s value %q is not one of %v", name, keys[i], fmt.Sprint(f), allowed)
+			}
+		}
+		if r, ok := info.Ranges[keys[i]]; ok {
+			n, isInt := f.(interface{ Int() int64 })
+			if !isInt || n.Int() < r[0] || n.Int() > r[1] {
+				return dropLocked("unknown_value", "metric %q label %s value %v is outside %d..%d", name, keys[i], f, r[0], r[1])
+			}
 		}
 	}
 	return nil
@@ -167,6 +187,11 @@ type DurianSignalMetricInfo struct {
 	AcrossPods string
 	PerPod     bool
 	Keys       []string
+	// Labels is the zero value of the generated labels type of this metric: the port refuses any other type.
+	Labels any
+	// Values are the allowed wire values per enum label; Ranges the min and max per bounded-number label.
+	Values map[string][]string
+	Ranges map[string][2]int64
 }
 type DurianSignalSpanInfo struct {
 	Kind string
@@ -182,22 +207,43 @@ type DurianSignalTables struct {
 }
 
 var (
-	mu      sync.Mutex
-	tables  = DurianSignalTables{Metrics: map[string]DurianSignalMetricInfo{}, Events: map[string]string{}, Spans: map[string]DurianSignalSpanInfo{}}
-	dropped = map[string]int64{}
+	mu         sync.Mutex
+	registered bool
+	tables     = DurianSignalTables{Metrics: map[string]DurianSignalMetricInfo{}, Events: map[string]string{}, Spans: map[string]DurianSignalSpanInfo{}}
+	dropped    = map[string]int64{}
 )
 
-// Register adds a generated package's tables (copied, so a later write to the exported maps
-// changes nothing). Called only from generated init() functions.
-func Register(t DurianSignalTables) {
+// Register installs the generated tables, once per process: the generated init() calls it before any
+// app code runs (the app imports the generated package). A later call is refused and counted in
+// dropped.register, never merged. The tables are deep-copied, so writing to the exported generated
+// maps and slices later changes nothing.
+func Register(t DurianSignalTables) error {
 	mu.Lock()
 	defer mu.Unlock()
-	maps.Copy(tables.Metrics, t.Metrics)
+	if registered {
+		return dropLocked("register", "the tables are already registered (the generated init registers them once per process)")
+	}
+	registered = true
+	for k, m := range t.Metrics {
+		m.Keys = slices.Clone(m.Keys)
+		values := make(map[string][]string, len(m.Values))
+		for lk, vs := range m.Values {
+			values[lk] = slices.Clone(vs)
+		}
+		m.Values = values
+		m.Ranges = maps.Clone(m.Ranges)
+		tables.Metrics[k] = m
+	}
 	maps.Copy(tables.Events, t.Events)
-	maps.Copy(tables.Spans, t.Spans)
+	for k, sp := range t.Spans {
+		sp.Keys = slices.Clone(sp.Keys)
+		tables.Spans[k] = sp
+	}
+	return nil
 }
 
-// Dropped is the dropped.<reason> counter (unknown_event, unknown_metric, unknown_key, unset_label).
+// Dropped is the dropped.<reason> counter (unknown_event, unknown_metric, unknown_key, unknown_value,
+// unset_label, register, guard_panic).
 func Dropped(reason string) int64 {
 	mu.Lock()
 	defer mu.Unlock()

@@ -346,7 +346,30 @@ func (g *emitter) render() string {
 	x.line("        {")
 	for _, n := range c.MetricOrder {
 		m := c.Metrics[n]
-		x.line("            [%s] = new(%s, %s, %d, %s, %s, %s),", cs(n), cs(m.Kind), cs(m.Unit), m.Budget, cs(m.AcrossPod), boolLit(m.PerPod), strArray(m.LabelOrder))
+		var values, ranges []string
+		for _, l := range m.LabelOrder {
+			t := c.Types[m.Labels[l]]
+			switch t.Kind {
+			case contract.KindEnum:
+				values = append(values, fmt.Sprintf("[%s] = %s", cs(l), strArray(t.Values)))
+			case contract.KindInt:
+				ranges = append(ranges, fmt.Sprintf("[%s] = new long[] { %d, %d }", cs(l), *t.Min, *t.Max))
+			case contract.KindTime:
+				hi := 23
+				if t.Unit == contract.UnitWeekday {
+					hi = 6
+				}
+				ranges = append(ranges, fmt.Sprintf("[%s] = new long[] { 0, %d }", cs(l), hi))
+			}
+		}
+		extra := ""
+		if len(values) > 0 {
+			extra += ",\n                Values: new Dictionary<string, string[]> { " + strings.Join(values, ", ") + " }"
+		}
+		if len(ranges) > 0 {
+			extra += ",\n                Ranges: new Dictionary<string, long[]> { " + strings.Join(ranges, ", ") + " }"
+		}
+		x.line("            [%s] = new(%s, %s, %d, %s, %s, %s%s),", cs(n), cs(m.Kind), cs(m.Unit), m.Budget, cs(m.AcrossPod), boolLit(m.PerPod), strArray(m.LabelOrder), extra)
 	}
 	x.line("        };")
 	x.blank()

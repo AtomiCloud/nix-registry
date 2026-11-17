@@ -187,16 +187,47 @@ type CheckoutRuntimeMemoryLabels struct {
 // CheckoutRuntimeMemory is the gauge checkout.runtime.memory.
 var CheckoutRuntimeMemory = obs.NewGauge[CheckoutRuntimeMemoryLabels]("checkout.runtime.memory")
 
-// MetricTable is the data table of the metrics: kind, unit, budget, pod handling and the allowed label keys.
+// MetricTable is the data table of the metrics: kind, unit, budget, pod handling, the allowed label keys,
+// the generated labels type, and the allowed values (enums) and ranges (bounded numbers) the port checks.
 var MetricTable = map[string]obs.DurianSignalMetricInfo{
-	"checkout.charges":           {Kind: "counter", Unit: "", Budget: 5000, AcrossPods: "", PerPod: false, Keys: []string{"provider", "outcome", "shard", "hour"}},
-	"checkout.charge.duration":   {Kind: "histogram", Unit: "seconds", Budget: 200, AcrossPods: "", PerPod: false, Keys: []string{"provider", "outcome"}},
-	"checkout.invoices":          {Kind: "counter", Unit: "", Budget: 400, AcrossPods: "", PerPod: false, Keys: []string{"billing_day", "provider"}},
-	"checkout.queue.depth":       {Kind: "gauge", Unit: "", Budget: 10, AcrossPods: "sum", PerPod: false, Keys: []string{"lane"}},
-	"checkout.worker.lag":        {Kind: "gauge", Unit: "seconds", Budget: 0, AcrossPods: "max", PerPod: false, Keys: []string{}},
-	"checkout.config.generation": {Kind: "gauge", Unit: "", Budget: 0, AcrossPods: "last", PerPod: false, Keys: []string{}},
-	"checkout.cache.entries":     {Kind: "gauge", Unit: "", Budget: 20, AcrossPods: "avg", PerPod: false, Keys: []string{"day"}},
-	"checkout.runtime.memory":    {Kind: "gauge", Unit: "bytes", Budget: 0, AcrossPods: "", PerPod: true, Keys: []string{}},
+	"checkout.charges": {
+		Kind: "counter", Unit: "", Budget: 5000, AcrossPods: "", PerPod: false, Keys: []string{"provider", "outcome", "shard", "hour"},
+		Labels: CheckoutChargesLabels{},
+		Values: map[string][]string{"provider": {"stripe", "adyen", "paypal"}, "outcome": {"ok", "declined", "error"}},
+		Ranges: map[string][2]int64{"shard": {0, 15}, "hour": {0, 23}},
+	},
+	"checkout.charge.duration": {
+		Kind: "histogram", Unit: "seconds", Budget: 200, AcrossPods: "", PerPod: false, Keys: []string{"provider", "outcome"},
+		Labels: CheckoutChargeDurationLabels{},
+		Values: map[string][]string{"provider": {"stripe", "adyen", "paypal"}, "outcome": {"ok", "declined", "error"}},
+	},
+	"checkout.invoices": {
+		Kind: "counter", Unit: "", Budget: 400, AcrossPods: "", PerPod: false, Keys: []string{"billing_day", "provider"},
+		Labels: CheckoutInvoicesLabels{},
+		Values: map[string][]string{"provider": {"stripe", "adyen", "paypal"}},
+	},
+	"checkout.queue.depth": {
+		Kind: "gauge", Unit: "", Budget: 10, AcrossPods: "sum", PerPod: false, Keys: []string{"lane"},
+		Labels: CheckoutQueueDepthLabels{},
+		Ranges: map[string][2]int64{"lane": {1, 3}},
+	},
+	"checkout.worker.lag": {
+		Kind: "gauge", Unit: "seconds", Budget: 0, AcrossPods: "max", PerPod: false, Keys: []string{},
+		Labels: CheckoutWorkerLagLabels{},
+	},
+	"checkout.config.generation": {
+		Kind: "gauge", Unit: "", Budget: 0, AcrossPods: "last", PerPod: false, Keys: []string{},
+		Labels: CheckoutConfigGenerationLabels{},
+	},
+	"checkout.cache.entries": {
+		Kind: "gauge", Unit: "", Budget: 20, AcrossPods: "avg", PerPod: false, Keys: []string{"day"},
+		Labels: CheckoutCacheEntriesLabels{},
+		Ranges: map[string][2]int64{"day": {0, 6}},
+	},
+	"checkout.runtime.memory": {
+		Kind: "gauge", Unit: "bytes", Budget: 0, AcrossPods: "", PerPod: true, Keys: []string{},
+		Labels: CheckoutRuntimeMemoryLabels{},
+	},
 }
 
 // ---- log events ----
@@ -262,7 +293,9 @@ var SpanTable = map[string]obs.DurianSignalSpanInfo{
 	"checkout.queue.consume": {Kind: "consumer", Keys: []string{"order_id"}},
 }
 
-// init registers the tables with the port: it refuses names, kinds, levels and label keys not in them.
+// init registers the tables with the port, once per process (it runs before any code of a package that
+// imports this one; a later Register is refused). The port refuses names, kinds, levels, label types,
+// keys and values not in them.
 func init() {
-	obs.Register(obs.DurianSignalTables{Metrics: MetricTable, Events: EventTable, Spans: SpanTable})
+	_ = obs.Register(obs.DurianSignalTables{Metrics: MetricTable, Events: EventTable, Spans: SpanTable})
 }

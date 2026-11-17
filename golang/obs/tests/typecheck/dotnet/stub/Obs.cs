@@ -198,13 +198,17 @@ public sealed class DurianSignalSpan<TAttributes>
 /// <param name="AcrossPods">sum, avg, max or last; empty for counters, histograms and per-pod gauges.</param>
 /// <param name="PerPod">True for a gauge that keeps its pod keys.</param>
 /// <param name="Keys">The allowed label keys, in contract order.</param>
+/// <param name="Values">The allowed wire values per enum label.</param>
+/// <param name="Ranges">The [min, max] per bounded-number label.</param>
 public sealed record DurianSignalMetricInfo(
     string Kind,
     string Unit,
     long Budget,
     string AcrossPods,
     bool PerPod,
-    IReadOnlyList<string> Keys);
+    IReadOnlyList<string> Keys,
+    IReadOnlyDictionary<string, string[]>? Values = null,
+    IReadOnlyDictionary<string, long[]>? Ranges = null);
 
 /// <summary>One row of SignalTables.Spans.</summary>
 public sealed record DurianSignalSpanInfo(string Kind, IReadOnlyList<string> Keys);
@@ -223,7 +227,7 @@ public static class Port
     private static IReadOnlyDictionary<string, DurianSignalMetricInfo> _metrics = new Dictionary<string, DurianSignalMetricInfo>();
     private static IReadOnlyDictionary<string, string> _events = new Dictionary<string, string>();
 
-    /// <summary>dropped.&lt;reason&gt;: unknown_event, unknown_metric, unknown_key, unset_label.</summary>
+    /// <summary>dropped.&lt;reason&gt;: unknown_event, unknown_metric, unknown_key, unknown_value, unset_label.</summary>
     public static Dictionary<string, int> Dropped { get; } = new();
 
     /// <summary>Builds the port from SignalTables.Metrics and SignalTables.EventLevels.</summary>
@@ -260,6 +264,13 @@ public static class Port
         {
             var value = p.GetValue(labels);
             if (value is null || value is IDurianSignalWire wire && !wire.Valid) return Drop("unset_label", $"metric \"{name}\" label {p.Name} is unset");
+            var key = ((DurianSignalLabelAttribute)Attribute.GetCustomAttribute(p, typeof(DurianSignalLabelAttribute))!).Name;
+            var text = value is IDurianSignalWire w ? w.Wire : value.ToString() ?? string.Empty;
+            if (info.Values is not null && info.Values.TryGetValue(key, out var allowed) && !allowed.Contains(text))
+                return Drop("unknown_value", $"metric \"{name}\" label {key} value \"{text}\" is not one of [{string.Join(' ', allowed)}]");
+            if (info.Ranges is not null && info.Ranges.TryGetValue(key, out var range) &&
+                (!long.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var n) || n < range[0] || n > range[1]))
+                return Drop("unknown_value", $"metric \"{name}\" label {key} value {text} is outside {range[0]}..{range[1]}");
         }
         return Result<bool, string>.Ok(true);
     }

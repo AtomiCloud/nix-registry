@@ -4,8 +4,8 @@
 //   - label value types: enum = string-literal union; bounded number up to maxUnion values = number-literal
 //     union; larger bounded number = brand + spec (the hand-written bounded(spec, n) builds it); calendar
 //     date = string brand + spec; free = string;
-//   - one label type per metric, the MetricLabels map and the metricTable key table (the port's run-time
-//     guard refuses keys that are not in it);
+//   - one label type per metric, the MetricLabels map and the metricTable (kind, keys, allowed enum values
+//     and bounded-number ranges: the port's run-time guard refuses keys and values that are not in it);
 //   - log events as {name, level} constants plus the eventNames list and the eventTable (name -> level)
 //     that logger(eventTable) takes: the port refuses a name not in it or a level that differs;
 //   - span attributes as the SpanAttrs map and spanTable (kind + allowed keys). Both are `type` aliases:
@@ -308,9 +308,30 @@ func renderWithOptions(c *contract.Contract, o gen.Options) (string, error) {
 				render(&b, 0, "export type "+id+" = ", labelsOf(m.LabelOrder, m.Labels, false), ";")
 			}
 			mapT.members = append(mapT.members, member{key(mn), raw(id)})
-			table.members = append(table.members, member{key(mn), obj{members: []member{
-				{"kind", raw(q(m.Kind))}, {"keys", strArr(m.LabelOrder)},
-			}}})
+			row := []member{{"kind", raw(q(m.Kind))}, {"keys", strArr(m.LabelOrder)}}
+			values, ranges := obj{}, obj{}
+			for _, l := range m.LabelOrder {
+				t := c.Types[m.Labels[l]]
+				switch t.Kind {
+				case contract.KindEnum:
+					values.members = append(values.members, member{key(l), strArr(t.Values)})
+				case contract.KindInt:
+					ranges.members = append(ranges.members, member{key(l), arr{items: []node{raw(fmt.Sprint(*t.Min)), raw(fmt.Sprint(*t.Max))}}})
+				case contract.KindTime:
+					hi := "23"
+					if t.Unit == contract.UnitWeekday {
+						hi = "6"
+					}
+					ranges.members = append(ranges.members, member{key(l), arr{items: []node{raw("0"), raw(hi)}}})
+				}
+			}
+			if len(values.members) > 0 {
+				row = append(row, member{"values", values})
+			}
+			if len(ranges.members) > 0 {
+				row = append(row, member{"ranges", ranges})
+			}
+			table.members = append(table.members, member{key(mn), obj{members: row}})
 		}
 		render(&b, 0, "export type MetricLabels = ", mapT, ";")
 		render(&b, 0, "export const metricTable = ", table, " as const;")

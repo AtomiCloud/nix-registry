@@ -94,22 +94,46 @@ func Plan(c *contract.Contract, obsDir string, langs []string) ([]Output, error)
 
 // checkOut refuses an out: folder that leaves the repository: in a Git repository it must stay under the
 // Git root (headers and the orphan walk are relative to it); with no repository it may not leave the
-// project folder (the folder that holds observability/).
+// project folder (the folder that holds observability/). Both the written path and its resolved path
+// (symlinks followed as far as the folders exist) are checked, so a symlink cannot lead outside.
 func checkOut(root, git, lang, out string) error {
 	if filepath.IsAbs(out) || path.IsAbs(filepath.ToSlash(out)) {
 		return fmt.Errorf("generate %s: out: %q must be relative to the project folder", lang, out)
 	}
+	target := filepath.Join(root, filepath.FromSlash(out))
 	if git == "" {
-		if rel := path.Clean(filepath.ToSlash(out)); rel == ".." || strings.HasPrefix(rel, "../") {
-			return fmt.Errorf("generate %s: out: %q leaves the project folder %s (no Git repository, so '..' is refused)", lang, out, root)
+		if rel := path.Clean(filepath.ToSlash(out)); rel == ".." || strings.HasPrefix(rel, "../") || !within(resolve(root), resolve(target)) {
+			return fmt.Errorf("generate %s: out: %q leaves the project folder %s (no Git repository, so '..' and symlinks out are refused)", lang, out, root)
 		}
 		return nil
 	}
-	rel, err := filepath.Rel(git, filepath.Join(root, filepath.FromSlash(out)))
-	if err != nil || rel == ".." || strings.HasPrefix(filepath.ToSlash(rel), "../") {
+	if !within(git, target) || !within(resolve(git), resolve(target)) {
 		return fmt.Errorf("generate %s: out: %q leaves the git repository %s", lang, out, git)
 	}
 	return nil
+}
+
+// within reports whether p is base or below it.
+func within(base, p string) bool {
+	rel, err := filepath.Rel(base, p)
+	return err == nil && rel != ".." && !strings.HasPrefix(filepath.ToSlash(rel), "../")
+}
+
+// resolve follows symlinks in the longest existing prefix of p and appends the rest unchanged.
+func resolve(p string) string {
+	p = filepath.Clean(p)
+	rest := ""
+	for {
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return filepath.Join(r, rest)
+		}
+		parent := filepath.Dir(p)
+		if parent == p {
+			return filepath.Join(p, rest)
+		}
+		rest = filepath.Join(filepath.Base(p), rest)
+		p = parent
+	}
 }
 
 // Events is contract/events.json: the event names the log-alert check reads (concept 3.4, 11.1).

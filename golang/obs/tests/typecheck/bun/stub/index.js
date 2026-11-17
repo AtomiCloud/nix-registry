@@ -1,6 +1,6 @@
 'use strict';
 // Runnable half of the stub (see index.d.ts). A refusal returns an Err and counts dropped.<reason>; it never throws.
-const counts = { unknown_event: 0, unknown_metric: 0, unknown_key: 0 };
+const counts = { unknown_event: 0, unknown_metric: 0, unknown_key: 0, unknown_value: 0 };
 const ok = value => ({ ok: true, value });
 const drop = (reason, error) => {
   counts[reason] += 1;
@@ -20,6 +20,14 @@ exports.metrics = table => {
     if (row.kind !== kind)
       return drop('unknown_metric', `metric "${name}" is a ${row.kind} in the generated metric table, not a ${kind}`);
     const extra = Object.keys(labels).filter(k => !row.keys.includes(k));
+    for (const [k, v] of Object.entries(labels)) {
+      const allowed = row.values?.[k];
+      if (allowed && !allowed.includes(v))
+        return drop('unknown_value', `metric "${name}" label ${k} value "${v}" is not one of [${allowed.join(' ')}]`);
+      const range = row.ranges?.[k];
+      if (range && !(Number.isInteger(v) && v >= range[0] && v <= range[1]))
+        return drop('unknown_value', `metric "${name}" label ${k} value ${v} is outside ${range[0]}..${range[1]}`);
+    }
     if (extra.length > 0)
       return drop(
         'unknown_key',

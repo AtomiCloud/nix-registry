@@ -57,7 +57,7 @@ var baseNames = []string{
 	"DurianSignalMetricInfo", "DurianSignalSpanInfo", "DurianSignalMetric", "DurianSignalPort", "DurianSignalLevelTrace",
 	"DurianSignalLevelDebug", "DurianSignalLevelInfo", "DurianSignalLevelWarn",
 	"DurianSignalLevelError", "DurianSignalLevelFatal", "metricTable", "spanTable", "eventNames",
-	"_durianSignalDate", "eventTable", "Event", "Result", "TraceLevel", "DebugLevel", "InfoLevel", "WarnLevel", "ErrorLevel", "FatalLevel",
+	"_durianSignalDate", "eventTable", "installSignals", "Event", "Result", "TraceLevel", "DebugLevel", "InfoLevel", "WarnLevel", "ErrorLevel", "FatalLevel",
 }
 
 // topReserved are the words a lowercase top-level constant may not take: Dart's reserved words and
@@ -457,8 +457,9 @@ func (x *w) entry(indent int, key, value string) {
 	x.line("%s    %s,", pad, value)
 }
 
-// tableRow writes one row of a data table: `'name': Info._(kind: ..., keys: [...]),`.
-func (x *w) tableRow(name, info string, fields []string, keys []string) {
+// tableRow writes one row of a data table: `'name': Info._(kind: ..., keys: [...]),`; after
+// writes more named arguments after keys (each already laid out by its own writer).
+func (x *w) tableRow(name, info string, fields []string, keys []string, after ...func(indent int)) {
 	ind := 2
 	if one := fmt.Sprintf("  %s: %s(", name, info); len(one) <= width {
 		x.line("%s", one)
@@ -472,7 +473,33 @@ func (x *w) tableRow(name, info string, fields []string, keys []string) {
 		x.line("%s  %s,", pad, fl)
 	}
 	x.strList(ind+2, "keys: ", ",", keys)
+	for _, a := range after {
+		a(ind + 2)
+	}
 	x.line("%s),", pad)
+}
+
+// listMap writes `<prefix>{` and one `'k': [a, b],` entry per line (a list split again when it does not
+// fit): dart format always splits a map literal whose values are list literals. Items are already Dart text.
+func (x *w) listMap(indent int, prefix string, keys []string, items [][]string) {
+	pad := strings.Repeat(" ", indent)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = dq(k) + ": [" + strings.Join(items[i], ", ") + "]"
+	}
+	x.line("%s%s{", pad, prefix)
+	for i, k := range keys {
+		if one := pad + "  " + parts[i] + ","; len(one) <= width {
+			x.line("%s", one)
+			continue
+		}
+		x.line("%s  %s: [", pad, dq(k))
+		for _, it := range items[i] {
+			x.line("%s    %s,", pad, it)
+		}
+		x.line("%s  ],", pad)
+	}
+	x.line("%s},", pad)
 }
 
 // strList writes `<prefix>['a', 'b']<suffix>` on one line, or one element per line when it does
@@ -562,10 +589,40 @@ func (g *emitter) render() string {
 	x.line("const metricTable = <String, DurianSignalMetricInfo>{")
 	for _, n := range c.MetricOrder {
 		m := c.Metrics[n]
+		var vKeys, rKeys []string
+		var vItems, rItems [][]string
+		for _, l := range m.LabelOrder {
+			t := c.Types[m.Labels[l]]
+			switch t.Kind {
+			case contract.KindEnum:
+				q := make([]string, len(t.Values))
+				for i, v := range t.Values {
+					q[i] = dq(v)
+				}
+				vKeys, vItems = append(vKeys, l), append(vItems, q)
+			case contract.KindInt:
+				rKeys, rItems = append(rKeys, l), append(rItems, []string{fmt.Sprint(*t.Min), fmt.Sprint(*t.Max)})
+			case contract.KindTime:
+				hi := "23"
+				if t.Unit == contract.UnitWeekday {
+					hi = "6"
+				}
+				rKeys, rItems = append(rKeys, l), append(rItems, []string{"0", hi})
+			}
+		}
+		labelsType := pascal(n) + "Labels"
 		x.tableRow(dq(n), "DurianSignalMetricInfo", []string{
 			"kind: " + dq(m.Kind), "unit: " + dq(m.Unit), fmt.Sprintf("budget: %d", m.Budget),
 			"acrossPods: " + dq(m.AcrossPod), fmt.Sprintf("perPod: %t", m.PerPod),
-		}, m.LabelOrder)
+		}, m.LabelOrder, func(ind int) {
+			x.entry(ind, "labels", labelsType)
+			if len(vKeys) > 0 {
+				x.listMap(ind, "values: ", vKeys, vItems)
+			}
+			if len(rKeys) > 0 {
+				x.listMap(ind, "ranges: ", rKeys, rItems)
+			}
+		})
 	}
 	x.line("};")
 
@@ -593,6 +650,11 @@ func (g *emitter) render() string {
 		evs = append(evs, [2]string{dq(c.Logs[k].Event), dq(c.Logs[k].Level)})
 	}
 	x.mapLit("const eventTable = <String, String>", evs)
+	x.blank()
+	x.line("/// Builds the telemetry port from this contract's tables, once per process (call it at")
+	x.line("/// start-up; a second install is refused).")
+	x.line("Result<DurianSignalPort> installSignals() =>")
+	x.line("    DurianSignalPort.install(metrics: metricTable, events: eventTable);")
 
 	x.blank()
 	x.line("// ---- spans ----")

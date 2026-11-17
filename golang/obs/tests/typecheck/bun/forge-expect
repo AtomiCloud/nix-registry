@@ -2,3 +2,5 @@ forge-event-typo.ts dropped.unknown_event: event \"checkout.chrage.faild\" is no
 forge-event-level.ts dropped.unknown_event: event \"checkout.charge.succeeded\" is info in the generated event table, not error
 forge-metric-cast.ts dropped.unknown_metric: metric \"checkout.chargez\" is not in the generated metric table
 forge-extra-key.ts dropped.unknown_key: metric \"checkout.charges\" keys [user_id] are not in its generated keys [provider outcome shard hour]
+forge-bad-value.ts dropped.unknown_value: metric \"checkout.charges\" label provider value \"visa\" is not one of [stripe adyen paypal]
+forge-bad-range.ts dropped.unknown_value: metric \"checkout.charges\" label shard value 999999 is outside 0..15

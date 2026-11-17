@@ -52,6 +52,12 @@ if (Port.Dropped.Values.Any(n => n != 0)) throw new Exception("a valid generated
 // The holes .NET leaves (concept 3.4): default for a bounded number, null! for an enum. Refused and counted.
 if (Port.Add(Names.CheckoutCharges, labels with { Shard = default }).IsSuccess) throw new Exception("default accepted");
 if (Port.Add(Names.CheckoutCharges, labels with { Provider = null! }).IsSuccess) throw new Exception("null enum accepted");
+// A value made by reflection (the .NET analogue of Go's unsafe) is refused by the table's allowed values.
+var visa = (Provider)typeof(Provider).GetConstructor(BindingFlags.NonPublic | BindingFlags.Instance, [typeof(string)])!.Invoke(["visa"]);
+var forgedValue = Port.Add(Names.CheckoutCharges, labels with { Provider = visa });
+if (forgedValue.IsSuccess || Port.Dropped["unknown_value"] != 1) throw new Exception("a forged enum value was accepted");
+Console.WriteLine($"guard-value: {forgedValue.Error}");
+
 // The port reads the tables it was built from: a port built from tables without the signal refuses it.
 Port.Install(new Dictionary<string, DurianSignalMetricInfo>(), new Dictionary<string, string>());
 var refused = Log.Error(Events.ChargeFailed);

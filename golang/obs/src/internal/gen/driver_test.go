@@ -230,3 +230,39 @@ func TestContractPathWithoutGitIgnoresCwd(t *testing.T) {
 		t.Fatalf("load from the project folder gave %q", got)
 	}
 }
+
+// Review round 5 (low): a symlink inside the project that points outside the repository must not let out:
+// escape; out: is checked on its resolved path.
+func TestPlanRefusesOutThroughSymlink(t *testing.T) {
+	outside := t.TempDir()
+	repo := t.TempDir()
+	if err := os.Mkdir(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c, obsDir := writeProject(t, repo, "svc", "ext/bun")
+	if err := os.Symlink(outside, filepath.Join(repo, "svc", "ext")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gen.Plan(c, obsDir, nil); err == nil || !strings.Contains(err.Error(), `out: "ext/bun" leaves the git repository`) {
+		t.Fatalf("out: through a symlink to outside the git root must be refused: %v", err)
+	}
+	plain := t.TempDir()
+	c2, obsDir2 := writeProject(t, plain, "p", "ext/bun")
+	if err := os.Symlink(outside, filepath.Join(plain, "p", "ext")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gen.Plan(c2, obsDir2, nil); err == nil || !strings.Contains(err.Error(), `out: "ext/bun" leaves the project folder`) {
+		t.Fatalf("outside git, out: through a symlink to outside the project must be refused: %v", err)
+	}
+	inside := filepath.Join(repo, "svc", "real")
+	if err := os.Mkdir(inside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(inside, filepath.Join(repo, "svc", "alias")); err != nil {
+		t.Fatal(err)
+	}
+	c.Generate[0].Out = "alias/bun"
+	if _, err := gen.Plan(c, obsDir, nil); err != nil {
+		t.Fatalf("a symlink that stays inside the repository must be accepted: %v", err)
+	}
+}

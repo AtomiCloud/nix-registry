@@ -69,13 +69,26 @@ export type MetricLabels = {
   'checkout.runtime.memory': CheckoutRuntimeMemoryLabels;
 };
 export const metricTable = {
-  'checkout.charges': { kind: 'counter', keys: ['provider', 'outcome', 'shard', 'hour'] },
-  'checkout.charge.duration': { kind: 'histogram', keys: ['provider', 'outcome'] },
-  'checkout.invoices': { kind: 'counter', keys: ['billing_day', 'provider'] },
-  'checkout.queue.depth': { kind: 'gauge', keys: ['lane'] },
+  'checkout.charges': {
+    kind: 'counter',
+    keys: ['provider', 'outcome', 'shard', 'hour'],
+    values: { provider: ['stripe', 'adyen', 'paypal'], outcome: ['ok', 'declined', 'error'] },
+    ranges: { shard: [0, 15], hour: [0, 23] },
+  },
+  'checkout.charge.duration': {
+    kind: 'histogram',
+    keys: ['provider', 'outcome'],
+    values: { provider: ['stripe', 'adyen', 'paypal'], outcome: ['ok', 'declined', 'error'] },
+  },
+  'checkout.invoices': {
+    kind: 'counter',
+    keys: ['billing_day', 'provider'],
+    values: { provider: ['stripe', 'adyen', 'paypal'] },
+  },
+  'checkout.queue.depth': { kind: 'gauge', keys: ['lane'], ranges: { lane: [1, 3] } },
   'checkout.worker.lag': { kind: 'gauge', keys: [] },
   'checkout.config.generation': { kind: 'gauge', keys: [] },
-  'checkout.cache.entries': { kind: 'gauge', keys: ['day'] },
+  'checkout.cache.entries': { kind: 'gauge', keys: ['day'], ranges: { day: [0, 6] } },
   'checkout.runtime.memory': { kind: 'gauge', keys: [] },
 } as const;
 
