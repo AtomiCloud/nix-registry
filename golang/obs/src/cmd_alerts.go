@@ -27,7 +27,7 @@ func runAlerts(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if os.Getenv("OBS_VERIFY_PRUNE") == "1" {
-		return runAlertsVerifyPrune(o, stdout, stderr) // cmd_alerts_verify.go
+		return runAlertsVerifyPrune(o, pruneForwardedFlags(fs), stdout, stderr) // cmd_alerts_verify.go
 	}
 	return alerts.Check(o, stdout, stderr)
 }

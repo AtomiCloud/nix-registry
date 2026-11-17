@@ -14,6 +14,8 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -46,6 +48,14 @@ type pruneChild struct {
 	steps, recorded, out, snapshot string
 }
 
+// Forward parsed flags generically so future options (such as chart settings)
+// are preserved in both children. --name=value also preserves empty/dash values.
+func pruneForwardedFlags(fs *flag.FlagSet) []string {
+	var out []string
+	fs.Visit(func(f *flag.Flag) { out = append(out, "--"+f.Name+"="+f.Value.String()) })
+	return out
+}
+
 // childEnv drops every switch that would change what the child evaluates or whether
 // it reads a cache, then adds extra.
 func childEnv(env []string, extra ...string) []string {
@@ -62,7 +72,7 @@ func childEnv(env []string, extra ...string) []string {
 	return append(out, extra...)
 }
 
-func runPruneChild(exe, tmp, name string, o alerts.Options, base int64, noPrune bool) (*pruneChild, error) {
+func runPruneChild(exe, tmp, name string, o alerts.Options, forwarded []string, base int64, noPrune bool) (*pruneChild, error) {
 	c := &pruneChild{
 		name:     name,
 		steps:    filepath.Join(tmp, name+"-steps.json"),
@@ -70,7 +80,8 @@ func runPruneChild(exe, tmp, name string, o alerts.Options, base int64, noPrune 
 		out:      filepath.Join(tmp, name+"-out.json"),
 		snapshot: filepath.Join(tmp, name+"-snapshot.json"),
 	}
-	args := []string{"alerts", "--dir", o.Dir, "--steps", c.steps, "--recorded", c.recorded, "--out", c.out}
+	args := append([]string{"alerts"}, forwarded...)
+	args = append(args, "--dir", o.Dir, "--steps", c.steps, "--recorded", c.recorded, "--out", c.out)
 	if o.SeedPath != "" {
 		args = append(args, "--seed", o.SeedPath)
 	}
@@ -126,7 +137,7 @@ func ruleIndex(dir string) map[string][]string {
 	return idx
 }
 
-func runAlertsVerifyPrune(o alerts.Options, stdout, stderr io.Writer) int {
+func runAlertsVerifyPrune(o alerts.Options, forwarded []string, stdout, stderr io.Writer) int {
 	exe, err := os.Executable()
 	if err != nil {
 		fmt.Fprintln(stderr, "obs alerts verify-prune:", err)
@@ -143,7 +154,7 @@ func runAlertsVerifyPrune(o alerts.Options, stdout, stderr io.Writer) int {
 	if p := os.Getenv(plantSeedEnv); p != "" {
 		prunedOpts.SeedPath = p
 	}
-	pruned, err := runPruneChild(exe, tmp, "pruned", prunedOpts, o.Base, false)
+	pruned, err := runPruneChild(exe, tmp, "pruned", prunedOpts, forwarded, o.Base, false)
 	if err != nil {
 		fmt.Fprintln(stderr, "obs alerts verify-prune:", err)
 		return 2
@@ -153,6 +164,13 @@ func runAlertsVerifyPrune(o alerts.Options, stdout, stderr io.Writer) int {
 		io.WriteString(stdout, pruned.stdout)
 		io.WriteString(stderr, pruned.stderr)
 		return 2
+	}
+	if _, ok := readOpt(pruned.out); !ok && pruned.rc != 0 {
+		// Static/refusal/recording failures return before exports. Preserve that
+		// failure instead of misreporting a missing base or a pruning mismatch.
+		io.WriteString(stdout, pruned.stdout)
+		io.WriteString(stderr, pruned.stderr)
+		return pruned.rc
 	}
 	base := o.Base
 	if base == 0 {
@@ -165,7 +183,7 @@ func runAlertsVerifyPrune(o alerts.Options, stdout, stderr io.Writer) int {
 		base = ms / 1000
 	}
 	// The pruned child chose its own base when none was given; the unpruned one reuses it.
-	full, err := runPruneChild(exe, tmp, "full", o, base, true)
+	full, err := runPruneChild(exe, tmp, "full", o, forwarded, base, true)
 	if err != nil {
 		fmt.Fprintln(stderr, "obs alerts verify-prune:", err)
 		return 2
@@ -293,7 +311,8 @@ func runAlertsVerifyPrune(o alerts.Options, stdout, stderr io.Writer) int {
 		total++
 		report = append(report, fmt.Sprintf("MISMATCH query-input snapshot: file written by pruned=%t full=%t", okP, okF))
 	default:
-		report = append(report, "note: neither run wrote an "+snapshotEnv+" snapshot (hook not present in this build); query inputs are compared through the per-minute results only")
+		total++
+		report = append(report, "MISMATCH query-input snapshot: neither run wrote the required "+snapshotEnv+" file")
 	}
 
 	for _, l := range report {
@@ -306,6 +325,26 @@ func runAlertsVerifyPrune(o alerts.Options, stdout, stderr io.Writer) int {
 			continue
 		}
 		if b, ok := readOpt(c.src); ok {
+			if c.src == pruned.out {
+				var summary map[string]json.RawMessage
+				if err := json.Unmarshal(b, &summary); err != nil {
+					fmt.Fprintln(stderr, err)
+					return 2
+				}
+				check, _ := json.Marshal(map[string]int{"compared": compared, "query_inputs": snapshots, "mismatches": total})
+				summary["verify_prune"] = check
+				if total > 0 {
+					var failed int
+					_ = json.Unmarshal(summary["failed"], &failed)
+					failed++
+					summary["failed"], _ = json.Marshal(failed)
+				}
+				b, err = json.Marshal(summary)
+				if err != nil {
+					fmt.Fprintln(stderr, err)
+					return 2
+				}
+			}
 			if err := os.WriteFile(filepath.Clean(c.dst), b, 0o644); err != nil {
 				fmt.Fprintln(stderr, err)
 				return 2
