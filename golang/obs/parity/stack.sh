@@ -155,7 +155,7 @@ logs)
   ;;
 down)
   mapfile -t containers < <(owned)
-  if ((${#containers[@]})); then docker rm -f "${containers[@]}" >/dev/null; fi
+  if ((${#containers[@]})); then docker rm -f -v "${containers[@]}" >/dev/null; fi
   if [[ $(docker network inspect --format '{{index .Labels "obs.parity.run"}}' "$name" 2>/dev/null || true) == "$name" ]]; then
     docker network rm "$name" >/dev/null
   fi
