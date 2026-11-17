@@ -1,0 +1,4 @@
+bad-wrong-kind.go.txt DurianSignalHistogram
+bad-wrong-level.go.txt DurianSignalLevelInfo
+bad-forged-enum.go.txt unexported field
+bad-wrong-labels.go.txt CheckoutChargeDurationLabels

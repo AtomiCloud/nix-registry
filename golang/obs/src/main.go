@@ -29,6 +29,8 @@ const usage = `obs: the observability check tool
 usage:
   obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
   obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names]
+  obs check [--dir observability] [--pods n] [--landscapes n]
+  obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
   obs version
 
 exit 0 when clean, 1 when a check failed, 2 on a usage or input error.
@@ -47,6 +49,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 0
 	case "query":
 		return runQuery(args[1:], stdout, stderr)
+	case "check":
+		return runCheck(args[1:], stdout, stderr)
+	case "gen":
+		return runGen(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
 		return 0

@@ -6,6 +6,7 @@
 package all
 
 import (
+	_ "github.com/AtomiCloud/obs/internal/gen/bun"
 	_ "github.com/AtomiCloud/obs/internal/gen/dart"
 	_ "github.com/AtomiCloud/obs/internal/gen/dotnet"
 	_ "github.com/AtomiCloud/obs/internal/gen/golang"

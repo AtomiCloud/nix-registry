@@ -34,7 +34,7 @@ func Generate(c *contract.Contract, header string) []byte {
 	interval := c.EffectiveInterval()
 	without := make([]string, 0, len(c.EffectivePodKeys()))
 	for _, k := range c.EffectivePodKeys() {
-		without = append(without, fmt.Sprintf("%q", k))
+		without = append(without, "'"+k+"'") // single quotes: the registry formatter (prettier) writes YAML that way
 	}
 	withoutList := "[" + strings.Join(without, ", ") + "]"
 

@@ -38,10 +38,11 @@ let
     };
   };
 
-  # End-to-end run of the built binary in the sandbox (no network): the good fixtures run green,
+  # End-to-end run of the built binary in the sandbox (no network): the good fixtures run green, the generated Go and
+  # TypeScript compile (go and tsc are inputs here),
   # every planted failure runs red naming file + rule + token, the vendored tree equals its tag.
   tests = nixpkgs.runCommand "obs-tests"
-    { nativeBuildInputs = [ obs nixpkgs.bash nixpkgs.gnugrep nixpkgs.gnused nixpkgs.coreutils nixpkgs.findutils nixpkgs.diffutils ]; }
+    { nativeBuildInputs = [ obs nixpkgs.bash nixpkgs.gnugrep nixpkgs.gnused nixpkgs.coreutils nixpkgs.findutils nixpkgs.diffutils go nixpkgs.typescript ]; }
     ''
       bash ${./tests}/run.sh --obs ${obs}/bin/obs --src ${./src} --out ${obs}
       mkdir -p "$out"
