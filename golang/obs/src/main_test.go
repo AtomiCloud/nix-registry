@@ -92,7 +92,12 @@ spec:
           datasourceUid: __expr__
           model: {type: math, expression: '$A > 1000000'}
 `})
-	if err := os.WriteFile(filepath.Join(dir, "seed.yaml"), []byte(strings.Replace(seedDoc, "length: 1h", "length: 1m", 1)), 0600); err != nil {
+	seedText := strings.Replace(seedDoc, "length: 1h", "length: 1m", 1)
+	// A trace-only source metric is pruned by alerts. Its unused definition
+	// must not make this otherwise valid alerts seed fail to build.
+	seedText = strings.Replace(seedText, "logs:\n", "  unused: {type: counter, series: [{where: {}, share: 1}]}\nlogs:\n", 1)
+	seedText += "traces:\n  - {from: {metric: unused}, server: unused, route: /unused}\n"
+	if err := os.WriteFile(filepath.Join(dir, "seed.yaml"), []byte(seedText), 0600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("OBS_CACHE_DIR", t.TempDir())
