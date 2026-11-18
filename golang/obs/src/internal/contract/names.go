@@ -108,7 +108,8 @@ func (c *Contract) metricLabels(m Metric) map[string]bool {
 	for _, l := range m.LabelOrder {
 		ls[l] = true
 	}
-	if m.PerPod {
+	if m.PerPod || m.IsSource() {
+		// a source: metric is stored as scraped, with the pod keys it carries (it is in no aggregation)
 		for _, k := range c.EffectivePodKeys() {
 			ls[k] = true
 		}

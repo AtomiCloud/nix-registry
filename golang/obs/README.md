@@ -63,13 +63,13 @@ Not tested items are collected in [Not tested](#not-tested), at the end of this 
 ## Usage
 
 ```text
-obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
+obs query --static [--dir observability] [--names] [--event-rule auto|on|off] [--contracts auto|none]
 obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names] [--vl-settings victorialogs-settings.yaml] [--tempo-config tempo.yaml]
 obs alerts [--dir observability] [--seed seed.yaml] [--base unix] [--out results.json] [--vl-settings victorialogs-settings.yaml] [--tempo-config tempo.yaml]
             [--workers n] [--steps steps.json] [--recorded recorded.json]
 obs assert --series FILE [--dir observability] [--pods n] [--unknown warn|fail|ignore]
 obs profile summarize|baseline|compare   (obs profile help)
-obs check [--dir observability] [--pods n] [--landscapes n]
+obs check [--dir observability] [--pods n] [--landscapes n] [--contracts auto|none]
 obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
 obs sandbox up [--dir observability] [--seed seed.yaml] [--project name] [--port-base n] [--runtime docker|podman] [--reseed]
 obs sandbox down|status [--dir observability] [--project name] [--runtime docker|podman]
@@ -304,10 +304,67 @@ stream fields are only the bounded where-from set (concept 3.3): a log event dec
 `stream_labels` entry is refused (`stream-label-declared`; with `free-stream-label` or `date-stream-label`
 when its type is free or a date).
 
+### Entries somebody else makes: `source:`, `estimate`, `follows`, `used_by`
+
+One contract shape covers a metric that is ours and one that is not (kube-state-metrics, cadvisor, an
+exporter). An entry with `source: <who makes it>` is **not ours**: `obs gen` makes no type for it and the
+aggregation file does not list it (it is stored as scraped, pod keys and all). It stays in the contract so
+`obs check` counts it against its budget, `obs query` and `obs assert` know its labels, and the keep-list
+below names it.
+
+```yaml
+types:
+  pod: { kind: estimate, min: 28, max: 110, churn_per_day: 25 } # a range somebody else decides
+  pod_phase: { kind: enum, values: [Pending, Running, Succeeded, Failed, Unknown] }
+metrics:
+  kube_pod_status_phase: # the stored name, exactly as scraped
+    source: kube-state-metrics
+    kind: gauge
+    budget: 550
+    used_by: [hub/alert/pod-crashloop, hub/dash/pods] # who reads it
+    labels:
+      pod: pod
+      uid: { follows: pod } # changes together with pod: adds no series
+      namespace: { follows: pod }
+      phase: pod_phase
+```
+
+- **`source:`** names who makes the metric. The metric name is the **stored** name: a counter or gauge
+  keeps its name as written (no `_total` or unit suffix is added), a histogram is stored as `_bucket`,
+  `_sum` and `_count`. `unit:` is not used for a `source:` entry. The gauge rule (`across_pods` or `per_pod`)
+  and the pod-key rules (`contract-pod-label`, `pod-label-on-business-metric`) do not apply to it, since
+  it keeps its pod keys. `free` on a label is still refused.
+- **`estimate`** is a label type with `min`, `max` and `churn_per_day` (all three required). It is allowed
+  **only** on a `source:` entry: on any other metric, a log stream label or a span attribute it fails
+  `[estimate-not-source]`, naming `file:line`, the metric and the label. `obs check` counts an estimate at its **max**
+  for the worst case and the budget. `churn_per_day` (new values a day: a replaced pod is a new value) is **not** in
+  the budget: the budget is the series stored at once, which is what the concept's budget means and what the
+  drafted budgets state. `obs check` prints it as information instead: `about N new series a day from churn`
+  (each estimate's churn times the series one of its values carries). No value of an estimate label is checked in a query.
+- **`follows: <label>`** marks a label that adds no series because it changes together with another label of
+  the same entry (a pod's `uid` follows the pod): it does not multiply the worst case. The target must be a label of the
+  same metric, and a chain must not loop (`[follows]`). It is only for a `source:` entry
+  (`[follows-not-source]`): our own labels are bounded types of their own.
+- **`used_by: [..]`** says who uses the metric (`hub/alert/<name>`, `hub/dash/<name>`). A metric is allowed when
+  it is in the contract, within its budget, and says who uses it. `obs check` prints it. A `source:` entry with
+  no `used_by` is a **warning** (`WARN ... [used-by-missing]`, exit stays 0): the owner's decision text asks for
+  "say who uses it" without saying a missing one must fail, so it does not.
+- An enum type used only by `source:` entries may list the empty string (a pod with no priority class
+  has an empty label); a type an own metric uses may not.
+
+**Several contracts in one repository.** `obs check` and `obs query` read **every** `observability/contract.yaml`
+below the Git root, not only `--dir`'s: a dashboard in `apps/hub/observability` may read a metric that
+`apps/cluster/observability/contract.yaml` declares. `obs check` validates and prints each. A stored series name
+that two contracts both declare is `[metric-clash]` and names both files and lines. `obs query` merges the
+others' metrics and platform metrics into the lookup (each keeps its own types); logs, spans and versions
+stay the `--dir` contract's. Contracts in a `fixtures` or `testdata` folder are never read as company, and
+a folder in one never looks for company; outside a Git repository only `--dir`'s contract is read.
+`--contracts none` reads only `--dir`'s. `obs gen` and `obs assert` stay per contract.
+
 ## `obs check`
 
 ```text
-obs check [--dir observability] [--pods n] [--landscapes n]
+obs check [--dir observability] [--pods n] [--landscapes n] [--contracts auto|none]
 ```
 
 Prints the worst-case series per metric (the product of its label sizes, times buckets + 2 for a
@@ -319,7 +376,9 @@ streams) and `events=[...]`. It fails (exit 1, `FAIL <file> <yaml path>: [rule] 
 - `stream-label-declared` (with `free-stream-label`, `date-stream-label`): a log event declares a stream field, or a free or date one;
 - `date-no-window`: a calendar date type without `window_days`;
 - `over-budget`, `budget-missing`: a metric over its budget, or with labels and no budget;
-- `gauge-pods`: a gauge with neither `across_pods` nor `per_pod` (or both);
+- `gauge-pods`: a gauge with neither `across_pods` nor `per_pod` (or both), for an entry of ours (not a `source:` one);
+- `estimate-not-source`, `estimate-bounds`, `follows`, `follows-not-source`, `used-by`, `metric-clash`: the
+  [`source:` rules](#entries-somebody-else-makes-source-estimate-follows-used_by) above;
 - `metric-kind`: no kind or an unknown kind; and the schema rules (`label-type`, `enum-empty`, `int-bounds`, `event-level`, ...).
 
 The after-start pod-key check of §4.1 is not here (it needs a running store: `obs assert`).
@@ -442,7 +501,8 @@ language's interfaces library rather than being redefined in each generated file
 `<dir>/contract/events.json` (event names, read by the log-alert event check) and
 `<dir>/contract/aggregation.yaml` (the §4.1 VictoriaMetrics stream-aggregation file: counters and
 histogram parts get `total`; gauges get `sum_samples`, `avg`, `max` or `last` with `dedup_interval`;
-`without` = `pod_keys`; `per_pod` metrics and unlisted metrics are in no match).
+`without` = `pod_keys`; `per_pod` metrics and unlisted metrics are in no match; `source:` entries are not listed).
+It also writes the **keep-list** `<dir>/contract/keep.yaml` (below). A `source:` entry gets no generated type in any language.
 Output is deterministic and formatted. Every file starts with `Code generated by obs gen. DO NOT EDIT.`
 and `contract-hash: sha256:<hash of the contract file>`.
 
@@ -456,6 +516,37 @@ folder outside Git) without following symlinks or entering dependency/cache dire
 Golden files: `tests/fixtures/gen/good` is a consumer repo with its generated files committed; the
 Go unit tests and `obs gen --check` compare against it (`OBS_UPDATE_GOLDEN=1 go test ./internal/gen/...`
 rewrites them). The tests find `tests/` in an ancestor of the package (or `OBS_TESTS_DIR`); a build from `src/` alone skips them, and the nix check copies `tests/` next to the source root.
+
+### The keep-list (`contract/keep.yaml`)
+
+The collector stores only declared metrics (owner decision): `obs gen` writes the names that may be stored, and
+the platform's renderer turns them into the keep rule on the metrics write door. The file is plain YAML:
+
+```yaml
+# generated by obs gen from apps/cluster/observability/contract.yaml
+# contract-hash: sha256:<hash of the contract file>
+metrics:
+  - container_cpu_usage_seconds_total
+  - http_server_request_duration_seconds_bucket
+  - http_server_request_duration_seconds_count
+  - http_server_request_duration_seconds_sum
+  - kube_pod_info
+```
+
+- The names are the **stored** VictoriaMetrics names, after the OTel to Prometheus name change: dots become `_`, a
+  `seconds`/`bytes` unit adds its suffix, a counter ends in `_total`, a histogram is `_bucket`, `_sum` and `_count`. A `source:` entry's name is
+  already the stored name (see above).
+- **Included:** our metrics, every `source:` entry (the generators skip its types, not its keep line) and `platform_metrics`.
+  A platform metric's kind is not in the contract: a key ending in `.duration` is the OTel seconds histogram
+  (three names, exact); for any other platform key every name it can be stored under is listed (`_total`,
+  `_seconds`, `_bytes`, `_bucket`, `_sum`, `_count`), because a name kept that nobody sends costs nothing and a name
+  dropped loses data.
+- Sorted, one per line, plain names (no regex, no dots). An empty contract writes `metrics: []`.
+- `obs gen --check` reports it like the other generated files: `[gen-missing]`, `[gen-edited]` (the hash matches, the lines do not) and
+  `[gen-stale]` (the contract changed). The golden file is `tests/fixtures/gen/ok-source-cluster/observability/contract/keep.yaml`,
+  generated from a copy of the platform's cluster draft (32 `source:` entries) with made-up consumer names; it also pins that
+  `obs gen` skips every one of them.
+- The always-kept names (`up`, `scrape_*`), collecting every `apps/*/observability/contract/keep.yaml` and the vminsert relabel rule are the platform's; see *Not tested*.
 
 **Each language compiles and runs against a stub written from the goal; NOT TESTED against the real library.**
 `tests/typecheck/<lang>/stub/` holds a minimal assumed interfaces API with just enough body to run the
@@ -1952,6 +2043,14 @@ source) where its section says so.
 - `obs sandbox up` on aarch64 and macOS, and with podman (the box that ran it has docker only); Tempo and Pyroscope take no data from the seed yet ([`obs sandbox`](#obs-sandbox-the-local-stack-for-people)).
 - `obs look` with a pull request on GitHub: the agent posts the comment; obs only prints the prompt ([`obs look`](#obs-look-dashboard-screenshots-reviewed-by-the-calling-agent)).
 - aarch64 and macOS builds run in CI; only x86_64 Linux was run by hand.
+
+**Source entries and the keep-list**
+
+- **The platform renderer and the write-door keep rule.** The renderer that collects every `contract/keep.yaml`, adds `up` and `scrape_*`, and turns the names into the vminsert `-relabelConfig` `keep` action lives in the platform repository and is not run here. Not tested: that a collector with this rule drops exactly the undeclared names, and that nothing the contracts need is lost on any of the three paths (cluster Alloy, host Alloy, OTLP).
+- **Platform metric names other than `*.duration`.** The stored names of such a metric are not in the contract, so all names it may have are kept; which one the store really holds was not measured on a running store.
+- **A `source:` counter or gauge name is assumed to be the stored name.** Checked against the cluster draft's names and VictoriaMetrics' scrape path (names are stored as scraped); a source that reaches the store through OTLP (dotted name, unit suffix) would need the stored name written out.
+- **Churn is information only.** `obs check` prints the approximate new series a day from each estimate's `churn_per_day`; the 30-day retention of the concept is not applied to the budget, and no measurement checks the estimates against a real cluster.
+- **Several contracts** are discovered below the Git root; large monorepos were not timed, and a repository with no `.git` (a source archive) reads only `--dir`'s contract.
 
 **Queries and data**
 

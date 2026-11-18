@@ -195,7 +195,7 @@ func holes(c *contract.Contract, g *group) []Finding {
 	for _, l := range labels {
 		vs := sortedKeys(values[l])
 		switch {
-		case podKey[l] && !g.sm.Platform && !g.sm.Metric.PerPod:
+		case podKey[l] && !g.sm.Platform && !g.sm.Metric.PerPod && !g.sm.Metric.IsSource():
 			out = append(out, Finding{Level: Fail, Metric: g.metric, Rule: "pod-label-on-business-metric",
 				Msg: fmt.Sprintf("label %q (%d values) is a pod key and the metric is not per_pod: the aggregation must drop it", l, len(vs))})
 		case !allowed[l]:
