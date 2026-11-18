@@ -571,3 +571,19 @@ func TestStoreTextMergesOverlapsAndHidesVmauthTokenList(t *testing.T) {
 		t.Fatalf("a short tenant id is no secret and must not garble the text: %q", got)
 	}
 }
+
+// vmauth's real 401 (v1.156.0): the token list is read with Go's quoting, so a token holding ]
+// does not end it early, and it is found before any other hiding, so a short secret that also
+// occurs in the marker text cannot hide the marker and let the list through.
+func TestStoreTextVmauthListQuotingAndOrder(t *testing.T) {
+	c := &Client{Headers: map[string]string{"X-Custom": "a]b"}}
+	got := c.storeText(`cannot authorize request with auth tokens ["a]b" "zq1"]: forbidden`)
+	if strings.Contains(got, "zq1") || strings.Contains(got, "a]b") || !strings.HasSuffix(got, ": forbidden") {
+		t.Fatalf("a ] inside a quoted token must not end the list: %q", got)
+	}
+	c = &Client{Headers: map[string]string{"X-Api-Key": "tok"}}
+	got = c.storeText(`cannot authorize request with auth tokens ["zq2"]`)
+	if strings.Contains(got, "zq2") {
+		t.Fatalf("a short key matching the marker must not let the list through: %q", got)
+	}
+}

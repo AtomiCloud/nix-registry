@@ -235,8 +235,8 @@ func safeDoError(err error) error {
 // word of it, for "Bearer <token>") is replaced by ***, since auth proxies echo the credential
 // they refused, and control characters (a terminal escape) become spaces. At most 200 runes.
 func (c *Client) storeText(s string) string {
+	s = hideAuthTokenEcho(s) // first, on the original text: a short secret may also occur in the marker
 	s = hideSpans(s, c.secretForms())
-	s = hideAuthTokenEcho(s)
 	s = strings.Map(func(r rune) rune {
 		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
 			return ' '
@@ -328,9 +328,10 @@ func hideSpans(s string, forms []string) string {
 	return out.String()
 }
 
-// hideAuthTokenEcho hides the bracketed token list vmauth prints when it refuses a request
-// ("cannot authorize request with auth tokens [...]"): it can hold a token of any length, from a
-// custom auth header obs did not recognise as a credential.
+// hideAuthTokenEcho hides the token list vmauth prints when it refuses a request ("cannot
+// authorize request with auth tokens [...]", Go's %q of a []string): it can hold a token of any
+// length, from a custom auth header obs did not recognise as a credential. The list ends at the
+// first ] outside a quoted string (a token may itself hold ] or an escaped quote).
 func hideAuthTokenEcho(s string) string {
 	const marker = "auth tokens ["
 	var out strings.Builder
@@ -342,12 +343,24 @@ func hideAuthTokenEcho(s string) string {
 		}
 		out.WriteString(s[:i+len(marker)])
 		rest := s[i+len(marker):]
-		j := strings.Index(rest, "]")
-		if j < 0 {
-			out.WriteString("***]")
-			return out.String()
+		end, inQuote := -1, false
+		for k := 0; k < len(rest); k++ {
+			switch ch := rest[k]; {
+			case inQuote && ch == '\\':
+				k++ // the escaped byte is part of the token
+			case ch == '"':
+				inQuote = !inQuote
+			case !inQuote && ch == ']':
+				end = k
+			}
+			if end >= 0 {
+				break
+			}
 		}
 		out.WriteString("***]")
-		s = rest[j+1:]
+		if end < 0 {
+			return out.String() // no closing ]: hide to the end
+		}
+		s = rest[end+1:]
 	}
 }
