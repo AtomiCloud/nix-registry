@@ -54,6 +54,24 @@ func TestLegacySandboxSpecAndLoaders(t *testing.T) {
 	}
 }
 
+func TestLookUpProvisionsConcreteProfileDatasource(t *testing.T) {
+	s := newStackServer(t)
+	cfg := s.cfg(t, &fakeRunner{})
+	cfg.ApplyIncidents = true
+	if err := os.WriteFile(filepath.Join(cfg.Dir, "dashboards", "profiles.json"), []byte(`{"uid":"profiles","panels":[{"id":1,"type":"flamegraph","datasource":{"type":"grafana-pyroscope-datasource","uid":"checkout-profiles"},"targets":[{"refId":"A"}]}]}`), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Up(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	for _, ds := range s.dsPosts {
+		if ds["uid"] == "checkout-profiles" && ds["type"] == "grafana-pyroscope-datasource" {
+			return
+		}
+	}
+	t.Fatalf("look Up did not provision the board's checkout-profiles datasource: %v", s.dsPosts)
+}
+
 func TestOverlappingIncidentsReplayLikeAlerts(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "observability")
 	if err := os.CopyFS(dir, os.DirFS("../../../tests/fixtures/look-seeded")); err != nil {
