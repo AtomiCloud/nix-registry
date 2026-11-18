@@ -150,6 +150,29 @@ func checkExisting(c *Config, have map[string]existing) error {
 	return nil
 }
 
+// checkRelabel refuses an existing sandbox whose VictoriaMetrics was created without -relabelConfig (by
+// an older obs): its scraped samples would keep the durian_cloud_* labels and miss the dotted selectors
+// of the standard. The labelmap is a start-up flag, so the container has to be recreated.
+func (c *Config) checkRelabel(ctx context.Context, have map[string]existing) error {
+	for _, k := range Pins {
+		if k.Name != "vm" {
+			continue
+		}
+		name := containerName(c.Project, k)
+		if _, ok := have[name]; !ok {
+			return nil
+		}
+		out, err := c.Runner.Run(ctx, "inspect", "--format", "{{json .Args}}", name)
+		if err != nil {
+			return fmt.Errorf("cannot read the arguments of %s: %w", name, err)
+		}
+		if !strings.Contains(out, "-relabelConfig") {
+			return fmt.Errorf("refusing: %s was made without -relabelConfig (an older obs), so scraped durian_cloud_* labels would not become durian.cloud.*; run `obs sandbox down` then `obs sandbox up` to recreate it", name)
+		}
+	}
+	return nil
+}
+
 // VMRelabelConfig is the sandbox VictoriaMetrics' -relabelConfig: Primordial's real vminsert relabel
 // config, copied exactly (same rules, same order). Source: github.com/AtomiCloud/primordial, branch
 // feat/durian-labels, commit 954508c79c36faa38b221d5eb37c5bada9a03068, apps/vm/chart/values.yaml,
@@ -269,6 +292,9 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 		return nil, fmt.Errorf("container runtime: %w", err)
 	}
 	if err := checkExisting(&cfg, have); err != nil {
+		return nil, err
+	}
+	if err := cfg.checkRelabel(ctx, have); err != nil {
 		return nil, err
 	}
 	created := false

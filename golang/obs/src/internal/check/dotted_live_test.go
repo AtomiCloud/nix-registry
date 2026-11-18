@@ -67,19 +67,55 @@ func TestLiveQuotedDottedLabelReturnsRows(t *testing.T) {
 	}
 }
 
-// The underscore form selects nothing, and the no-rows finding names the stored (dotted) spelling.
-func TestLiveUnderscoreSpellingHasNoRowsAndNamesTheDottedOne(t *testing.T) {
+// The underscore form selects nothing: the live run fails it once per query with label-spelling, naming the
+// stored (dotted) spelling, instead of running it to a bare no-rows.
+func TestLiveUnderscoreSpellingFailsNamingTheDottedOne(t *testing.T) {
 	r := dottedLive(t, `sum(rate(checkout_charges_total{durian_cloud_service="checkout"}[5m]))`)
 	if r.Failures() != 2 {
-		t.Fatalf("want a no-rows failure for the alert and the panel, got %+v", r.Findings)
+		t.Fatalf("want a failure for the alert and the panel, got %+v", r.Findings)
 	}
 	for _, f := range r.Findings {
-		if f.Rule != "no-rows" && f.Rule != "threshold-removed" {
-			t.Errorf("unexpected finding %+v", f)
+		if f.Level == Fail && (f.Rule != "label-spelling" || !strings.Contains(f.Msg, `write "durian.cloud.service"`)) {
+			t.Errorf("want label-spelling naming the dotted label, got %+v", f)
 		}
-		if f.Rule == "no-rows" && !strings.Contains(f.Msg, `stored as "durian.cloud.service"`) {
-			t.Errorf("no-rows must name the dotted spelling: %s", f.Msg)
+	}
+}
+
+// Opus 2 (live): label_values(metric, payment_provider) lists nothing; the run fails naming the stored label.
+func TestLiveLabelValuesUnderscoreVariableNamesTheDottedLabel(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "seed.yaml")
+	if err := os.WriteFile(p, []byte(dottedSeed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sd, _ := seed.Load(p)
+	ds, err := seed.Build(sd, time.Now().UTC().Truncate(time.Minute).Add(-sd.Duration()-10*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := vm.New(ds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	run := func(label string) *Report {
+		d := &files.Dashboard{File: "dashboards/overview.json", Vars: []files.Variable{{Name: "provider", Type: "query", Query: "label_values(checkout_charges_total, " + label + ")"}}}
+		q := files.Query{File: d.File, Where: "panel 1 target A", Kind: files.Metrics, Dash: d, Expr: `sum(rate(checkout_charges_total{"payment.provider"=~"$provider"}[5m]))`}
+		return runLive(&files.Set{Queries: []files.Query{q}, Dashboards: []*files.Dashboard{d}}, Options{}, ds, e, nil)
+	}
+	for _, label := range []string{"payment.provider", `"payment.provider"`} {
+		if r := run(label); r.Failures() != 0 {
+			t.Errorf("label_values(..., %s): want values on the seed, got %+v", label, r.Findings)
 		}
+	}
+	r := run("payment_provider")
+	found := false
+	for _, f := range r.Findings {
+		if f.Rule == "label-spelling" && strings.Contains(f.Msg, `write "payment.provider"`) && strings.Contains(f.Where, "panel 1") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("want a label-spelling failure naming payment.provider, got %+v", r.Findings)
 	}
 }
 
@@ -118,5 +154,53 @@ spans: { checkout.charge: { attributes: { payment.provider: provider } } }
 		if r.Failures() != 1 || !strings.Contains(r.Findings[0].Msg, want) || !strings.Contains(r.Findings[0].Msg, "undeclared attribute") {
 			t.Errorf("%s: want one failure naming %s, got %+v", expr, want, r.Findings)
 		}
+	}
+}
+
+// Opus 2: a dashboard variable label_values(metric, label) is judged like a selector label.
+func TestStaticLabelValuesVariableSpelling(t *testing.T) {
+	c, err := contract.Parse("c.yaml", []byte(nameContract))
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func(q string) *Report {
+		r := newReport()
+		contractVariables(r, &files.Dashboard{File: "dashboards/overview.json", Vars: []files.Variable{{Name: "provider", Type: "query", Query: q}}}, c)
+		return r
+	}
+	for _, q := range []string{
+		`label_values(checkout_charges_total, payment.provider)`,
+		`label_values(checkout_charges_total, "payment.provider")`,
+		`label_values(checkout_charges_total{outcome="error"}, outcome)`,
+	} {
+		if r := run(q); len(r.Findings) != 0 {
+			t.Errorf("%s: %+v", q, r.Findings)
+		}
+	}
+	for q, want := range map[string]string{
+		`label_values(checkout_charges_total, payment_provider)`: `write "payment.provider"`,
+		`label_values(payment_provider)`:                         `write "payment.provider"`,
+	} {
+		r := run(q)
+		if r.Failures() != 1 || !strings.Contains(r.Findings[0].Msg, want) || r.Findings[0].Where != "variable $provider" {
+			t.Errorf("%s: want one failure naming %s, got %+v", q, want, r.Findings)
+		}
+	}
+}
+
+// Opus 3: with no contract.yaml, a grouping-only underscore query is judged against the seed's label
+// names, and a label_values variable with the underscore spelling names the stored one.
+func TestLiveGroupingOnlyUnderscoreSpellingFails(t *testing.T) {
+	r := dottedLive(t, `sum by (durian_cloud_service) (rate(checkout_charges_total[5m])) > 0.0001`)
+	if r.Failures() != 2 {
+		t.Fatalf("want the alert and the panel to fail, got %+v", r.Findings)
+	}
+	for _, f := range r.Findings {
+		if f.Level == Fail && (f.Rule != "label-spelling" || !strings.Contains(f.Msg, `write "durian.cloud.service"`)) {
+			t.Errorf("want label-spelling naming the dotted label, got %+v", f)
+		}
+	}
+	if r := dottedLive(t, `sum by ("durian.cloud.service") (rate(checkout_charges_total[5m]))`); r.Failures() != 0 {
+		t.Errorf("dotted grouping must pass: %+v", r.Findings)
 	}
 }

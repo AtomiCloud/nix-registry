@@ -37,7 +37,7 @@ func scrapedInto(t *testing.T, relabelConfig string) *vm.Engine {
 	defer store.Close()
 	err := scrape.Run(context.Background(), scrape.Options{
 		Targets: []string{target.URL}, VM: store.URL, Job: "obs-scrape", Count: 1,
-		Labels: map[string]string{"durian_cloud_service": "checkout", "durian_cloud_landscape": "local", "durian_cloud_other": "x", "cluster": "c1"},
+		Labels: map[string]string{"durian_cloud_service": "checkout", "durian_cloud_landscape": "local", "durian_cloud_platform": "payments", "durian_cloud_module": "api", "durian_cloud_extra": "x", "cluster": "c1"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -109,6 +109,10 @@ func TestScrapedSamplesAreStoredWithDottedLabels(t *testing.T) {
 	if n := rowsOf(t, e, `app_up{"durian.cloud.service"="checkout", "durian.cloud.landscape"="local"}`); n != 1 {
 		t.Errorf("dotted selector: want 1 row, got %d", n)
 	}
+	// all four named where-from labels map
+	if n := rowsOf(t, e, `app_up{"durian.cloud.platform"="payments", "durian.cloud.module"="api"}`); n != 1 {
+		t.Errorf("platform and module: want 1 row, got %d", n)
+	}
 	if n := rowsOf(t, e, `sum by ("durian.cloud.service") (app_requests_total{route="/x"})`); n != 1 {
 		t.Errorf("dotted grouping: want 1 row, got %d", n)
 	}
@@ -121,10 +125,10 @@ func TestScrapedSamplesAreStoredWithDottedLabels(t *testing.T) {
 	if n := rowsOf(t, e, `app_up{cluster="c1"}`); n != 0 {
 		t.Errorf("cluster label: want it dropped, got %d rows", n)
 	}
-	if n := rowsOf(t, e, `app_up{durian_cloud_other="x"}`); n != 1 {
+	if n := rowsOf(t, e, `app_up{durian_cloud_extra="x"}`); n != 1 {
 		t.Errorf("an unmapped durian_cloud_* label stays as sent: want 1 row, got %d", n)
 	}
-	if n := rowsOf(t, e, `app_up{"durian.cloud.other"="x"}`); n != 0 {
+	if n := rowsOf(t, e, `app_up{"durian.cloud.extra"="x"}`); n != 0 {
 		t.Errorf("an unmapped durian_cloud_* label is not renamed: got %d rows", n)
 	}
 }

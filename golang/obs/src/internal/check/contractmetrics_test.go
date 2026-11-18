@@ -21,6 +21,11 @@ metrics:
     kind: counter
     budget: 20
     labels: { payment.provider: provider, outcome: outcome }
+  checkout.queue.depth:
+    kind: gauge
+    per_pod: true
+    budget: 20
+    labels: { payment.provider: provider }
 platform_metrics:
   http.server.request.duration: [http.route]
 `
@@ -230,6 +235,12 @@ func TestDottedLabelsAreTheStoredSpelling(t *testing.T) {
 	wantRed(t, "", `checkout_charges_total{durian_cloud_service="checkout"}`, "contract-undeclared-label", `write "durian.cloud.service"`)
 	wantRed(t, "", `http_server_request_duration_seconds_count{http_route="/x"}`, "contract-undeclared-label", `write "http.route"`)
 	wantRed(t, "", `label_replace(checkout_charges_total, "x", "$1", "payment_provider", "(.*)")`, "contract-undeclared-label", `write "payment.provider"`)
+	// per_pod and platform metrics DO carry the pod key, dotted: the underscore form is a wrong spelling
+	// that names the dotted one, not a "business metrics have no pod key" finding
+	wantRed(t, "", `checkout_queue_depth{k8s_pod_name="x"}`, "contract-undeclared-label", `write "k8s.pod.name"`)
+	wantRed(t, "", `sum by (k8s_pod_name) (http_server_request_duration_seconds_count)`, "contract-undeclared-label", `write "k8s.pod.name"`)
+	wantGreen(t, "", `checkout_queue_depth{"k8s.pod.name"="x"}`)
+	wantGreen(t, "", `sum by ("k8s.pod.name") (http_server_request_duration_seconds_count)`)
 	// a pod key in either spelling is a pod key
 	wantRed(t, "", `sum by ("k8s.pod.name") (rate(checkout_charges_total[5m]))`, "contract-pod-label", "k8s.pod.name")
 	wantRed(t, "", `sum by (k8s_pod_name) (rate(checkout_charges_total[5m]))`, "contract-pod-label", "k8s_pod_name")

@@ -112,6 +112,9 @@ func runLive(set *files.Set, o Options, ds *seed.Dataset, m metricsEngine, l log
 			continue
 		}
 		r.Counts[q.Kind.String()]++
+		if q.Kind == files.Metrics && lv.spelling(q) {
+			continue // a wrong label spelling is reported once, with the right one; the run would only say no-rows
+		}
 		if q.IsAlert {
 			lv.alert(q)
 		} else {
@@ -249,7 +252,7 @@ func (l *liveRun) panel(q *files.Query) {
 	values := map[string][]string{}
 	for _, n := range names {
 		if v, ok := defs[n]; ok {
-			vs := l.varValues(v, start, end)
+			vs := l.varValues(q, v, start, end)
 			if !v.Multi {
 				// One value at a time, as the dashboard shows it: the current one, else the first.
 				pick := vs[0]
@@ -339,13 +342,13 @@ func (l *liveRun) runPanel(q *files.Query, res vars.Result, start, end time.Time
 }
 
 // varValues returns the values a template variable takes on the seed.
-func (l *liveRun) varValues(v files.Variable, start, end time.Time) []string {
+func (l *liveRun) varValues(q *files.Query, v files.Variable, start, end time.Time) []string {
 	switch v.Type {
 	case "query":
 		if m := labelValuesRe.FindStringSubmatch(v.Query); m != nil {
-			metric, label := "", strings.TrimSpace(m[2])
+			metric, label := "", strings.Trim(strings.TrimSpace(m[2]), "\"")
 			if label == "" {
-				label = strings.TrimSpace(m[1])
+				label = strings.Trim(strings.TrimSpace(m[1]), "\"")
 			} else {
 				metric = strings.TrimSpace(m[1])
 				if i := strings.IndexAny(metric, "{"); i >= 0 {
@@ -356,7 +359,12 @@ func (l *liveRun) varValues(v files.Variable, start, end time.Time) []string {
 			if len(vs) > 0 {
 				return vs
 			}
-			l.r.add(Warn, "", "", "variable", "variable $%s: label_values(%s) has no values on the seed", v.Name, v.Query)
+			// VictoriaMetrics stores a dotted label with its dots (concept 2.1): name the right spelling.
+			if d := contract.Dotted(label, l.labelNames); d != "" {
+				l.r.add(Fail, q.File, q.Where, "label-spelling", "variable $%s: %s reads label %q, which VictoriaMetrics stores as %q: write %q", v.Name, v.Query, label, d, d)
+				return []string{""}
+			}
+			l.r.add(Warn, "", "", "variable", "variable $%s: %s has no values on the seed", v.Name, v.Query)
 		}
 	case "custom":
 		var out []string
@@ -381,6 +389,45 @@ func (l *liveRun) varValues(v files.Variable, start, end time.Time) []string {
 		return []string{v.Query}
 	}
 	return []string{""}
+}
+
+// spelling fails a metrics query that reads the underscore form of a label the seed stores dotted
+// (VictoriaMetrics keeps the dots, concept 2.1), naming the right spelling. It needs no contract: it
+// compares against the label names of the seed itself, so a grouping-only query is judged too.
+// It reports whether it failed the query.
+func (l *liveRun) spelling(q *files.Query) bool {
+	e, err := metricsql.Parse(staticFill(q))
+	if err != nil {
+		return false // the static check reports it
+	}
+	seen := map[string]bool{}
+	var wrong []string
+	metricsql.VisitAll(e, func(x metricsql.Expr) {
+		var read []string
+		switch t := x.(type) {
+		case *metricsql.MetricExpr:
+			for _, lfs := range t.LabelFilterss {
+				for _, lf := range lfs {
+					read = append(read, lf.Label)
+				}
+			}
+		case *metricsql.AggrFuncExpr:
+			read = append(read, t.Modifier.Args...)
+		case *metricsql.BinaryOpExpr:
+			read = append(read, t.GroupModifier.Args...)
+			read = append(read, t.JoinModifier.Args...)
+		}
+		for _, name := range read {
+			if d := contract.Dotted(name, l.labelNames); d != "" && !seen[name] {
+				seen[name] = true
+				wrong = append(wrong, fmt.Sprintf("label %q is stored as %q: write %q (a selector is {%q=\"...\"}, a grouping is by (%q))", name, d, d, d, d))
+			}
+		}
+	})
+	for _, w := range wrong {
+		l.r.add(Fail, q.File, q.Where, "label-spelling", "VictoriaMetrics keeps a label's dots: %s", w)
+	}
+	return len(wrong) > 0
 }
 
 // ---- messages ----

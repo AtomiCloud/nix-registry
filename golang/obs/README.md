@@ -229,7 +229,7 @@ dashboard or alert written to the standard returns rows on an obs seed and on th
 
 Seed data is made to look like stored data (concept §11.2). Metrics: counters get `_total`, seconds
 histograms `_seconds_bucket`/`_sum`/`_count` with `le`; dots in a metric NAME become `_`, dots in a LABEL name stay
-(see the table below). Logs, as VictoriaLogs stores an OTLP
+(see "Label spelling per store" above). Logs, as VictoriaLogs stores an OTLP
 log record (FROM SOURCE, v1.54.0; **not yet compared with a real VictoriaLogs through Alloy**): attribute
 keys unchanged (`durian.cloud/event`, `payment.provider`), the body as `_msg`, `severity_text` (upper case,
 e.g. `ERROR`) and `severity_number`, `trace_id`, `span_id`. Stream fields are the bounded where-from set
@@ -442,6 +442,35 @@ labels their input has. A metric label is compared in its stored spelling, dots
 kept and quoted (`{"payment.provider"="stripe"}`, `by ("payment.provider")`); the underscore form of a dotted label is
 `contract-undeclared-label` and the finding names the dotted spelling (a pod key in either spelling is
 `contract-pod-label`). Other log fields are free-form (§6): not judged.
+
+## Migrating from 0.2
+
+obs 0.2 stored seeded VictoriaMetrics labels with dots turned into underscores and accepted both spellings in
+checks. Concept §2.1 says VictoriaMetrics keeps the dots and a query quotes them, so obs now follows the concept.
+This is a correction to the standard, not a flag or exit-code change, so it ships as a minor release. A dashboard,
+alert or TraceQL query written with the underscore spelling of a dotted label now fails, once, with the fix in
+the message:
+
+| Where it fails                    | The message names                                                                          | Fix                                                |
+| --------------------------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------- |
+| `obs query --static`, a selector  | `[contract-undeclared-label] label "durian_cloud_service" ... write "durian.cloud.service"` | `{"durian.cloud.service"="checkout"}`              |
+| `obs query --static`, a grouping  | the same finding for the `by (...)` / `on (...)` label                                     | `by ("durian.cloud.service")`                      |
+| `obs query --static`, a variable  | `variable $provider: [contract-undeclared-label] label_values reads label "payment_provider"` | `label_values(checkout_charges_total, payment.provider)` |
+| `obs query --live` (any seed)     | `[label-spelling] VictoriaMetrics keeps a label's dots: label "x_y" is stored as "x.y"`      | write the dotted name, quoted in a selector        |
+| TraceQL attribute                 | `[traceql-attribute] undeclared attribute span.payment_provider (Tempo keeps the dots: write "payment.provider")` | `span.payment.provider`                            |
+
+- A pod key on a per_pod or platform metric is a label too: `k8s_pod_name` fails the same way, naming `k8s.pod.name`.
+- Pyroscope labels do not change: they stay underscores.
+- **Alert templates** (annotations, labels) must use `{{ index $labels "durian.cloud.service" }}`: the dotted path
+  `$labels.durian.cloud.service` is a template error and the underscore form renders empty. (From review of the Grafana
+  template rules; obs does not render templates.)
+- **An old sandbox must be recreated.** A sandbox made before this release has a VictoriaMetrics without the
+  relabel config; `obs sandbox up` refuses it, naming `-relabelConfig`. Run `obs sandbox down` and then
+  `obs sandbox up`.
+- NOT TESTED: `label_values` with a quoted dotted label (`label_values(m, "payment.provider")`) in Grafana itself; obs
+  accepts both quoted and bare, but only the bare form is what the fixtures use.
+- Primordial's current charts (main, release 1.5.0, `scripts/ci/obs-query.sh`) pass with this obs: 6 charts, 0 failures.
+  They have no `contract.yaml` and use no `durian.*` label, so nothing in them was judged for spelling.
 
 ## `obs sandbox`: the local stack, for people
 

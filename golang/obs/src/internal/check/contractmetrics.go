@@ -284,7 +284,9 @@ func (mc *metricChecker) grouping(args []string, sc labelScope) {
 		if sc.labels[l] {
 			continue
 		}
-		if isPodKey(mc.c, l) {
+		// The underscore spelling of a label these series DO carry (a per_pod or platform metric keeps its
+		// pod keys) is a wrong spelling, not a missing pod key: name the dotted one first.
+		if contract.Dotted(l, sc.labels) == "" && isPodKey(mc.c, l) {
 			mc.r.add(Fail, mc.q.File, mc.q.Where, "contract-pod-label", "grouping by %q: business metrics have no pod key in the store (concept 4.1)", a)
 			continue
 		}
@@ -363,7 +365,7 @@ func (mc *metricChecker) selector(me *metricsql.MetricExpr) labelScope {
 			l := lf.Label
 			if !allowed[l] {
 				switch {
-				case isPodKey(mc.c, l) && len(matched) > 0:
+				case contract.Dotted(l, allowed) == "" && isPodKey(mc.c, l) && len(matched) > 0:
 					mc.r.add(Fail, mc.q.File, mc.q.Where, "contract-pod-label",
 						"label %q on metric %q: business metrics have no pod key in the store (concept 4.1); only per_pod metrics keep it", lf.Label, firstName(name, nameRe))
 				case len(matched) > 0:
@@ -621,4 +623,53 @@ func dashVars(q *files.Query) map[string]bool {
 		}
 	}
 	return m
+}
+
+// contractVariables judges the label of a dashboard variable `label_values(metric, label)` against the
+// contract, the way a selector's labels are: VictoriaMetrics stores a dotted label with its dots, so the
+// underscore form (`label_values(checkout_charges_total, payment_provider)`) lists nothing and fails
+// naming the dotted spelling. A metric that holds a variable or is not in the contract is not judged here.
+func contractVariables(r *Report, d *files.Dashboard, c *contract.Contract) {
+	for _, v := range d.Vars {
+		if v.Type != "query" {
+			continue
+		}
+		m := labelValuesRe.FindStringSubmatch(v.Query)
+		if m == nil {
+			continue
+		}
+		metric, label := "", strings.Trim(strings.TrimSpace(m[2]), "\"")
+		if label == "" {
+			label = strings.Trim(strings.TrimSpace(m[1]), "\"")
+		} else {
+			metric = strings.TrimSpace(m[1])
+			if i := strings.IndexAny(metric, "{"); i >= 0 {
+				metric = strings.TrimSpace(metric[:i])
+			}
+		}
+		allowed := c.AllLabels()
+		where := fmt.Sprintf("variable $%s", v.Name)
+		if metric != "" {
+			if strings.ContainsAny(metric, "$[]()") {
+				continue
+			}
+			sm, ok := c.Lookup(metric)
+			if !ok {
+				continue // not a contract metric: another rule's business
+			}
+			allowed = sm.Labels
+		}
+		if label == "" || strings.Contains(label, "$") || allowed[label] {
+			continue
+		}
+		if metric == "" && contract.Dotted(label, allowed) == "" {
+			continue // label_values(label) with no metric may read a log field or a trace attribute: judge only a known wrong spelling
+		}
+		msg := "label_values reads label %q, which is not a label of %s in the contract%s"
+		target := "any contract metric"
+		if metric != "" {
+			target = fmt.Sprintf("metric %q", metric)
+		}
+		r.add(Fail, d.File, where, "contract-undeclared-label", msg, label, target, labelHint(label, allowed))
+	}
 }
