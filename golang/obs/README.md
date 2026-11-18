@@ -335,7 +335,10 @@ metrics:
   `gauge` or `histogram` only: there is no `summary` kind, so a scraped summary is declared as the gauges
   its `_sum` and `_count` series are (each its own entry). The gauge rule (`across_pods` or `per_pod`)
   and the pod-key rules (`contract-pod-label`, `pod-label-on-business-metric`) do not apply to it, since
-  it keeps its pod keys. `free` on a label is still refused.
+  it keeps its pod keys. `free` on a label is still refused. A `source:` must name a producer: a blank one fails
+  `[source-blank]`. A `source:` metric name is the scraped name, used **as written**, so a dotted one
+  (`exporter.health`) fails `[source-metric-dotted]` instead of being rewritten with underscores; write
+  `exporter_health`. Both name the file and line.
 - **`estimate`** is a label type with `min`, `max` and `churn_per_day` (all three required). It is allowed
   **only** on a `source:` entry: on any other metric, a log stream label or a span attribute it fails
   `[estimate-not-source]`, naming `file:line`, the metric and the label. `obs check` counts an estimate at its **max**
@@ -564,12 +567,19 @@ metrics:
   obs mirrors the converter there is no name obs refuses for its stored form. A `source:` entry's name is already the stored name (see above).
 - **Included:** our metrics, every `source:` entry (the generators skip its types, not its keep line) and `platform_metrics`.
   A platform metric's kind and unit are not in the contract, so its names are a **superset, not exact**: for every key the plain
-  name, `_total`, `_bucket`, `_count` and `_sum`, each also with the unit variants `_seconds`, `_bytes`, `_ratio` (a unit `1` gauge such as
-  `process_cpu_utilization_ratio`) and `_milliseconds` (old-semconv durations: `http.server.duration` in ms is
-  `http_server_duration_milliseconds_*`). A key ending in `.duration` gets only the time variants (plain, `_seconds`, `_milliseconds`),
-  so `http.server.request.duration` lists `http_server_request_duration_seconds_bucket`, `_sum`, `_count` among them. A name
-  kept that nobody sends costs nothing, and a name dropped loses data. NOT TESTED: the superset against the names a real
-  platform emits.
+  name, `_total`, `_bucket`, `_count` and `_sum`, each also with a unit variant for **every unit word of VictoriaMetrics'
+  unit table** (`_seconds`, `_milliseconds`, `_bytes`, `_hertz`, `_percent`, `_celsius`, ... 25 words) and `_ratio` (a unit `1` gauge such as
+  `process_cpu_utilization_ratio`). The words are not a hand list: `internal/contract/units_gen.go` is generated from the converter's own
+  table (`unitMap`, v1.156.0) and `TestUnitWordsAreTheVictoriaMetricsTable` fails when it differs from the pinned module (rewrite it with
+  `go test ./internal/contract -run UnitWords -update-units`). A key whose `total` part sits where VictoriaMetrics moves it from also lists the
+  converter order: a counter `requests_total` with unit `s` is stored `requests_seconds_total`, so the keep-list has that name as well as
+  `requests_total` (the unitless case). A key ending in `.duration` gets only the time words (`days`, `hours`, `minutes`, `seconds`, `milliseconds`, `microseconds`,
+  `nanoseconds`, each checked against the table by `TestDurationUnitsAreTimeWordsOfTheTable`), so `http.server.request.duration` lists
+  `http_server_request_duration_seconds_bucket`, `_sum`, `_count` among them. A name kept that nobody sends costs nothing, and a name dropped loses data. **MEASURED:**
+  `TestPlatformKeepCoversEveryUnitOfTheTable` feeds every unit of the table, every kind and names with `total`, `ratio` and unit words in
+  every position through VictoriaMetrics' converter and asserts each stored name is in the superset. Not covered: a unit outside the table
+  (VictoriaMetrics appends it as written) and a rate unit such as `By/s` (it appends `per_second`). NOT TESTED: the superset against the names
+  a real platform emits.
 - Sorted, one per line, plain names (no regex, no dots). An empty contract writes `metrics: []`.
 - `obs gen --check` reports it like the other generated files: `[gen-missing]`, `[gen-edited]` (the hash matches, the lines do not) and
   `[gen-stale]` (the contract changed). The golden file is `tests/fixtures/gen/ok-source-cluster/observability/contract/keep.yaml`,
@@ -706,9 +716,17 @@ kept and quoted (`{"payment.provider"="stripe"}`, `by ("payment.provider")`); th
   `obs gen` is run once and the new file committed.
 - `obs check`, `obs query` and `obs alerts` load every `contract.yaml` in the repo; two contracts that claim the same
   stored metric name now fail `[metric-clash]`. `obs check` and `obs query` take `--contracts none` to keep the old
-  single-contract behaviour; `obs alerts` has no such flag yet.
+  single-contract behaviour; `obs alerts` has no such flag yet. Limits: discovery only selects other
+  `observability/contract.yaml` files below the Git root (not under `fixtures` or `testdata`), and `obs query` and `obs alerts` skip it
+  when the selected directory has no `contract.yaml` of its own, so a clash with another contract can go undetected there. A directory
+  discovery cannot read fails `obs check`, `obs query` and `obs alerts` (`contract discovery: cannot read <path>`) instead of being skipped.
 - Contract entries may carry `source:`, `estimate`, `follows:` and `used_by:` (see the contract section). Nothing
   changes for a contract that uses none of them.
+- **Stored names of own metrics changed in one case; re-check dashboards and alerts.** A name that already holds the unit word
+  as a part now stores without a second suffix, as VictoriaMetrics' converter does: an own counter `x.bytes.sent` with unit `By` used to
+  resolve to `x_bytes_sent_bytes_total` and is now `x_bytes_sent_total`. This is so even when the contract uses none of the new fields, and
+  `obs query --static` (also with `--contracts none`) now rejects a selector that still uses the old name. Check every dashboard and alert
+  query against the names the regenerated `contract/keep.yaml` lists. Regenerating `keep.yaml` does not change your queries.
 
 ## Migrating from 0.2 to 0.3
 

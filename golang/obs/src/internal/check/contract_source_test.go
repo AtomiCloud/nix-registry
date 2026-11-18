@@ -148,3 +148,28 @@ func TestQueryInvalidOtherContractNamesItsFile(t *testing.T) {
 		t.Fatalf("problems %v", problems)
 	}
 }
+
+// Review of PR 125, thread 3: a directory the discovery cannot read fails the load, and the opt-out stays scan-free.
+func TestQueryUnreadableDirectoryFailsDiscovery(t *testing.T) {
+	root := repoWith(t, map[string]string{
+		"apps/box/observability/contract.yaml": boxContract,
+		"apps/locked/observability/x":          "x",
+	})
+	locked := filepath.Join(root, "apps/locked")
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	if _, err := os.ReadDir(locked); err == nil {
+		t.Skip("the directory is readable anyway (running as root)")
+	}
+	dir := filepath.Join(root, "apps/box/observability")
+	c, problems := loadContract(&Options{Dir: dir})
+	joined := strings.Join(problems, "\n")
+	if c != nil || !strings.Contains(joined, "apps/locked") || !strings.Contains(joined, "contract discovery") {
+		t.Fatalf("an unreadable directory must fail loading and name itself: c=%v problems=%v", c != nil, problems)
+	}
+	if c, problems := loadContract(&Options{Dir: dir, NoOtherContracts: true}); c == nil || len(problems) != 0 {
+		t.Fatalf("--contracts none must not scan: %v", problems)
+	}
+}

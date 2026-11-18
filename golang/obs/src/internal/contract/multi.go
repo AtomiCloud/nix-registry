@@ -1,6 +1,7 @@
 package contract
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -20,21 +21,31 @@ var testDirs = map[string]bool{"fixtures": true, "testdata": true}
 
 // Discover returns the other contract.yaml files of dir's repository: every observability/contract.yaml
 // below the Git root, except dir's own and any under a fixtures or testdata folder. A contract that
-// is itself in such a folder, or in no Git repository, has no others. Sorted.
-func Discover(dir string) []string {
+// is itself in such a folder, or in no Git repository, has no others. Sorted. A folder the walk cannot
+// read is an error naming it (relative to the Git root): the others in it would go unchecked.
+func Discover(dir string) ([]string, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("contract discovery: %w", err)
 	}
 	own := filepath.Join(abs, "contract.yaml")
 	root := gitRoot(abs)
 	if root == "" || inTestDir(root, abs) {
-		return nil
+		return nil, nil
 	}
 	var out []string
-	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
-			return nil
+			cause := err
+			var pe *fs.PathError
+			if errors.As(err, &pe) {
+				cause = pe.Err
+			}
+			rel, rerr := filepath.Rel(root, p)
+			if rerr != nil {
+				rel = p
+			}
+			return fmt.Errorf("contract discovery: cannot read %s: %w", filepath.ToSlash(rel), cause)
 		}
 		if d.IsDir() {
 			if p != root && (skipDirs[d.Name()] || testDirs[d.Name()]) {
@@ -47,8 +58,11 @@ func Discover(dir string) []string {
 		}
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
 	sort.Strings(out)
-	return out
+	return out, nil
 }
 
 func inTestDir(root, p string) bool {
@@ -133,10 +147,12 @@ func Merge(primary *Contract, others []*Contract) *Contract {
 			ns = o.Service
 		}
 		for _, n := range o.MetricOrder {
-			if _, taken := m.Metrics[n]; taken {
-				continue // a clash is Clashes' to report
-			}
 			mt := o.Metrics[n]
+			mt.Name = mt.NameOr(n)
+			// The view is keyed by an internal key, not by stored name: two contracts may use one YAML key for
+			// metrics with different stored names (a gauge queue_depth, a histogram queue_depth_bucket). A
+			// stored name two contracts share is Clashes' to report, before Merge is called.
+			key := freeKey(m.Metrics, ns, n)
 			labels := map[string]string{}
 			for l, t := range mt.Labels {
 				if t == "" {
@@ -148,14 +164,29 @@ func Merge(primary *Contract, others []*Contract) *Contract {
 				labels[l] = q
 			}
 			mt.Labels = labels
-			m.Metrics[n] = mt
-			m.MetricOrder = append(m.MetricOrder, n)
+			m.Metrics[key] = mt
+			m.MetricOrder = append(m.MetricOrder, key)
 		}
 		for k, ls := range o.Platform {
 			m.Platform[k] = union(m.Platform[k], ls)
 		}
 	}
 	return &m
+}
+
+// freeKey is n when no metric of the view has it, else "<contract file>:<n>" (numbered if even that is taken):
+// the key of a lookup view is internal; a metric is found by its stored names, never by its key.
+func freeKey(taken map[string]Metric, ns, n string) string {
+	if _, used := taken[n]; !used {
+		return n
+	}
+	key := ns + ":" + n
+	for i := 2; ; i++ {
+		if _, used := taken[key]; !used {
+			return key
+		}
+		key = fmt.Sprintf("%s:%s#%d", ns, n, i)
+	}
 }
 
 // union is a followed by the entries of b that a lacks; a and b are not changed.

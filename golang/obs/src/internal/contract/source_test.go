@@ -347,3 +347,53 @@ spans:
 		t.Fatalf("empty value on a shared type accepted: %v", parse(t, both).Validate())
 	}
 }
+
+// Review of PR 125, thread 2: a source that is only blanks names no producer; it is not an own metric in disguise.
+func TestBlankSourceIsRefused(t *testing.T) {
+	for _, blank := range []string{`" "`, `"   "`, `"\t"`} {
+		doc := "service: s\nmetrics:\n  queue_depth:\n    source: " + blank + "\n    kind: counter\n    budget: 1\n"
+		is := parse(t, doc).Validate()
+		if !hasRule(is, "source-blank", "queue_depth") {
+			t.Errorf("source %s accepted: %v", blank, is)
+			continue
+		}
+		var msg string
+		for _, i := range is {
+			if i.Rule == "source-blank" {
+				msg = i.Msg
+			}
+		}
+		if !strings.Contains(msg, "c.yaml:3") {
+			t.Errorf("source %s: message lacks file:line c.yaml:3: %s", blank, msg)
+		}
+	}
+	// an absent source is an own metric, a named one is a source: neither is refused
+	if is := parse(t, "service: s\nmetrics:\n  queue_depth:\n    kind: counter\n    budget: 1\n").Validate(); hasRule(is, "source-blank", "") {
+		t.Fatalf("own metric refused: %v", is)
+	}
+}
+
+// Review of PR 125, thread 7: a source name is the scraped name, so a dotted one is refused, not rewritten.
+func TestDottedSourceNameIsRefused(t *testing.T) {
+	doc := "service: s\nmetrics:\n  exporter.health:\n    source: exporter\n    kind: gauge\n    budget: 1\n"
+	is := parse(t, doc).Validate()
+	if !hasRule(is, "source-metric-dotted", "exporter.health") {
+		t.Fatalf("dotted source name accepted: %v", is)
+	}
+	for _, i := range is {
+		if i.Rule == "source-metric-dotted" && !strings.Contains(i.Msg, "c.yaml:3") {
+			t.Errorf("message lacks file:line c.yaml:3: %s", i.Msg)
+		}
+	}
+	// an own metric may be dotted (it is converted from OTel), an underscored source name is fine
+	if is := parse(t, "service: s\nmetrics:\n  checkout.charges:\n    kind: counter\n    budget: 1\n").Validate(); hasRule(is, "source-metric-dotted", "") {
+		t.Fatalf("own dotted name refused: %v", is)
+	}
+	if is := parse(t, "service: s\nmetrics:\n  kube_pod_info:\n    source: ksm\n    kind: gauge\n    budget: 1\n").Validate(); hasRule(is, "source-metric-dotted", "") {
+		t.Fatalf("underscored source refused: %v", is)
+	}
+	// and the stored name of a source is the name as written
+	if got := StoredNames("kube_pod_info", Metric{Source: "ksm", Kind: MetricGauge}); strings.Join(got, ",") != "kube_pod_info" {
+		t.Errorf("source stored name %v", got)
+	}
+}

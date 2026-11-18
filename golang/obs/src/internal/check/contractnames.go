@@ -36,7 +36,11 @@ func loadContract(o *Options) (c *contract.Contract, problems []string) {
 	}
 	// The repository's other contracts: a box dashboard reads the cluster contract's metrics.
 	var others []*contract.Contract
-	for _, p := range contract.Discover(o.Dir) {
+	found, derr := contract.Discover(o.Dir)
+	if derr != nil {
+		problems = append(problems, derr.Error())
+	}
+	for _, p := range found {
 		oc, err := contract.Load(p)
 		if err != nil {
 			problems = append(problems, strings.ReplaceAll(err.Error(), p, contract.RelPath(p)))

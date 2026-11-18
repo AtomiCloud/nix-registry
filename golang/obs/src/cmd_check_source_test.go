@@ -172,3 +172,28 @@ func noAbs(t *testing.T, root, out string) {
 		}
 	}
 }
+
+// Review of PR 125, thread 3: obs check names a directory discovery could not read, and --contracts none does not look.
+func TestCheckFailsWhenDiscoveryCannotReadADirectory(t *testing.T) {
+	root := repo(t, map[string]string{
+		"apps/cluster/observability/contract.yaml": checkClusterDoc,
+		"apps/locked/observability/x":              "x",
+	})
+	locked := filepath.Join(root, "apps/locked")
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	if _, err := os.ReadDir(locked); err == nil {
+		t.Skip("the directory is readable anyway (running as root)")
+	}
+	dir := filepath.Join(root, "apps/cluster/observability")
+	rc, out := runChk("--dir", dir)
+	if rc != 1 || !strings.Contains(out, "FAIL ") || !strings.Contains(out, "contract discovery") || !strings.Contains(out, "FAIL contract discovery: cannot read apps/locked: ") {
+		t.Fatalf("rc %d\n%s", rc, out)
+	}
+	rc, out = runChk("--dir", dir, "--contracts", "none")
+	if rc != 0 || strings.Contains(out, "apps/locked") {
+		t.Fatalf("--contracts none rc %d\n%s", rc, out)
+	}
+}

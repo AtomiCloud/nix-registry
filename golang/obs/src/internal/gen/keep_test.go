@@ -79,11 +79,36 @@ func TestKeepFileFormat(t *testing.T) {
 		"  - http_server_request_duration\n" +
 		"  - http_server_request_duration_bucket\n" +
 		"  - http_server_request_duration_count\n" +
+		"  - http_server_request_duration_days\n" +
+		"  - http_server_request_duration_days_bucket\n" +
+		"  - http_server_request_duration_days_count\n" +
+		"  - http_server_request_duration_days_sum\n" +
+		"  - http_server_request_duration_days_total\n" +
+		"  - http_server_request_duration_hours\n" +
+		"  - http_server_request_duration_hours_bucket\n" +
+		"  - http_server_request_duration_hours_count\n" +
+		"  - http_server_request_duration_hours_sum\n" +
+		"  - http_server_request_duration_hours_total\n" +
+		"  - http_server_request_duration_microseconds\n" +
+		"  - http_server_request_duration_microseconds_bucket\n" +
+		"  - http_server_request_duration_microseconds_count\n" +
+		"  - http_server_request_duration_microseconds_sum\n" +
+		"  - http_server_request_duration_microseconds_total\n" +
 		"  - http_server_request_duration_milliseconds\n" +
 		"  - http_server_request_duration_milliseconds_bucket\n" +
 		"  - http_server_request_duration_milliseconds_count\n" +
 		"  - http_server_request_duration_milliseconds_sum\n" +
 		"  - http_server_request_duration_milliseconds_total\n" +
+		"  - http_server_request_duration_minutes\n" +
+		"  - http_server_request_duration_minutes_bucket\n" +
+		"  - http_server_request_duration_minutes_count\n" +
+		"  - http_server_request_duration_minutes_sum\n" +
+		"  - http_server_request_duration_minutes_total\n" +
+		"  - http_server_request_duration_nanoseconds\n" +
+		"  - http_server_request_duration_nanoseconds_bucket\n" +
+		"  - http_server_request_duration_nanoseconds_count\n" +
+		"  - http_server_request_duration_nanoseconds_sum\n" +
+		"  - http_server_request_duration_nanoseconds_total\n" +
 		"  - http_server_request_duration_seconds\n" +
 		"  - http_server_request_duration_seconds_bucket\n" +
 		"  - http_server_request_duration_seconds_count\n" +

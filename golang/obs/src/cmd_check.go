@@ -48,7 +48,12 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 	var others []*contract.Contract
 	otherFails := 0
 	if *contracts == "auto" {
-		for _, p := range contract.Discover(*dir) {
+		found, derr := contract.Discover(*dir)
+		if derr != nil {
+			fmt.Fprintf(stdout, "FAIL %s\n", derr)
+			otherFails++
+		}
+		for _, p := range found {
 			oc, err := contract.Load(p)
 			if err != nil {
 				fmt.Fprintf(stdout, "FAIL %s\n", strings.ReplaceAll(err.Error(), p, contract.RelPath(p)))
