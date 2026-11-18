@@ -56,29 +56,43 @@ func (c *Contract) KeepNames() []string {
 	return out
 }
 
-// platformUnits are the unit words a platform metric may carry in its stored name: none, seconds
-// (OTel durations), bytes, ratio (unit 1 gauges such as process.cpu.utilization) and milliseconds
-// (old-semconv durations such as http.server.duration, which are in ms).
-var platformUnits = []string{"", "_seconds", "_bytes", "_ratio", "_milliseconds"}
+// platformUnits are the unit words a platform metric may carry in its stored name: none, every word of
+// VictoriaMetrics' unit table (vmUnitWords: seconds, milliseconds, bytes, hertz, percent, celsius, ...,
+// generated from the pinned converter) and ratio (the token it adds to a unit 1 gauge such as
+// process.cpu.utilization). Not covered: a unit outside that table (VictoriaMetrics appends it as written)
+// and a rate unit such as By/s (it appends _per_second).
+var platformUnits = func() []string {
+	out := []string{"", "_ratio"}
+	for _, w := range vmUnitWords {
+		out = append(out, "_"+w)
+	}
+	return out
+}()
+
+// timeUnitSuffixes are the unit words of vmUnitWords that measure time. TestDurationUnitsAreTimeWordsOfTheTable
+// keeps each of them in the table. A platform key ending in _duration is stored with one of these or with none.
+var timeUnitSuffixes = []string{"_days", "_hours", "_minutes", "_seconds", "_milliseconds", "_microseconds", "_nanoseconds"}
+
+var durationUnits = append([]string{""}, timeUnitSuffixes...)
 
 // platformStored is every stored name a platform metric may have. The kind and unit of a platform
 // metric are not in the contract, so this is a SUPERSET, not a prediction: for each base name (below)
-// and each unit in platformUnits (a key ending in _duration: only seconds and milliseconds), added
-// unless the name already ends in it, the plain name, _total and the histogram parts _bucket, _sum
-// and _count. A name kept that nobody sends costs nothing, a name dropped loses data. Keep-list,
+// and each unit in platformUnits (a key ending in _duration: only the time units, timeUnitSuffixes), added
+// unless the name already ends in it, the plain name, _total and the histogram parts _bucket, _sum and _count. A name kept that nobody sends costs nothing, a name dropped loses data. Keep-list,
 // name lookup and the clash check all read this one list.
 //
 // The base names are the key as written (dots to _), the key split into tokens the way
 // VictoriaMetrics splits it (a double _ collapses; / - : and space split too), and each of those with
-// a total or ratio token that is not last taken out of the middle: VictoriaMetrics moves that token
-// to the end (jobs.total.done, a counter, is stored jobs_done_total).
+// a total or ratio token taken out of where it stands: VictoriaMetrics moves that token to the end,
+// after the unit word it appends (jobs.total.done, a counter, is stored jobs_done_total; requests_total
+// with unit s is stored requests_seconds_total; the unitless one stays requests_total, the key as written).
 func platformStored(key string) []string {
 	var out []string
 	seen := map[string]bool{}
 	for _, base := range platformBases(key) {
 		units := platformUnits
 		if strings.HasSuffix(base, "_duration") {
-			units = []string{"", "_seconds", "_milliseconds"} // a duration is in time, never bytes or a ratio
+			units = durationUnits // a duration is in time, never bytes or a ratio
 		}
 		for _, unit := range units {
 			b := base
@@ -102,7 +116,7 @@ func platformBases(key string) []string {
 	bases := []string{StoredBase(key), strings.Join(toks, "_")}
 	for _, word := range []string{"total", "ratio"} {
 		for i, t := range toks {
-			if t == word && i < len(toks)-1 {
+			if t == word {
 				rest := append(append([]string(nil), toks[:i]...), toks[i+1:]...)
 				bases = append(bases, strings.Join(rest, "_"))
 				break

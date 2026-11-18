@@ -63,8 +63,9 @@ type StoredMetric struct {
 
 // Lookup resolves a stored series name (as a query writes it) to the contract metric behind it.
 func (c *Contract) Lookup(stored string) (StoredMetric, bool) {
-	for _, n := range c.MetricOrder {
-		m := c.Metrics[n]
+	for _, key := range c.MetricOrder {
+		m := c.Metrics[key]
+		n := m.NameOr(key)
 		for _, s := range StoredNames(n, m) {
 			if s == stored {
 				return StoredMetric{Name: n, Metric: m, Labels: c.metricLabels(m)}, true
@@ -117,8 +118,9 @@ func (c *Contract) metricLabels(m Metric) map[string]bool {
 // StoredNameList lists every stored series name a query may read, for "did you mean" hints.
 func (c *Contract) StoredNameList() []string {
 	var out []string
-	for _, n := range c.MetricOrder {
-		out = append(out, StoredNames(n, c.Metrics[n])...)
+	for _, key := range c.MetricOrder {
+		m := c.Metrics[key]
+		out = append(out, StoredNames(m.NameOr(key), m)...)
 	}
 	for _, k := range c.platformKeys() {
 		out = append(out, StoredBase(k))

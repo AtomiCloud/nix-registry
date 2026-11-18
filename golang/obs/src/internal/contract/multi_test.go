@@ -31,19 +31,22 @@ func TestDiscover(t *testing.T) {
 	write(t, filepath.Join(root, "apps", "c", "docs", "contract.yaml"), "service: c\n")                       // not an observability folder
 	write(t, filepath.Join(root, "tests", "fixtures", "z", "observability", "contract.yaml"), "service: z\n") // fixture
 	write(t, filepath.Join(root, "node_modules", "p", "observability", "contract.yaml"), "service: nm\n")     // dependency
-	got := Discover(filepath.Dir(own))
+	got, err := Discover(filepath.Dir(own))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 1 || got[0] != other {
 		t.Fatalf("Discover = %v, want [%s]", got, other)
 	}
 	// a fixture never goes looking for company
 	fx := write(t, filepath.Join(root, "tests", "fixtures", "z", "observability", "contract.yaml"), "service: z\n")
-	if got := Discover(filepath.Dir(fx)); len(got) != 0 {
-		t.Fatalf("fixture discovered %v", got)
+	if got, err := Discover(filepath.Dir(fx)); err != nil || len(got) != 0 {
+		t.Fatalf("fixture discovered %v, err %v", got, err)
 	}
 	// no repository: nothing to look at
 	lone := write(t, filepath.Join(t.TempDir(), "observability", "contract.yaml"), aDoc)
-	if got := Discover(filepath.Dir(lone)); len(got) != 0 {
-		t.Fatalf("no git root but discovered %v", got)
+	if got, err := Discover(filepath.Dir(lone)); err != nil || len(got) != 0 {
+		t.Fatalf("no git root but discovered %v, err %v", got, err)
 	}
 }
 
@@ -211,5 +214,79 @@ func TestClashNamesFilesRelativeToGitRoot(t *testing.T) {
 		if !strings.Contains(is[0].Msg, want) {
 			t.Errorf("message lacks %s: %s", want, is[0].Msg)
 		}
+	}
+}
+
+// Review of PR 125, thread 3: a directory Discover cannot read is a failure, not a quiet skip.
+func TestDiscoverReportsAWalkError(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, ".git", "HEAD"), "ref")
+	own := write(t, filepath.Join(root, "apps", "b", "observability", "contract.yaml"), bDoc)
+	write(t, filepath.Join(root, "apps", "a", "observability", "contract.yaml"), aDoc)
+	locked := filepath.Join(root, "apps", "locked")
+	write(t, filepath.Join(locked, "observability", "contract.yaml"), aDoc)
+	if err := os.Chmod(locked, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(locked, 0o755) })
+	if _, err := os.ReadDir(locked); err == nil {
+		t.Skip("the directory is readable anyway (running as root)")
+	}
+	got, err := Discover(filepath.Dir(own))
+	if err == nil {
+		t.Fatalf("Discover hid the unreadable directory: %v", got)
+	}
+	if !strings.Contains(err.Error(), "apps/locked") {
+		t.Errorf("the error does not name the directory: %v", err)
+	}
+	if !strings.Contains(err.Error(), "contract discovery") {
+		t.Errorf("the error does not say what failed: %v", err)
+	}
+	if strings.Contains(err.Error(), root) {
+		t.Errorf("the error holds an absolute path: %v", err)
+	}
+}
+
+// Review of PR 125, thread 4: a source gauge and a source histogram with one YAML key in two contracts
+// store different series, so the merged view keeps both; a real stored-name collision stays a clash.
+func TestMergeKeepsSameKeyWithDistinctStoredNames(t *testing.T) {
+	gauge := "service: g\nmetrics:\n  queue_depth:\n    source: x\n    kind: gauge\n    budget: 1\n"
+	hist := "service: h\nmetrics:\n  queue_depth:\n    source: y\n    kind: histogram\n    budget: 1\n"
+	for name, order := range map[string][2]string{"gauge primary": {gauge, hist}, "histogram primary": {hist, gauge}} {
+		a := parseAt(t, "apps/a/observability/contract.yaml", order[0])
+		b := parseAt(t, "apps/b/observability/contract.yaml", order[1])
+		if is := Clashes([]*Contract{a, b}); len(is) != 0 {
+			t.Fatalf("%s: distinct stored names are not a clash: %v", name, is)
+		}
+		m := Merge(a, []*Contract{b})
+		for _, stored := range []string{"queue_depth", "queue_depth_bucket", "queue_depth_sum", "queue_depth_count"} {
+			if _, ok := m.Lookup(stored); !ok {
+				t.Errorf("%s: merged view cannot resolve %s", name, stored)
+			}
+		}
+		if len(m.MetricOrder) != 2 || len(m.Metrics) != 2 {
+			t.Errorf("%s: merged view has %d ordered and %d keyed metrics, want 2 and 2", name, len(m.MetricOrder), len(m.Metrics))
+		}
+		if len(a.MetricOrder) != 1 || len(b.MetricOrder) != 1 {
+			t.Errorf("%s: Merge changed an input", name)
+		}
+	}
+	// three contracts with the same key: all three stay
+	c := parseAt(t, "apps/c/observability/contract.yaml", "service: c\nmetrics:\n  queue_depth:\n    kind: histogram\n    unit: seconds\n    budget: 1\n")
+	a := parseAt(t, "apps/a/observability/contract.yaml", gauge)
+	b := parseAt(t, "apps/b/observability/contract.yaml", hist)
+	if is := Clashes([]*Contract{a, b, c}); len(is) != 0 {
+		t.Fatalf("clashes: %v", is)
+	}
+	m := Merge(a, []*Contract{b, c})
+	for _, stored := range []string{"queue_depth", "queue_depth_bucket", "queue_depth_seconds_bucket"} {
+		if _, ok := m.Lookup(stored); !ok {
+			t.Errorf("three contracts: merged view cannot resolve %s", stored)
+		}
+	}
+	// a real collision (the same stored name twice) is still reported by Clashes
+	g2 := parseAt(t, "apps/d/observability/contract.yaml", gauge)
+	if is := Clashes([]*Contract{a, g2}); len(is) != 1 || is[0].Rule != "metric-clash" {
+		t.Fatalf("a real stored-name collision must stay a clash: %v", is)
 	}
 }

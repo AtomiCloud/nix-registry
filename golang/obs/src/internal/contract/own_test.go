@@ -33,3 +33,44 @@ func TestPlatformStoredNames(t *testing.T) {
 		}
 	}
 }
+
+// Review of PR 125, thread 5: unit variants come from VictoriaMetrics' unit table, hertz and the rest included.
+func TestPlatformStoredNamesCoverTheUnitWords(t *testing.T) {
+	has := func(key, want string) {
+		t.Helper()
+		if !in(platformStored(key), want) {
+			t.Errorf("%s: no %s", key, want)
+		}
+	}
+	has("system.cpu.frequency", "system_cpu_frequency_hertz")
+	has("system.cpu.frequency", "system_cpu_frequency_hertz_bucket")
+	has("system.cpu.temperature", "system_cpu_temperature_celsius")
+	has("system.memory.utilization", "system_memory_utilization_percent")
+	has("process.disk.io", "process_disk_io_kibibytes_total")
+	has("process.uptime", "process_uptime_hours")
+	has("http.server.request.duration", "http_server_request_duration_microseconds_sum")
+}
+
+// Review of PR 125, thread 6: a counter key ending in total, with a unit, is stored with the unit
+// before the moved total; the unitless counter keeps the key.
+func TestPlatformCounterTotalKeyWithUnit(t *testing.T) {
+	keep := platformStored("requests_total")
+	for _, want := range []string{"requests_total", "requests_seconds_total", "requests_bytes_total", "requests_hertz_total"} {
+		if !in(keep, want) {
+			t.Errorf("requests_total: no %s in %v", want, keep)
+		}
+	}
+	dotted := platformStored("requests.total")
+	for _, want := range []string{"requests_total", "requests_seconds_total"} {
+		if !in(dotted, want) {
+			t.Errorf("requests.total: no %s in %v", want, dotted)
+		}
+	}
+	c := parse(t, "service: s\nplatform_metrics:\n  requests_total: [x]\n")
+	if !in(c.KeepNames(), "requests_seconds_total") {
+		t.Errorf("keep list lacks requests_seconds_total: %v", c.KeepNames())
+	}
+	if _, ok := c.Lookup("requests_seconds_total"); !ok {
+		t.Error("lookup does not resolve requests_seconds_total")
+	}
+}

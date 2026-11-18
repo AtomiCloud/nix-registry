@@ -241,3 +241,54 @@ run check --dir "$work/repo/apps/hub/observability"
 expect 1 '[metric-clash]' 'apps/hub/observability/contract.yaml' 'apps/cluster/observability/contract.yaml' 'kube_pod_status_phase'
 absent "$work/repo/apps/cluster"
 echo "PASS contract-source: a platform metric against another contract's source: entry is red and names both files"
+
+# ---- review of PR 125: source rules, platform keep names, an unreadable folder -------------
+rm -rf "${work:?}/rv"
+mkdir -p "$work/rv/.git" "$work/rv/apps/a/observability"
+cat >"$work/rv/apps/a/observability/contract.yaml" <<'YAML'
+service: a
+metrics:
+  exporter_health:
+    source: exporter
+    kind: gauge
+    budget: 1
+platform_metrics:
+  requests_total: [http.route]
+  system.cpu.frequency: [cpu]
+YAML
+run check --dir "$work/rv/apps/a/observability"
+expect 0 'obs check: ok'
+run gen --dir "$work/rv/apps/a/observability"
+expect 0 'wrote observability/contract/keep.yaml'
+for name in exporter_health requests_total requests_seconds_total system_cpu_frequency_hertz system_cpu_frequency_hertz_bucket; do
+  grep -qx "  - $name" "$work/rv/apps/a/observability/contract/keep.yaml" || {
+    cat "$work/rv/apps/a/observability/contract/keep.yaml"
+    echo "contract-source: keep.yaml lacks $name"
+    exit 1
+  }
+done
+echo "PASS contract-source: the keep-list holds a platform counter with a unit in converter order (requests_seconds_total) and a hertz name"
+sed -i 's/exporter_health:/exporter.health:/' "$work/rv/apps/a/observability/contract.yaml"
+run check --dir "$work/rv/apps/a/observability"
+expect 1 '[source-metric-dotted]' 'apps/a/observability/contract.yaml:3' 'exporter.health'
+echo "PASS contract-source: a dotted source: metric name is red and names the file, line and name"
+sed -i 's/exporter.health:/exporter_health:/; s/source: exporter/source: " "/' "$work/rv/apps/a/observability/contract.yaml"
+run check --dir "$work/rv/apps/a/observability"
+expect 1 '[source-blank]' 'apps/a/observability/contract.yaml:3' 'exporter_health'
+echo "PASS contract-source: a blank source: is red and names the file, line and metric"
+sed -i 's/source: " "/source: exporter/' "$work/rv/apps/a/observability/contract.yaml"
+mkdir -p "$work/rv/apps/locked/observability"
+chmod 000 "$work/rv/apps/locked"
+if [ ! -r "$work/rv/apps/locked" ]; then
+  run check --dir "$work/rv/apps/a/observability"
+  chmod 755 "$work/rv/apps/locked"
+  expect 1 'contract discovery: cannot read apps/locked'
+  chmod 000 "$work/rv/apps/locked"
+  run check --dir "$work/rv/apps/a/observability" --contracts none
+  chmod 755 "$work/rv/apps/locked"
+  expect 0 'obs check: ok'
+  echo "PASS contract-source: a folder discovery cannot read is red and names it; --contracts none does not look"
+else
+  chmod 755 "$work/rv/apps/locked"
+  echo "SKIP contract-source: the folder is readable anyway (running as root)"
+fi

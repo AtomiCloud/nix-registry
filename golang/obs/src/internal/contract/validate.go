@@ -127,6 +127,12 @@ func (c *Contract) Validate() []Issue {
 		if !nameRe.MatchString(n) {
 			add(p, "metric-name", "metric name %q: use lowercase dotted or underscored names (checkout.charges)", n)
 		}
+		if m.Source != "" && strings.TrimSpace(m.Source) == "" {
+			add(p, "source-blank", "%s: metric %q has a blank source: name who makes it (kube-state-metrics), or remove source: if the metric is ours", c.at(m.Line), n)
+		}
+		if m.IsSource() && strings.Contains(n, ".") {
+			add(p, "source-metric-dotted", "%s: metric %q has source: and a dotted name: a source: metric is named as it is scraped (kube_pod_info), the name is stored as written", c.at(m.Line), n)
+		}
 		stored := StoredBase(n)
 		if prev, dup := seenName[stored]; dup {
 			add(p, "metric-duplicate", "metric %q and %q are stored under the same name %q", n, prev, stored)
@@ -517,9 +523,9 @@ func StoredBase(name string) string { return strings.ReplaceAll(name, ".", "_") 
 // feeds OTLP through VictoriaMetrics' own converter and asserts equality for every kind and unit.
 func StoredNames(name string, m Metric) []string {
 	if m.IsSource() {
-		// A source name is the stored name already (it was scraped, not converted from OTel): a counter
-		// keeps the name it has, a histogram has its three parts.
-		base := StoredBase(name)
+		// A source name is the stored name already (it was scraped, not converted from OTel, and Validate
+		// refuses a dotted one): it is used as written. A counter keeps the name it has, a histogram has its three parts.
+		base := name
 		if m.Kind == MetricHistogram {
 			return []string{base + "_bucket", base + "_sum", base + "_count"}
 		}

@@ -105,6 +105,9 @@ func (t Type) Size() int {
 
 // Metric is one metric of the contract.
 type Metric struct {
+	// Name is the metric's own name when its key in the contract differs from it: only a merged view
+	// (Merge) keys a metric another contract also names by an internal key. Empty in a parsed contract.
+	Name string `yaml:"-"`
 	// Source names who makes the metric when it is not ours (kube-state-metrics, cadvisor).
 	// obs gen makes no types for it; its name is already the stored name.
 	Source string `yaml:"source,omitempty"`
@@ -157,6 +160,14 @@ func (l *LabelSpec) UnmarshalYAML(n *yaml.Node) error {
 		return nil
 	}
 	return fmt.Errorf("line %d: a label is a type name or { follows: <label> }", n.Line)
+}
+
+// NameOr is the metric's own name: Name when set (a merged view), else the key it is listed under.
+func (m Metric) NameOr(key string) string {
+	if m.Name != "" {
+		return m.Name
+	}
+	return key
 }
 
 // IsSource is true for an entry somebody else makes.
