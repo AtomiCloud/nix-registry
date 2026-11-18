@@ -1,0 +1,9 @@
+story: A deterministic burst of failed payments
+window: { start: 3m, duration: 5m }
+change:
+  - { metric: checkout.requests, where: { outcome: error }, rate: 2/s }
+expect:
+  fire: [payment-errors, payment-pending]
+  quiet: [payment-safety]
+  fire_within: 2m
+  resolve_within: 2m

@@ -362,3 +362,39 @@ func TestTraceAndProfilePanelsAreExpectedEmpty(t *testing.T) {
 		t.Errorf("prompt differs from %s (run go test ./internal/look -update to rewrite it)\n--- got ---\n%s", golden, got2)
 	}
 }
+
+func TestSeededPanelsIncidentsAndKeepPrompt(t *testing.T) {
+	dir, cl := project(t)
+	if err := os.WriteFile(filepath.Join(dir, "dashboards", "traces.json"), []byte(tracesDash), 0644); err != nil {
+		t.Fatal(err)
+	}
+	info := *testInfo
+	info.TracesSeeded, info.ProfilesSeeded = true, true
+	info.Incidents = []sandbox.IncidentInfo{{Name: "payment-spike", From: info.From + 60000, To: info.From + 120000, Fire: []string{"payment-errors"}, Quiet: []string{"latency"}}}
+	p := Setup(context.Background(), Options{Dir: dir, Checklist: cl, Keep: true, Files: []string{"dashboards/traces.json"}}, fakeUp(&info, nil))
+	for _, panel := range p.Dashboards[0].Panels {
+		if panel.ExpectedEmpty != "" {
+			t.Errorf("seeded panel still expected empty: %+v", panel)
+		}
+	}
+	for _, want := range []string{"payment-spike", "payment-errors", "latency", "--keep", "leaves the stack running"} {
+		if !strings.Contains(p.Prompt, want) {
+			t.Errorf("prompt lacks %s: %s", want, p.Prompt)
+		}
+	}
+}
+
+func TestLiveRulePromptHasScreenshotTimesAndNormalControl(t *testing.T) {
+	dir, cl := project(t)
+	info := *testInfo
+	at := time.Date(2026, 11, 18, 20, 0, 0, 0, time.UTC)
+	info.LiveIncident = "spike"
+	info.Incidents = []sandbox.IncidentInfo{{Name: "spike", From: info.From, To: info.To, Fire: []string{"pending"}, Quiet: []string{"control"}}}
+	info.LiveRules = []sandbox.NativeRuleWindow{{UID: "pending", Expected: "Firing", ProvisionedAt: at.UnixMilli(), For: "1m0s", Interval: "10s", FiringAt: at.Add(70 * time.Second).UnixMilli(), HoldUntil: at.Add(5 * time.Minute).UnixMilli(), Supported: true}, {UID: "control", Expected: "Normal", ProvisionedAt: at.UnixMilli(), For: "0s", Interval: "10s", Supported: true}}
+	p := Setup(context.Background(), Options{Dir: dir, Checklist: cl, Files: []string{"dashboards/overview.json"}}, fakeUp(&info, nil))
+	for _, want := range []string{"live rule pending: provisioned 2026-11-18T20:00:00Z", "expected Firing by 2026-11-18T20:01:10Z", "hold Firing until 2026-11-18T20:05:00Z", "live rule control: expected Normal"} {
+		if !strings.Contains(p.Prompt, want) {
+			t.Errorf("live prompt lacks %q", want)
+		}
+	}
+}

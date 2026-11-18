@@ -6,6 +6,7 @@ SANDBOX
   Grafana: http://127.0.0.1:3000 (anonymous viewer, nothing to log in to)
   seed window: 2026-11-17T09:30:00Z to 2026-11-17T10:00:00Z (the URLs fix it; do not change the time range)
   changed dashboards are those that differ from origin/main
+  no incidents in this seed: Grafana's native state is current; no incident Firing state is expected.
 
 STEPS
   1. For each dashboard below, open its URL in a browser with a viewport of 1600 x 1000 px.

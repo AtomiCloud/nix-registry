@@ -1,0 +1,29 @@
+length: 12m
+random_seed: 42
+resource:
+  durian.cloud.landscape: fixture
+  durian.cloud.platform: payments
+  durian.cloud.service: checkout
+  durian.cloud.module: api
+traffic:
+  requests: 1/s
+  settings:
+    level: { min: 0.5, typical: 1, max: 8 }
+    cycle: { daily_amplitude: 0.25, peak_hour: 20 }
+    noise: 0.15
+metrics:
+  checkout.requests:
+    type: counter
+    series:
+      - { where: { outcome: ok }, share: 1 }
+      - { where: { outcome: error }, share: 0 }
+logs:
+  - { event: checkout.failed, level: error, from: { metric: checkout.requests, where: { outcome: error } } }
+traces:
+  - from: { metric: checkout.requests }
+    server: POST /charge
+    route: /charge
+    client: db.query
+    median_s: 0.05
+    error_when: { outcome: error }
+incidents: [payment-spike]

@@ -65,7 +65,9 @@ type fakeRunner struct {
 	// imageVolumes is what `image inspect --format ...Volumes` answers (default: none declared).
 	imageVolumes string
 	// vmArgs is what `inspect --format {{json .Args}}` answers for the vm container (default: it has -relabelConfig).
-	vmArgs string
+	vmArgs        string
+	tempoBindings string
+	tempoFiles    []string
 }
 
 func (f *fakeRunner) Run(_ context.Context, args ...string) (string, error) {
@@ -79,7 +81,35 @@ func (f *fakeRunner) Run(_ context.Context, args ...string) (string, error) {
 		}
 		return "null", nil
 	case args[0] == "ps":
+		if args[len(args)-1] == "{{.Names}}" {
+			var names []string
+			for _, ln := range strings.Fields(f.ps) {
+				names = append(names, strings.Split(ln, "|")[0])
+			}
+			return strings.Join(names, "\n"), nil
+		}
 		return f.ps, nil
+	case args[0] == "cp" && len(args) == 3 && strings.HasSuffix(args[2], ":/etc/tempo.yaml"):
+		b, err := os.ReadFile(args[1])
+		if err != nil {
+			return "", err
+		}
+		f.tempoFiles = append(f.tempoFiles, string(b))
+	case args[0] == "rm":
+		var keep []string
+		for _, ln := range strings.Fields(f.ps) {
+			if strings.Split(ln, "|")[0] != args[len(args)-1] {
+				keep = append(keep, ln)
+			}
+		}
+		f.ps = strings.Join(keep, "\n")
+	case args[0] == "network" && args[1] == "rm":
+		f.networkExists = false
+	case args[0] == "inspect" && len(args) > 2 && args[2] == "{{json .HostConfig.PortBindings}}":
+		if f.tempoBindings != "" {
+			return f.tempoBindings, nil
+		}
+		return `{"4318/tcp":[{"HostIp":"127.0.0.1","HostPort":"18305"}]}`, nil
 	case args[0] == "inspect" && len(args) > 2 && args[2] == "{{json .Args}}":
 		if f.vmArgs != "" {
 			return f.vmArgs, nil
@@ -212,13 +242,19 @@ func TestDownRemovesOnlyItsOwnAndNeverPrunes(t *testing.T) {
 // stackServer answers every endpoint of the five components on one server.
 type stackServer struct {
 	*httptest.Server
-	mu       sync.Mutex
-	vmBody   string
-	vlBodies []string
-	vlQuery  string
-	dsPosts  []map[string]any
-	dashes   []map[string]any
-	versions map[string]string // overrides: vm, vl, grafana, plugin, tempo
+	mu           sync.Mutex
+	vmBody       string
+	vlBodies     []string
+	vlQuery      string
+	dsPosts      []map[string]any
+	dashes       []map[string]any
+	versions     map[string]string // overrides: vm, vl, grafana, plugin, tempo
+	annotations  []map[string]any
+	groups       []map[string]any
+	groupMethods []string
+	groupRoutes  []string
+	traces       []map[string]any
+	profileLoads int
 }
 
 func newStackServer(t *testing.T) *stackServer {
@@ -227,6 +263,40 @@ func newStackServer(t *testing.T) *stackServer {
 	ok := func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, "OK") }
 	mux.HandleFunc("/health", ok)
 	mux.HandleFunc("/ready", ok)
+	mux.HandleFunc("/ingest", func(w http.ResponseWriter, _ *http.Request) {
+		s.mu.Lock()
+		s.profileLoads++
+		s.mu.Unlock()
+		fmt.Fprint(w, "OK")
+	})
+	mux.HandleFunc("/api/folders", ok)
+	mux.HandleFunc("/api/folders/", ok)
+	mux.HandleFunc("/api/v1/provisioning/", func(w http.ResponseWriter, r *http.Request) {
+		var m map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&m)
+		s.mu.Lock()
+		s.groups = append(s.groups, m)
+		s.groupMethods = append(s.groupMethods, r.Method)
+		s.groupRoutes = append(s.groupRoutes, r.URL.EscapedPath())
+		s.mu.Unlock()
+		fmt.Fprint(w, `{}`)
+	})
+	mux.HandleFunc("/api/annotations", func(w http.ResponseWriter, r *http.Request) {
+		var m map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&m)
+		s.mu.Lock()
+		s.annotations = append(s.annotations, m)
+		s.mu.Unlock()
+		fmt.Fprint(w, `{}`)
+	})
+	mux.HandleFunc("/v1/traces", func(w http.ResponseWriter, r *http.Request) {
+		var m map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&m)
+		s.mu.Lock()
+		s.traces = append(s.traces, m)
+		s.mu.Unlock()
+		fmt.Fprint(w, `{}`)
+	})
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, `{"version":%q}`, s.versions["grafana"])
 	})
