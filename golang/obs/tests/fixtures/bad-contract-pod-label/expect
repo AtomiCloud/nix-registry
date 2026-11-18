@@ -1,4 +1,4 @@
 mode: static
 exit: 1
 contains: [contract-pod-label]
-contains: k8s_pod_name
+contains: k8s.pod.name

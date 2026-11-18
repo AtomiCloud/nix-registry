@@ -1,0 +1,23 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata:
+  name: payments-checkout-where-from-critical
+spec:
+  folderRef: payments-checkout-folder
+  interval: 1m
+  rules:
+    - uid: where-from-critical
+      title: 🚨 Checkout errors by where-from
+      condition: A
+      for: 5m
+      noDataState: OK
+      execErrState: Error
+      data:
+        - refId: A
+          relativeTimeRange: { from: 600, to: 0 }
+          datasourceUid: primordial-metrics
+          model:
+            expr: 'sum by ("durian.cloud.service") (rate(checkout_charges_total{"durian.cloud.service"="checkout", outcome="error"}[5m])) > 0.0001'
+            instant: true
+      labels: { severity: critical }
+      annotations: { summary: '🚨 Checkout errors by where-from' }

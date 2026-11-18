@@ -1,0 +1,7 @@
+# Without a contract the static check cannot judge; live, the underscore selector finds no series on the dotted seed.
+mode: live
+exit: 1
+contains: alerts/where-from/critical.yaml rule where-from-critical query A
+contains: [no-rows]
+contains: stored as "durian.cloud.service"
+contains: stored as "durian.cloud.platform"

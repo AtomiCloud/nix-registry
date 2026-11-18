@@ -138,7 +138,7 @@ func (s *labelScope) add(l string) {
 	if s.labels == nil {
 		s.labels = map[string]bool{}
 	}
-	s.labels[contract.Norm(l)] = true
+	s.labels[l] = true
 }
 
 // metricChecker walks one query.
@@ -255,10 +255,9 @@ func (mc *metricChecker) labelFunc(fe *metricsql.FuncExpr, sc *labelScope) {
 		input = mc.scopeOf(fe.Args[0])
 	}
 	for _, l := range reads {
-		n := contract.Norm(l)
-		if input.judged && !input.labels[n] {
+		if input.judged && !input.labels[l] {
 			mc.r.add(Fail, mc.q.File, mc.q.Where, "contract-undeclared-label",
-				"%s reads label %q, which the series it takes do not have in the contract%s", fe.Name, l, labelHint(n, input.labels))
+				"%s reads label %q, which the series it takes do not have in the contract%s", fe.Name, l, labelHint(l, input.labels))
 		}
 	}
 	for _, l := range makes {
@@ -281,7 +280,7 @@ func (mc *metricChecker) grouping(args []string, sc labelScope) {
 		if a == "*" {
 			continue
 		}
-		l := contract.Norm(a)
+		l := a
 		if sc.labels[l] {
 			continue
 		}
@@ -361,7 +360,7 @@ func (mc *metricChecker) selector(me *metricsql.MetricExpr) labelScope {
 			if lf.Label == "__name__" {
 				continue
 			}
-			l := contract.Norm(lf.Label)
+			l := lf.Label
 			if !allowed[l] {
 				switch {
 				case isPodKey(mc.c, l) && len(matched) > 0:
@@ -391,16 +390,23 @@ func firstName(name, re string) string {
 	return "~" + re
 }
 
-func isPodKey(c *contract.Contract, norm string) bool {
+// isPodKey reports whether l is a pod key in either spelling (the underscore form is the wrong
+// spelling of a pod key, and a pod key either way).
+func isPodKey(c *contract.Contract, l string) bool {
 	for _, k := range c.EffectivePodKeys() {
-		if contract.Norm(k) == norm {
+		if k == l || contract.Under(k) == l {
 			return true
 		}
 	}
 	return false
 }
 
+// labelHint names the right spelling of a label: VictoriaMetrics stores a dotted label with its
+// dots, so the underscore form of one selects nothing. Otherwise the closest stored label.
 func labelHint(l string, set map[string]bool) string {
+	if d := contract.Dotted(l, set); d != "" {
+		return fmt.Sprintf("; VictoriaMetrics stores this label with its dots, write %q (a selector is {%q=\"...\"}, a grouping is by (%q))", d, d, d)
+	}
 	var all []string
 	for k := range set {
 		all = append(all, k)
@@ -431,14 +437,14 @@ func (mc *metricChecker) valueCheck(matched []contract.StoredMetric, metric stri
 	for _, sm := range matched {
 		if sm.Platform {
 			// a platform metric that carries the label takes any value; one that does not is not selected by it
-			if sm.Labels[contract.Norm(lf.Label)] {
+			if sm.Labels[lf.Label] {
 				return
 			}
 			continue
 		}
-		t, ok := mc.c.LabelType(sm.Metric, contract.Norm(lf.Label))
+		t, ok := mc.c.LabelType(sm.Metric, lf.Label)
 		if !ok {
-			if sm.Labels[contract.Norm(lf.Label)] {
+			if sm.Labels[lf.Label] {
 				return // a platform label on a contract metric: any value
 			}
 			continue

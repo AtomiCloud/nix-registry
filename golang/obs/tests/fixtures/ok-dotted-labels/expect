@@ -1,0 +1,4 @@
+# Concept 2.1: VictoriaMetrics keeps dots; a dashboard and an alert written to the standard return rows on the seed.
+mode: both
+exit: 0
+contains: obs query

@@ -5,9 +5,26 @@ import (
 	"strings"
 )
 
-// Norm is the spelling VictoriaMetrics-side checks compare names in: dots become underscores,
-// so `payment.provider` and `payment_provider` are the same label.
-func Norm(s string) string { return strings.ReplaceAll(s, ".", "_") }
+// Under is the underscore form of a name: dots become underscores. VictoriaMetrics STORES a label
+// with its dots (concept 2.1: `{"durian.cloud.service"="checkout"}`; a scraped `durian_cloud_*`
+// label is turned back into dots by the vminsert labelmap), so Under is never a stored spelling.
+// It only recognises the wrong spelling of a dotted label, to name the right one.
+func Under(s string) string { return strings.ReplaceAll(s, ".", "_") }
+
+// Dotted returns the stored label of set that written is the underscore form of ("durian_cloud_service"
+// for the stored "durian.cloud.service"), or "" when written is a stored spelling already or matches none.
+func Dotted(written string, set map[string]bool) string {
+	if set[written] {
+		return ""
+	}
+	best := ""
+	for k := range set {
+		if k != written && strings.Contains(k, ".") && Under(k) == written && (best == "" || k < best) {
+			best = k
+		}
+	}
+	return best
+}
 
 // PlatformLabels are the labels every signal carries without the contract (concept section 2),
 // in their dotted spelling, plus the labels of histogram series and of the standard metrics.
@@ -21,13 +38,13 @@ var PlatformLabels = []string{
 // QueryLabels are labels that exist on query results rather than on stored series.
 var QueryLabels = []string{"le", "quantile", "vmrange", "__name__"}
 
-// PlatformLabelSet is Norm of PlatformLabels and QueryLabels, without the pod keys: a business
+// PlatformLabelSet is PlatformLabels (stored, dotted spelling) and QueryLabels, without the pod keys: a business
 // metric has no pod key in the store (concept 4.1), so only per_pod and platform metrics add them.
 func PlatformLabelSet() map[string]bool {
 	m := map[string]bool{}
 	for _, l := range PlatformLabels {
 		if !in(DefaultPodKeys, l) {
-			m[Norm(l)] = true
+			m[l] = true
 		}
 	}
 	for _, l := range QueryLabels {
@@ -41,7 +58,7 @@ type StoredMetric struct {
 	Name     string // the contract metric name, or the platform metric key
 	Metric   Metric
 	Platform bool
-	Labels   map[string]bool // Norm of the label names it may carry (contract labels + platform labels)
+	Labels   map[string]bool // the label names it may carry, in their stored spelling (contract labels + platform labels)
 }
 
 var platformSuffixes = []string{"", "_total", "_seconds", "_seconds_bucket", "_seconds_sum", "_seconds_count", "_bytes", "_bytes_bucket", "_bytes_sum", "_bytes_count", "_bucket", "_sum", "_count"}
@@ -65,10 +82,10 @@ func (c *Contract) Lookup(stored string) (StoredMetric, bool) {
 					ls[l] = true
 				}
 				for _, k := range c.EffectivePodKeys() {
-					ls[Norm(k)] = true // a platform metric is in no aggregation match, so it keeps its pod keys
+					ls[k] = true // a platform metric is in no aggregation match, so it keeps its pod keys
 				}
 				for _, l := range c.Platform[k] {
-					ls[Norm(l)] = true
+					ls[l] = true
 				}
 				return StoredMetric{Name: k, Platform: true, Labels: ls}, true
 			}
@@ -89,11 +106,11 @@ func (c *Contract) platformKeys() []string {
 func (c *Contract) metricLabels(m Metric) map[string]bool {
 	ls := PlatformLabelSet()
 	for _, l := range m.LabelOrder {
-		ls[Norm(l)] = true
+		ls[l] = true
 	}
 	if m.PerPod {
 		for _, k := range c.EffectivePodKeys() {
-			ls[Norm(k)] = true
+			ls[k] = true
 		}
 	}
 	return ls
@@ -111,10 +128,10 @@ func (c *Contract) StoredNameList() []string {
 	return out
 }
 
-// LabelType returns the type of a contract label of metric m (by its Norm spelling).
+// LabelType returns the type of a contract label of metric m (by its stored spelling).
 func (c *Contract) LabelType(m Metric, label string) (Type, bool) {
 	for _, l := range m.LabelOrder {
-		if Norm(l) == label || l == label {
+		if l == label {
 			t, ok := c.Types[m.Labels[l]]
 			return t, ok
 		}
@@ -122,18 +139,18 @@ func (c *Contract) LabelType(m Metric, label string) (Type, bool) {
 	return Type{}, false
 }
 
-// AllLabels is the union of every label any metric may carry (Norm spelling): for group-by
+// AllLabels is the union of every label any metric may carry (stored spelling): for group-by
 // modifiers, which the expression tree does not tie to one selector.
 func (c *Contract) AllLabels() map[string]bool {
 	ls := PlatformLabelSet()
 	for _, n := range c.MetricOrder {
 		for _, l := range c.Metrics[n].LabelOrder {
-			ls[Norm(l)] = true
+			ls[l] = true
 		}
 	}
 	for _, k := range c.platformKeys() {
 		for _, l := range c.Platform[k] {
-			ls[Norm(l)] = true
+			ls[l] = true
 		}
 	}
 	return ls
@@ -159,19 +176,19 @@ func (c *Contract) HasSpanAttribute(scope, name string) bool {
 // resourceHas: a traced resource carries every platform label of concept section 2, the pod keys
 // included (a trace has its pod name; only business METRICS drop it, concept 4.1).
 func (c *Contract) resourceHas(name string) bool {
-	n := Norm(name)
+	n := Under(name)
 	for _, l := range PlatformLabels {
-		if Norm(l) == n {
+		if Under(l) == n {
 			return true
 		}
 	}
-	return PlatformLabelSet()[n] || c.platformHas(name)
+	return PlatformLabelSet()[name] || c.platformHas(name)
 }
 
 func (c *Contract) spanHas(name string) bool {
 	for _, n := range c.SpanOrder {
 		for _, a := range c.Spans[n].AttrOrder {
-			if a == name || Norm(a) == Norm(name) {
+			if a == name || Under(a) == Under(name) {
 				return true
 			}
 		}
@@ -182,7 +199,7 @@ func (c *Contract) spanHas(name string) bool {
 func (c *Contract) platformHas(name string) bool {
 	for _, ls := range c.Platform {
 		for _, l := range ls {
-			if Norm(l) == Norm(name) {
+			if Under(l) == Under(name) {
 				return true
 			}
 		}

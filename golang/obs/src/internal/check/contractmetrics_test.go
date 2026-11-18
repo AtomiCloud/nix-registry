@@ -82,7 +82,7 @@ func TestLabelFunctionsReadRealLabels(t *testing.T) {
 // Review finding 5: a quoted label name with a dashboard variable is not judged on the placeholder.
 func TestQuotedLabelWithVariable(t *testing.T) {
 	wantGreen(t, `checkout_charges_total{"payment.provider"=~"$provider"}`, `checkout_charges_total{"payment.provider"=~"x"}`)
-	wantGreen(t, `checkout_charges_total{payment_provider=~"$provider"}`, `checkout_charges_total{payment_provider=~"x"}`)
+	wantGreen(t, `checkout_charges_total{payment.provider=~"$provider"}`, `checkout_charges_total{payment.provider=~"x"}`)
 	wantGreen(t, `checkout_charges_total{"payment.provider"="${provider}"}`, `checkout_charges_total{"payment.provider"="x"}`)
 	// ... while a fixed bad value on the same quoted label is still red
 	wantRed(t, `checkout_charges_total{"payment.provider"="visa"}`, `checkout_charges_total{"payment.provider"="visa"}`, "contract-bad-enum-value", "visa")
@@ -104,7 +104,7 @@ func TestRegexMetricName(t *testing.T) {
 	wantGreen(t, "", `{__name__=~"checkout_charges_total"}`)
 	wantGreen(t, "", `{__name__=~"checkout_.*", outcome="error"}`)
 	wantRed(t, "", `{__name__=~"checkout_.*", result="error"}`, "contract-undeclared-label", "result")
-	wantGreen(t, "", `{__name__=~"http_server_request_duration_seconds_.*", http_route="/x"}`)
+	wantGreen(t, "", `{__name__=~"http_server_request_duration_seconds_.*", "http.route"="/x"}`)
 }
 
 // Round 2, finding 1: a regex name selects known metrics, whose label values are judged too.
@@ -216,4 +216,21 @@ func TestAnchoredTypoIsNotAVariable(t *testing.T) {
 	wantGreen(t, `checkout_charges_total{outcome=~"error$"}`, `checkout_charges_total{outcome=~"error$"}`)
 	wantGreen(t, `checkout_charges_total{outcome=~"${outcome:regex}"}`, `checkout_charges_total{outcome=~"x"}`)
 	wantGreen(t, `checkout_charges_total{outcome=~"[[outcome]]"}`, `checkout_charges_total{outcome=~"x"}`)
+}
+
+// Concept 2.1: VictoriaMetrics keeps a label's dots and a query quotes them. The underscore form of a
+// dotted contract label selects nothing, so it is red and the finding names the dotted spelling.
+func TestDottedLabelsAreTheStoredSpelling(t *testing.T) {
+	wantGreen(t, "", `checkout_charges_total{"payment.provider"="stripe"}`)
+	wantGreen(t, "", `sum by ("payment.provider") (rate(checkout_charges_total[5m]))`)
+	wantGreen(t, "", `sum by ("durian.cloud.service") (rate(checkout_charges_total{"durian.cloud.service"="checkout"}[5m]))`)
+	wantGreen(t, "", `http_server_request_duration_seconds_count{"http.route"="/x"}`)
+	wantRed(t, "", `checkout_charges_total{payment_provider="stripe"}`, "contract-undeclared-label", `write "payment.provider"`)
+	wantRed(t, "", `sum by (payment_provider) (rate(checkout_charges_total[5m]))`, "contract-undeclared-label", `write "payment.provider"`)
+	wantRed(t, "", `checkout_charges_total{durian_cloud_service="checkout"}`, "contract-undeclared-label", `write "durian.cloud.service"`)
+	wantRed(t, "", `http_server_request_duration_seconds_count{http_route="/x"}`, "contract-undeclared-label", `write "http.route"`)
+	wantRed(t, "", `label_replace(checkout_charges_total, "x", "$1", "payment_provider", "(.*)")`, "contract-undeclared-label", `write "payment.provider"`)
+	// a pod key in either spelling is a pod key
+	wantRed(t, "", `sum by ("k8s.pod.name") (rate(checkout_charges_total[5m]))`, "contract-pod-label", "k8s.pod.name")
+	wantRed(t, "", `sum by (k8s_pod_name) (rate(checkout_charges_total[5m]))`, "contract-pod-label", "k8s_pod_name")
 }

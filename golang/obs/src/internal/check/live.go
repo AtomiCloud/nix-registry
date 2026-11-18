@@ -8,6 +8,7 @@ import (
 
 	"github.com/VictoriaMetrics/metricsql"
 
+	"github.com/AtomiCloud/obs/internal/contract"
 	"github.com/AtomiCloud/obs/internal/engines/tempo"
 	"github.com/AtomiCloud/obs/internal/engines/vl"
 	"github.com/AtomiCloud/obs/internal/engines/vm"
@@ -400,7 +401,12 @@ func (l *liveRun) noRows(q *files.Query, expr, extra string) {
 			}
 			for _, x := range ls {
 				if !l.labelNames[x] {
-					missing = append(missing, "label "+x)
+					// VictoriaMetrics stores a dotted label with its dots (concept 2.1): name the right spelling.
+					if d := contract.Dotted(x, l.labelNames); d != "" {
+						missing = append(missing, fmt.Sprintf("label %s (stored as %q: write {%q=...})", x, d, d))
+					} else {
+						missing = append(missing, "label "+x)
+					}
 				}
 			}
 		}

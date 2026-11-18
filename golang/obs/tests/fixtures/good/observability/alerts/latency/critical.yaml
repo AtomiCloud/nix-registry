@@ -17,7 +17,7 @@ spec:
           relativeTimeRange: { from: 600, to: 0 }
           datasourceUid: primordial-metrics
           model:
-            expr: 'histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{http_route="/charge"}[5m]))) > 0.8'
+            expr: 'histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{"http.route"="/charge"}[5m]))) > 0.8'
             instant: true
       labels: { severity: critical }
       annotations: { summary: '🚨 Charge p95 very slow' }

@@ -67,7 +67,8 @@ func (r *Result) Failures() int {
 	return n
 }
 
-const landscapeLabel = "durian_cloud_landscape"
+// landscapeLabel is the stored spelling: VictoriaMetrics keeps the dots (concept 2.1).
+const landscapeLabel = "durian.cloud.landscape"
 
 type group struct {
 	metric    string
@@ -92,7 +93,7 @@ func Check(c *contract.Contract, series []Series, o Options) *Result {
 	var order []string
 	unknown := map[string]int{}
 	for _, s := range series {
-		norm := normLabels(s.Labels)
+		norm := s.Labels
 		sm, ok := c.Lookup(s.Name)
 		if !ok {
 			unknown[s.Name]++
@@ -149,14 +150,6 @@ func Check(c *contract.Contract, series []Series, o Options) *Result {
 	return res
 }
 
-func normLabels(in map[string]string) map[string]string {
-	out := make(map[string]string, len(in))
-	for k, v := range in {
-		out[contract.Norm(k)] = v
-	}
-	return out
-}
-
 func overFinding(c *contract.Contract, g *group, cnt Count, pods int) Finding {
 	where := ""
 	if g.landscape != "" {
@@ -182,7 +175,8 @@ func holes(c *contract.Contract, g *group) []Finding {
 	allowed := g.sm.Labels
 	podKey := map[string]bool{}
 	for _, k := range c.EffectivePodKeys() {
-		podKey[contract.Norm(k)] = true
+		podKey[k] = true
+		podKey[contract.Under(k)] = true // the wrong spelling of a pod key is still a pod key
 	}
 	values := map[string]map[string]bool{}
 	for _, s := range g.series {
@@ -209,8 +203,13 @@ func holes(c *contract.Contract, g *group) []Finding {
 			if len(vs) > 1 {
 				level, detail = Fail, "varying label splits series"
 			}
+			hint := ""
+			if d := contract.Dotted(l, allowed); d != "" {
+				level, detail = Fail, "wrong spelling: the contract label is stored with its dots"
+				hint = fmt.Sprintf("; %q is the underscore spelling of %q: VictoriaMetrics stores the dots, so a scraped label needs the vminsert labelmap", l, d)
+			}
 			out = append(out, Finding{Level: level, Metric: g.metric, Rule: "label-not-in-contract",
-				Msg: fmt.Sprintf("label %q is not a label of this metric in the contract (%d values, e.g. %s); %s", l, len(vs), quoteN(vs, 3), detail)})
+				Msg: fmt.Sprintf("label %q is not a label of this metric in the contract (%d values, e.g. %s); %s%s", l, len(vs), quoteN(vs, 3), detail, hint)})
 		default:
 			if t, ok := c.LabelType(g.sm.Metric, l); ok {
 				if bad := outside(t, vs); len(bad) > 0 {

@@ -18,7 +18,7 @@ spec:
           datasourceUid: speed-metrics
           model:
             datasource: { type: prometheus, uid: speed-metrics }
-            expr: 'sum by (payment_provider) (rate(checkout_charges_total{outcome="error"}[8m]))'
+            expr: 'sum by ("payment.provider") (rate(checkout_charges_total{outcome="error"}[8m]))'
             instant: true
         - refId: B
           datasourceUid: __expr__

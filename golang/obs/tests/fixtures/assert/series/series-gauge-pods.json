@@ -4,31 +4,31 @@
   "data": [
     {
       "__name__": "checkout_queue_depth",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
-      "payment_provider": "stripe",
-      "k8s_pod_name": "pod-a"
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
+      "payment.provider": "stripe",
+      "k8s.pod.name": "pod-a"
     },
     {
       "__name__": "checkout_queue_depth",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
-      "payment_provider": "adyen",
-      "k8s_pod_name": "pod-a"
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
+      "payment.provider": "adyen",
+      "k8s.pod.name": "pod-a"
     },
     {
       "__name__": "checkout_queue_depth",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
-      "payment_provider": "stripe",
-      "k8s_pod_name": "pod-b"
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
+      "payment.provider": "stripe",
+      "k8s.pod.name": "pod-b"
     },
     {
       "__name__": "checkout_queue_depth",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
-      "payment_provider": "adyen",
-      "k8s_pod_name": "pod-b"
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
+      "payment.provider": "adyen",
+      "k8s.pod.name": "pod-b"
     }
   ]
 }

@@ -167,7 +167,7 @@ rule skipped: no contract.yaml`. When it is present, the alert must filter on th
 ```yaml
 length: 4h # how much time to make
 random_seed: 42 # the same file gives the same data
-resource: # resource attributes, dots kept; become metric labels (dots -> _) and log fields
+resource: # resource attributes, dots kept; become metric labels (dots kept, concept §2.1) and log fields
   durian.cloud.landscape: fixture-dev
   durian.cloud.platform: payments
   durian.cloud.service: checkout
@@ -196,8 +196,30 @@ logs: # which log event each metric event writes
 
 `incidents:` and `traces:` are accepted and ignored until the release that uses them.
 
+### Label spelling per store (concept §2.1)
+
+A name is spelled the way its store keeps it. obs seeds, checks and queries every store in that spelling, so a
+dashboard or alert written to the standard returns rows on an obs seed and on the real stack alike.
+
+| Store           | Label spelling                                         | Query example                                                         |
+| --------------- | ------------------------------------------------------ | --------------------------------------------------------------------- |
+| VictoriaMetrics | dots kept, quoted (metric NAMES still use `_`)         | `checkout_charges_total{"durian.cloud.service"="checkout"}`           |
+| VictoriaLogs    | dots kept, as sent; quoted                             | `_stream:{"durian.cloud.landscape"="fixture-dev"}`                          |
+| Tempo           | dots, as sent                                          | `{resource.durian.cloud.landscape="fixture-dev"}`                           |
+| Pyroscope       | underscores only (a dotted name is dropped)            | `{durian_cloud_service="checkout", service_name="checkout"}`          |
+
+- The underscore form of a dotted VictoriaMetrics label (`durian_cloud_service`, `payment_provider`) selects
+  nothing. `obs query --static` fails it with `contract-undeclared-label` and names the dotted spelling to write;
+  `--live` fails it with `no-rows` and the same hint.
+- **Scraped (non-OTLP) metrics** reach VictoriaMetrics as `durian_cloud_*` (Alloy drops a relabel rule whose
+  `target_label` has dots), and a vminsert `-relabelConfig` `labelmap` rule (`regex: durian_cloud_(.*)`,
+  `replacement: durian.cloud.$1`) turns them back into `durian.cloud.*`. `obs scrape` takes the underscore input
+  (`--label durian_cloud_landscape=local`); the sandbox's VictoriaMetrics has no labelmap, so scraped samples
+  keep the underscores there (NOT TESTED against the real labelmap).
+
 Seed data is made to look like stored data (concept §11.2). Metrics: counters get `_total`, seconds
-histograms `_seconds_bucket`/`_sum`/`_count` with `le`, dots become `_`. Logs, as VictoriaLogs stores an OTLP
+histograms `_seconds_bucket`/`_sum`/`_count` with `le`; dots in a metric NAME become `_`, dots in a LABEL name stay
+(see the table below). Logs, as VictoriaLogs stores an OTLP
 log record (FROM SOURCE, v1.54.0; **not yet compared with a real VictoriaLogs through Alloy**): attribute
 keys unchanged (`durian.cloud/event`, `payment.provider`), the body as `_msg`, `severity_text` (upper case,
 e.g. `ERROR`) and `severity_number`, `trace_id`, `span_id`. Stream fields are the bounded where-from set
@@ -406,8 +428,10 @@ bounded number; a value that holds a dashboard variable is not judged),
 `contract-pod-label` (a pod key on a business metric, §4.1), `contract-undeclared-event` and
 `contract-undeclared-stream-field` (a stream tag outside the where-from set). Regex metric names (`{__name__=~"..."}`) are matched against the known names and a regex that matches none is
 undeclared; regex label values must match an allowed value; label functions (`label_replace`, ...) must read
-labels their input has. Names compare with dots
-and underscores equal. Other log fields are free-form (§6): not judged.
+labels their input has. A metric label is compared in its stored spelling, dots
+kept and quoted (`{"payment.provider"="stripe"}`, `by ("payment.provider")`); the underscore form of a dotted label is
+`contract-undeclared-label` and the finding names the dotted spelling (a pod key in either spelling is
+`contract-pod-label`). Other log fields are free-form (§6): not judged.
 
 ## `obs sandbox`: the local stack, for people
 
@@ -499,7 +523,8 @@ Concept §11.8 names `obs scrape` next to the sandbox but does not define it; th
 It scrapes Prometheus text endpoints (an app's `/metrics`) on an interval and writes them into the running
 sandbox's VictoriaMetrics (`/api/v1/import/prometheus`), with `job`, `instance` and the `--label`s on every
 sample, so the app's metrics can be looked at next to the seed. Scraped metrics carry their where-from
-labels as `durian_cloud_*` (concept §2): pass `--label durian_cloud_landscape=local` and so on. `--once`
+labels as `durian_cloud_*` (concept §2): pass `--label durian_cloud_landscape=local` and so on (a vminsert labelmap turns
+them into `durian.cloud.*` in the real stack; the sandbox has none, see "Label spelling per store"). `--once`
 scrapes once and exits 1 when it failed; otherwise it runs until Ctrl-C and keeps going after a failed
 scrape.
 
@@ -634,13 +659,14 @@ obs assert --series FILE [--dir observability] [--pods n] [--unknown warn|fail|i
 
 - **Input** (`--series`): `/api/v1/series` JSON (`{"status":"success","data":[{"__name__":...}]}`) or
   `/api/v1/export` lines (`{"metric":{...},"values":[...],"timestamps":[...]}`), for example
-  `curl -g "$VM/api/v1/series?match[]={durian_cloud_service=\"checkout\"}&start=<e2e start>"`. Scope the export to the
+  `curl -g "$VM/api/v1/series?match[]={\"durian.cloud.service\"=\"checkout\"}&start=<e2e start>"`. Scope the export to the
   service under test: obs counts every series it is given. A series repeated in an export counts once.
-  Label names compare with dots and underscores equal (`payment.provider` = `payment_provider`).
+  Label names are the stored spelling, dots kept (`payment.provider`). An underscore spelling (`payment_provider`) is a
+  `label-not-in-contract` finding that names the dotted spelling.
 - **Count.** A series belongs to the contract metric whose stored names it carries (`checkout_charges_total`,
   `checkout_charge_duration_seconds_bucket|_sum|_count`: a histogram counts all three, like the worst case of
   `obs check`, buckets + 2 per label set). The series are counted **per landscape** (label
-  `durian_cloud_landscape`; none = one group), since the worst case is per landscape.
+  `durian.cloud.landscape`; none = one group), since the worst case is per landscape.
 - **Limit.** `contract.WorstCase(metric)`; for a `per_pod` metric worst case × `--pods` (the pods per landscape,
   from the landscape config). Fails with `series-over-worst-case`, naming the series file, the metric, the count,
   the stored names and the worst case. Platform metrics (`platform_metrics:`) are counted and printed, with no

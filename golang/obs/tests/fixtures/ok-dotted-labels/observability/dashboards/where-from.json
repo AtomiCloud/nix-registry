@@ -1,0 +1,20 @@
+{
+  "title": "Checkout where-from",
+  "uid": "payments-checkout-where-from",
+  "time": { "from": "now-3h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Charges of the checkout service",
+      "interval": "1m",
+      "datasource": { "type": "prometheus", "uid": "primordial-metrics" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome, \"durian.cloud.platform\") (rate(checkout_charges_total{\"durian.cloud.service\"=\"checkout\"}[$__rate_interval]))"
+        }
+      ]
+    }
+  ]
+}

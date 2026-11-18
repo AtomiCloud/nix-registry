@@ -18,7 +18,7 @@ spec:
           datasourceUid: speed-metrics
           model:
             datasource: { type: prometheus, uid: speed-metrics }
-            expr: 'sum(rate(http_server_request_duration_seconds_count{http_response_status_code=~"5.."}[12m])) / sum(rate(http_server_request_duration_seconds_count[12m]))'
+            expr: 'sum(rate(http_server_request_duration_seconds_count{"http.response.status_code"=~"5.."}[12m])) / sum(rate(http_server_request_duration_seconds_count[12m]))'
             instant: true
         - refId: B
           datasourceUid: __expr__
