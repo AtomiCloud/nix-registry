@@ -14,7 +14,7 @@ import (
 
 func TestReplayEqualsAlertsFireTimes(t *testing.T) {
 	dir := "../../../tests/fixtures/alerts/features"
-	p, err := loadProject(dir, "")
+	p, err := loadProject(dir, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
