@@ -4,11 +4,13 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/AtomiCloud/obs/internal/alerts"
 	"github.com/AtomiCloud/obs/internal/check"
+	"github.com/AtomiCloud/obs/internal/contract"
 	"github.com/AtomiCloud/obs/internal/files"
 	"github.com/AtomiCloud/obs/internal/obstest"
 	"github.com/AtomiCloud/obs/internal/seed"
@@ -110,7 +112,7 @@ func runTest(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "note: no alert rules under %s/alerts: obs alerts has nothing to run\n", *dir)
 		part("alerts", "0 alerts", 0)
 	} else {
-		ao := alerts.Options{Dir: *dir, SeedPath: *seedPath, Out: *out, Steps: *steps, Recorded: *recorded, VLSettings: *vlSettings, TempoConfig: *tempoConfig, Obs: of, Base: *base, Workers: *workers}
+		ao := alerts.Options{Dir: *dir, SeedPath: *seedPath, Out: *out, Steps: *steps, Recorded: *recorded, VLSettings: *vlSettings, TempoConfig: *tempoConfig, Obs: of, Base: *base, Workers: *workers, EventRule: *eventRule, AllowEmptyExpect: true}
 		var rc int
 		res, rc = alerts.CheckResult(ao, stdout, stderr)
 		total := "the run stopped before its verdicts"
@@ -120,10 +122,12 @@ func runTest(args []string, stdout, stderr io.Writer) int {
 		part("alerts", total, rc)
 	}
 
-	// 3. links: obs links (a seed with no traces has no link to follow)
+	// 3. links: obs links. Skipped only when nothing could be linked: the seed has no traces AND the contract
+	// declares no spans AND no query is TraceQL. A contract that declares spans (or a TraceQL query) with a seed
+	// that has no traces is a real finding of obs links, so obs test runs it.
 	sd, serr := seed.Load(sp)
-	if serr == nil && sd.Traces.IsZero() {
-		lines = append(lines, "obs test: links: skipped: the seed has no traces, so there is no trace, log or profile link to follow")
+	if serr == nil && sd.Traces.IsZero() && !tracesExpected(set, *dir) {
+		lines = append(lines, "obs test: links: skipped: the seed has no traces and nothing declares or queries any (no contract span, no TraceQL query), so there is no trace, log or profile link to follow")
 	} else {
 		lr, seedFile, rc := linksReport(*dir, *seedPath, *base, stderr)
 		if lr == nil {
@@ -143,7 +147,7 @@ func runTest(args []string, stdout, stderr io.Writer) int {
 		inc := incidentPart(res.Incidents, res.Verdicts, false, stdout)
 		part("incidents", inc.total, inc.rc)
 	case noRules && serr == nil:
-		incs, ierr := seed.LoadIncidents(sd, *dir)
+		incs, ierr := seed.LoadIncidentsForTest(sd, *dir)
 		if ierr != nil {
 			fmt.Fprintf(stderr, "obs test: incidents: %v\n", ierr)
 			part("incidents", "the incident files could not be read (exit 2)", 2)
@@ -170,6 +174,22 @@ func runTest(args []string, stdout, stderr io.Writer) int {
 	return 1
 }
 
+// tracesExpected is true when the folder declares spans in contract.yaml or has a TraceQL query, so a seed
+// without traces cannot be skipped over. A contract that cannot be read counts as expecting them (obs links then says why).
+func tracesExpected(set *files.Set, dir string) bool {
+	for _, q := range set.Queries {
+		if q.Kind == files.Traces {
+			return true
+		}
+	}
+	cpath := filepath.Join(dir, "contract.yaml")
+	if _, err := os.Stat(cpath); err != nil {
+		return !os.IsNotExist(err)
+	}
+	c, err := contract.Load(cpath)
+	return err != nil || len(c.SpanOrder) > 0
+}
+
 type incidentResult struct {
 	total string
 	rc    int
@@ -181,9 +201,17 @@ func incidentPart(incs []seed.Incident, vs []alerts.Verdict, noRules bool, stdou
 	for _, f := range un {
 		fmt.Fprintln(stdout, f.Line())
 	}
+	notes := obstest.Disturbances(incs)
+	for _, n := range notes {
+		fmt.Fprintln(stdout, n.Line())
+	}
 	rc := 0
 	if len(un) > 0 {
 		rc = 1
 	}
-	return incidentResult{fmt.Sprintf("%d incidents, %d caught, %d uncaught", len(incs), len(incs)-len(un), len(un)), rc}
+	total := fmt.Sprintf("%d incidents, %d caught, %d uncaught", len(incs), len(incs)-len(un)-len(notes), len(un))
+	if len(notes) > 0 {
+		total += fmt.Sprintf(", %d disturbance(s)", len(notes))
+	}
+	return incidentResult{total, rc}
 }

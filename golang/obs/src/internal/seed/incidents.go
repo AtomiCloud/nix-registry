@@ -14,9 +14,13 @@ import (
 
 // Incident changes the seed during Window and declares the expected alert IDs.
 type Incident struct {
-	Name   string `yaml:"-"`
-	Story  string `yaml:"story"`
-	Window struct {
+	Name  string `yaml:"-"`
+	Story string `yaml:"story"`
+	// Disturbance marks a deliberate non-incident disturbance (only quiet expectations: it proves the
+	// alerts stay quiet). The reason is required. `obs test` leaves it out of [incident-uncaught] and
+	// prints it as a note; `obs alerts` ignores it.
+	Disturbance string `yaml:"disturbance"`
+	Window      struct {
 		Start    string `yaml:"start"`
 		Duration string `yaml:"duration"`
 	} `yaml:"window"`
@@ -44,8 +48,18 @@ func (i *Incident) Contains(at time.Duration) bool {
 	return at >= start && at < start+duration
 }
 
-// LoadIncidents reads only the seed's named incident files, with strict fields.
-func LoadIncidents(s *Seed, dir string) ([]Incident, error) {
+// LoadIncidents reads only the seed's named incident files, with strict fields. An incident must
+// expect at least one alert to fire or stay quiet (what `obs alerts` demands).
+func LoadIncidents(s *Seed, dir string) ([]Incident, error) { return loadIncidents(s, dir, false) }
+
+// LoadIncidentsForTest is LoadIncidents for `obs test`: an incident with an empty expectation
+// (`expect: {}`) loads, so the rule "every incident is caught by an alert" can report it as
+// [incident-uncaught] instead of the run stopping with an input error.
+func LoadIncidentsForTest(s *Seed, dir string) ([]Incident, error) {
+	return loadIncidents(s, dir, true)
+}
+
+func loadIncidents(s *Seed, dir string, allowEmptyExpect bool) ([]Incident, error) {
 	var out []Incident
 	seen := map[string]bool{}
 	for _, name := range s.Incidents {
@@ -65,6 +79,9 @@ func LoadIncidents(s *Seed, dir string) ([]Incident, error) {
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
 		i.Name = name
+		if err := checkDisturbance(path, b, i.Disturbance); err != nil {
+			return nil, err
+		}
 		start, err := time.ParseDuration(i.Window.Start)
 		if err != nil || start < 0 {
 			return nil, fmt.Errorf("%s: window.start %q is invalid", path, i.Window.Start)
@@ -103,10 +120,29 @@ func LoadIncidents(s *Seed, dir string) ([]Incident, error) {
 				return nil, fmt.Errorf("%s: change %s has invalid latency_x or share_x", path, c.Metric)
 			}
 		}
-		if len(i.Expect.Fire)+len(i.Expect.Quiet) == 0 {
+		if !allowEmptyExpect && len(i.Expect.Fire)+len(i.Expect.Quiet) == 0 {
 			return nil, fmt.Errorf("%s: expect needs fire or quiet alert IDs", path)
 		}
 		out = append(out, i)
 	}
 	return out, nil
+}
+
+// checkDisturbance fails when the file has a disturbance key without a reason (an empty, blank or null
+// value), naming file:line. An absent key is fine.
+func checkDisturbance(path string, doc []byte, reason string) error {
+	var root yaml.Node
+	if err := yaml.Unmarshal(doc, &root); err != nil || len(root.Content) == 0 || root.Content[0].Kind != yaml.MappingNode {
+		return nil // the strict decode above reports the real error
+	}
+	m := root.Content[0]
+	for k := 0; k+1 < len(m.Content); k += 2 {
+		if m.Content[k].Value != "disturbance" {
+			continue
+		}
+		if strings.TrimSpace(reason) == "" {
+			return fmt.Errorf("%s:%d: disturbance needs a non-empty reason (what the incident proves the alerts ignore); remove the key or write the reason", path, m.Content[k].Line)
+		}
+	}
+	return nil
 }

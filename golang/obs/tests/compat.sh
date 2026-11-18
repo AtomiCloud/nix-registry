@@ -47,7 +47,7 @@ case_() {
     pass=$((pass + 1))
   else
     echo "FAIL compat $name: output differs from the 0.4 golden file"
-    diff "$golden/$name.out" "$work/got" | head -20 | sed 's/^/  | /'
+    { diff "$golden/$name.out" "$work/got" || true; } | head -20 | sed 's/^/  | /'
     fail=$((fail + 1))
   fi
 }
@@ -79,10 +79,14 @@ for f in good sample-app links/good; do
 done
 case_ "alerts__alerts-features" alerts --dir alerts/features --base "$base"
 case_ "alerts__links-good-flat" alerts --dir links/good --base "$base"
+# an "expect fire" that stays quiet: test/good with the threshold raised from 0.5 to 500 (exit 1, the FAIL line of the failed verdict)
+case_ "alerts__test-alert-quiet" alerts --dir test/alert-quiet/observability --base "$base"
 
 # obs links
 case_ "links__links-good" links --dir links/good --base "$base"
 case_ "links__good" links --dir good/observability --base "$base"
+# real link findings: alerts/features has a seed whose route has no log, so trace-to-logs and friends fail (exit 1)
+case_ "links__alerts-features" links --dir alerts/features --base "$base"
 
 # usage errors keep their text and exit code
 case_ "usage__query-no-mode" query

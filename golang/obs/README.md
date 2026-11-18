@@ -437,14 +437,20 @@ obs test [--dir observability] [--seed seed.yaml] [--base unix] [--names] [--eve
 | `links`     | `obs links`                | a trace, log, metric or profile link that does not resolve on the seed                         |
 | `incidents` | new, `[incident-uncaught]` | an incident no alert catches                                                                   |
 
+**`obs test` turns off the `[empty]` rule of `obs query --live`** (a folder with no alert and no dashboard is red there). Why: `obs test` is also the run that
+tells a repository with incidents and no alert yet which incident is uncaught, so a folder with nothing to query is a finding of the
+`incidents` part (`[incident-uncaught]`), not an input error of the `queries` part. `obs check` does the same for the same reason.
+
 The flags mean what they mean on the old commands (`--dir`, `--seed`, `--base`, `--names`, `--event-rule`,
-`--contracts`, `--vl-settings`, `--tempo-config`, `--workers`, `--out`, `--steps`, `--recorded`). Each part prints its own
+`--contracts`, `--vl-settings`, `--tempo-config`, `--workers`, `--out`, `--steps`, `--recorded`). `--event-rule` reaches both the
+`queries` and the `alerts` part: with `--event-rule off` a log alert that names no contract event is accepted in both (`obs alerts` itself has no such flag and keeps
+the rule on whenever the folder has a contract). Each part prints its own
 findings as the old command does, then one total per part and one last line:
 
 ```text
 obs test: queries: ok: 7 queries (3 logs, 4 metrics), 0 failures, 0 warnings
 obs test: alerts: ok: 1 alerts (0 recording rules), 2 runs, 2 expectations, 0 failed
-obs test: links: skipped: the seed has no traces, so there is no trace, log or profile link to follow
+obs test: links: skipped: the seed has no traces and nothing declares or queries any (no contract span, no TraceQL query), so there is no trace, log or profile link to follow
 obs test: incidents: ok: 1 incidents, 1 caught, 0 uncaught
 obs test: ok
 ```
@@ -452,7 +458,9 @@ obs test: ok
 Exit 0 when every part passes, 1 when a part failed, 2 on a usage or input error. A part that fails does not
 stop the next one. `obs.yaml` is gated first, as in `obs query` and `obs alerts`: a version it names that the embedded
 evaluators do not match fails the run before any part. The `obs alerts` part still prints its own result line
-(`obs alerts: alerts=...`) and the `links` part is skipped, with a line saying so, when the seed has no traces. A folder
+(`obs alerts: alerts=...`). The `links` part is skipped, with a line saying so, only when nothing could be linked: the seed has no traces **and**
+the contract declares no span **and** no query is TraceQL. A contract that declares spans (or a TraceQL query) with a seed that has no traces
+is a finding of `obs links` (`[seed] no traces in seed.traces`), so `obs test` runs the part and is red as `obs links` is. A folder
 with no alert rule has nothing for `obs alerts` to run (a note, not the exit 2 of the old command), so its incidents are all uncaught.
 
 ### Every incident is caught by at least one alert (`[incident-uncaught]`)
@@ -462,8 +470,10 @@ An incident in `incidents/<name>.yaml` (the files the seed names under `incident
 passed its fire verdict, that is it fired inside the incident window (within `fire_within`, and not outside the window
 plus `resolve_within`). An incident is **uncaught** when
 
-- `expect.fire` is empty (only quiet alerts, or none), or
-- no alert in `expect.fire` fired inside the window, or
+- `expect.fire` is empty (only quiet alerts, or none; `obs test` also accepts `expect: {}` here and reports it, where `obs alerts` still refuses the file with exit 2), or
+- no alert in `expect.fire` passed its fire expectation: the line says `no alert passed its fire expectation` and names each alert with its failed
+  condition as `obs alerts` printed it (`quiet`, `fired before the incident window`, or `fired at +12m0s, firing 29 min; firing outside window [10m0s,25m0s) at +25m0s` for an
+  alert that fired inside the window and resolved late), or
 - the folder has no alert rule at all.
 
 An alert that fires without being listed is not a catch: it already fails as an unexpected fire in the `alerts` part. The line names the
@@ -478,13 +488,23 @@ the window, the change, `expect`), list it under `incidents:` in `seed.yaml` and
 Add the alert that would have caught it and list its uid in `expect.fire` (also in every other incident the alert fires in:
 an unlisted alert is expected quiet): `obs test` is green. `tests/check-test.sh` runs exactly this flow.
 
-An incident that is deliberately not covered by any alert (for example a slowdown no alert should page for) is red under this rule
-by decision (owner pick, agenda A371); there is no way to waive one. The fixtures `tests/fixtures/alerts-speed/*` have such incidents, so `obs test` is red on them
-and `obs alerts` still green.
+An incident that is deliberately not covered by any alert (a slowdown no alert should page for, a trickle that proves the alerts stay quiet) is
+red under this rule unless it says so. Mark the incident file with `disturbance: "<reason>"` (the reason is required, an empty one is an error naming file and line). A
+marked incident is left out of `[incident-uncaught]` and printed as a note, and the totals count it apart:
 
-**Speed (MEASURED, 18 Nov 2026, x86_64 Linux, one run each, all four parts):** `obs test` takes 0.06 s on `tests/fixtures/test/good`
-(40 min seed, one alert), 0.76 s on `alerts-speed/n1` with its 4 h seed and 2.6 s with its 24 h seed
-(3 incidents, 1 alert, 2 queries; red there on `[incident-uncaught]`, the time is the same). It is not under 1 second on a 24 h seed. Of the 2.6 s, `obs alerts` alone takes 0.77 s and `obs query --live` alone 2.0 s on that seed (separate runs; each builds the seed again).
+```text
+note: [disturbance] incidents/slow-burn.yaml slow-burn: a trickle of errors: proves the error alert stays quiet
+obs test: incidents: ok: 3 incidents, 2 caught, 0 uncaught, 1 disturbance(s)
+```
+
+An incident **without** the marker and with no catching alert stays red (owner pick, agenda A371: every incident is caught by at least one alert; the marker is
+the one way to say an incident is not one). `obs alerts` ignores the field: its output is unchanged. The quiet-only incidents of `tests/fixtures/alerts-speed/n1` and `t1` carry it,
+so `obs test` is green on `n1` and its `incidents` part is green on `t1` (`t1` has traces with no logs and no profile, so its `links` part is red by construction).
+
+**Speed (MEASURED, 18 Nov 2026, x86_64 Linux, a shared box, two runs each, all four parts):** `obs test` takes 0.09 s on `tests/fixtures/test/good`
+(40 min seed, one alert), 1.1 s and 1.3 s on `alerts-speed/n1` with its 4 h seed and 3.3 s and 3.2 s with its 24 h seed
+(3 incidents, 1 alert, 2 queries, links skipped; green). It is not under 1 second on the 4 h or the 24 h seed. A solo run of `obs alerts` alone took 0.77 s
+and `obs query --live` alone 2.0 s on the 24 h seed in an earlier measurement (each builds the seed again; not re-measured on this box).
 
 ## `obs.yaml`: the versions and thresholds a repo targets
 
@@ -811,10 +831,11 @@ What is new in `obs check` and `obs test` for a caller:
 - `obs check` now also fails on a query finding, with the same rule ids, files and tokens as `obs query --static`. A CI that ran both can run one. It takes
   `--names`, `--event-rule`, `--vl-settings`, `--tempo-config` (new) next to `--contracts`.
 - `obs check --contracts none` now also runs the query rules with this folder's contract only, so a dashboard that reads a metric another contract declares is red there (as with `obs query --static --contracts none`). The limits it prints are unchanged.
+  **Remedy for a query that reads a metric of another contract:** leave `--contracts auto` (the default), which reads the repository's other `observability/contract.yaml` files too, or fix the reported query so it uses only a metric this folder's contract declares.
 - `obs check` on a folder with no `contract.yaml` was exit 2; it now skips the limits with a note and checks the queries.
 - `obs check`'s last line is `obs check: ok: <contract counts>; queries: <query totals>` (it was `obs check: ok: <contract counts>`), and a failure line
   lists every failing half. The prefixes `obs check: ok:` and `obs check: FAILED:` are unchanged.
-- `obs test` is new, including the rule `[incident-uncaught]`: a folder whose incidents list only quiet alerts is red there.
+- `obs test` is new, including the rule `[incident-uncaught]`: a folder whose incidents list only quiet alerts is red there, unless the incident carries `disturbance: "<reason>"` (see _Every incident is caught by at least one alert_).
 
 ## Migrating from 0.3 to 0.4
 

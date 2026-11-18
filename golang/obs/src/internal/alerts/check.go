@@ -35,6 +35,12 @@ type Options struct {
 	Base      int64
 	Workers   int
 	LogsGuard QueryGuard
+	// EventRule is --event-rule of `obs test` ("auto", "on", "off"; empty = auto): whether a LogsQL alert
+	// must name a contract event. `obs alerts` leaves it empty (it has no such flag).
+	EventRule string
+	// AllowEmptyExpect lets an incident with no fire and no quiet alert load (`obs test` reports it as
+	// [incident-uncaught]); `obs alerts` keeps refusing it.
+	AllowEmptyExpect bool
 }
 
 // TempoAlertingNote is printed once per obs alerts run that has trace rules.
@@ -88,7 +94,7 @@ func run(o Options, stdout, stderr io.Writer, res *RunResult) int {
 	VerifyMismatch.Store(0)
 	verifyExamples.Store(0)
 	SkippedRuns, SkipChecked, SkipMismatch = 0, 0, 0
-	p, err := loadProject(o.Dir, o.SeedPath)
+	p, err := loadProject(o.Dir, o.SeedPath, o.AllowEmptyExpect)
 	if err != nil {
 		fmt.Fprintln(stderr, "obs alerts:", err)
 		return 2
@@ -152,7 +158,7 @@ func run(o Options, stdout, stderr io.Writer, res *RunResult) int {
 		}
 	}
 	set.Queries, set.Dashboards = queries, nil
-	rep := check.Static(set, check.Options{Dir: o.Dir})
+	rep := check.Static(set, check.Options{Dir: o.Dir, EventRule: o.EventRule})
 	rep.Print(stdout)
 	if rep.Failures() > 0 {
 		return 1
@@ -175,6 +181,12 @@ func run(o Options, stdout, stderr io.Writer, res *RunResult) int {
 		// Include effective settings, not unrelated chart/auth args, in cache keys.
 		p.Files["victorialogs-query-limits"] = []byte(fmt.Sprintf("%#v", limits))
 	}
+	// --event-rule off (obs test): the contract's events are not required in log queries, as in obs query --live;
+	// the queries run as written. The seed is still checked against the contract above.
+	queryEvents := events
+	if o.EventRule == "off" {
+		queryEvents = nil
+	}
 	logEvents := logEventSets{}
 	for _, group := range [][]Alert{p.Alerts, p.Records} {
 		for i := range group {
@@ -182,14 +194,14 @@ func run(o Options, stdout, stderr io.Writer, res *RunResult) int {
 				if q.Datasource != "logs" {
 					continue
 				}
-				analysis, err := logevent.Analyze(q.Expr, events)
+				analysis, err := logevent.Analyze(q.Expr, queryEvents)
 				if err != nil {
 					fmt.Fprintf(stderr, "%s rule %s query %s: %v\n", group[i].File, group[i].ID, ref, err)
 					return 1
 				}
 				q.Expr = analysis.Expr
 				group[i].Queries[ref] = q
-				logEvents[q.Expr] = rootEvents(q.Expr, events)
+				logEvents[q.Expr] = rootEvents(q.Expr, queryEvents)
 			}
 		}
 	}

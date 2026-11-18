@@ -139,11 +139,30 @@ run check --dir "$work/ob/observability"
 verdict "check: an invalid contract is red and reported once, not again as a query rule" expect 1 '[over-budget]' 'obs check: FAILED:'
 verdict "check: ... no [contract] finding from the query half" absent '[contract]'
 # speed: gen + check on the fixtures (the numbers in the README are measured with `time` on the 4 h fixture)
+# gen --check runs on a COPY of the golden tree (as tests/gen.sh does): in place its "# contract:" header line names a
+# different path than the committed one, so it is red ([gen-edited]) inside a Git worktree. Both exits are asserted
+# before the time is judged: a run that failed fast is not a fast run.
+rm -rf "${work:?}/speed"
+cp -R "$fx/gen/good" "$work/speed"
+chmod -R u+w "$work/speed"
 start=$(date +%s%N)
-run gen --check --dir "$fx/gen/good/observability" --lang go
+run gen --check --dir "$work/speed/observability" --lang go
+gen_rc=$rc
+cp "$work/out.txt" "$work/gen-out.txt"
 run check --dir "$fx/good/observability"
+check_rc=$rc
 ms=$((($(date +%s%N) - start) / 1000000))
-[ "$ms" -lt 3000 ] && ok "check: gen --check + check on the fixtures took ${ms} ms (limit 3000 ms here; measured under 1 s on a laptop)" || bad "check: gen + check took ${ms} ms"
+if [ "$gen_rc" -ne 0 ]; then
+  bad "check: gen --check exited $gen_rc on the golden copy, so its time says nothing"
+  sed 's/^/  | /' "$work/gen-out.txt" | head -10
+elif [ "$check_rc" -ne 0 ]; then
+  bad "check: check exited $check_rc on the good fixture, so its time says nothing"
+  sed 's/^/  | /' "$work/out.txt" | head -10
+elif [ "$ms" -lt 3000 ]; then
+  ok "check: gen --check (exit 0) + check (exit 0) on the fixtures took ${ms} ms (limit 3000 ms here; measured under 1 s on a laptop)"
+else
+  bad "check: gen + check took ${ms} ms"
+fi
 
 # ---- obs test: green ---------------------------------------------------------------------------------------
 run test --dir "$fx/test/good/observability" --base "$base"
@@ -213,5 +232,74 @@ rm -rf "${work:?}/nothing/observability/alerts" "${work:?}/nothing/observability
 sed -i '/incidents: \[spike\]/d' "$work/nothing/observability/seed.yaml"
 run test --dir "$work/nothing/observability" --base "$base"
 verdict "test: no alerts and no incidents has nothing to catch: green" expect 0 'obs test: incidents: ok: 0 incidents, 0 caught, 0 uncaught' 'obs test: ok'
+# ---- fix round: an unreadable contract, an empty expectation, a late resolve, links, disturbances ------------------
+fresh loop
+rm "$work/loop/observability/contract.yaml"
+ln -s contract.yaml "$work/loop/observability/contract.yaml"
+run check --dir "$work/loop/observability"
+verdict "check: a contract.yaml that cannot be read (symlink loop) is exit 2, not 'limits not checked'" expect 2 'obs check:' 'too many levels of symbolic links'
+verdict "check: ... and never the absent-file note" absent 'limits (series per metric, log streams) not checked'
+fresh empty
+cat >"$work/empty/observability/incidents/empty.yaml" <<'YAML'
+{
+  story: A disturbance nobody asserts on,
+  window: { start: 25m, duration: 5m },
+  change: [{ metric: fixture.requests, where: { outcome: error }, rate: 0.1/s }],
+  expect: {},
+}
+YAML
+sed -i 's/incidents: \[spike\]/incidents: [spike, empty]/' "$work/empty/observability/seed.yaml"
+run test --dir "$work/empty/observability" --base "$base"
+verdict "test: an incident with an empty expectation is [incident-uncaught] (exit 1), not an input error" expect 1 'FAIL incidents/empty.yaml incident empty window [25m0s,30m0s): [incident-uncaught]' 'obs test: alerts: ok:' 'obs test: incidents: FAILED: 2 incidents, 1 caught, 1 uncaught'
+run alerts --dir "$work/empty/observability" --base "$base"
+verdict "alerts: the same file is still an input error for obs alerts (its validation is unchanged)" expect 2 'expect needs fire or quiet alert IDs'
+fresh late
+sed -i 's/for: 1m,/for: 1m, keepFiringFor: 20m,/' "$work/late/observability/alerts/metric/critical.yaml"
+run test --dir "$work/late/observability" --base "$base"
+verdict "test: an alert that resolves late keeps its reason in the uncaught line" expect 1 '[incident-uncaught] no alert passed its fire expectation: metric (fired at +' 'firing outside window'
+fresh spans
+cat >"$work/spans/observability/contract.yaml" <<'YAML'
+{
+  service: fixture,
+  types: { outcome: { kind: enum, values: [ok, error] } },
+  metrics: { fixture.requests: { kind: counter, budget: 2, labels: { outcome: outcome } } },
+  spans: { fixture.charge: { attributes: { outcome: outcome } } },
+}
+YAML
+run links --dir "$work/spans/observability" --base "$base"
+verdict "links: premise, a contract that declares spans and a seed without traces is red under obs links" expect 1 '[seed] no traces in seed.traces'
+run test --dir "$work/spans/observability" --base "$base"
+verdict "test: ... and red under obs test too (links is not skipped when the contract declares spans)" expect 1 '[seed] no traces in seed.traces' 'obs test: links: FAILED:'
+fresh quietinc
+cat >"$work/quietinc/observability/incidents/blip.yaml" <<'YAML'
+{
+  story: A trickle the alerts must ignore,
+  window: { start: 25m, duration: 5m },
+  change: [{ metric: fixture.requests, where: { outcome: error }, rate: 0.01/s }],
+  expect: { quiet: [metric], fire_within: 5m, resolve_within: 5m },
+}
+YAML
+sed -i 's/incidents: \[spike\]/incidents: [spike, blip]/' "$work/quietinc/observability/seed.yaml"
+run test --dir "$work/quietinc/observability" --base "$base"
+verdict "test: a quiet-only incident without a disturbance marker stays red" expect 1 'FAIL incidents/blip.yaml incident blip window [25m0s,30m0s): [incident-uncaught] expect.fire is empty'
+sed -i 's/^}$/  disturbance: "proves the error alert ignores a trickle",\n}/' "$work/quietinc/observability/incidents/blip.yaml"
+run test --dir "$work/quietinc/observability" --base "$base"
+verdict "test: ... with disturbance: <reason> it is a note and obs test is green" expect 0 'note: [disturbance] incidents/blip.yaml blip: proves the error alert ignores a trickle' 'obs test: incidents: ok: 2 incidents, 1 caught, 0 uncaught, 1 disturbance(s)' 'obs test: ok'
+sed -i 's/disturbance: "proves the error alert ignores a trickle"/disturbance: ""/' "$work/quietinc/observability/incidents/blip.yaml"
+run test --dir "$work/quietinc/observability" --base "$base"
+verdict "test: an empty disturbance reason is an error naming file and line" expect 2 'incidents/blip.yaml:6: disturbance needs a non-empty reason'
+# the speed-table fixtures: their quiet-only incidents carry a reason, so the incidents part is green on them (4 h seed).
+# n1 is green as a whole. t1 (a trace set made to time TraceQL alerts) has traces with no logs and no profile, so its links
+# part is red by construction; the line below asserts the incidents part only.
+for set in n1 t1; do
+  rm -rf "${work:?}/speed-$set"
+  cp -R "$fx/alerts-speed/$set" "$work/speed-$set"
+  chmod -R u+w "$work/speed-$set"
+  cp "$work/speed-$set/seed.4h.yaml" "$work/speed-$set/seed.yaml"
+  run test --dir "$work/speed-$set" --base "$base"
+  want=0
+  [ "$set" = t1 ] && want=1
+  verdict "test: alerts-speed/$set (4 h seed): no [incident-uncaught], its quiet-only incidents are noted as disturbances" expect "$want" 'note: [disturbance] incidents/adyen-declines.yaml adyen-declines:' 'note: [disturbance] incidents/checkout-slow.yaml checkout-slow:' 'obs test: incidents: ok: 3 incidents, 1 caught, 0 uncaught, 2 disturbance(s)' 'obs test: alerts: ok:'
+done
 echo "obs check/test tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

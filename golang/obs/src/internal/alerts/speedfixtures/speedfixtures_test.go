@@ -11,6 +11,7 @@ import (
 	"github.com/AtomiCloud/obs/internal/check"
 	"github.com/AtomiCloud/obs/internal/files"
 	"github.com/AtomiCloud/obs/internal/seed"
+	"gopkg.in/yaml.v3"
 )
 
 func TestSetsLoad(t *testing.T) {
@@ -190,5 +191,69 @@ func TestNoRealLandscapeAnywhere(t *testing.T) {
 		if strings.Contains(strings.ToLower(string(b)), bad) {
 			t.Errorf("%s names the real landscape %q", readmePath, bad)
 		}
+	}
+}
+
+// An incident that no alert of its set is expected to fire for is a deliberate non-incident disturbance
+// (it proves the alerts stay quiet): `obs test` needs the marker, with a reason, to leave it out of
+// [incident-uncaught]. An incident with an alert in expect.fire must not carry it.
+func TestQuietOnlyIncidentsCarryADisturbanceReason(t *testing.T) {
+	sets := map[string]map[string]string{}
+	for _, n := range Sizes {
+		sets["n"+itoa(n)] = Incidents(n)
+	}
+	for _, n := range []int{1, 20} {
+		sets["t"+itoa(n)] = TraceIncidents(n)
+	}
+	quietOnly := 0
+	for set, incs := range sets {
+		for name, body := range incs {
+			marked := strings.Contains(body, "\ndisturbance: ")
+			if strings.Contains(body, "  fire: []\n") {
+				quietOnly++
+				if !marked {
+					t.Errorf("%s/%s has no alert in expect.fire and no disturbance reason", set, name)
+				}
+			} else if marked {
+				t.Errorf("%s/%s has an alert in expect.fire and still carries a disturbance reason", set, name)
+			}
+		}
+	}
+	if quietOnly == 0 {
+		t.Fatal("no quiet-only incident found: the fixture shape changed")
+	}
+}
+
+// The checked-in fixtures (tests/fixtures/alerts-speed): the same rule, read from the files `obs test` reads.
+func TestCheckedInQuietOnlyIncidentsCarryADisturbanceReason(t *testing.T) {
+	const checkedIn = "../../../../tests/fixtures/alerts-speed"
+	if _, err := os.Stat(checkedIn); err != nil {
+		t.Skip("a build from src/ alone has no tests/ folder")
+	}
+	files, _ := filepath.Glob(filepath.Join(checkedIn, "*", "incidents", "*.yaml"))
+	if len(files) == 0 {
+		t.Fatal("found no checked-in incident files")
+	}
+	quietOnly := 0
+	for _, p := range files {
+		b, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var inc seed.Incident
+		if err := yaml.Unmarshal(b, &inc); err != nil {
+			t.Fatalf("%s: %v", p, err)
+		}
+		if len(inc.Expect.Fire) == 0 {
+			quietOnly++
+			if strings.TrimSpace(inc.Disturbance) == "" {
+				t.Errorf("%s: no alert in expect.fire and no disturbance reason", p)
+			}
+		} else if inc.Disturbance != "" {
+			t.Errorf("%s: an alert is in expect.fire and the file still carries a disturbance reason", p)
+		}
+	}
+	if quietOnly == 0 {
+		t.Fatal("no quiet-only incident among the checked-in files: the fixture shape changed")
 	}
 }

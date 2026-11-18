@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -58,7 +59,16 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 	var c *contract.Contract
 	contractFails := 0 // contract problems printed above (the queries half does not print them twice)
 	contractPath := ""
-	noContract := !fileExists(filepath.Join(*dir, "contract.yaml"))
+	// Skip the limits only for an ABSENT contract. A contract that exists but cannot be read (a symlink loop,
+	// a permission error) stops the run with exit 2, as obs 0.4 did.
+	noContract := false
+	if _, serr := os.Stat(filepath.Join(*dir, "contract.yaml")); serr != nil {
+		if !os.IsNotExist(serr) {
+			fmt.Fprintf(stderr, "obs check: %v\n", serr)
+			return 2
+		}
+		noContract = true
+	}
 	if noContract {
 		// Nothing to measure: the limits half is skipped, the queries half still runs (it reads no contract names then).
 		fmt.Fprintf(stdout, "note: %s/contract.yaml not found: limits (series per metric, log streams) not checked\n", *dir)

@@ -84,3 +84,39 @@ func TestNoIncidentsIsVacuouslyGreen(t *testing.T) {
 		t.Fatalf("got %+v", got)
 	}
 }
+
+// A late resolve: the alert fired inside the window, then kept firing past resolve_within. The verdict
+// fails with that reason; the uncaught line keeps it and must not say the alert never fired.
+func TestLateResolveKeepsTheFailedCondition(t *testing.T) {
+	incs := []seed.Incident{incident("spike", "10m", "10m", []string{"metric"}, nil)}
+	vs := []alerts.Verdict{{Run: "spike", Alert: "metric", Expect: "fire", Pass: false,
+		Why: "fired at +12m0s, firing 28 min; firing outside window [10m0s,25m0s) at +25m0s; incident [10m0s,20m0s), fire_within=10m0s"}}
+	got := Uncaught(incs, vs, false)
+	if len(got) != 1 {
+		t.Fatalf("got %+v", got)
+	}
+	r := got[0].Reason
+	for _, want := range []string{"no alert passed its fire expectation", "metric (fired at +12m0s, firing 28 min; firing outside window [10m0s,25m0s) at +25m0s)"} {
+		if !strings.Contains(r, want) {
+			t.Errorf("reason %q lacks %q", r, want)
+		}
+	}
+	if strings.Contains(r, "fired inside the window") {
+		t.Errorf("reason %q says the alert did not fire inside the window", r)
+	}
+}
+
+func TestDisturbanceIsNotUncaught(t *testing.T) {
+	reason := "proves the alerts stay quiet"
+	quiet := incident("blip", "10m", "5m", nil, []string{"metric"})
+	quiet.Disturbance = reason
+	incs := []seed.Incident{quiet, incident("spike", "20m", "5m", nil, []string{"metric"})}
+	got := Uncaught(incs, nil, false)
+	if len(got) != 1 || got[0].Incident != "spike" {
+		t.Fatalf("only the unmarked incident is uncaught: %+v", got)
+	}
+	notes := Disturbances(incs)
+	if len(notes) != 1 || notes[0].Line() != "note: [disturbance] incidents/blip.yaml blip: "+reason {
+		t.Fatalf("notes %+v", notes)
+	}
+}
