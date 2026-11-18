@@ -6,8 +6,11 @@ import (
 )
 
 // Own is the contract without the entries somebody else makes: no source: metric, no estimate
-// type. The code generators and the aggregation file only ever see this view, so obs gen makes
-// no type for a source: entry. The hash and the file stay the contract's. The original is not changed.
+// type and no type only source: metrics use (its values are what a scraper happens to send, an
+// empty one included, and would become names in code). A type an own metric, a log stream label or
+// a span attribute uses stays, and so does a type nobody uses. The code generators and the
+// aggregation file only ever see this view, so obs gen makes no type for a source: entry. The hash
+// and the file stay the contract's. The original is not changed.
 func (c *Contract) Own() *Contract {
 	o := *c
 	o.Metrics = map[string]Metric{}
@@ -20,8 +23,9 @@ func (c *Contract) Own() *Contract {
 	}
 	o.Types = map[string]Type{}
 	o.TypeOrder = nil
+	sourceOnly := c.sourceOnlyTypes()
 	for _, n := range c.TypeOrder {
-		if t := c.Types[n]; t.Kind != KindEstimate {
+		if t := c.Types[n]; t.Kind != KindEstimate && !sourceOnly[n] {
 			o.Types[n] = t
 			o.TypeOrder = append(o.TypeOrder, n)
 		}
@@ -52,18 +56,24 @@ func (c *Contract) KeepNames() []string {
 	return out
 }
 
-// platformStored is the stored names of a platform metric. OTel names every duration metric in
-// seconds and as a histogram (http.server.request.duration), so that one is exact. For any other
-// platform metric the kind is not in the contract, so every name the metric can be stored under is
-// listed: a name kept that nobody sends costs nothing, a name dropped loses data.
+// platformUnits are the unit words a platform metric may carry in its stored name: none, seconds
+// (OTel durations), bytes, ratio (unit 1 gauges such as process.cpu.utilization) and milliseconds
+// (old-semconv durations such as http.server.duration, which are in ms).
+var platformUnits = []string{"", "_seconds", "_bytes", "_ratio", "_milliseconds"}
+
+// platformStored is every stored name a platform metric may have. The kind and unit of a platform
+// metric are not in the contract, so this is a SUPERSET, not a prediction: for each unit in
+// platformUnits (a key ending in _duration: only seconds and milliseconds), added unless the key
+// already ends in it, the plain name, _total and the histogram parts _bucket, _sum and _count. A name kept that nobody sends costs nothing, a name
+// dropped loses data. Keep-list, name lookup and the clash check all read this one list.
 func platformStored(key string) []string {
 	base := StoredBase(key)
+	units := platformUnits
 	if strings.HasSuffix(base, "_duration") {
-		base += "_seconds"
-		return []string{base + "_bucket", base + "_count", base + "_sum"}
+		units = []string{"", "_seconds", "_milliseconds"} // a duration is in time, never bytes or a ratio
 	}
 	var out []string
-	for _, unit := range []string{"", "_seconds", "_bytes"} {
+	for _, unit := range units {
 		b := base
 		if unit != "" && !strings.HasSuffix(b, unit) {
 			b += unit

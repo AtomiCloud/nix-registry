@@ -50,7 +50,7 @@ func (c *Contract) Validate() []Issue {
 
 	// A type only source: metrics use may list an empty value: a scraped label really is empty
 	// (a pod with no priority class). An own type may not, it becomes a name in generated code.
-	ownUse := c.ownTypeUse()
+	sourceOnly := c.sourceOnlyTypes()
 
 	// ---- types
 	for _, n := range c.TypeOrder {
@@ -66,7 +66,7 @@ func (c *Contract) Validate() []Issue {
 			}
 			seen := map[string]bool{}
 			for _, v := range t.Values {
-				if v == "" && ownUse[n] {
+				if v == "" && !sourceOnly[n] {
 					add(p, "enum-value", "enum %q has an empty value", n)
 				}
 				if seen[v] {
@@ -408,12 +408,30 @@ func (c *Contract) ownTypeUse() map[string]bool {
 	return use
 }
 
-// at is "file:line", or just the file when the line is unknown.
+// sourceOnlyTypes is the types a source: metric uses and nothing of ours does (no own metric, log
+// stream label or span attribute). obs gen makes no type for them, so only these may list an empty value.
+func (c *Contract) sourceOnlyTypes() map[string]bool {
+	own := c.ownTypeUse()
+	out := map[string]bool{}
+	for _, m := range c.Metrics {
+		if !m.IsSource() {
+			continue
+		}
+		for _, t := range m.Labels {
+			if t != "" && !own[t] {
+				out[t] = true
+			}
+		}
+	}
+	return out
+}
+
+// at is "file:line", or just the file when the line is unknown. The file is relative to the Git root.
 func (c *Contract) at(line int) string {
 	if line <= 0 {
-		return c.File
+		return c.Rel()
 	}
-	return fmt.Sprintf("%s:%d", c.File, line)
+	return fmt.Sprintf("%s:%d", c.Rel(), line)
 }
 
 // followsProblem says why label l of m can not follow its target ("" when it can).
@@ -484,37 +502,57 @@ func (c *Contract) StreamCount(landscapes int) int64 {
 // StoredBase is the name VictoriaMetrics stores for a metric before the kind suffix: dots become _.
 func StoredBase(name string) string { return strings.ReplaceAll(name, ".", "_") }
 
-// StoredNames returns the series names a metric is stored under (concept 11.2): counters get
-// _total, a unit adds its suffix, histograms store _bucket, _sum and _count.
+// StoredNames returns the series names a metric is stored under (concept 11.2) when production
+// stores OTLP metrics through vminsert with -opentelemetry.convertMetricNamesToPrometheus (names
+// only; label names keep their dots; NOT -opentelemetry.usePrometheusNaming, which also rewrites
+// label names). The name is VictoriaMetrics v1.156.0's own conversion, mirrored from
+// lib/protoparser/opentelemetry/stream/sanitize.go: the name is split into tokens at / _ . - : and
+// space (empty tokens are dropped, so a double underscore collapses), the unit word is appended
+// unless it already is a token anywhere in the name, a counter's "total" token is moved to the end
+// (or appended), and a histogram stores _bucket, _sum and _count. TestStoredNamesEqualVictoriaMetricsConversion
+// feeds OTLP through VictoriaMetrics' own converter and asserts equality for every kind and unit.
 func StoredNames(name string, m Metric) []string {
-	base := StoredBase(name)
 	if m.IsSource() {
 		// A source name is the stored name already (it was scraped, not converted from OTel): a counter
 		// keeps the name it has, a histogram has its three parts.
+		base := StoredBase(name)
 		if m.Kind == MetricHistogram {
 			return []string{base + "_bucket", base + "_sum", base + "_count"}
 		}
 		return []string{base}
 	}
-	switch m.Unit {
-	case "":
-	case "s", "seconds":
-		if !strings.HasSuffix(base, "_seconds") {
-			base += "_seconds"
-		}
-	case "By", "bytes":
-		if !strings.HasSuffix(base, "_bytes") {
-			base += "_bytes"
-		}
-	}
-	switch m.Kind {
-	case MetricCounter:
-		if strings.HasSuffix(base, "_total") {
-			return []string{base}
-		}
-		return []string{base + "_total"}
-	case MetricHistogram:
+	base := vmMetricName(name, m.Unit, m.Kind == MetricCounter)
+	if m.Kind == MetricHistogram {
 		return []string{base + "_bucket", base + "_sum", base + "_count"}
 	}
 	return []string{base}
+}
+
+// vmMetricName is sanitizePrometheusMetricName of VictoriaMetrics for the units a contract allows
+// (none, s or seconds, By or bytes; the same words as the OTel unit names it maps them to).
+func vmMetricName(name, unit string, counter bool) string {
+	var toks []string
+	for _, t := range strings.FieldsFunc(name, func(r rune) bool { return strings.ContainsRune("/_.-: ", r) }) {
+		toks = append(toks, t)
+	}
+	word := ""
+	switch unit {
+	case "s", "seconds":
+		word = "seconds"
+	case "By", "bytes":
+		word = "bytes"
+	}
+	if word != "" && !in(toks, word) {
+		toks = append(toks, word)
+	}
+	if counter {
+		for i, t := range toks {
+			if t == "total" {
+				toks = append(toks[:i], toks[i+1:]...)
+				break
+			}
+		}
+		toks = append(toks, "total")
+	}
+	return strings.Join(toks, "_")
 }

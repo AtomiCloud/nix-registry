@@ -331,7 +331,9 @@ metrics:
 
 - **`source:`** names who makes the metric. The metric name is the **stored** name: a counter or gauge
   keeps its name as written (no `_total` or unit suffix is added), a histogram is stored as `_bucket`,
-  `_sum` and `_count`. `unit:` is not used for a `source:` entry. The gauge rule (`across_pods` or `per_pod`)
+  `_sum` and `_count`. `unit:` is not used for a `source:` entry. Declare a scraped metric as `counter`,
+  `gauge` or `histogram` only: there is no `summary` kind, so a scraped summary is declared as the gauges
+  its `_sum` and `_count` series are (each its own entry). The gauge rule (`across_pods` or `per_pod`)
   and the pod-key rules (`contract-pod-label`, `pod-label-on-business-metric`) do not apply to it, since
   it keeps its pod keys. `free` on a label is still refused.
 - **`estimate`** is a label type with `min`, `max` and `churn_per_day` (all three required). It is allowed
@@ -348,14 +350,20 @@ metrics:
 - **`used_by: [..]`** says who uses the metric (`hub/alert/<name>`, `hub/dash/<name>`). A metric is allowed when
   it is in the contract, within its budget, and says who uses it. `obs check` prints it. A `source:` entry with
   no `used_by` is a **warning** (`WARN ... [used-by-missing]`, exit stays 0): the owner's decision text asks for
-  "say who uses it" without saying a missing one must fail, so it does not.
+  "say who uses it" without saying a missing one must fail, so it does not. The warning is only for `source:`
+  entries: an own metric is named by its own service (its `service:` and the generated code), so it needs no `used_by`.
 - An enum type used only by `source:` entries may list the empty string (a pod with no priority class
   has an empty label); a type an own metric uses may not.
 
 **Several contracts in one repository.** `obs check` and `obs query` read **every** `observability/contract.yaml`
 below the Git root, not only `--dir`'s: a dashboard in `apps/hub/observability` may read a metric that
-`apps/cluster/observability/contract.yaml` declares. `obs check` validates and prints each. A stored series name
-that two contracts both declare is `[metric-clash]` and names both files and lines. `obs query` merges the
+`apps/cluster/observability/contract.yaml` declares. `obs check` validates and prints each. One table of **stored**
+series names decides ownership: a metric (ours or a `source:` one) against a metric of another contract, and a
+platform metric's possible stored names (unit and histogram variants, see the keep-list) against a metric of another
+contract, are `[metric-clash]` and name both files (relative to the Git root) and lines. A `platform_metrics` entry that
+several contracts list is **not** a clash (every service lists `http.server.request.duration`): the lookup merges their
+label lists. Two contracts may name the same `service:`; their types stay apart (the lookup names a type by its
+contract file). `obs query` merges the
 others' metrics and platform metrics into the lookup (each keeps its own types); logs, spans and versions
 stay the `--dir` contract's. Contracts in a `fixtures` or `testdata` folder are never read as company, and
 a folder in one never looks for company; outside a Git repository only `--dir`'s contract is read.
@@ -533,19 +541,34 @@ metrics:
   - kube_pod_info
 ```
 
-- The names are the **stored** VictoriaMetrics names, after the OTel to Prometheus name change: dots become `_`, a
-  `seconds`/`bytes` unit adds its suffix, a counter ends in `_total`, a histogram is `_bucket`, `_sum` and `_count`. A `source:` entry's name is
-  already the stored name (see above).
+- The names are the **stored** VictoriaMetrics names of our metrics, as production stores them: OTLP goes through vminsert with
+  `-opentelemetry.convertMetricNamesToPrometheus` (metric **names** only; label names keep their dots). obs's stored names match
+  that flag, **not** `-opentelemetry.usePrometheusNaming` (which also rewrites label names, so the dotted labels
+  `durian.cloud.service` would become `durian_cloud_service`) and not the OTel collector's translator. The rule (VictoriaMetrics
+  v1.156.0, `lib/protoparser/opentelemetry/stream/sanitize.go`): the name is split at `/ _ . - :` and space (empty parts are
+  dropped, so `__` collapses), the unit word (`seconds` for `s`/`seconds`, `bytes` for `By`/`bytes`) is appended **unless it already
+  is a part of the name anywhere**, a counter's `total` part is moved to the end (or appended), and a histogram is stored as
+  `_bucket`, `_sum` and `_count`. So `a.total.b` as a counter is `a_b_total`, and `requests_total` as a counter with unit `s` is
+  `requests_seconds_total`. **MEASURED:** `TestStoredNamesEqualVictoriaMetricsConversion` feeds real OTLP protobuf through
+  VictoriaMetrics' own converter (the pinned module, flag on) and asserts the stored names equal obs's for every kind (counter, gauge,
+  histogram) and every unit a contract allows, over the fixture contract's names and names built to trip a hand-written rule
+  (a unit or `total` inside the name, `__`, `_total` plus a unit); a new VictoriaMetrics pin that changes the rule fails it. Because
+  obs mirrors the converter there is no name obs refuses for its stored form. A `source:` entry's name is already the stored name (see above).
 - **Included:** our metrics, every `source:` entry (the generators skip its types, not its keep line) and `platform_metrics`.
-  A platform metric's kind is not in the contract: a key ending in `.duration` is the OTel seconds histogram
-  (three names, exact); for any other platform key every name it can be stored under is listed (`_total`,
-  `_seconds`, `_bytes`, `_bucket`, `_sum`, `_count`), because a name kept that nobody sends costs nothing and a name
-  dropped loses data.
+  A platform metric's kind and unit are not in the contract, so its names are a **superset, not exact**: for every key the plain
+  name, `_total`, `_bucket`, `_count` and `_sum`, each also with the unit variants `_seconds`, `_bytes`, `_ratio` (a unit `1` gauge such as
+  `process_cpu_utilization_ratio`) and `_milliseconds` (old-semconv durations: `http.server.duration` in ms is
+  `http_server_duration_milliseconds_*`). A key ending in `.duration` gets only the time variants (plain, `_seconds`, `_milliseconds`),
+  so `http.server.request.duration` lists `http_server_request_duration_seconds_bucket`, `_sum`, `_count` among them. A name
+  kept that nobody sends costs nothing, and a name dropped loses data. NOT TESTED: the superset against the names a real
+  platform emits.
 - Sorted, one per line, plain names (no regex, no dots). An empty contract writes `metrics: []`.
 - `obs gen --check` reports it like the other generated files: `[gen-missing]`, `[gen-edited]` (the hash matches, the lines do not) and
   `[gen-stale]` (the contract changed). The golden file is `tests/fixtures/gen/ok-source-cluster/observability/contract/keep.yaml`,
   generated from a copy of the platform's cluster draft (32 `source:` entries) with made-up consumer names; it also pins that
   `obs gen` skips every one of them.
+- **Upgrading:** after this release, `obs gen --check` fails `[gen-missing] contract/keep.yaml` in every folder with a contract until
+  `obs gen` has been run once (the keep-list is a new generated file); commit the file it writes.
 - The always-kept names (`up`, `scrape_*`), collecting every `apps/*/observability/contract/keep.yaml` and the vminsert relabel rule are the platform's; see *Not tested*.
 
 **Each language compiles and runs against a stub written from the goal; NOT TESTED against the real library.**
@@ -2046,6 +2069,7 @@ source) where its section says so.
 
 **Source entries and the keep-list**
 
+- **A running vminsert with `-opentelemetry.convertMetricNamesToPrometheus`.** The stored-name parity test runs VictoriaMetrics' own OTLP parser and converter (the pinned module, the flag set) in-process; it does not start a vminsert or store anything. Not tested: names through the real write path, and the platform-metric name superset against what a real platform emits.
 - **The platform renderer and the write-door keep rule.** The renderer that collects every `contract/keep.yaml`, adds `up` and `scrape_*`, and turns the names into the vminsert `-relabelConfig` `keep` action lives in the platform repository and is not run here. Not tested: that a collector with this rule drops exactly the undeclared names, and that nothing the contracts need is lost on any of the three paths (cluster Alloy, host Alloy, OTLP).
 - **Platform metric names other than `*.duration`.** The stored names of such a metric are not in the contract, so all names it may have are kept; which one the store really holds was not measured on a running store.
 - **A `source:` counter or gauge name is assumed to be the stored name.** Checked against the cluster draft's names and VictoriaMetrics' scrape path (names are stored as scraped); a source that reaches the store through OTLP (dotted name, unit suffix) would need the stored name written out.

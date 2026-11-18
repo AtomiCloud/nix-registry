@@ -76,9 +76,21 @@ func TestKeepFileFormat(t *testing.T) {
 		"  - checkout_charge_duration_seconds_count\n" +
 		"  - checkout_charge_duration_seconds_sum\n" +
 		"  - checkout_charges_total\n" +
+		"  - http_server_request_duration\n" +
+		"  - http_server_request_duration_bucket\n" +
+		"  - http_server_request_duration_count\n" +
+		"  - http_server_request_duration_milliseconds\n" +
+		"  - http_server_request_duration_milliseconds_bucket\n" +
+		"  - http_server_request_duration_milliseconds_count\n" +
+		"  - http_server_request_duration_milliseconds_sum\n" +
+		"  - http_server_request_duration_milliseconds_total\n" +
+		"  - http_server_request_duration_seconds\n" +
 		"  - http_server_request_duration_seconds_bucket\n" +
 		"  - http_server_request_duration_seconds_count\n" +
 		"  - http_server_request_duration_seconds_sum\n" +
+		"  - http_server_request_duration_seconds_total\n" +
+		"  - http_server_request_duration_sum\n" +
+		"  - http_server_request_duration_total\n" +
 		"  - kube_pod_info\n"
 	if keep != want {
 		t.Fatalf("keep.yaml:\n%s\nwant:\n%s", keep, want)
@@ -194,5 +206,66 @@ func TestKeepGoldenFromClusterDraft(t *testing.T) {
 	// every entry has a source, so the generators see nothing
 	if own := c.Own(); len(own.MetricOrder) != 0 {
 		t.Fatalf("own metrics: %v", own.MetricOrder)
+	}
+}
+
+// A source: entry whose enum has an empty value (” for a pod with no priority class) must not reach any
+// generator: Go once failed with "declared twice" on it, and every language would name the type.
+func TestGenSkipsSourceOnlyEnumWithEmptyValue(t *testing.T) {
+	const doc = `service: s
+types:
+  priority_class: { kind: enum, values: ['', system-critical, batch] }
+  lane: { kind: enum, values: [a, b] }
+generate:
+  - { lang: go, out: gen/go/signals, package: signals }
+  - { lang: dotnet, out: gen/dotnet/Signals, namespace: S.Signals }
+  - { lang: dart, out: gen/dart/lib/src/signals, package: s_signals }
+  - { lang: bun, out: gen/bun/src/signals }
+metrics:
+  checkout.charges:
+    kind: counter
+    budget: 2
+    labels: { lane: lane }
+  kube_pod_info:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 6
+    used_by: [hub/dash/pods]
+    labels: { priority_class: priority_class }
+`
+	dir := t.TempDir()
+	obs := filepath.Join(dir, "observability")
+	if err := os.MkdirAll(obs, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(obs, "contract.yaml")
+	if err := os.WriteFile(p, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := contract.LoadValid(p)
+	if err != nil {
+		t.Fatalf("source-only enum with an empty value refused: %v", err)
+	}
+	outs, err := gen.Plan(c, obs, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	langs := map[string]bool{}
+	for _, o := range outs {
+		if o.Lang == "" {
+			continue
+		}
+		langs[o.Lang] = true
+		low := strings.ToLower(string(o.Content))
+		for _, bad := range []string{"priority", "system-critical", "kube_pod_info"} {
+			if strings.Contains(low, bad) {
+				t.Errorf("%s (%s): generated code names the source-only type (%s)", o.Path, o.Lang, bad)
+			}
+		}
+	}
+	for _, l := range []string{"go", "dotnet", "dart", "bun"} {
+		if !langs[l] {
+			t.Errorf("no output for %s", l)
+		}
 	}
 }

@@ -39,12 +39,12 @@ func loadContract(o *Options) (c *contract.Contract, problems []string) {
 	for _, p := range contract.Discover(o.Dir) {
 		oc, err := contract.Load(p)
 		if err != nil {
-			problems = append(problems, err.Error())
+			problems = append(problems, strings.ReplaceAll(err.Error(), p, contract.RelPath(p)))
 			continue
 		}
 		if is := oc.Validate(); len(is) > 0 {
 			for _, i := range is {
-				problems = append(problems, p+": "+i.String())
+				problems = append(problems, oc.Rel()+": "+i.String())
 			}
 			continue
 		}

@@ -291,3 +291,59 @@ func TestEmptyEnumValueOnlyForSourceTypes(t *testing.T) {
 		t.Fatalf("empty value on an own type accepted: %v", parse(t, own).Validate())
 	}
 }
+
+// A type only a source: entry uses is not generated: its empty value (” as in a pod with no priority class)
+// would become a name in code, and nobody asked for the type.
+func TestOwnDropsSourceOnlyTypesKeepsSharedOnes(t *testing.T) {
+	doc := `service: s
+types:
+  prio: { kind: enum, values: ['', high] }
+  lane: { kind: enum, values: [a, b] }
+  shared: { kind: enum, values: [x, y] }
+  unused: { kind: enum, values: [u, v] }
+metrics:
+  scraped:
+    source: ksm
+    kind: gauge
+    budget: 8
+    labels: { prio: prio, lane: lane, shared: shared }
+  mine:
+    kind: counter
+    budget: 2
+    labels: { lane: lane }
+spans:
+  mine.span:
+    attributes: { shared: shared }
+`
+	c := parse(t, doc)
+	if is := c.Validate(); len(is) != 0 {
+		t.Fatalf("valid contract refused: %v", is)
+	}
+	o := c.Own()
+	if _, ok := o.Types["prio"]; ok {
+		t.Fatalf("own keeps the source-only type prio: %v", o.TypeOrder)
+	}
+	for _, keep := range []string{"lane", "shared", "unused"} {
+		if _, ok := o.Types[keep]; !ok {
+			t.Errorf("own lost type %s: %v", keep, o.TypeOrder)
+		}
+	}
+	for _, n := range o.TypeOrder {
+		if n == "prio" {
+			t.Fatalf("TypeOrder keeps prio: %v", o.TypeOrder)
+		}
+	}
+	if _, ok := c.Types["prio"]; !ok {
+		t.Fatal("Own changed the original")
+	}
+	// an unused type may not list an empty value: it is generated
+	un := strings.Replace(doc, "unused: { kind: enum, values: [u, v] }", "unused: { kind: enum, values: ['', v] }", 1)
+	if !hasRule(parse(t, un).Validate(), "enum-value", "unused") {
+		t.Fatalf("empty value on an unused type accepted: %v", parse(t, un).Validate())
+	}
+	// a type a source: entry and an own metric both use may not list one
+	both := strings.Replace(doc, "values: [x, y]", "values: ['', y]", 1)
+	if !hasRule(parse(t, both).Validate(), "enum-value", "shared") {
+		t.Fatalf("empty value on a shared type accepted: %v", parse(t, both).Validate())
+	}
+}

@@ -75,8 +75,12 @@ func gitRoot(dir string) string {
 	}
 }
 
-// Clashes finds a stored series name two contracts both declare (or a platform metric both list).
-// Each issue names both files and lines.
+// Clashes finds a stored series name that two contracts both own, in one table of stored names:
+// a metric (ours or a source: one) against a metric of another contract, and a platform metric's
+// possible stored names (histogram parts and unit variants included) against a metric of another
+// contract. Platform metrics listed by several contracts are NOT a clash: every service lists
+// http.server.request.duration, and Merge joins their label lists. Each issue names both files
+// (relative to the Git root) and lines.
 func Clashes(cs []*Contract) []Issue {
 	type owner struct {
 		c    *Contract
@@ -97,12 +101,15 @@ func Clashes(cs []*Contract) []Issue {
 				}
 			}
 		}
+	}
+	for _, c := range cs {
 		for _, k := range c.platformKeys() {
-			key := "platform:" + StoredBase(k)
-			if prev, dup := seen[key]; dup && prev.c != c {
-				out = append(out, Issue{"platform_metrics." + k, "metric-clash", fmt.Sprintf("platform metric %q (%s) is also listed in %s", k, c.File, prev.c.File)})
-			} else if !dup {
-				seen[key] = owner{c, k, 0}
+			told := map[*Contract]bool{}
+			for _, s := range platformStored(k) {
+				if prev, dup := seen[s]; dup && prev.c != c && !told[prev.c] {
+					told[prev.c] = true
+					out = append(out, Issue{"platform_metrics." + k, "metric-clash", fmt.Sprintf("platform metric %q (%s) and metric %q (%s) are both stored as the series %q: a series has one contract", k, c.at(0), prev.name, prev.c.at(prev.line), s)})
+				}
 			}
 		}
 	}
@@ -110,9 +117,10 @@ func Clashes(cs []*Contract) []Issue {
 }
 
 // Merge is one contract for name lookups: the primary, plus every metric and platform metric of the
-// others (with the types those metrics need, renamed "<service>/<type>" so two contracts' types
-// never meet). Logs, spans, versions and the hash stay the primary's. Neither input is changed.
-// The result is a lookup view: it is not validated and not generated from.
+// others (with the types those metrics need, renamed "<contract file>/<type>" so two contracts' types
+// never meet, even when both name the same service). A platform metric several contracts list gets the
+// union of their labels. Logs, spans, versions and the hash stay the primary's. Neither input is
+// changed. The result is a lookup view: it is not validated and not generated from.
 func Merge(primary *Contract, others []*Contract) *Contract {
 	m := *primary
 	m.Metrics = copyMap(primary.Metrics)
@@ -120,6 +128,10 @@ func Merge(primary *Contract, others []*Contract) *Contract {
 	m.Types = copyMap(primary.Types)
 	m.Platform = copyMap(primary.Platform)
 	for _, o := range others {
+		ns := o.File
+		if ns == "" {
+			ns = o.Service
+		}
 		for _, n := range o.MetricOrder {
 			if _, taken := m.Metrics[n]; taken {
 				continue // a clash is Clashes' to report
@@ -131,7 +143,7 @@ func Merge(primary *Contract, others []*Contract) *Contract {
 					labels[l] = ""
 					continue
 				}
-				q := o.Service + "/" + t
+				q := ns + "/" + t
 				m.Types[q] = o.Types[t]
 				labels[l] = q
 			}
@@ -140,12 +152,21 @@ func Merge(primary *Contract, others []*Contract) *Contract {
 			m.MetricOrder = append(m.MetricOrder, n)
 		}
 		for k, ls := range o.Platform {
-			if _, taken := m.Platform[k]; !taken {
-				m.Platform[k] = ls
-			}
+			m.Platform[k] = union(m.Platform[k], ls)
 		}
 	}
 	return &m
+}
+
+// union is a followed by the entries of b that a lacks; a and b are not changed.
+func union(a, b []string) []string {
+	out := append([]string(nil), a...)
+	for _, x := range b {
+		if !in(out, x) {
+			out = append(out, x)
+		}
+	}
+	return out
 }
 
 func copyMap[K comparable, V any](in map[K]V) map[K]V {

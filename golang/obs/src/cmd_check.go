@@ -51,13 +51,13 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		for _, p := range contract.Discover(*dir) {
 			oc, err := contract.Load(p)
 			if err != nil {
-				fmt.Fprintf(stdout, "FAIL %v\n", err)
+				fmt.Fprintf(stdout, "FAIL %s\n", strings.ReplaceAll(err.Error(), p, contract.RelPath(p)))
 				otherFails++
 				continue
 			}
 			if is := oc.Validate(); len(is) > 0 {
 				for _, i := range is {
-					fmt.Fprintf(stdout, "FAIL %s %s\n", p, i)
+					fmt.Fprintf(stdout, "FAIL %s %s\n", oc.Rel(), i)
 				}
 				otherFails += len(is)
 				continue

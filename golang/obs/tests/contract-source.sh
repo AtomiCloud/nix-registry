@@ -8,7 +8,7 @@ OBS=$1
 here="$(cd "$(dirname "$0")" && pwd)"
 fx="$here/fixtures"
 work="$(mktemp -d)"
-trap 'rm -rf "$work"' EXIT
+trap 'rm -rf "${work:?}"' EXIT
 run() {
   set +e
   "$OBS" "$@" >"$work/out" 2>&1
@@ -150,12 +150,12 @@ metrics:
       pod: pod
 YAML
 run check --dir "$work/own/observability"
-expect 1 "FAIL $work/own/observability/contract.yaml metrics.own.things.labels.pod: [estimate-not-source]" "$work/own/observability/contract.yaml:9:" 'label "pod"'
+expect 1 "FAIL $work/own/observability/contract.yaml metrics.own.things.labels.pod: [estimate-not-source]" "observability/contract.yaml:9:" 'label "pod"'
 echo "PASS contract-source: an estimate on an entry with no source is red and names file:line, the metric and the label"
 # follows a label that is not there
 plant f1 's/uid: { follows: pod }/uid: { follows: podd }/'
 run check --dir "$work/f1/observability"
-expect 1 '[follows]' '"podd"' "$work/f1/observability/contract.yaml:"
+expect 1 '[follows]' '"podd"' "observability/contract.yaml:"
 echo "PASS contract-source: follows a missing label is red and names the label"
 # over budget uses the estimate max
 plant b1 's/^    budget: 110$/    budget: 109/'
@@ -218,3 +218,26 @@ expect 1 '[metric-clash]' 'apps/hub/observability/contract.yaml' 'apps/cluster/o
 run query --static --dir "$work/repo/apps/hub/observability"
 expect 1 '[metric-clash]' 'apps/cluster/observability/contract.yaml'
 echo "PASS contract-source: a stored name two contracts declare is red and names both files"
+absent "$work/repo/apps/cluster"
+echo "PASS contract-source: the clash message names files relative to the Git root, never an absolute path (the other contract)"
+# a platform metric listed by both contracts is shared, not a clash
+cat >"$work/repo/apps/hub/observability/contract.yaml" <<'YAML'
+service: hub
+platform_metrics:
+  http.server.request.duration: [http.route]
+YAML
+printf '\nplatform_metrics:\n  http.server.request.duration: [http.request.method]\n' >>"$work/repo/apps/cluster/observability/contract.yaml"
+run check --dir "$work/repo/apps/hub/observability"
+expect 0 'obs check: ok'
+absent '[metric-clash]'
+echo "PASS contract-source: a platform metric two contracts list is shared, not a clash"
+# a platform metric against a source: entry of another contract (a stored name both would write)
+cat >"$work/repo/apps/hub/observability/contract.yaml" <<'YAML'
+service: hub
+platform_metrics:
+  kube.pod.status.phase: [phase]
+YAML
+run check --dir "$work/repo/apps/hub/observability"
+expect 1 '[metric-clash]' 'apps/hub/observability/contract.yaml' 'apps/cluster/observability/contract.yaml' 'kube_pod_status_phase'
+absent "$work/repo/apps/cluster"
+echo "PASS contract-source: a platform metric against another contract's source: entry is red and names both files"
