@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -238,6 +239,128 @@ func TestParseWindow(t *testing.T) {
 	for _, bad := range []string{"2026-11-10", "x..y", "2026-11-11..2026-11-10"} {
 		if _, err := ParseWindow(bad, now); err == nil || !strings.Contains(err.Error(), bad) {
 			t.Errorf("%q: %v", bad, err)
+		}
+	}
+}
+
+type stateChange struct {
+	uid, name, prev, next string
+	at                    time.Time
+}
+
+// grafanaHistory answers /api/annotations like Grafana does: only the entries between the from
+// and to the request names (milliseconds), so a test sees what a window read really returns.
+func grafanaHistory(t *testing.T, rec *recorder, all []stateChange) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec.record(r)
+		if r.URL.Path != "/api/annotations" {
+			http.Error(w, "unexpected "+r.URL.Path, 500)
+			return
+		}
+		from, _ := strconv.ParseInt(r.URL.Query().Get("from"), 10, 64)
+		to, _ := strconv.ParseInt(r.URL.Query().Get("to"), 10, 64)
+		var parts []string
+		for _, c := range all {
+			if ms := c.at.UnixMilli(); ms >= from && ms <= to {
+				parts = append(parts, ann(c.uid, c.name, c.prev, c.next, c.at))
+			}
+		}
+		w.Write([]byte("[" + strings.Join(parts, ",") + "]"))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestIncidentsAlertFiringBeforeTheWindowThatClearsInsideIsReported(t *testing.T) {
+	// The window's first transition is Alerting -> Normal. Starting the state at "not firing"
+	// reported zero overlapping alerts for an alert that was firing for the first 10 minutes.
+	dir := writeRepo(t)
+	rec := &recorder{}
+	now := t0.Add(time.Hour)
+	srv := grafanaHistory(t, rec, []stateChange{
+		{"high-errors", "High error rate", "Normal", "Alerting", t0},                       // before the window
+		{"high-errors", "High error rate", "Alerting", "Normal", t0.Add(30 * time.Minute)}, // inside it
+	})
+	res, err := Incidents(context.Background(), &Client{}, &Target{Name: "prod", Grafana: srv.URL}, IncidentOptions{Dir: dir, Since: 40 * time.Minute, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Fired) != 1 || res.Fired[0].ID != "high-errors" {
+		t.Fatalf("an alert that cleared inside the window was firing in it: %+v", res.Fired)
+	}
+	f := res.Fired[0]
+	if !f.StartedBeforeWindow || f.Firings != 1 || !f.First.Equal(now.Add(-40*time.Minute)) || f.Longest != 10*time.Minute {
+		t.Fatalf("first span runs from the window start (t0+20m) to the clear (t0+30m): %+v", f)
+	}
+	var sb strings.Builder
+	res.Print(&sb)
+	if !strings.Contains(sb.String(), "already firing when the window began") {
+		t.Fatalf("text:\n%s", sb.String())
+	}
+	assertReadOnly(t, rec)
+}
+
+func TestIncidentsAlertStillFiringAtTheWindowStartWithNoChangeInsideIsReported(t *testing.T) {
+	dir := writeRepo(t)
+	rec := &recorder{}
+	now := t0.Add(2 * time.Hour)
+	srv := grafanaHistory(t, rec, []stateChange{{"slow-charges", "Slow charges", "Normal", "Alerting", t0}})
+	res, err := Incidents(context.Background(), &Client{}, &Target{Name: "prod", Grafana: srv.URL}, IncidentOptions{Dir: dir, Since: time.Hour, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Fired) != 1 || res.Fired[0].ID != "slow-charges" || res.Fired[0].Longest != time.Hour || !res.Fired[0].StartedBeforeWindow {
+		t.Fatalf("firing the whole window, from before it began: %+v", res.Fired)
+	}
+	// an alert that cleared before the window began is not in it
+	srv2 := grafanaHistory(t, rec, []stateChange{
+		{"slow-charges", "Slow charges", "Normal", "Alerting", t0.Add(-2 * time.Hour)},
+		{"slow-charges", "Slow charges", "Alerting", "Normal", t0.Add(-time.Hour)},
+	})
+	res, err = Incidents(context.Background(), &Client{}, &Target{Name: "prod", Grafana: srv2.URL}, IncidentOptions{Dir: dir, Since: time.Hour, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Fired) != 0 {
+		t.Fatalf("over before the window: %+v", res.Fired)
+	}
+}
+
+func TestIncidentsFirstEntryNormalWithPreviousAlertingNeedsNoEarlierHistory(t *testing.T) {
+	// Grafana's own retention may hold no entry before the window: prevState says it was firing.
+	dir := writeRepo(t)
+	rec := &recorder{}
+	now := t0.Add(time.Hour)
+	srv := grafanaHistory(t, rec, []stateChange{{"high-errors", "High error rate", "Alerting", "Normal", t0.Add(40 * time.Minute)}})
+	res, err := Incidents(context.Background(), &Client{}, &Target{Name: "prod", Grafana: srv.URL}, IncidentOptions{Dir: dir, Since: 30 * time.Minute, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Fired) != 1 || res.Fired[0].Longest != 10*time.Minute || !res.Fired[0].StartedBeforeWindow {
+		t.Fatalf("%+v", res.Fired)
+	}
+}
+
+func TestIncidentsNamedWindowSeesAnAlertThatClearsInsideIt(t *testing.T) {
+	dir := writeRepo(t)
+	rec := &recorder{}
+	now := t0.Add(48 * time.Hour)
+	srv := grafanaHistory(t, rec, []stateChange{
+		{"high-errors", "High error rate", "Normal", "Alerting", t0},
+		{"high-errors", "High error rate", "Alerting", "Normal", t0.Add(30 * time.Minute)},
+	})
+	w := Window{From: t0.Add(15 * time.Minute), To: t0.Add(45 * time.Minute)}
+	res, err := Incidents(context.Background(), &Client{}, &Target{Name: "prod", Grafana: srv.URL}, IncidentOptions{Dir: dir, Since: time.Hour, Windows: []Window{w}, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Windows) != 1 || len(res.Windows[0].Fired) != 1 || res.Windows[0].Fired[0] != "high-errors" {
+		t.Fatalf("the named window holds the end of that firing: %+v", res.Windows)
+	}
+	for _, m := range res.IncidentNotAlerted {
+		if m.Window != nil {
+			t.Fatalf("an alert did fire in the window: %+v", m)
 		}
 	}
 }

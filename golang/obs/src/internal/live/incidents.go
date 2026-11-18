@@ -40,7 +40,9 @@ type FiredAlert struct {
 	InRepo   bool          `json:"in_repo"`
 	Runbook  string        `json:"runbook_url,omitempty"`
 	Incident string        `json:"incident,omitempty"`
-	spans    []interval
+	// StartedBeforeWindow: the alert was already firing when the window began; First is the window start.
+	StartedBeforeWindow bool `json:"started_before_window,omitempty"`
+	spans               []interval
 }
 
 // Missed is an incident (a file, or a window the user named) that no alert caught.
@@ -90,43 +92,78 @@ type annotation struct {
 
 func alerting(s string) bool { return strings.HasPrefix(strings.ToLower(s), "alerting") }
 
-// fromAnnotations reads Grafana's alert state history: one entry per state change.
+// stateLookback is how far before the window the state history is read, so the state AT the
+// window start is known: an alert that began firing before the window and is still firing, or
+// clears inside it, is an alert that was firing in the window.
+const stateLookback = 7 * 24 * time.Hour
+
+// fromAnnotations reads Grafana's alert state history (one entry per state change) from
+// stateLookback before the window to its end, rebuilds when each alert was alerting, and keeps
+// what overlaps from..to. An alert already firing at from has its first span start at from.
 func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Time) (map[string]*FiredAlert, error) {
-	q := url.Values{"type": {"alert"}, "from": {strconv.FormatInt(from.UnixMilli(), 10)}, "to": {strconv.FormatInt(to.UnixMilli(), 10)}, "limit": {"10000"}}
+	readFrom := from.Add(-stateLookback)
+	q := url.Values{"type": {"alert"}, "from": {strconv.FormatInt(readFrom.UnixMilli(), 10)}, "to": {strconv.FormatInt(to.UnixMilli(), 10)}, "limit": {"10000"}}
 	var all []annotation
 	if err := c.GetJSON(ctx, t.Grafana, "/api/annotations", q, &all); err != nil {
 		return nil, err
 	}
 	sort.SliceStable(all, func(i, j int) bool { return all[i].Time < all[j].Time })
-	out := map[string]*FiredAlert{}
+	spans := map[string][]interval{}
+	titles := map[string]string{}
 	open := map[string]*interval{}
 	for _, a := range all {
 		key := a.AlertUID
 		if key == "" {
 			key = a.AlertName
 		}
-		f := out[key]
+		if titles[key] == "" {
+			titles[key] = a.AlertName
+		}
 		at := time.UnixMilli(a.Time).UTC()
+		if open[key] == nil && alerting(a.PrevState) && !alerting(a.NewState) {
+			// the history starts after the alert began firing: it was already alerting when the read began
+			open[key] = &interval{From: readFrom}
+		}
 		switch {
 		case alerting(a.NewState) && open[key] == nil:
-			if f == nil {
-				f = &FiredAlert{ID: key, Title: a.AlertName, First: at}
-				out[key] = f
-			}
-			f.Firings++
-			f.Last = at
 			open[key] = &interval{From: at}
 		case !alerting(a.NewState) && open[key] != nil:
 			iv := open[key]
 			iv.To = at
-			out[key].spans = append(out[key].spans, *iv)
+			spans[key] = append(spans[key], *iv)
 			open[key] = nil
 		}
 	}
 	for key, iv := range open {
 		if iv != nil {
 			iv.To = to
-			out[key].spans = append(out[key].spans, *iv)
+			spans[key] = append(spans[key], *iv)
+		}
+	}
+	out := map[string]*FiredAlert{}
+	for key, ss := range spans {
+		for _, iv := range ss {
+			if !iv.To.After(from) || !iv.From.Before(to) {
+				continue // over before the window began, or after it ended
+			}
+			f := out[key]
+			if f == nil {
+				f = &FiredAlert{ID: key, Title: titles[key]}
+				out[key] = f
+			}
+			if iv.From.Before(from) {
+				f.StartedBeforeWindow = true
+				iv.From = from
+			}
+			if iv.To.After(to) {
+				iv.To = to
+			}
+			f.Firings++
+			if f.First.IsZero() || iv.From.Before(f.First) {
+				f.First = iv.From
+			}
+			f.Last = iv.From
+			f.spans = append(f.spans, iv)
 		}
 	}
 	return out, nil
@@ -385,7 +422,11 @@ func (r *IncidentsResult) Print(w io.Writer) {
 		if !f.InRepo {
 			repo = " [not a rule in this repo]"
 		}
-		fmt.Fprintf(w, "  %s: %d firing(s), first %s, longest %s%s\n", f.ID, f.Firings, f.First.Format(time.RFC3339), f.Longest.Round(time.Second), repo)
+		early := ""
+		if f.StartedBeforeWindow {
+			early = " (already firing when the window began; first is the window start)"
+		}
+		fmt.Fprintf(w, "  %s: %d firing(s), first %s, longest %s in the window%s%s\n", f.ID, f.Firings, f.First.Format(time.RFC3339), f.Longest.Round(time.Second), early, repo)
 	}
 	for _, wr := range r.Windows {
 		fmt.Fprintf(w, "  window %s..%s: fired %v\n", wr.Window.From.Format(time.RFC3339), wr.Window.To.Format(time.RFC3339), wr.Fired)
