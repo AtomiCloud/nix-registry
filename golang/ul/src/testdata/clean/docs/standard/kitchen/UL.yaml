@@ -1,0 +1,25 @@
+namespace: example.org/cooking/kitchen
+premise: Made-up example for tests; the tools of a kitchen
+language:
+  Frying pan:
+    aliases: [Fry pan, Flat Pan]
+    desc: A flat pan for frying food on a hob.
+    details: |
+      A frying pan is **flat** and **shallow**.
+
+      Heat it on the hob; it never goes in the Oven.
+    avoid: [griddle]
+    see: [Oven, Wok]
+  Oven:
+    desc: A closed box that cooks food with dry heat.
+    details: |
+      An oven bakes or roasts; set the heat before the food goes in.
+    see: [Frying pan]
+  Wok:
+    aliases: [Round Pan]
+    desc: A deep pan for stirring food over high heat.
+    details: Use it in place of a Flat Pan when the oven is full.
+  Skillet:
+    desc: Old name in this book for a Frying pan.
+    status: retired
+    replacedBy: Frying pan

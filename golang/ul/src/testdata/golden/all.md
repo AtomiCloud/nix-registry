@@ -1,42 +1,42 @@
 # Ubiquitous language
 
-## OOP
+## kitchen
 
-durian.cloud > engineering > standards > OOP
+example.org > cooking > kitchen
 
-When writing code, best practice when using object-oriented programming
+Made-up example for tests; the tools of a kitchen
 
 | Word | Means | Also called | See |
 |---|---|---|---|
-| OCP | Add behaviour by adding a plugin, not by editing shared code. | Open-Close Principle, Plugin Design | Plugin, SRP |
-| Plugin | One part added to the core through one seam. |  | OCP |
-| SRP | A module has one reason to change. | Single Responsibility |  |
+| Frying pan | A flat pan for frying food on a hob. | Fry pan, Flat Pan | Oven, Wok |
+| Oven | A closed box that cooks food with dry heat. |  | Frying pan |
+| Wok | A deep pan for stirring food over high heat. | Round Pan |  |
 
 Retired words:
 
 | Word | Replaced by |
 |---|---|
-| Facade | Plugin |
+| Skillet | Frying pan |
 
-## billing
+## pastry
 
-durian.cloud > shop > billing
+example.org > cooking > pastry
 
-Money owed by a customer, from the first charge to the last receipt
-
-| Word | Means | Also called | See |
-|---|---|---|---|
-| Charge | One amount added to an invoice. |  | Invoice |
-| Invoice | The bill sent to a customer for a period. |  | Charge, durian.cloud/engineering/standards/OOP#OCP |
-| Plugin | A payment method that the billing context can take money with. | Payment Plugin |  |
-
-## pay
-
-durian.cloud > shop > billing > pay
-
-The card payment plugin of billing
+Made-up example for tests; a bakery, from the dough to the loaf
 
 | Word | Means | Also called | See |
 |---|---|---|---|
-| Receipt | Proof that a Charge was paid. |  | durian.cloud/shop/billing#Charge |
-| Settle | Move the money of one Invoice from the card to the shop. |  | durian.cloud/shop/billing#Invoice |
+| Crust | The hard outside of a loaf. |  | Loaf |
+| Loaf | Bread baked in one piece. |  | Crust, example.org/cooking/kitchen#Oven |
+| Oven | The big oven of the bakery, used for bread only. | Deck Oven |  |
+
+## bread
+
+example.org > cooking > pastry > bread
+
+Made-up example for tests; the bread recipes of the bakery
+
+| Word | Means | Also called | See |
+|---|---|---|---|
+| Rise | Let one Loaf grow before it is baked. |  | example.org/cooking/pastry#Loaf |
+| Score | A cut that lets the Crust open. |  | example.org/cooking/pastry#Crust |

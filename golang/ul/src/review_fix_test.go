@@ -30,7 +30,7 @@ func TestOutputWriteErrorsExit2(t *testing.T) {
 	// each gen case gets its own folder with a missing UL.md: a gen that writes it fixes the drift
 	drifted := func() string {
 		d := fixture(t, "clean")
-		if err := os.Remove(filepath.Join(d, "plugins/pay/UL.md")); err != nil {
+		if err := os.Remove(filepath.Join(d, "recipes/bread/UL.md")); err != nil {
 			t.Fatal(err)
 		}
 		return d
@@ -43,11 +43,11 @@ func TestOutputWriteErrorsExit2(t *testing.T) {
 	}{
 		{"all json", clean, []string{"all"}, true},
 		{"all md", clean, []string{"all", "--format", "md"}, true},
-		{"lookup json", clean, []string{"lookup", "plugin", "--format", "json"}, true},
-		{"lookup text", clean, []string{"lookup", "plugin"}, true},
-		{"lookup md", clean, []string{"lookup", "plugin", "--format", "md"}, true},
+		{"lookup json", clean, []string{"lookup", "oven", "--format", "json"}, true},
+		{"lookup text", clean, []string{"lookup", "oven"}, true},
+		{"lookup md", clean, []string{"lookup", "oven", "--format", "md"}, true},
 		{"lookup no match", clean, []string{"lookup", "zzqqzz"}, false},
-		{"lookup no match, near", clean, []string{"lookup", "plugi"}, false},
+		{"lookup no match, near", clean, []string{"lookup", "ovn"}, false},
 		{"check text", bad, []string{"check"}, true},
 		{"check json", bad, []string{"check", "--format", "json"}, true},
 		{"gen refuses on problems", bad, []string{"gen"}, false},
@@ -135,9 +135,9 @@ func TestDoubleDashEndsFlags(t *testing.T) {
 	dir := fixture(t, "clean")
 	te := newEnv(t, dir)
 	for _, args := range [][]string{
-		{"lookup", "--", "plugin", "--format", "json"},
-		{"lookup", "plugin", "--", "--format", "json"},
-		{"lookup", "--", "plugin", "x"},
+		{"lookup", "--", "oven", "--format", "json"},
+		{"lookup", "oven", "--", "--format", "json"},
+		{"lookup", "--", "oven", "x"},
 		{"all", "--", "--details"},
 	} {
 		if code, _, errs := te.ul(append(args, "--root", dir)...); code != 2 || !strings.Contains(errs, "usage") && !strings.Contains(errs, "unexpected") {
@@ -148,15 +148,15 @@ func TestDoubleDashEndsFlags(t *testing.T) {
 	if code, _, errs := te.ul("lookup", "--root", dir, "--", "-nope"); code != 1 || strings.Contains(errs, "flag provided") {
 		t.Errorf("lookup -- -nope: exit %d, stderr %q; want 1 (not found)", code, errs)
 	}
-	if got := te.mustOK("lookup", "--format", "json", "--root", dir, "--", "plugin"); !strings.Contains(got, `"query": "plugin"`) {
+	if got := te.mustOK("lookup", "--format", "json", "--root", dir, "--", "oven"); !strings.Contains(got, `"query": "oven"`) {
 		t.Errorf("flags before --: %s", got)
 	}
-	if got := te.mustOK("lookup", "plugin", "--format", "json", "--root", dir); !strings.Contains(got, `"query": "plugin"`) {
+	if got := te.mustOK("lookup", "oven", "--format", "json", "--root", dir); !strings.Contains(got, `"query": "oven"`) {
 		t.Errorf("flags after the word: %s", got)
 	}
 	// A flag whose value is "--" does not end flag parsing.
-	if code, _, _ := te.ul("lookup", "--from", "--", "plugin", "--root", dir); code != 0 {
-		t.Errorf("--from -- plugin: exit %d, want 0", code)
+	if code, _, _ := te.ul("lookup", "--from", "--", "oven", "--root", dir); code != 0 {
+		t.Errorf("--from -- oven: exit %d, want 0", code)
 	}
 }
 

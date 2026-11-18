@@ -65,7 +65,7 @@ run query
 [ "$rc" -eq 2 ] && ok "query without --static/--live is a usage error" || bad "query without mode exit $rc"
 
 # ---- good fixtures: green ------------------------------------------------------------
-for f in good charlotte; do
+for f in good sample-app; do
   for mode in static live; do
     run query "--$mode" --dir "$fx/$f/observability" --base "$base"
     [ "$rc" -eq 0 ] && grep -q "obs query --$mode: ok:" "$work/out.txt" && ok "$f $mode exit 0" || bad "$f $mode exit $rc: $(cat "$work/out.txt")"
@@ -78,19 +78,50 @@ cp "$work/out.txt" "$work/live1.txt"
 run query --live --dir "$fx/good/observability" --base "$base" --names
 cmp -s "$work/live1.txt" "$work/out.txt" && ok "live output is identical on a second run" || bad "live output differs between runs"
 
-# Charlotte has no contract.yaml: the event rule is skipped with one note per log alert.
-run query --static --dir "$fx/charlotte/observability"
+# Sample-app has no contract.yaml: the event rule is skipped with one note per log alert.
+run query --static --dir "$fx/sample-app/observability"
 n=$(grep -c 'event rule skipped: no contract.yaml' "$work/out.txt" || true)
-[ "$n" -eq 1 ] && ok "charlotte: one 'event rule skipped' note for its one log alert" || bad "charlotte event notes: $n"
+[ "$n" -eq 1 ] && ok "sample-app: one 'event rule skipped' note for its one log alert" || bad "sample-app event notes: $n"
 # ... and the rule is switchable: forced on, the same alert (no event filter) fails.
-run query --static --dir "$fx/charlotte/observability" --event-rule on
+run query --static --dir "$fx/sample-app/observability" --event-rule on
 [ "$rc" -eq 1 ] && grep -q '\[logsql-alert-needs-event\]' "$work/out.txt" && ok "--event-rule on fails a log alert with no event filter" || bad "--event-rule on: rc=$rc"
 run query --static --dir "$fx/bad-event-missing/observability" --event-rule off
 [ "$rc" -eq 0 ] && ok "--event-rule off passes the contract-present fixture" || bad "--event-rule off: rc=$rc"
 
-# The charlotte live run must really read the seed: the crash alert's rows come from the seeded panic line.
-run query --live --dir "$fx/charlotte/observability" --base "$base"
-grep -q "pod-crashloop.*threshold-removed" "$work/out.txt" && ok "charlotte: the threshold in the metrics alert is run without its comparison" || bad "threshold note missing"
+# The sample-app live run must really read the seed: the crash alert's rows come from the seeded panic line.
+run query --live --dir "$fx/sample-app/observability" --base "$base"
+grep -q "pod-crashloop.*threshold-removed" "$work/out.txt" && ok "sample-app: the threshold in the metrics alert is run without its comparison" || bad "threshold note missing"
+
+# --live treats a log alert's filter on a free-form field as `obs query --static` and `obs alerts` do: assumed true,
+# dropped, with the same note. A copy of fixtures/good whose alert also filters on user_tier (not in the seed).
+cp -R "$fx/good" "$work/assumed"
+chmod -R u+w "$work/assumed"
+sed -i 's/"durian.cloud\/event":="checkout.charge.failed" | stats/"durian.cloud\/event":="checkout.charge.failed" user_tier:=gold | stats/' "$work/assumed/observability/alerts/failed-logs/warning.yaml"
+grep -q 'user_tier:=gold' "$work/assumed/observability/alerts/failed-logs/warning.yaml" && ok "assumed-filter fixture planted (user_tier:=gold)" || bad "assumed-filter fixture not planted"
+for mode in static live; do
+  run query "--$mode" --dir "$work/assumed/observability" --base "$base"
+  [ "$rc" -eq 0 ] && grep -q 'assumed true (free-form fields): user_tier:=gold' "$work/out.txt" &&
+    ok "assumed filter: $mode exits 0 and prints the assumed-true note" || bad "assumed filter $mode: exit $rc: $(cat "$work/out.txt")"
+done
+# Red: with the event rule off nothing is assumed, the filter stays, and --live fails no-rows naming the field.
+run query --live --dir "$work/assumed/observability" --base "$base" --event-rule off
+[ "$rc" -eq 1 ] && grep -q '\[no-rows\].*user_tier' "$work/out.txt" && ok "assumed filter kept (--event-rule off): live fails no-rows naming user_tier" || bad "--event-rule off live: exit $rc: $(cat "$work/out.txt")"
+
+# --live does not fail an alert query over a recording rule's output; it names the rule and says obs alerts checks it.
+# A copy of the alerts features fixture with only the recording rule and the alert that reads its output.
+cp -R "$fx/alerts/features" "$work/rec"
+chmod -R u+w "$work/rec"
+for d in "$work/rec/alerts"/*; do
+  case "$(basename "$d")" in record-rule | recorded) ;; *) rm -rf "${d:?}" ;; esac
+done
+run query --live --dir "$work/rec" --base "$base"
+[ "$rc" -eq 0 ] && grep -q 'alerts/recorded/critical.yaml rule recorded query A: \[recording-rule\] reads recording rule fixture_recorded: checked by obs alerts' "$work/out.txt" &&
+  ok "recording-rule read: exit 0 and a named note (file, rule, recording rule)" || bad "recording-rule read: exit $rc: $(cat "$work/out.txt")"
+# Red: without the recording rule the metric is just missing from the seed, and --live fails no-rows naming it.
+rm -rf "${work:?}/rec/alerts/record-rule"
+run query --live --dir "$work/rec" --base "$base"
+[ "$rc" -eq 1 ] && grep -q '\[no-rows\].*fixture_recorded' "$work/out.txt" && ! grep -q 'recording-rule' "$work/out.txt" &&
+  ok "recording-rule read: a metric no rule records still fails no-rows" || bad "unrecorded metric live: exit $rc: $(cat "$work/out.txt")"
 
 # ---- planted failures: each red, naming file + rule/panel + the bad token ------------
 for d in "$fx"/bad-* "$fx"/ok-*; do

@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-const oopNS = "durian.cloud/engineering/standards/OOP"
+const kitchenNS = "example.org/cooking/kitchen"
 
 func (te *testEnv) lookupIDs(args ...string) []string {
 	te.t.Helper()
@@ -104,13 +104,13 @@ func TestLookupOrder(t *testing.T) {
 func TestLookupNotFound(t *testing.T) {
 	dir := fixture(t, "clean")
 	te := newEnv(t, dir)
-	code, out, errs := te.ul("lookup", "Plugn", "--root", dir)
-	if code != 1 || out != "" || !strings.Contains(errs, `no match for "Plugn"`) || !strings.Contains(errs, "near: Plugin") {
+	code, out, errs := te.ul("lookup", "Ovn", "--root", dir)
+	if code != 1 || out != "" || !strings.Contains(errs, `no match for "Ovn"`) || !strings.Contains(errs, "near: Oven") {
 		t.Fatalf("exit %d\nout: %s\nerr: %s", code, out, errs)
 	}
-	code, out, _ = te.ul("lookup", "Plugn", "--root", dir, "--format", "json")
+	code, out, _ = te.ul("lookup", "Ovn", "--root", dir, "--format", "json")
 	var res lookupResult
-	if code != 1 || json.Unmarshal([]byte(out), &res) != nil || res.Schema != "ul/v1" || res.Query != "Plugn" || len(res.Matches) != 0 || len(res.Near) != 2 {
+	if code != 1 || json.Unmarshal([]byte(out), &res) != nil || res.Schema != "ul/v1" || res.Query != "Ovn" || len(res.Matches) != 0 || len(res.Near) != 2 {
 		t.Fatalf("exit %d: %s", code, out)
 	}
 	if code, _, errs := te.ul("lookup", "zzzzzzzz", "--root", dir); code != 1 || strings.Contains(errs, "near:") {
@@ -120,8 +120,8 @@ func TestLookupNotFound(t *testing.T) {
 		t.Fatalf("lookup with no name: exit %d", code)
 	}
 	// Interspersed flags: the name may come first.
-	te.mustOK("lookup", "SRP", "--root", dir, "--format", "json")
-	if got := te.mustOK("lookup", "single responsibility", "--root", dir); !strings.HasPrefix(got, "SRP  (durian.cloud > engineering > standards > OOP)\n") {
+	te.mustOK("lookup", "Wok", "--root", dir, "--format", "json")
+	if got := te.mustOK("lookup", "round pan", "--root", dir); !strings.HasPrefix(got, "Wok  (example.org > cooking > kitchen)\n") {
 		t.Fatalf("alias lookup: %s", got)
 	}
 }
@@ -198,13 +198,13 @@ language:
 func TestMentionsInClean(t *testing.T) {
 	dir := fixture(t, "clean")
 	r := newEnv(t, dir).report("all", "--root", dir)
-	rec := findWord(t, r, "durian.cloud/shop/billing/pay#Receipt")
-	want := []string{oopNS + "#Plugin", "durian.cloud/shop/billing#Charge", "durian.cloud/shop/billing#Plugin"}
-	if strings.Join(rec.Mentions, " ") != strings.Join(want, " ") {
-		t.Errorf("Receipt mentions %v, want %v", rec.Mentions, want)
+	score := findWord(t, r, "example.org/cooking/pastry/bread#Score")
+	want := []string{kitchenNS + "#Oven", "example.org/cooking/pastry#Crust", "example.org/cooking/pastry#Oven"}
+	if strings.Join(score.Mentions, " ") != strings.Join(want, " ") {
+		t.Errorf("Score mentions %v, want %v", score.Mentions, want)
 	}
-	srp := findWord(t, r, oopNS+"#SRP")
-	if strings.Join(srp.Mentions, " ") != oopNS+"#OCP "+oopNS+"#Plugin" {
-		t.Errorf("an alias hit (Open-Close Principle) must mention OCP: %v", srp.Mentions)
+	wok := findWord(t, r, kitchenNS+"#Wok")
+	if strings.Join(wok.Mentions, " ") != kitchenNS+"#Frying pan "+kitchenNS+"#Oven" {
+		t.Errorf("an alias hit (Flat Pan) must mention Frying pan: %v", wok.Mentions)
 	}
 }

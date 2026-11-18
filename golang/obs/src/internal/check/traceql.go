@@ -118,7 +118,7 @@ func (l *liveRun) tracePanel(q *files.Query, expr string, start, end time.Time, 
 	// The dashboard is viewed at the end of the seed's time line, so that is the
 	// query-frontend's "now": its end cutoff, duration and interval limits apply as they
 	// do in Tempo (thresholds.traces in obs.yaml, --tempo-config over it).
-	resp, err := l.tempo.QueryRange(l.frontend, end, expr, start, end, step)
+	resp, err := l.tempo.QueryRange(l.frontend, l.end, expr, start, end, step)
 	if err != nil {
 		return false, fmt.Errorf("%w (Tempo query-frontend limits in force: thresholds.traces.query_end_cutoff %s, metrics_max_duration %s, metrics_max_intervals %d; set them in obs.yaml or with --tempo-config)",
 			err, l.frontend.QueryEndCutoff, l.frontend.MaxDuration, l.frontend.MaxIntervals)

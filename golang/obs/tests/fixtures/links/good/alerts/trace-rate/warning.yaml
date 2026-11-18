@@ -1,0 +1,25 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata:
+  name: payments-checkout-trace-rate-warning
+spec:
+  folderRef: payments-checkout-folder
+  interval: 1m
+  rules:
+    - uid: trace-rate-warning
+      title: Charge span rate high
+      condition: A
+      for: 5m
+      noDataState: OK
+      execErrState: Error
+      data:
+        - refId: A
+          relativeTimeRange: { from: 300, to: 0 }
+          datasourceUid: fixture-tempo
+          model:
+            datasource: { type: tempo, uid: fixture-tempo }
+            queryType: traceql
+            metricsQueryType: instant
+            query: '{ span.provider = "stripe" } | rate()'
+      labels: { severity: warning }
+      annotations: { summary: Charge span rate high }

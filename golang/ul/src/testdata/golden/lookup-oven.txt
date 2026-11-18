@@ -1,0 +1,9 @@
+Oven  (example.org > cooking > kitchen)
+  A closed box that cooks food with dry heat.
+  See: Frying pan
+
+  An oven bakes or roasts; set the heat before the food goes in.
+
+Oven  (example.org > cooking > pastry)
+  The big oven of the bakery, used for bread only.
+  Also called: Deck Oven

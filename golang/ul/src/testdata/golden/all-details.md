@@ -1,82 +1,82 @@
 # Ubiquitous language
 
-## OOP
+## kitchen
 
-durian.cloud > engineering > standards > OOP
+example.org > cooking > kitchen
 
-When writing code, best practice when using object-oriented programming
+Made-up example for tests; the tools of a kitchen
 
 | Word | Means | Also called | See |
 |---|---|---|---|
-| OCP | Add behaviour by adding a plugin, not by editing shared code. | Open-Close Principle, Plugin Design | Plugin, SRP |
-| Plugin | One part added to the core through one seam. |  | OCP |
-| SRP | A module has one reason to change. | Single Responsibility |  |
+| Frying pan | A flat pan for frying food on a hob. | Fry pan, Flat Pan | Oven, Wok |
+| Oven | A closed box that cooks food with dry heat. |  | Frying pan |
+| Wok | A deep pan for stirring food over high heat. | Round Pan |  |
 
 Retired words:
 
 | Word | Replaced by |
 |---|---|
-| Facade | Plugin |
+| Skillet | Frying pan |
 
-### OCP
+### Frying pan
 
-Code is **open** for extension and **closed** for edits.
+A frying pan is **flat** and **shallow**.
 
-Add a plugin that implements the seam; never rewrite another plugin's line.
+Heat it on the hob; it never goes in the Oven.
 
-Avoid: extension point
+Avoid: griddle
 
-### Plugin
+### Oven
 
-A plugin owns its own types and joins the core with one registration line.
+An oven bakes or roasts; set the heat before the food goes in.
 
-### SRP
+### Wok
 
-Pairs with the Open-Close Principle when a plugin grows.
+Use it in place of a Flat Pan when the oven is full.
 
-### Facade
+### Skillet
 
-Old name for the one entry object of a plugin.
+Old name in this book for a Frying pan.
 
-Retired. Use Plugin instead.
+Retired. Use Frying pan instead.
 
-## billing
+## pastry
 
-durian.cloud > shop > billing
+example.org > cooking > pastry
 
-Money owed by a customer, from the first charge to the last receipt
-
-| Word | Means | Also called | See |
-|---|---|---|---|
-| Charge | One amount added to an invoice. |  | Invoice |
-| Invoice | The bill sent to a customer for a period. |  | Charge, durian.cloud/engineering/standards/OOP#OCP |
-| Plugin | A payment method that the billing context can take money with. | Payment Plugin |  |
-
-### Charge
-
-### Invoice
-
-An invoice lists every Charge of the period.
-
-It is final once sent.
-
-Avoid: bill, statement
-
-### Plugin
-
-## pay
-
-durian.cloud > shop > billing > pay
-
-The card payment plugin of billing
+Made-up example for tests; a bakery, from the dough to the loaf
 
 | Word | Means | Also called | See |
 |---|---|---|---|
-| Receipt | Proof that a Charge was paid. |  | durian.cloud/shop/billing#Charge |
-| Settle | Move the money of one Invoice from the card to the shop. |  | durian.cloud/shop/billing#Invoice |
+| Crust | The hard outside of a loaf. |  | Loaf |
+| Loaf | Bread baked in one piece. |  | Crust, example.org/cooking/kitchen#Oven |
+| Oven | The big oven of the bakery, used for bread only. | Deck Oven |  |
 
-### Receipt
+### Crust
 
-Issued once; a Plugin never edits it.
+### Loaf
 
-### Settle
+A loaf has one Crust all round.
+
+It is done once it sounds hollow.
+
+Avoid: bun, roll
+
+### Oven
+
+## bread
+
+example.org > cooking > pastry > bread
+
+Made-up example for tests; the bread recipes of the bakery
+
+| Word | Means | Also called | See |
+|---|---|---|---|
+| Rise | Let one Loaf grow before it is baked. |  | example.org/cooking/pastry#Loaf |
+| Score | A cut that lets the Crust open. |  | example.org/cooking/pastry#Crust |
+
+### Rise
+
+### Score
+
+Made once; an Oven never makes it.

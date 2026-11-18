@@ -117,7 +117,7 @@ func TestPinsAreTheConceptVersions(t *testing.T) {
 }
 
 func TestProjectName(t *testing.T) {
-	for in, want := range map[string]string{"My Repo": "my-repo", "primordial": "primordial", "": "default", "A_b.c": "a-b-c", strings.Repeat("x", 50): strings.Repeat("x", 30)} {
+	for in, want := range map[string]string{"My Repo": "my-repo", "fixture-app": "fixture-app", "": "default", "A_b.c": "a-b-c", strings.Repeat("x", 50): strings.Repeat("x", 30)} {
 		if got := ProjectName(in); got != want {
 			t.Errorf("ProjectName(%q) = %q, want %q", in, got, want)
 		}

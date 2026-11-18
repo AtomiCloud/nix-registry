@@ -50,7 +50,7 @@ spec:
       condition: B
       data:
         - refId: A
-          datasourceUid: primordial-logs
+          datasourceUid: fixture-logs
           relativeTimeRange: {from: 60, to: 0}
           model: {expr: '"durian.cloud/event":="checkout.charge.failed" | stats count() n', queryType: stats}
         - refId: B

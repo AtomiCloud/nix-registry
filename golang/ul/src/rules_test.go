@@ -121,13 +121,13 @@ func TestGenRefusesWhileProblemsExist(t *testing.T) {
 func TestGenDriftAndRewrite(t *testing.T) {
 	dir := fixture(t, "clean")
 	te := newEnv(t, dir)
-	md := filepath.Join(dir, "docs/standard/oop/UL.md")
+	md := filepath.Join(dir, "docs/standard/kitchen/UL.md")
 	orig, _ := os.ReadFile(md)
 	if err := os.WriteFile(md, append(orig, []byte("drift\n")...), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	code, out, _ := te.ul("gen", "--check", "--root", dir)
-	if code != 1 || !strings.Contains(out, "docs/standard/oop/UL.md:1: UL301") {
+	if code != 1 || !strings.Contains(out, "docs/standard/kitchen/UL.md:1: UL301") {
 		t.Fatalf("gen --check exit %d: %s", code, out)
 	}
 	if code, out, _ := te.ul("check", "--root", dir); code != 1 || !strings.Contains(out, "UL301") {
@@ -150,11 +150,11 @@ func TestGenDriftAndRewrite(t *testing.T) {
 func TestGenIsDeterministic(t *testing.T) {
 	a, b := fixture(t, "clean"), fixture(t, "clean")
 	for _, d := range []string{a, b} {
-		os.Remove(filepath.Join(d, "plugins/pay/UL.md"))
+		os.Remove(filepath.Join(d, "recipes/bread/UL.md"))
 		newEnv(t, d).mustOK("gen", "--root", d)
 	}
-	x, _ := os.ReadFile(filepath.Join(a, "plugins/pay/UL.md"))
-	y, _ := os.ReadFile(filepath.Join(b, "plugins/pay/UL.md"))
+	x, _ := os.ReadFile(filepath.Join(a, "recipes/bread/UL.md"))
+	y, _ := os.ReadFile(filepath.Join(b, "recipes/bread/UL.md"))
 	if string(x) != string(y) || len(x) == 0 {
 		t.Fatal("same input must give the same bytes")
 	}
