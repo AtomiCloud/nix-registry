@@ -1,6 +1,7 @@
 package live
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AtomiCloud/obs/internal/assert"
 	"github.com/AtomiCloud/obs/internal/contract"
 )
 
@@ -28,7 +30,7 @@ const (
 type UsageOptions struct {
 	Window      time.Duration // how far back rates (data points, lines, spans) are measured
 	Pods        int           // a per_pod metric may hold worst case x Pods series
-	Unknown     string        // metric that is not in the contract: warn, fail or ignore
+	Unknown     string        // metric that is not in the contract: warn, fail (default) or ignore
 	Top         int           // keep only the N rows furthest from the contract (0: all)
 	OverOnly    bool          // keep only rows that are not ok
 	AllServices bool          // do not restrict to the contract's service
@@ -36,21 +38,45 @@ type UsageOptions struct {
 	Now         func() time.Time
 }
 
-// MetricRow is one contract metric (all its stored names together) on the target.
+// LandscapeUsage is what one landscape holds of a metric: the budget is per landscape, so every
+// comparison is made one landscape at a time.
+type LandscapeUsage struct {
+	Landscape string  `json:"landscape"`
+	Series    int64   `json:"active_series"`
+	DPM       float64 `json:"data_points_per_min"`
+}
+
+// MetricRow is one contract metric (all its stored names together) on the target. Series and DPM
+// are those of the fullest landscape.
 type MetricRow struct {
-	Metric  string   `json:"metric"`
-	Kind    string   `json:"kind,omitempty"`
-	Stored  []string `json:"stored_names"`
-	Series  int64    `json:"active_series"`
-	Worst   int64    `json:"worst_case"`
-	Budget  int      `json:"budget,omitempty"`
-	Limit   int64    `json:"limit"` // the budget when the contract has one, else the worst case
-	Ratio   float64  `json:"ratio_of_limit"`
-	DPM     float64  `json:"data_points_per_min"`
-	MaxDPM  float64  `json:"max_data_points_per_min"`
-	DPMOver bool     `json:"dpm_over"`
-	Status  Status   `json:"status"`
-	rank    int
+	Metric      string           `json:"metric"`
+	Kind        string           `json:"kind,omitempty"`
+	Stored      []string         `json:"stored_names"`
+	Landscapes  []LandscapeUsage `json:"landscapes,omitempty"`
+	Series      int64            `json:"active_series"`
+	Worst       int64            `json:"worst_case"`
+	Budget      int              `json:"budget,omitempty"`
+	Limit       int64            `json:"limit"` // the budget when the contract has one, else the worst case
+	SeriesRatio float64          `json:"ratio_of_limit"`
+	DPM         float64          `json:"data_points_per_min"`
+	WorstDPM    float64          `json:"worst_case_data_points_per_min"`
+	BudgetDPM   float64          `json:"budget_data_points_per_min,omitempty"`
+	LimitDPM    float64          `json:"limit_data_points_per_min"`
+	DPMRatio    float64          `json:"dpm_ratio_of_limit"`
+	Deviation   float64          `json:"deviation"` // the larger of the two ratios: how far from the contract
+	DPMOver     bool             `json:"dpm_over"`  // points/min above the worst case (the budget when it is over that too)
+	DPMNote     string           `json:"data_points_note,omitempty"`
+	Status      Status           `json:"status"`
+	Why         string           `json:"why,omitempty"`
+	rank        int
+}
+
+// Finding is one of assert's label checks (and its over-the-worst-case check) on the target.
+type Finding struct {
+	Level  string `json:"level"`
+	Metric string `json:"metric"`
+	Rule   string `json:"rule"`
+	Msg    string `json:"message"`
 }
 
 // LogsUsage is the log volume of the service on the target.
@@ -66,6 +92,7 @@ type LogsUsage struct {
 	BytesEstimate float64 `json:"bytes_estimate,omitempty"`
 	BytesRatio    float64 `json:"bytes_ratio,omitempty"`
 	StreamsOver   bool    `json:"streams_over"`
+	Compared      bool    `json:"compared_with_estimates"`
 }
 
 // TracesUsage is the span volume on the target.
@@ -92,6 +119,7 @@ type UsageResult struct {
 	Scope        string       `json:"scope"`
 	Pods         int          `json:"pods"`
 	Metrics      []MetricRow  `json:"metrics"`
+	Findings     []Finding    `json:"findings"`
 	Logs         *LogsUsage   `json:"logs"`
 	Traces       *TracesUsage `json:"traces"`
 	IsOverBudget bool         `json:"over_budget"`
@@ -99,12 +127,16 @@ type UsageResult struct {
 	TotalMetrics int          `json:"metrics_total"` // rows before --top and --over-only
 }
 
-// OverBudget is true when the command exits 1: some metric is over its budget (or an undeclared
-// metric with --unknown fail), or the log streams are over the worst case.
+// OverBudget is true when the command exits 1.
 func (r *UsageResult) OverBudget() bool { return r.IsOverBudget }
 
+// maxDPMNames bounds the per-name data point queries (one request per stored metric name).
+const maxDPMNames = 400
+
 // Usage reads active series and data points per minute per metric, log lines, bytes and streams
-// and span volume from the target and compares them with the contract.
+// and span volume from the target and compares them with the contract. The series are read once
+// (/api/v1/series) and counted by internal/assert, the code behind `obs assert`: per landscape,
+// with its label checks. Data points are read with one PromQL-compatible query per metric name.
 func Usage(ctx context.Context, c *Client, t *Target, ct *contract.Contract, o UsageOptions) (*UsageResult, error) {
 	if o.Now == nil {
 		o.Now = time.Now
@@ -116,10 +148,10 @@ func Usage(ctx context.Context, c *Client, t *Target, ct *contract.Contract, o U
 		o.Pods = 1
 	}
 	if o.Unknown == "" {
-		o.Unknown = "warn"
+		o.Unknown = "fail"
 	}
 	now := o.Now()
-	res := &UsageResult{Target: t.Name, Window: o.Window.String(), Pods: o.Pods}
+	res := &UsageResult{Target: t.Name, Window: o.Window.String(), Pods: o.Pods, Findings: []Finding{}}
 	scope := ""
 	if !o.AllServices && ct.Service != "" {
 		res.Service = ct.Service
@@ -129,21 +161,38 @@ func Usage(ctx context.Context, c *Client, t *Target, ct *contract.Contract, o U
 		res.Scope = "every series on the target"
 	}
 	sel := `{__name__=~".+"` + scope + `}`
-	win := fmt.Sprintf("%ds", int(o.Window.Seconds()))
 
-	ats, err := c.Instant(ctx, t.Metrics, "count by (__name__) ("+sel+")", now)
+	raw, err := c.Series(ctx, t.Metrics, sel, now.Add(-o.Window), now)
 	if err != nil {
 		return nil, fmt.Errorf("active series: %w", err)
 	}
-	mins := o.Window.Minutes()
-	dpm, err := c.Instant(ctx, t.Metrics, "sum by (__name__) (count_over_time("+sel+"["+win+"]) keep_metric_names)", now)
+	series, err := assert.ParseSeries("the target's /api/v1/series answer", bytes.NewReader(raw))
 	if err != nil {
-		return nil, fmt.Errorf("data points: %w", err)
+		// an empty answer is a valid "nothing stored"
+		if !strings.Contains(err.Error(), "empty") {
+			return nil, fmt.Errorf("active series: %w", err)
+		}
+		series = nil
 	}
-	res.Metrics = metricRows(ct, ats, dpm, mins, o)
+	chk := assert.Check(ct, series, assert.Options{Pods: o.Pods, Unknown: o.Unknown})
+
+	names := storedNames(series)
+	dpm, dpmErrs := dataPoints(ctx, c, t, names, scope, o.Window, now)
+	if len(names) > 0 && len(dpmErrs) == len(names) {
+		return nil, fmt.Errorf("data points: %s", firstErr(dpmErrs))
+	}
+	res.Metrics = metricRows(ct, series, chk, dpm, dpmErrs, o)
 	res.TotalMetrics = len(res.Metrics)
+	for _, f := range chk.Findings {
+		res.Findings = append(res.Findings, Finding{Level: f.Level.String(), Metric: f.Metric, Rule: f.Rule, Msg: f.Msg})
+		// Every failure assert would report (series over the worst case, a label outside the
+		// contract, a pod label on a non-per_pod metric, a value outside its type) fails here too.
+		if f.Level == assert.Fail {
+			res.IsOverBudget = true
+		}
+	}
 	for _, m := range res.Metrics {
-		if m.Status == StatusOverBudget || (m.Status == StatusNotInContract && o.Unknown == "fail") {
+		if m.Status == StatusOverBudget {
 			res.IsOverBudget = true
 		}
 	}
@@ -154,7 +203,7 @@ func Usage(ctx context.Context, c *Client, t *Target, ct *contract.Contract, o U
 	res.Traces = tracesUsage(ctx, c, t, ct, o, now, scope != "")
 	switch {
 	case res.IsOverBudget:
-		res.Reason = "over budget: exit 1"
+		res.Reason = "over budget or a contract hole found: exit 1"
 	default:
 		res.Reason = "nothing over budget: exit 0"
 	}
@@ -162,7 +211,66 @@ func Usage(ctx context.Context, c *Client, t *Target, ct *contract.Contract, o U
 	return res, nil
 }
 
-func metricRows(ct *contract.Contract, ats, dpm []Vec, mins float64, o UsageOptions) []MetricRow {
+func storedNames(series []assert.Series) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range series {
+		if !seen[s.Name] {
+			seen[s.Name] = true
+			out = append(out, s.Name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+func firstErr(m map[string]error) string {
+	var ks []string
+	for k := range m {
+		ks = append(ks, k)
+	}
+	sort.Strings(ks)
+	return ks[0] + ": " + m[ks[0]].Error()
+}
+
+const landscapeLabel = "durian.cloud.landscape"
+
+// dataPointsQuery is the data points a metric name stored in window w, per landscape. It is
+// written to parse in Prometheus and in VictoriaMetrics alike: count_over_time drops the metric
+// name in both, so the name goes into the selector (one query per name) and the grouping is by
+// the landscape label only. keep_metric_names is MetricsQL only and Prometheus rejects it.
+func dataPointsQuery(name, scope string, w time.Duration) string {
+	return fmt.Sprintf(`sum by (%s) (count_over_time({__name__=%s%s}[%ds]))`, strconv.Quote(landscapeLabel), strconv.Quote(name), scope, int(w.Seconds()))
+}
+
+// dataPoints reads, per stored name and landscape, the data points per minute. A name whose query
+// fails is returned in the error map and its row says so.
+func dataPoints(ctx context.Context, c *Client, t *Target, names []string, scope string, w time.Duration, now time.Time) (map[string]map[string]float64, map[string]error) {
+	out := map[string]map[string]float64{}
+	errs := map[string]error{}
+	mins := w.Minutes()
+	for i, n := range names {
+		if i >= maxDPMNames {
+			for _, rest := range names[i:] {
+				errs[rest] = fmt.Errorf("not read: more than %d metric names on the target", maxDPMNames)
+			}
+			break
+		}
+		vs, err := c.Instant(ctx, t.Metrics, dataPointsQuery(n, scope, w), now)
+		if err != nil {
+			errs[n] = err
+			continue
+		}
+		m := map[string]float64{}
+		for _, v := range vs {
+			m[v.Labels[landscapeLabel]] += v.V / mins
+		}
+		out[n] = m
+	}
+	return out, errs
+}
+
+func metricRows(ct *contract.Contract, series []assert.Series, chk *assert.Result, dpm map[string]map[string]float64, dpmErrs map[string]error, o UsageOptions) []MetricRow {
 	interval, err := time.ParseDuration(ct.EffectiveInterval())
 	if err != nil || interval <= 0 {
 		interval = 30 * time.Second
@@ -170,69 +278,131 @@ func metricRows(ct *contract.Contract, ats, dpm []Vec, mins float64, o UsageOpti
 	perMin := 60 / interval.Seconds()
 	rows := map[string]*MetricRow{}
 	var order []string
-	row := func(stored string) *MetricRow {
-		sm, ok := ct.Lookup(stored)
-		key, kind := stored, ""
-		if ok {
-			key, kind = sm.Name, sm.Metric.Kind
+	landDPM := func(stored []string, land string) (float64, string) {
+		sum, note := 0.0, ""
+		for _, s := range stored {
+			if e, ok := dpmErrs[s]; ok {
+				note = "points/min not read for " + s + ": " + e.Error()
+				continue
+			}
+			sum += dpm[s][land]
 		}
+		return sum, note
+	}
+	add := func(key string, mk func() *MetricRow, lu LandscapeUsage, stored []string, note string) {
 		r := rows[key]
 		if r == nil {
-			r = &MetricRow{Metric: key, Kind: kind}
-			switch {
-			case !ok:
-				r.Status = StatusNotInContract
-			case sm.Platform:
-				r.Status = StatusPlatform
-			default:
-				w, _ := ct.WorstCase(key)
-				if sm.Metric.PerPod {
-					w *= int64(o.Pods)
-				}
-				r.Worst, r.Budget = w, sm.Metric.Budget
-				r.Limit = w
-				if r.Budget > 0 {
-					r.Limit = int64(r.Budget)
-				}
-				r.MaxDPM = float64(w) * perMin
-			}
+			r = mk()
 			rows[key] = r
 			order = append(order, key)
 		}
-		for _, s := range r.Stored {
-			if s == stored {
-				return r
+		r.Landscapes = append(r.Landscapes, lu)
+		for _, s := range stored {
+			found := false
+			for _, x := range r.Stored {
+				found = found || x == s
+			}
+			if !found {
+				r.Stored = append(r.Stored, s)
 			}
 		}
-		r.Stored = append(r.Stored, stored)
-		return r
+		if lu.Series > r.Series {
+			r.Series = lu.Series
+		}
+		if lu.DPM > r.DPM {
+			r.DPM = lu.DPM
+		}
+		if note != "" {
+			r.DPMNote = note
+		}
 	}
-	for _, v := range ats {
-		row(v.Labels["__name__"]).Series += int64(math.Round(v.V))
+	for _, cnt := range chk.Counts {
+		d, note := landDPM(cnt.Stored, cnt.Landscape)
+		cnt := cnt
+		add(cnt.Metric, func() *MetricRow {
+			sm, _ := ct.Lookup(cnt.Stored[0])
+			r := &MetricRow{Metric: cnt.Metric, Kind: sm.Metric.Kind}
+			if cnt.Platform {
+				r.Status = StatusPlatform
+				return r
+			}
+			r.Worst, r.Budget = cnt.Worst, sm.Metric.Budget
+			r.Limit = r.Worst
+			if r.Budget > 0 {
+				r.Limit = int64(r.Budget)
+			}
+			r.WorstDPM = float64(r.Worst) * perMin
+			r.LimitDPM = float64(r.Limit) * perMin
+			if r.Budget > 0 {
+				r.BudgetDPM = float64(r.Budget) * perMin
+			}
+			return r
+		}, LandscapeUsage{Landscape: cnt.Landscape, Series: int64(cnt.Series), DPM: d}, cnt.Stored, note)
 	}
-	for _, v := range dpm {
-		row(v.Labels["__name__"]).DPM += v.V / mins
+	// metrics the contract does not know: counted per name and landscape, like assert counts them
+	un := map[string]map[string]int64{}
+	for _, s := range series {
+		if _, ok := ct.Lookup(s.Name); !ok {
+			if un[s.Name] == nil {
+				un[s.Name] = map[string]int64{}
+			}
+			un[s.Name][s.Labels[landscapeLabel]]++
+		}
+	}
+	var unNames []string
+	for n := range un {
+		unNames = append(unNames, n)
+	}
+	sort.Strings(unNames)
+	for _, n := range unNames {
+		var lands []string
+		for l := range un[n] {
+			lands = append(lands, l)
+		}
+		sort.Strings(lands)
+		for _, l := range lands {
+			d, note := landDPM([]string{n}, l)
+			add(n, func() *MetricRow { return &MetricRow{Metric: n, Status: StatusNotInContract} }, LandscapeUsage{Landscape: l, Series: un[n][l], DPM: d}, []string{n}, note)
+		}
 	}
 	var out []MetricRow
 	for _, k := range order {
 		r := rows[k]
 		sort.Strings(r.Stored)
+		sort.SliceStable(r.Landscapes, func(i, j int) bool { return r.Landscapes[i].Landscape < r.Landscapes[j].Landscape })
+		if len(r.Landscapes) == 1 && r.Landscapes[0].Landscape == "" {
+			r.Landscapes = nil // one store, no landscape label: nothing to list
+		}
+		if r.Limit > 0 {
+			r.SeriesRatio = float64(r.Series) / float64(r.Limit)
+		}
+		if r.LimitDPM > 0 {
+			r.DPMRatio = r.DPM / r.LimitDPM
+		}
+		r.Deviation = math.Max(r.SeriesRatio, r.DPMRatio)
 		switch r.Status {
 		case "":
+			overSeries, overDPM := r.Series > r.Limit, r.DPM > r.LimitDPM
 			switch {
-			case r.Limit > 0 && r.Series > r.Limit:
+			case overSeries || overDPM:
 				r.Status = StatusOverBudget
-			case r.Series > r.Worst:
+				switch {
+				case overSeries && overDPM:
+					r.Why = fmt.Sprintf("%d series is over %s %d; %s points/min is over %s", r.Series, limitName(r), r.Limit, num(r.DPM), num(r.LimitDPM))
+				case overSeries:
+					r.Why = fmt.Sprintf("%d series is over %s %d (worst case %d)", r.Series, limitName(r), r.Limit, r.Worst)
+				default:
+					r.Why = fmt.Sprintf("%s points/min is over %s %s (%s the worst case)", num(r.DPM), limitName(r), num(r.LimitDPM), num(r.WorstDPM))
+				}
+			case r.Series > r.Worst || r.DPM > r.WorstDPM:
 				r.Status = StatusAboveWorst
 			default:
 				r.Status = StatusOK
 			}
-			if r.Limit > 0 {
-				r.Ratio = float64(r.Series) / float64(r.Limit)
-			}
-			r.DPMOver = r.MaxDPM > 0 && r.DPM > r.MaxDPM
+			r.DPMOver = r.DPM > r.WorstDPM
 		}
-		r.rank = map[Status]int{StatusOverBudget: 0, StatusAboveWorst: 1, StatusNotInContract: 2, StatusOK: 3, StatusPlatform: 4}[r.Status]
+		// over budget first, then a metric the contract does not know, then above the worst case
+		r.rank = map[Status]int{StatusOverBudget: 0, StatusNotInContract: 1, StatusAboveWorst: 2, StatusOK: 3, StatusPlatform: 4}[r.Status]
 		out = append(out, *r)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -240,16 +410,30 @@ func metricRows(ct *contract.Contract, ats, dpm []Vec, mins float64, o UsageOpti
 		if a.rank != b.rank {
 			return a.rank < b.rank
 		}
-		if a.rank == 2 || a.rank == 4 {
+		if a.rank == 1 || a.rank == 4 { // no contract number to measure against: the fullest first
 			if a.Series != b.Series {
 				return a.Series > b.Series
 			}
-		} else if a.Ratio != b.Ratio {
-			return a.Ratio > b.Ratio
+		} else if a.Deviation != b.Deviation {
+			return a.Deviation > b.Deviation
 		}
 		return a.Metric < b.Metric
 	})
+	// an undeclared metric has no budget at all: with --unknown fail (the default) it is over budget
+	for i := range out {
+		if out[i].Status == StatusNotInContract && o.Unknown == "fail" {
+			out[i].Status = StatusOverBudget
+			out[i].Why = "not in the contract and not a platform metric: budget 0, so every series is over budget (--unknown warn shows it without failing)"
+		}
+	}
 	return out
+}
+
+func limitName(r *MetricRow) string {
+	if r.Budget > 0 {
+		return "budget"
+	}
+	return "the worst case"
 }
 
 func filterRows(rows []MetricRow, o UsageOptions) []MetricRow {
@@ -258,10 +442,7 @@ func filterRows(rows []MetricRow, o UsageOptions) []MetricRow {
 		if o.Unknown == "ignore" && r.Status == StatusNotInContract {
 			continue
 		}
-		if o.OverOnly && r.Status == StatusOK && !r.DPMOver {
-			continue
-		}
-		if o.OverOnly && r.Status == StatusPlatform {
+		if o.OverOnly && (r.Status == StatusOK || r.Status == StatusPlatform) {
 			continue
 		}
 		out = append(out, r)
@@ -307,21 +488,24 @@ func logsUsage(ctx context.Context, c *Client, t *Target, ct *contract.Contract,
 			l.Streams = int64(math.Round(v.V))
 		}
 	}
-	l.LinesEstimate, l.BytesEstimate = o.Estimates.Logs.LinesPerMin, o.Estimates.Logs.BytesPerMin
-	l.LinesRatio, l.BytesRatio = ratio(l.LinesPerMin, l.LinesEstimate), ratio(l.BytesPerMin, l.BytesEstimate)
-	l.StreamsOver = scoped && l.Streams > l.StreamWorst
-	if !scoped {
-		l.Note = "streams cover every service on the target; the worst case is this service's only"
+	if scoped {
+		// the estimates and the stream worst case are the service's: compared only when the read is too
+		l.Compared = true
+		l.LinesEstimate, l.BytesEstimate = o.Estimates.Logs.LinesPerMin, o.Estimates.Logs.BytesPerMin
+		l.LinesRatio, l.BytesRatio = ratio(l.LinesPerMin, l.LinesEstimate), ratio(l.BytesPerMin, l.BytesEstimate)
+		l.StreamsOver = l.Streams > l.StreamWorst
+	} else {
+		l.Note = "every service on the target is counted, so nothing is compared: the estimates and the stream worst case are this service's"
 	}
 	return l
 }
 
 func tracesUsage(ctx context.Context, c *Client, t *Target, ct *contract.Contract, o UsageOptions, now time.Time, scoped bool) *TracesUsage {
 	tr := &TracesUsage{}
-	tr.SpansEstimate, tr.BytesEstimate = o.Estimates.Traces.SpansPerMin, o.Estimates.Traces.BytesPerMin
 	win := fmt.Sprintf("%ds", int(o.Window.Seconds()))
 	// Spans a minute: Tempo's own TraceQL metrics first (it can filter by service); Tempo's
-	// distributor counter in VictoriaMetrics second (the whole Tempo, not one service).
+	// distributor counter in VictoriaMetrics second. The counter covers the whole Tempo, so it
+	// is used only when the whole target is asked for (--all-services): never as one service's figure.
 	var tempoErr string
 	if t.Traces == "" {
 		tempoErr = "the target has no traces URL (targets." + t.Name + ".traces)"
@@ -351,22 +535,36 @@ func tracesUsage(ctx context.Context, c *Client, t *Target, ct *contract.Contrac
 		}
 		return vs[0].V * 60, true
 	}
-	const wholeTempo = " (whole Tempo, not only this service)"
+	const wholeTempo = " (whole Tempo, not one service)"
+	const notPerService = "not available for one service: Tempo's own counter covers every service and is not compared with this service's estimate (--all-services reads it for the whole target)"
 	if !tr.SpansAvailable {
-		if v, ok := perMin("tempo_distributor_spans_received_total"); ok {
-			tr.SpansAvailable, tr.SpansPerMin = true, v
-			tr.SpansSource = "VictoriaMetrics tempo_distributor_spans_received_total" + wholeTempo
-		} else {
-			tr.SpansNote = tempoErr + "; and VictoriaMetrics has no tempo_distributor_spans_received_total"
+		switch {
+		case scoped:
+			tr.SpansNote = tempoErr + "; " + notPerService
+		default:
+			if v, ok := perMin("tempo_distributor_spans_received_total"); ok {
+				tr.SpansAvailable, tr.SpansPerMin = true, v
+				tr.SpansSource = "VictoriaMetrics tempo_distributor_spans_received_total" + wholeTempo
+			} else {
+				tr.SpansNote = tempoErr + "; and VictoriaMetrics has no tempo_distributor_spans_received_total"
+			}
 		}
 	}
-	if v, ok := perMin("tempo_distributor_bytes_received_total"); ok {
-		tr.BytesAvailable, tr.BytesPerMin = true, v
-		tr.BytesSource = "VictoriaMetrics tempo_distributor_bytes_received_total" + wholeTempo
-	} else {
-		tr.BytesNote = "VictoriaMetrics has no tempo_distributor_bytes_received_total (Tempo's own metrics are not scraped there)"
+	switch {
+	case scoped:
+		tr.BytesNote = "bytes/min " + notPerService
+	default:
+		if v, ok := perMin("tempo_distributor_bytes_received_total"); ok {
+			tr.BytesAvailable, tr.BytesPerMin = true, v
+			tr.BytesSource = "VictoriaMetrics tempo_distributor_bytes_received_total" + wholeTempo
+		} else {
+			tr.BytesNote = "VictoriaMetrics has no tempo_distributor_bytes_received_total (Tempo's own metrics are not scraped there)"
+		}
 	}
-	tr.SpansRatio, tr.BytesRatio = ratio(tr.SpansPerMin, tr.SpansEstimate), ratio(tr.BytesPerMin, tr.BytesEstimate)
+	if scoped && tr.SpansAvailable {
+		tr.SpansEstimate = o.Estimates.Traces.SpansPerMin
+		tr.SpansRatio = ratio(tr.SpansPerMin, tr.SpansEstimate)
+	}
 	return tr
 }
 
@@ -390,37 +588,52 @@ func vs(v, est, ratio float64) string {
 // Print writes the table for people.
 func (r *UsageResult) Print(w io.Writer) {
 	fmt.Fprintf(w, "obs live usage: target %s, rates over the last %s, %s\n", r.Target, r.Window, r.Scope)
-	fmt.Fprintf(w, "\nMETRICS (%d on the target, sorted by distance from the contract)\n", r.TotalMetrics)
-	fmt.Fprintf(w, "  %-44s %8s %6s %7s %9s  %s\n", "metric", "series", "worst", "budget", "points/min", "status")
+	fmt.Fprintf(w, "\nMETRICS (%d on the target, sorted by the larger of series and points/min against the contract)\n", r.TotalMetrics)
+	fmt.Fprintf(w, "  %-40s %7s %6s %7s | %9s %9s %9s  %s\n", "metric", "series", "worst", "budget", "points/min", "worst", "budget", "status")
 	for _, m := range r.Metrics {
-		worst, budget := "-", "-"
+		worst, budget, wdpm, bdpm := "-", "-", "-", "-"
 		if m.Status != StatusNotInContract && m.Status != StatusPlatform {
-			worst = strconv.FormatInt(m.Worst, 10)
+			worst, wdpm = strconv.FormatInt(m.Worst, 10), num(m.WorstDPM)
+			if m.Budget > 0 {
+				budget, bdpm = strconv.Itoa(m.Budget), num(m.BudgetDPM)
+			}
 		}
-		if m.Budget > 0 {
-			budget = strconv.Itoa(m.Budget)
+		fmt.Fprintf(w, "  %-40s %7d %6s %7s | %9s %9s %9s  %s\n", m.Metric, m.Series, worst, budget, num(m.DPM), wdpm, bdpm, m.Status)
+		if m.Why != "" {
+			fmt.Fprintf(w, "    -> %s\n", m.Why)
 		}
-		extra := ""
-		if m.DPMOver {
-			extra = fmt.Sprintf("; points/min above %s", num(m.MaxDPM))
+		if m.DPMNote != "" {
+			fmt.Fprintf(w, "    -> %s\n", m.DPMNote)
 		}
-		fmt.Fprintf(w, "  %-44s %8d %6s %7s %9s  %s%s\n", m.Metric, m.Series, worst, budget, num(m.DPM), m.Status, extra)
-		if m.Status == StatusOverBudget {
-			fmt.Fprintf(w, "    -> %d series is over budget %d (worst case %d)\n", m.Series, m.Budget, m.Worst)
+		if len(m.Landscapes) > 0 {
+			var parts []string
+			for _, l := range m.Landscapes {
+				parts = append(parts, fmt.Sprintf("%s: %d series, %s points/min", l.Landscape, l.Series, num(l.DPM)))
+			}
+			fmt.Fprintf(w, "    per landscape (each is compared on its own; the row shows the fullest): %s\n", strings.Join(parts, "; "))
 		}
 	}
 	if len(r.Metrics) == 0 {
 		fmt.Fprintln(w, "  (no rows: nothing matched, or --over-only / --unknown ignore hid them)")
+	}
+	if len(r.Findings) > 0 {
+		fmt.Fprintf(w, "\nFINDINGS (the label checks of obs assert)\n")
+		for _, f := range r.Findings {
+			fmt.Fprintf(w, "  %-4s metric %s: [%s] %s\n", f.Level, f.Metric, f.Rule, f.Msg)
+		}
 	}
 	l := r.Logs
 	fmt.Fprintf(w, "\nLOGS\n")
 	if !l.Available {
 		fmt.Fprintf(w, "  not read: %s\n", l.Note)
 	} else {
-		fmt.Fprintf(w, "  lines/min: %s (%s)\n", num(l.LinesPerMin), vs(l.LinesPerMin, l.LinesEstimate, l.LinesRatio))
-		fmt.Fprintf(w, "  message bytes/min: %s (%s)\n", num(l.BytesPerMin), vs(l.BytesPerMin, l.BytesEstimate, l.BytesRatio))
+		fmt.Fprintf(w, "  lines/min: %s (%s)\n", num(l.LinesPerMin), vsCompared(l.Compared, l.LinesPerMin, l.LinesEstimate, l.LinesRatio))
+		fmt.Fprintf(w, "  message bytes/min: %s (%s)\n", num(l.BytesPerMin), vsCompared(l.Compared, l.BytesPerMin, l.BytesEstimate, l.BytesRatio))
 		st := "within the contract's worst case"
-		if l.StreamsOver {
+		switch {
+		case !l.Compared:
+			st = "not compared"
+		case l.StreamsOver:
 			st = "OVER BUDGET"
 		}
 		fmt.Fprintf(w, "  streams: %d, worst case %d: %s\n", l.Streams, l.StreamWorst, st)
@@ -431,14 +644,21 @@ func (r *UsageResult) Print(w io.Writer) {
 	tr := r.Traces
 	fmt.Fprintf(w, "\nTRACES\n")
 	if tr.SpansAvailable {
-		fmt.Fprintf(w, "  spans/min: %s (%s); source: %s\n", num(tr.SpansPerMin), vs(tr.SpansPerMin, tr.SpansEstimate, tr.SpansRatio), tr.SpansSource)
+		fmt.Fprintf(w, "  spans/min: %s (%s); source: %s\n", num(tr.SpansPerMin), vsCompared(tr.SpansEstimate > 0 || tr.SpansRatio > 0, tr.SpansPerMin, tr.SpansEstimate, tr.SpansRatio), tr.SpansSource)
 	} else {
-		fmt.Fprintf(w, "  spans/min: not read: %s\n", tr.SpansNote)
+		fmt.Fprintf(w, "  spans/min: not available: %s\n", tr.SpansNote)
 	}
 	if tr.BytesAvailable {
-		fmt.Fprintf(w, "  bytes/min: %s (%s); source: %s\n", num(tr.BytesPerMin), vs(tr.BytesPerMin, tr.BytesEstimate, tr.BytesRatio), tr.BytesSource)
+		fmt.Fprintf(w, "  bytes/min: %s (whole target: not compared with an estimate); source: %s\n", num(tr.BytesPerMin), tr.BytesSource)
 	} else {
-		fmt.Fprintf(w, "  bytes/min: not read: %s\n", tr.BytesNote)
+		fmt.Fprintf(w, "  bytes/min: not available: %s\n", tr.BytesNote)
 	}
 	fmt.Fprintf(w, "\nobs live usage: %s\n", strings.TrimSpace(r.Reason))
+}
+
+func vsCompared(compared bool, v, est, ratio float64) string {
+	if !compared {
+		return "not compared with an estimate"
+	}
+	return vs(v, est, ratio)
 }

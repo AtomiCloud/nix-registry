@@ -162,3 +162,10 @@ func (c *Client) TempoRange(ctx context.Context, base, q string, start, end time
 	}
 	return out, nil
 }
+
+// Series lists the series that match selector and had samples between from and to
+// (/api/v1/series). It returns the raw answer; assert.ParseSeries reads it.
+func (c *Client) Series(ctx context.Context, base, selector string, from, to time.Time) ([]byte, error) {
+	v := url.Values{"match[]": {selector}, "start": {strconv.FormatInt(from.Unix(), 10)}, "end": {strconv.FormatInt(to.Unix(), 10)}}
+	return c.Get(ctx, base, "/api/v1/series", v)
+}

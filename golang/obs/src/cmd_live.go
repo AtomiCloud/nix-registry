@@ -133,7 +133,7 @@ func runLiveUsage(args []string, stdout, stderr io.Writer) int {
 	overOnly := fs.Bool("over-only", false, "show only rows that are not ok")
 	pods := fs.Int("pods", 1, "pods per landscape: a per_pod metric may hold worst case x pods series")
 	window := fs.String("window", "5m", "how far back rates (points, lines, spans per minute) are measured")
-	unknown := fs.String("unknown", "warn", "a metric that is not in the contract: warn, fail or ignore")
+	unknown := fs.String("unknown", "fail", "a metric that is not in the contract: fail (default: it has no budget), warn or ignore")
 	all := fs.Bool("all-services", false, "count every service on the target, not only the contract's service")
 	if err := fs.Parse(args); err != nil {
 		return 2
