@@ -293,3 +293,20 @@ func TestGuardRefusesQueryEncodedAndTraversalPaths(t *testing.T) {
 		}
 	}
 }
+
+// A Location net/http cannot parse is quoted whole in Go's own error (url.Error's inner error
+// included): the diagnostic must say a redirect was refused and print nothing of the value.
+func TestMalformedRedirectLocationIsNeverPrinted(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "http://[::1%zz/api/v1/query?token=sekrit-malformed-token")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer srv.Close()
+	err := (&Client{}).GetJSON(context.Background(), srv.URL, "/api/v1/query", nil, &struct{}{})
+	if err == nil || !strings.Contains(err.Error(), "redirect refused") {
+		t.Fatalf("a malformed redirect must be refused: %v", err)
+	}
+	if strings.Contains(err.Error(), "sekrit-malformed-token") || strings.Contains(err.Error(), "token=") || strings.Contains(err.Error(), "%zz") {
+		t.Fatalf("the refusal must not print the Location value: %v", err)
+	}
+}

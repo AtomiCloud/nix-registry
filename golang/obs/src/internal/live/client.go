@@ -152,6 +152,11 @@ func (c *Client) Get(ctx context.Context, base, path string, q url.Values) ([]by
 		if errors.As(err, &ue) {
 			err = ue.Err
 		}
+		// A Location net/http cannot parse is quoted whole in its own error ("failed to parse
+		// Location header %q"), inner error included: print none of it.
+		if strings.Contains(err.Error(), "Location header") {
+			err = errors.New("redirect refused: the store sent a Location obs cannot parse")
+		}
 		return nil, fmt.Errorf("GET %s%s: %v", base, path, err)
 	}
 	defer resp.Body.Close()
