@@ -115,7 +115,9 @@ func (c *Contract) metricLabels(m Metric) map[string]bool {
 	return ls
 }
 
-// StoredNameList lists every stored series name a query may read, for "did you mean" hints.
+// StoredNameList lists every stored series name a query may read: the names a regex name selector
+// is matched against and the "did you mean" hints. A platform metric lists every name Lookup
+// accepts for it (platformStored), so an exact selector and the same name as a regex agree.
 func (c *Contract) StoredNameList() []string {
 	var out []string
 	for _, key := range c.MetricOrder {
@@ -124,6 +126,7 @@ func (c *Contract) StoredNameList() []string {
 	}
 	for _, k := range c.platformKeys() {
 		out = append(out, StoredBase(k))
+		out = append(out, platformStored(k)...)
 	}
 	return out
 }

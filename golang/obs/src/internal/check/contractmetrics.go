@@ -3,6 +3,7 @@ package check
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -159,7 +160,8 @@ func contractMetrics(r *Report, q *files.Query, e metricsql.Expr, c *contract.Co
 	mc.walk(e)
 }
 
-// storedNames lists every series name a query may select: the contract's and the platform's.
+// storedNames lists every series name a query may select: the contract's and the platform's
+// (StoredNameList, which holds every name Lookup accepts), plus the fixed suffix list it always had.
 func storedNames(c *contract.Contract) []string {
 	out := c.StoredNameList()
 	for k := range c.Platform {
@@ -169,7 +171,7 @@ func storedNames(c *contract.Contract) []string {
 		}
 	}
 	sort.Strings(out)
-	return out
+	return slices.Compact(out)
 }
 
 func (mc *metricChecker) walk(e metricsql.Expr) labelScope {
