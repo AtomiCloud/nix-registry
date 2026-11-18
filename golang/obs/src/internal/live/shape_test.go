@@ -2,7 +2,11 @@ package live
 
 import (
 	"fmt"
+	"github.com/AtomiCloud/obs/internal/seed"
+	"gopkg.in/yaml.v3"
 	"math"
+	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -46,7 +50,7 @@ func TestShapeTrendIsChangePerDayOverTypical(t *testing.T) {
 	s := series(7, time.Hour, func(t int64, i int) float64 { return 100 + 3*float64(t-monday)/86400 })
 	sh := analyze(s, time.Hour)
 	near(t, "change per day", sh.Trend.ChangePerDay, 3/sh.Level.Typical, 1e-6)
-	if !sh.Trend.Known {
+	if !sh.TrendKnown {
 		t.Fatal("a week is enough to know the trend")
 	}
 }
@@ -58,7 +62,7 @@ func TestShapeDailyCycleAmplitudeAndPeakHour(t *testing.T) {
 	})
 	sh := analyze(s, time.Hour)
 	near(t, "daily amplitude", sh.Cycle.DailyAmplitude, 0.4, 0.01)
-	if sh.Cycle.PeakHour != 8 || !sh.Cycle.DailyKnown {
+	if sh.Cycle.PeakHour != 8 || !sh.DailyKnown {
 		t.Fatalf("peak hour: %+v", sh.Cycle)
 	}
 	if sh.Spikes.Count != 0 {
@@ -131,7 +135,7 @@ func TestShapeShortWindowSaysWhatItCannotKnow(t *testing.T) {
 	s := series(1, 5*time.Minute, func(int64, int) float64 { return 7 })
 	s = s[:48] // 4 hours
 	sh := analyze(s, 5*time.Minute)
-	if sh.Trend.Known || sh.Cycle.DailyKnown || sh.Cycle.WeekendFactor != nil {
+	if sh.TrendKnown || sh.DailyKnown || sh.Cycle.WeekendFactor != nil {
 		t.Fatalf("4 hours know no trend, daily cycle or weekend: %+v", sh)
 	}
 }
@@ -232,7 +236,30 @@ func TestShapeWeeklyPartSurvivesASevenDayWindowMinusOneStep(t *testing.T) {
 	if sh := Analyze(s[:72], time.Hour, time.Unix(monday, 0), time.Unix(monday, 0).Add(win)); sh.Cycle.WeekendFactor != nil {
 		t.Fatal("3 days of data in a 7 day window do not show a weekly cycle")
 	}
-	if !sh.Trend.Known || !sh.Cycle.DailyKnown {
+	if !sh.TrendKnown || !sh.DailyKnown {
 		t.Fatalf("a week knows its trend and daily cycle: %+v", sh)
+	}
+}
+
+func TestShapeColumnsUseSeedShapeSettings(t *testing.T) {
+	// The real column and the seed column are the same type, and that type is the seed package's own
+	// ShapeSettings (the five parts a seed is written with), not a copy that can drift from it.
+	want := reflect.TypeOf(seed.ShapeSettings{})
+	for _, typ := range []reflect.Type{reflect.TypeOf(MetricShape{}.Real), reflect.TypeOf(MetricShape{}.Seed)} {
+		if typ != reflect.TypeOf(&Shape{}) {
+			t.Fatalf("real and seed columns must both be *Shape: %v", typ)
+		}
+	}
+	f, ok := reflect.TypeOf(Shape{}).FieldByName("ShapeSettings")
+	if !ok || f.Type != want || !f.Anonymous {
+		t.Fatalf("Shape must embed seed.ShapeSettings: %+v", f)
+	}
+	var s Shape
+	var _ seed.ShapeSettings = s.ShapeSettings // assignable without conversion
+	// and a measured shape can be written back as a seed's traffic.settings
+	sh := analyze(series(7, time.Hour, func(int64, int) float64 { return 100 }), time.Hour)
+	b, err := yaml.Marshal(sh.ShapeSettings)
+	if err != nil || !strings.Contains(string(b), "typical: 100") || !strings.Contains(string(b), "daily_amplitude") {
+		t.Fatalf("%v\n%s", err, b)
 	}
 }

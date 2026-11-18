@@ -172,14 +172,14 @@ func levelText(s *Shape) string {
 }
 
 func trendText(s *Shape) string {
-	if !s.Trend.Known {
+	if !s.TrendKnown {
 		return "n/a (under 2 days)"
 	}
 	return pct(s.Trend.ChangePerDay) + " a day"
 }
 
 func cycleText(s *Shape) string {
-	if !s.Cycle.DailyKnown {
+	if !s.DailyKnown {
 		return "n/a (under 2 days)"
 	}
 	out := fmt.Sprintf("daily +-%.0f%%, peak %02.0f:00", s.Cycle.DailyAmplitude*100, s.Cycle.PeakHour)

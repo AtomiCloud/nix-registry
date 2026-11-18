@@ -1000,7 +1000,7 @@ and `obs scrape` as the recommended command (`assert` keeps working unchanged).
 ### `obs live shape`
 
 Per contract metric over `--window` (default 7d, step `--step`, default 5m): the real data and the seed side by
-side, in five parts plus noise, named like the seed's shape settings (`seed.ShapeSettings`). It never fails: the
+side, in five parts plus noise, as `seed.ShapeSettings`. It never fails: the
 LLM reads the two columns and judges if the seed is realistic.
 
 | Part   | Field                                                                  | Meaning                                                                                               |
@@ -1014,7 +1014,7 @@ LLM reads the two columns and judges if the seed is realistic.
 
 - **Timing.** The peak hour comes from the samples' own timestamps (a cosine that peaks at 20:00 UTC sampled every 5 minutes from :04 reports 20, not the clock hour 19 whose samples sit on one side of it). Gaps are counted before the first sample and after the last one as well as between samples: both window bounds are passed, so a 6 hour window on a store that holds 4 hours says "1 gap, 2h". What a window can show is judged on the window asked for: trend and daily cycle need 2 days, the weekly part 7 days, and the samples of a 7 day window at a step span 7 days minus one step, so the test is span >= window - 2 steps (a 7 day window with 3 days of data shows no weekly part).
 - The metric is read as one number: a counter as the summed rate per second, a histogram as the summed rate of its observations (`_count`), a gauge as its summed value. The same query runs on the real store and on the seed.
-- The seed column is the seed generator's own data (`seed.Build`) run through the embedded VictoriaMetrics with the same query, over the seed's length: a seed of 4 h cannot show a trend or a daily cycle, and the cell says so (`n/a`). Until the seed carries `traffic.settings` the seed side is computed from the data it makes today.
+- The seed column is the seed generator's own data (`seed.Build`) run through the embedded VictoriaMetrics with the same query, over the seed's length: a seed of 4 h cannot show a trend or a daily cycle, and the cell says so (`n/a`). Both columns are the same Go type, `seed.ShapeSettings` (the five parts a seed's `traffic.settings` is written with, plus the flags for what a short window cannot show), so a measured column can be pasted into a seed and read back with the same names; a test pins that the real and the seed column are one type.
 
 ### `obs live incidents`
 

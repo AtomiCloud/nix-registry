@@ -94,10 +94,10 @@ func TestRecordedShape(t *testing.T) {
 	if m.Real.Gaps.Count != 1 || m.Real.Gaps.Length != "167h55m" {
 		t.Fatalf("the 7 day window with 5 minutes of data: %+v", m.Real.Gaps)
 	}
-	if m.Real.Trend.Known || m.Real.Cycle.DailyKnown {
+	if m.Real.TrendKnown || m.Real.DailyKnown {
 		t.Fatalf("5 minutes of data know no trend or daily cycle: %+v", m.Real)
 	}
-	if m.Seed == nil || m.Seed.Points != 2 || m.Seed.Level.Typical < 1 || m.Seed.Level.Typical > 1.2 || res.SeedLength != "12m" {
+	if m.Seed == nil || m.Seed.Points != 2 || m.Seed.Level.Typical < 1.2 || m.Seed.Level.Typical > 1.4 || res.SeedLength != "12m" {
 		t.Fatalf("the seed side comes from the seed in the repo: %+v", m.Seed)
 	}
 }

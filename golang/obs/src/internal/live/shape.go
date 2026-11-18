@@ -1,64 +1,35 @@
 package live
 
 import (
+	"github.com/AtomiCloud/obs/internal/seed"
 	"math"
 	"sort"
 	"strings"
 	"time"
 )
 
-// Shape is how one metric behaves over a window, in the five parts the owner asked for. The
-// field names follow the seed's shape settings (seed.ShapeSettings of the obs-regroup-look
-// branch) so a real column and a seed column line up. All times are UTC.
+// Shape is how one metric behaves over a window, in the five parts the owner asked for. The parts
+// ARE seed.ShapeSettings (level, trend, cycle, spikes, gaps, noise): the real column and the seed
+// column of `obs live shape` are both a Shape, so a column can be pasted into a seed's
+// traffic.settings and read back with the same names. What a window is too short to show is flagged
+// beside the settings (TrendKnown, DailyKnown; a nil weekend factor is under 7 days). All times are UTC.
+//
+//   - level: lowest, typical (the median) and highest value
+//   - trend.change_per_day: a fraction of typical (0.03 is up 3 % a day)
+//   - cycle: daily_amplitude is half the peak-to-trough of the average hour of day over the mean,
+//     peak_hour the UTC hour of the peak, weekend_factor the weekend over the weekday average
+//   - spikes: how many separate upward jumps, and the biggest as a multiple of that hour's typical value
+//   - gaps: runs of two or more steps without data (and data that stopped before the window end) and
+//     their total length as a duration string such as 15h or 11m
+//   - noise: the wiggle left after the hour-of-day shape, as a fraction of typical
 type Shape struct {
-	Points int         `json:"points"`
-	From   int64       `json:"from_unix,omitempty"`
-	To     int64       `json:"to_unix,omitempty"`
-	Level  ShapeLevel  `json:"level"`
-	Trend  ShapeTrend  `json:"trend"`
-	Cycle  ShapeCycle  `json:"cycle"`
-	Spikes ShapeSpikes `json:"spikes"`
-	Gaps   ShapeGaps   `json:"gaps"`
-	Noise  float64     `json:"noise"` // typical size of the wiggle left after the hour-of-day shape, as a fraction of typical
-}
-
-// ShapeLevel: lowest, typical (the median) and highest value.
-type ShapeLevel struct {
-	Min     float64 `json:"min"`
-	Typical float64 `json:"typical"`
-	Max     float64 `json:"max"`
-}
-
-// ShapeTrend: change per day as a fraction of the typical value (0.03 is up 3 % a day).
-// Known is false when the window is under 2 days.
-type ShapeTrend struct {
-	ChangePerDay float64 `json:"change_per_day"`
-	Known        bool    `json:"known"`
-}
-
-// ShapeCycle: DailyAmplitude is half the peak-to-trough distance of the average hour of day over the
-// average (0.4 is +-40 % around the mean), PeakHour is the UTC hour of the peak, WeekendFactor is the
-// weekend average over the weekday average (nil under 7 days). DailyKnown is false under 2 days.
-type ShapeCycle struct {
-	DailyAmplitude float64  `json:"daily_amplitude"`
-	PeakHour       float64  `json:"peak_hour"`
-	DailyKnown     bool     `json:"daily_known"`
-	WeekendFactor  *float64 `json:"weekend_factor,omitempty"`
-}
-
-// ShapeSpikes: how many separate upward jumps, and Size, the biggest one as a multiple of the typical
-// value of that hour.
-type ShapeSpikes struct {
-	Count int     `json:"count"`
-	Size  float64 `json:"size"`
-}
-
-// ShapeGaps: runs of two or more steps without data (and data that stopped before the window end),
-// and their total length as a duration string such as 15h or 11m (like seed.ShapeGaps.Length).
-type ShapeGaps struct {
-	Count  int    `json:"count"`
-	Length string `json:"length"`
-	total  time.Duration
+	Points int   `json:"points"`
+	From   int64 `json:"from_unix,omitempty"`
+	To     int64 `json:"to_unix,omitempty"`
+	seed.ShapeSettings
+	TrendKnown bool `json:"trend_known"` // false when the window is under 2 days
+	DailyKnown bool `json:"daily_known"` // false when the window is under 2 days
+	gapTotal   time.Duration
 }
 
 func median(v []float64) float64 {
@@ -133,7 +104,7 @@ func Analyze(s []Sample, step time.Duration, windowStart, windowEnd time.Time) S
 
 	// Trend: least squares slope per day over the typical value.
 	if covers(48 * time.Hour) {
-		sh.Trend.Known = true
+		sh.TrendKnown = true
 		var sx, sy, sxx, sxy float64
 		n := float64(len(s))
 		for _, x := range s {
@@ -151,7 +122,7 @@ func Analyze(s []Sample, step time.Duration, windowStart, windowEnd time.Time) S
 		hourVals[hourOf(x.T)] = append(hourVals[hourOf(x.T)], x.V)
 	}
 	if covers(48 * time.Hour) {
-		sh.Cycle.DailyKnown = true
+		sh.DailyKnown = true
 		var all, peak, trough float64
 		peak, trough = math.Inf(-1), math.Inf(1)
 		for _, x := range s {
@@ -198,7 +169,7 @@ func Analyze(s []Sample, step time.Duration, windowStart, windowEnd time.Time) S
 
 	// Spikes: a point far above the typical value of its hour (its day-shape), merged when adjacent.
 	base := func(t int64) float64 { return typical }
-	if sh.Cycle.DailyKnown {
+	if sh.DailyKnown {
 		hm := map[int]float64{}
 		for h, v := range hourVals {
 			hm[h] = median(v)
@@ -246,22 +217,22 @@ func Analyze(s []Sample, step time.Duration, windowStart, windowEnd time.Time) S
 		if !windowStart.IsZero() {
 			if lead := (sh.From - windowStart.Unix()) / stepS; lead >= 2 {
 				sh.Gaps.Count++
-				sh.Gaps.total += time.Duration(lead) * step
+				sh.gapTotal += time.Duration(lead) * step
 			}
 		}
 		for i := 1; i < len(s); i++ {
 			missing := (s[i].T-s[i-1].T)/stepS - 1
 			if missing >= 2 {
 				sh.Gaps.Count++
-				sh.Gaps.total += time.Duration(missing) * step
+				sh.gapTotal += time.Duration(missing) * step
 			}
 		}
 		if tail := (windowEnd.Unix() - sh.To) / stepS; tail >= 2 {
 			sh.Gaps.Count++
-			sh.Gaps.total += time.Duration(tail) * step
+			sh.gapTotal += time.Duration(tail) * step
 		}
 	}
-	sh.Gaps.Length = DurText(sh.Gaps.total)
+	sh.Gaps.Length = DurText(sh.gapTotal)
 	return sh
 }
 
