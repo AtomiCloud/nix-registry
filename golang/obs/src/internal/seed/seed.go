@@ -14,8 +14,8 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Seed is the seed file. `incidents` and `traces` belong to later obs commands
-// (`obs alerts`, TraceQL); they are read and ignored here.
+// Seed is the seed file. `incidents` (read by `obs alerts`) and `traces` (read by `obs query --live`
+// and `obs links`) are not used by metric and log seeding; they are kept here as raw nodes.
 type Seed struct {
 	Length     string            `yaml:"length"`
 	RandomSeed uint64            `yaml:"random_seed"`

@@ -1,0 +1,8 @@
+# The underscore form of a dotted label selects nothing in VictoriaMetrics: red, and the finding names the dotted spelling.
+mode: static
+exit: 1
+contains: alerts/where-from/critical.yaml
+contains: [contract-undeclared-label]
+contains: durian_cloud_service
+contains: write "durian.cloud.service"
+contains: write "durian.cloud.platform"

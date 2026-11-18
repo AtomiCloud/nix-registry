@@ -1,0 +1,9 @@
+namespace: example.org/area/demo
+premise: A demo area
+language:
+  Alpha:
+    desc: The first word.
+    avoid: [first]
+  Beta:
+    desc: The second word.
+    aliases: [First]

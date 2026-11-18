@@ -18,7 +18,7 @@ spec:
           datasourceUid: speed-metrics
           model:
             datasource: { type: prometheus, uid: speed-metrics }
-            expr: 'histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{http_route="/charge"}[5m])))'
+            expr: 'histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{"http.route"="/charge"}[5m])))'
             instant: true
         - refId: B
           datasourceUid: __expr__

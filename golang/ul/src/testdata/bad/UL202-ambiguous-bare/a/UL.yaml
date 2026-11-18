@@ -1,0 +1,5 @@
+namespace: example.org/area/a
+premise: Area A
+language:
+  Widget:
+    desc: A widget in area A.

@@ -15,7 +15,7 @@ spec:
       data:
         - refId: A
           relativeTimeRange: { from: 300, to: 0 }
-          datasourceUid: primordial-metrics
+          datasourceUid: fixture-metrics
           model:
             expr: 'sum(rate(checkout_charges_total[5m])'
             instant: true

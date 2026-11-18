@@ -1,0 +1,5 @@
+namespace: example.org/area/demo
+premise: The same area again
+language:
+  Beta:
+    desc: The second word.

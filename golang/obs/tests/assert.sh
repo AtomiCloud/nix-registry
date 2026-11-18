@@ -37,27 +37,31 @@ expect() {
 s="$fx/series"
 
 # Underfilled exports must enforce labels independently of the worst-case count.
-printf '%s\n' '{"status":"success","data":[{"__name__":"checkout_charges_total","payment_provider":"stripe","outcome":"success"}]}' >"$work/sparse-ok.json"
+printf '%s\n' '{"status":"success","data":[{"__name__":"checkout_charges_total","payment.provider":"stripe","outcome":"success"}]}' >"$work/sparse-ok.json"
 run --series "$work/sparse-ok.json"
 expect 0 "underfilled green control (1 of 6 series)" "1 series, worst case 6: ok"
-sed 's/"outcome":"success"/"outcome":"success","k8s_pod_name":"review-pod"/' "$work/sparse-ok.json" >"$work/sparse-pod.json"
+sed 's/"outcome":"success"/"outcome":"success","k8s.pod.name":"review-pod"/' "$work/sparse-ok.json" >"$work/sparse-pod.json"
 run --series "$work/sparse-pod.json"
-expect 1 "RED underfilled: business pod key" "FAIL $work/sparse-pod.json metric checkout.charges: [pod-label-on-business-metric]" '"k8s_pod_name"'
+expect 1 "RED underfilled: business pod key" "FAIL $work/sparse-pod.json metric checkout.charges: [pod-label-on-business-metric]" '"k8s.pod.name"'
 sed 's/"outcome":"success"/"outcome":"success","user_id":"review-user"/' "$work/sparse-ok.json" >"$work/sparse-label.json"
 run --series "$work/sparse-label.json"
 expect 0 "underfilled constant undeclared label warns without splitting series" "warn $work/sparse-label.json metric checkout.charges: [label-not-in-contract]" '"user_id"'
+# Concept 2.1: VictoriaMetrics keeps the dots; the underscore spelling of a contract label is wrong, even when constant.
+sed 's/"payment.provider"/"payment_provider"/' "$work/sparse-ok.json" >"$work/sparse-underscore.json"
+run --series "$work/sparse-underscore.json"
+expect 1 "RED underfilled: the underscore spelling of a dotted label names the dotted one" "FAIL $work/sparse-underscore.json metric checkout.charges: [label-not-in-contract]" '"payment_provider"' '"payment.provider"' "wrong spelling"
 sed 's/stripe/review-provider/' "$work/sparse-ok.json" >"$work/sparse-value.json"
 run --series "$work/sparse-value.json"
 expect 1 "RED underfilled: enum value outside type" "FAIL $work/sparse-value.json metric checkout.charges: [label-value-outside-type]" '"review-provider"'
 
 cat >"$work/sdk-ok.json" <<'JSON'
-{"status":"success","data":[{"__name__":"checkout_charges_total","payment_provider":"stripe","outcome":"success","telemetry_sdk_language":"go","telemetry_sdk_name":"opentelemetry","telemetry_sdk_version":"1.47.0"},{"__name__":"checkout_charges_total","payment_provider":"adyen","outcome":"success","telemetry_sdk_language":"go","telemetry_sdk_name":"opentelemetry","telemetry_sdk_version":"1.47.0"}]}
+{"status":"success","data":[{"__name__":"checkout_charges_total","payment.provider":"stripe","outcome":"success","telemetry.sdk.language":"go","telemetry.sdk.name":"opentelemetry","telemetry.sdk.version":"1.47.0"},{"__name__":"checkout_charges_total","payment.provider":"adyen","outcome":"success","telemetry.sdk.language":"go","telemetry.sdk.name":"opentelemetry","telemetry.sdk.version":"1.47.0"}]}
 JSON
 run --series "$work/sdk-ok.json"
-expect 0 "OTel export: constant SDK resource labels are warnings" "obs assert: ok:" '"telemetry_sdk_version"' "constant resource label"
-sed 's/"adyen","outcome":"success","telemetry_sdk_language":"go","telemetry_sdk_name":"opentelemetry","telemetry_sdk_version":"1.47.0"/"adyen","outcome":"success","telemetry_sdk_language":"go","telemetry_sdk_name":"opentelemetry","telemetry_sdk_version":"1.48.0"/' "$work/sdk-ok.json" >"$work/sdk-red.json"
+expect 0 "OTel export: constant SDK resource labels are warnings" "obs assert: ok:" '"telemetry.sdk.version"' "constant resource label"
+sed 's/"adyen","outcome":"success","telemetry.sdk.language":"go","telemetry.sdk.name":"opentelemetry","telemetry.sdk.version":"1.47.0"/"adyen","outcome":"success","telemetry.sdk.language":"go","telemetry.sdk.name":"opentelemetry","telemetry.sdk.version":"1.48.0"/' "$work/sdk-ok.json" >"$work/sdk-red.json"
 run --series "$work/sdk-red.json"
-expect 1 "RED OTel export: varying SDK version splits series under capacity" "FAIL $work/sdk-red.json metric checkout.charges: [label-not-in-contract]" '"telemetry_sdk_version"' '"1.48.0"' "varying label splits series"
+expect 1 "RED OTel export: varying SDK version splits series under capacity" "FAIL $work/sdk-red.json metric checkout.charges: [label-not-in-contract]" '"telemetry.sdk.version"' '"1.48.0"' "varying label splits series"
 
 run --series "$s/series-ok.json" --pods 2
 expect 0 "/api/v1/series within the worst case (counter 6, histogram 3 x 14 = 42, per-pod gauge 2 pods, platform metric)" \
@@ -78,7 +82,7 @@ expect 1 "RED: the same hole in /api/v1/export lines" "[series-over-worst-case] 
 run --series "$s/series-extra-label.json"
 expect 1 "RED: a raw call added user_id: names the label" "[series-over-worst-case] 9 series" '[label-not-in-contract] label "user_id"'
 run --series "$s/series-pod-label.json"
-expect 1 "RED: a pod label left on a business metric: names the pod key" "[series-over-worst-case] 12 series" '[pod-label-on-business-metric] label "k8s_pod_name"'
+expect 1 "RED: a pod label left on a business metric: names the pod key" "[series-over-worst-case] 12 series" '[pod-label-on-business-metric] label "k8s.pod.name"'
 run --series "$s/series-extra-bucket.json"
 expect 1 "RED: a 13th histogram bucket (45 > 42) is counted against the 14-series worst case" "metric checkout.charge.duration: [series-over-worst-case] 45 series" "worst case of 42"
 run --series "$s/series-gauge-pods.json"

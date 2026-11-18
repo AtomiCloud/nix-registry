@@ -173,8 +173,7 @@ func runQuery(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		// A live run also applies the static rules: a query that does not parse cannot run.
-		rep.Findings = append(rep.Findings, lr.Findings...)
-		rep.Counts = lr.Counts
+		rep.AppendLive(lr)
 	}
 	rep.Print(stdout)
 	fmt.Fprintln(stdout, rep.Summary(cmd))

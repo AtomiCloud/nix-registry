@@ -1,0 +1,6 @@
+# A dashboard variable label_values(metric, payment_provider) lists nothing: red in both modes, naming the dotted label.
+mode: both
+exit: 1
+contains: dashboards/overview.json
+contains: variable $provider
+contains: write "payment.provider"

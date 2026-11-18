@@ -71,9 +71,9 @@ func find(r *Result, rule string) *Finding {
 func TestWithinWorstCasePasses(t *testing.T) {
 	c := loadC(t)
 	r := Check(c, []Series{
-		sr("checkout_charges_total", "payment_provider", "stripe"),
-		sr("checkout_charges_total", "payment_provider", "adyen"),
-		sr("http_server_request_duration_seconds_count", "http_route", "/a"),
+		sr("checkout_charges_total", "payment.provider", "stripe"),
+		sr("checkout_charges_total", "payment.provider", "adyen"),
+		sr("http_server_request_duration_seconds_count", "http.route", "/a"),
 	}, Options{})
 	if r.Failures() != 0 {
 		t.Fatalf("%+v", r.Findings)
@@ -86,9 +86,9 @@ func TestWithinWorstCasePasses(t *testing.T) {
 func TestOverWorstCaseNamesTheBadValue(t *testing.T) {
 	c := loadC(t)
 	r := Check(c, []Series{
-		sr("checkout_charges_total", "payment_provider", "stripe"),
-		sr("checkout_charges_total", "payment_provider", "adyen"),
-		sr("checkout_charges_total", "payment_provider", "paypal"),
+		sr("checkout_charges_total", "payment.provider", "stripe"),
+		sr("checkout_charges_total", "payment.provider", "adyen"),
+		sr("checkout_charges_total", "payment.provider", "paypal"),
 	}, Options{})
 	if f := find(r, "series-over-worst-case"); f == nil || !strings.Contains(f.Msg, "3 series") || !strings.Contains(f.Msg, "worst case of 2") {
 		t.Fatalf("%+v", r.Findings)
@@ -133,9 +133,9 @@ func TestHistogramCountsAllItsSeries(t *testing.T) {
 		var ss []Series
 		for _, p := range []string{"stripe", "adyen"} {
 			for i := 0; i < 5+extra; i++ {
-				ss = append(ss, sr("checkout_latency_seconds_bucket", "payment_provider", p, "le", string(rune('a'+i))))
+				ss = append(ss, sr("checkout_latency_seconds_bucket", "payment.provider", p, "le", string(rune('a'+i))))
 			}
-			ss = append(ss, sr("checkout_latency_seconds_sum", "payment_provider", p), sr("checkout_latency_seconds_count", "payment_provider", p))
+			ss = append(ss, sr("checkout_latency_seconds_sum", "payment.provider", p), sr("checkout_latency_seconds_count", "payment.provider", p))
 		}
 		return ss
 	}
@@ -150,19 +150,19 @@ func TestHistogramCountsAllItsSeries(t *testing.T) {
 func TestExtraLabelAndPodLabel(t *testing.T) {
 	c := loadC(t)
 	r := Check(c, []Series{
-		sr("checkout_charges_total", "payment_provider", "stripe", "user_id", "u1"),
-		sr("checkout_charges_total", "payment_provider", "stripe", "user_id", "u2"),
-		sr("checkout_charges_total", "payment_provider", "adyen", "user_id", "u1"),
+		sr("checkout_charges_total", "payment.provider", "stripe", "user_id", "u1"),
+		sr("checkout_charges_total", "payment.provider", "stripe", "user_id", "u2"),
+		sr("checkout_charges_total", "payment.provider", "adyen", "user_id", "u1"),
 	}, Options{})
 	if f := find(r, "label-not-in-contract"); f == nil || !strings.Contains(f.Msg, `"user_id"`) {
 		t.Errorf("%+v", r.Findings)
 	}
 	r = Check(c, []Series{
-		sr("checkout_charges_total", "payment_provider", "stripe", "k8s_pod_name", "a"),
-		sr("checkout_charges_total", "payment_provider", "stripe", "k8s_pod_name", "b"),
-		sr("checkout_charges_total", "payment_provider", "adyen", "k8s_pod_name", "a"),
+		sr("checkout_charges_total", "payment.provider", "stripe", "k8s.pod.name", "a"),
+		sr("checkout_charges_total", "payment.provider", "stripe", "k8s.pod.name", "b"),
+		sr("checkout_charges_total", "payment.provider", "adyen", "k8s.pod.name", "a"),
 	}, Options{})
-	if f := find(r, "pod-label-on-business-metric"); f == nil || !strings.Contains(f.Msg, `"k8s_pod_name"`) {
+	if f := find(r, "pod-label-on-business-metric"); f == nil || !strings.Contains(f.Msg, `"k8s.pod.name"`) {
 		t.Errorf("%+v", r.Findings)
 	}
 	// Dotted spelling in the export is the same label.
@@ -181,7 +181,7 @@ func TestPerPodMultiplierAndLandscapes(t *testing.T) {
 	var q []Series
 	for _, pod := range []string{"a", "b", "c"} {
 		for _, p := range []string{"stripe", "adyen"} {
-			q = append(q, sr("checkout_queue", "payment_provider", p, "k8s_pod_name", pod))
+			q = append(q, sr("checkout_queue", "payment.provider", p, "k8s.pod.name", pod))
 		}
 	}
 	if r := Check(c, q, Options{Pods: 3}); r.Failures() != 0 {
@@ -194,7 +194,7 @@ func TestPerPodMultiplierAndLandscapes(t *testing.T) {
 	var ss []Series
 	for _, l := range []string{"lab", "prod"} {
 		for _, p := range []string{"stripe", "adyen"} {
-			ss = append(ss, sr("checkout_charges_total", "payment_provider", p, "durian_cloud_landscape", l))
+			ss = append(ss, sr("checkout_charges_total", "payment.provider", p, "durian.cloud.landscape", l))
 		}
 	}
 	if r := Check(c, ss, Options{}); r.Failures() != 0 || len(r.Counts) != 2 {
@@ -218,16 +218,16 @@ func TestUnknownMetric(t *testing.T) {
 
 func TestUnderfilledExportsStillCheckLabels(t *testing.T) {
 	c := loadC(t)
-	if r := Check(c, []Series{sr("checkout_charges_total", "payment_provider", "stripe")}, Options{}); r.Failures() != 0 {
+	if r := Check(c, []Series{sr("checkout_charges_total", "payment.provider", "stripe")}, Options{}); r.Failures() != 0 {
 		t.Fatalf("green underfilled export: %+v", r.Findings)
 	}
 	for _, tc := range []struct {
 		label, value, rule string
 		level              Level
 	}{
-		{"k8s_pod_name", "review-pod", "pod-label-on-business-metric", Fail},
+		{"k8s.pod.name", "review-pod", "pod-label-on-business-metric", Fail},
 		{"user_id", "review-user", "label-not-in-contract", Warn},
-		{"payment_provider", "review-provider", "label-value-outside-type", Fail},
+		{"payment.provider", "review-provider", "label-value-outside-type", Fail},
 	} {
 		t.Run(tc.rule, func(t *testing.T) {
 			r := Check(c, []Series{sr("checkout_charges_total", tc.label, tc.value)}, Options{})
@@ -241,14 +241,27 @@ func TestUnderfilledExportsStillCheckLabels(t *testing.T) {
 	}
 }
 
+// Concept 2.1: the stored spelling keeps the dots; the underscore form of a contract label is a failure naming it.
+func TestUnderscoreSpellingOfDottedLabelFails(t *testing.T) {
+	c := loadC(t)
+	r := Check(c, []Series{sr("checkout_charges_total", "payment_provider", "stripe")}, Options{})
+	f := find(r, "label-not-in-contract")
+	if f == nil || f.Level != Fail || !strings.Contains(f.Msg, `"payment_provider"`) || !strings.Contains(f.Msg, `"payment.provider"`) {
+		t.Fatalf("want a failing label-not-in-contract naming both spellings, got %+v", r.Findings)
+	}
+	if r := Check(c, []Series{sr("checkout_charges_total", "payment.provider", "stripe")}, Options{}); r.Failures() != 0 {
+		t.Fatalf("the dotted spelling must pass: %+v", r.Findings)
+	}
+}
+
 func TestPlatformLabelsCheckedWithoutCardinalityLimit(t *testing.T) {
 	c := loadC(t)
-	green := sr("http_server_request_duration_seconds_count", "http_route", "/a", "k8s_pod_name", "pod-a")
+	green := sr("http_server_request_duration_seconds_count", "http.route", "/a", "k8s.pod.name", "pod-a")
 	if r := Check(c, []Series{green}, Options{}); r.Failures() != 0 {
 		t.Fatalf("platform metrics retain pod keys: %+v", r.Findings)
 	}
-	red := sr("http_server_request_duration_seconds_count", "http_route", "/a", "user_id", "review-user")
-	red2 := sr("http_server_request_duration_seconds_count", "http_route", "/b", "user_id", "another-user")
+	red := sr("http_server_request_duration_seconds_count", "http.route", "/a", "user_id", "review-user")
+	red2 := sr("http_server_request_duration_seconds_count", "http.route", "/b", "user_id", "another-user")
 	if r := Check(c, []Series{red, red2}, Options{}); r.Failures() != 1 || find(r, "label-not-in-contract") == nil {
 		t.Fatalf("varying platform labels must be enforced: %+v", r.Findings)
 	}
@@ -257,13 +270,13 @@ func TestPlatformLabelsCheckedWithoutCardinalityLimit(t *testing.T) {
 func TestOTelSDKResourceLabelsOnlyFailWhenTheySplitSeries(t *testing.T) {
 	c := loadC(t)
 	series := []Series{
-		sr("checkout_charges_total", "payment_provider", "stripe", "telemetry_sdk_language", "go", "telemetry_sdk_name", "opentelemetry", "telemetry_sdk_version", "1.47.0"),
-		sr("checkout_charges_total", "payment_provider", "adyen", "telemetry_sdk_language", "go", "telemetry_sdk_name", "opentelemetry", "telemetry_sdk_version", "1.47.0"),
+		sr("checkout_charges_total", "payment.provider", "stripe", "telemetry.sdk.language", "go", "telemetry.sdk.name", "opentelemetry", "telemetry.sdk.version", "1.47.0"),
+		sr("checkout_charges_total", "payment.provider", "adyen", "telemetry.sdk.language", "go", "telemetry.sdk.name", "opentelemetry", "telemetry.sdk.version", "1.47.0"),
 	}
 	if r := Check(c, series, Options{}); r.Failures() != 0 {
 		t.Fatalf("constant SDK resource labels must only warn: %+v", r.Findings)
 	}
-	series[1].Labels["telemetry_sdk_version"] = "1.48.0"
+	series[1].Labels["telemetry.sdk.version"] = "1.48.0"
 	r := Check(c, series, Options{})
 	if f := find(r, "label-not-in-contract"); r.Failures() != 1 {
 		t.Fatalf("varying SDK label must fail exactly once: %+v (%+v)", r.Findings, f)

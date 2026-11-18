@@ -138,7 +138,7 @@ func (s *labelScope) add(l string) {
 	if s.labels == nil {
 		s.labels = map[string]bool{}
 	}
-	s.labels[contract.Norm(l)] = true
+	s.labels[l] = true
 }
 
 // metricChecker walks one query.
@@ -206,48 +206,7 @@ func (mc *metricChecker) walk(e metricsql.Expr) labelScope {
 // labelFunc judges the labels a label function READS (they must exist on its input) and adds the
 // labels it MAKES to the scope of its result only.
 func (mc *metricChecker) labelFunc(fe *metricsql.FuncExpr, sc *labelScope) {
-	str := func(i int) (string, bool) {
-		if i < len(fe.Args) {
-			if se, ok := fe.Args[i].(*metricsql.StringExpr); ok {
-				return se.S, true
-			}
-		}
-		return "", false
-	}
-	var reads, makes []string
-	pick := func(idx ...int) []string {
-		var out []string
-		for _, i := range idx {
-			if s, ok := str(i); ok {
-				out = append(out, s)
-			}
-		}
-		return out
-	}
-	switch strings.ToLower(fe.Name) {
-	case "label_replace":
-		makes, reads = pick(1), pick(3)
-	case "label_join":
-		makes = pick(1)
-		for i := 3; i < len(fe.Args); i++ {
-			reads = append(reads, pick(i)...)
-		}
-	case "label_set":
-		for i := 1; i < len(fe.Args); i += 2 {
-			makes = append(makes, pick(i)...)
-		}
-	case "label_copy", "label_move":
-		for i := 1; i+1 < len(fe.Args); i += 2 {
-			reads = append(reads, pick(i)...)
-			makes = append(makes, pick(i+1)...)
-		}
-	case "label_map", "label_match", "label_mismatch", "label_transform":
-		reads = pick(1)
-	case "label_uppercase", "label_lowercase", "label_del", "label_keep":
-		for i := 1; i < len(fe.Args); i++ {
-			reads = append(reads, pick(i)...)
-		}
-	}
+	reads, makes := labelFuncLabels(fe)
 	// What the input carries is the scope of the series argument only: labels made by an inner
 	// label function count, labels made by this one (or by a sibling elsewhere) do not.
 	var input labelScope
@@ -255,10 +214,9 @@ func (mc *metricChecker) labelFunc(fe *metricsql.FuncExpr, sc *labelScope) {
 		input = mc.scopeOf(fe.Args[0])
 	}
 	for _, l := range reads {
-		n := contract.Norm(l)
-		if input.judged && !input.labels[n] {
+		if input.judged && !input.labels[l] {
 			mc.r.add(Fail, mc.q.File, mc.q.Where, "contract-undeclared-label",
-				"%s reads label %q, which the series it takes do not have in the contract%s", fe.Name, l, labelHint(n, input.labels))
+				"%s reads label %q, which the series it takes do not have in the contract%s", fe.Name, l, labelHint(l, input.labels))
 		}
 	}
 	for _, l := range makes {
@@ -281,11 +239,13 @@ func (mc *metricChecker) grouping(args []string, sc labelScope) {
 		if a == "*" {
 			continue
 		}
-		l := contract.Norm(a)
+		l := a
 		if sc.labels[l] {
 			continue
 		}
-		if isPodKey(mc.c, l) {
+		// The underscore spelling of a label these series DO carry (a per_pod or platform metric keeps its
+		// pod keys) is a wrong spelling, not a missing pod key: name the dotted one first.
+		if contract.Dotted(l, sc.labels) == "" && isPodKey(mc.c, l) {
 			mc.r.add(Fail, mc.q.File, mc.q.Where, "contract-pod-label", "grouping by %q: business metrics have no pod key in the store (concept 4.1)", a)
 			continue
 		}
@@ -361,10 +321,10 @@ func (mc *metricChecker) selector(me *metricsql.MetricExpr) labelScope {
 			if lf.Label == "__name__" {
 				continue
 			}
-			l := contract.Norm(lf.Label)
+			l := lf.Label
 			if !allowed[l] {
 				switch {
-				case isPodKey(mc.c, l) && len(matched) > 0:
+				case contract.Dotted(l, allowed) == "" && isPodKey(mc.c, l) && len(matched) > 0:
 					mc.r.add(Fail, mc.q.File, mc.q.Where, "contract-pod-label",
 						"label %q on metric %q: business metrics have no pod key in the store (concept 4.1); only per_pod metrics keep it", lf.Label, firstName(name, nameRe))
 				case len(matched) > 0:
@@ -391,16 +351,23 @@ func firstName(name, re string) string {
 	return "~" + re
 }
 
-func isPodKey(c *contract.Contract, norm string) bool {
+// isPodKey reports whether l is a pod key in either spelling (the underscore form is the wrong
+// spelling of a pod key, and a pod key either way).
+func isPodKey(c *contract.Contract, l string) bool {
 	for _, k := range c.EffectivePodKeys() {
-		if contract.Norm(k) == norm {
+		if k == l || contract.Under(k) == l {
 			return true
 		}
 	}
 	return false
 }
 
+// labelHint names the right spelling of a label: VictoriaMetrics stores a dotted label with its
+// dots, so the underscore form of one selects nothing. Otherwise the closest stored label.
 func labelHint(l string, set map[string]bool) string {
+	if d := contract.Dotted(l, set); d != "" {
+		return fmt.Sprintf("; VictoriaMetrics stores this label with its dots, write %q (a selector is {%q=\"...\"}, a grouping is by (%q))", d, d, d)
+	}
 	var all []string
 	for k := range set {
 		all = append(all, k)
@@ -431,14 +398,14 @@ func (mc *metricChecker) valueCheck(matched []contract.StoredMetric, metric stri
 	for _, sm := range matched {
 		if sm.Platform {
 			// a platform metric that carries the label takes any value; one that does not is not selected by it
-			if sm.Labels[contract.Norm(lf.Label)] {
+			if sm.Labels[lf.Label] {
 				return
 			}
 			continue
 		}
-		t, ok := mc.c.LabelType(sm.Metric, contract.Norm(lf.Label))
+		t, ok := mc.c.LabelType(sm.Metric, lf.Label)
 		if !ok {
-			if sm.Labels[contract.Norm(lf.Label)] {
+			if sm.Labels[lf.Label] {
 				return // a platform label on a contract metric: any value
 			}
 			continue
@@ -615,4 +582,85 @@ func dashVars(q *files.Query) map[string]bool {
 		}
 	}
 	return m
+}
+
+// contractVariables judges the label of a dashboard variable `label_values(metric, label)` against the
+// contract, the way a selector's labels are: VictoriaMetrics stores a dotted label with its dots, so the
+// underscore form (`label_values(checkout_charges_total, payment_provider)`) lists nothing and fails
+// naming the dotted spelling. A metric that holds a variable or is not in the contract is not judged here.
+func contractVariables(r *Report, d *files.Dashboard, c *contract.Contract) {
+	for _, v := range d.Vars {
+		if v.Type != "query" {
+			continue
+		}
+		metric, label, ok := parseLabelValues(v.Query)
+		if !ok {
+			continue
+		}
+		allowed := c.AllLabels()
+		where := fmt.Sprintf("variable $%s", v.Name)
+		if metric != "" {
+			if strings.ContainsAny(metric, "$[]()") {
+				continue
+			}
+			sm, ok := c.Lookup(metric)
+			if !ok {
+				continue // not a contract metric: another rule's business
+			}
+			allowed = sm.Labels
+		}
+		if label == "" || strings.Contains(label, "$") || allowed[label] {
+			continue
+		}
+		if metric == "" && contract.Dotted(label, allowed) == "" {
+			continue // label_values(label) with no metric may read a log field or a trace attribute: judge only a known wrong spelling
+		}
+		msg := "label_values reads label %q, which is not a label of %s in the contract%s"
+		target := "any contract metric"
+		if metric != "" {
+			target = fmt.Sprintf("metric %q", metric)
+		}
+		r.add(Fail, d.File, where, "contract-undeclared-label", msg, label, target, labelHint(label, allowed))
+	}
+}
+
+// labelFuncLabels names the labels a label function READS from its series argument and the labels it MAKES
+// (its string arguments), for the static contract check and the live spelling check alike.
+func labelFuncLabels(fe *metricsql.FuncExpr) (reads, makes []string) {
+	pick := func(idx ...int) []string {
+		var out []string
+		for _, i := range idx {
+			if i < len(fe.Args) {
+				if se, ok := fe.Args[i].(*metricsql.StringExpr); ok {
+					out = append(out, se.S)
+				}
+			}
+		}
+		return out
+	}
+	switch strings.ToLower(fe.Name) {
+	case "label_replace":
+		makes, reads = pick(1), pick(3)
+	case "label_join":
+		makes = pick(1)
+		for i := 3; i < len(fe.Args); i++ {
+			reads = append(reads, pick(i)...)
+		}
+	case "label_set":
+		for i := 1; i < len(fe.Args); i += 2 {
+			makes = append(makes, pick(i)...)
+		}
+	case "label_copy", "label_move":
+		for i := 1; i+1 < len(fe.Args); i += 2 {
+			reads = append(reads, pick(i)...)
+			makes = append(makes, pick(i+1)...)
+		}
+	case "label_map", "label_match", "label_mismatch", "label_transform":
+		reads = pick(1)
+	case "label_uppercase", "label_lowercase", "label_del", "label_keep":
+		for i := 1; i < len(fe.Args); i++ {
+			reads = append(reads, pick(i)...)
+		}
+	}
+	return reads, makes
 }

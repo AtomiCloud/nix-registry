@@ -8,7 +8,7 @@
       {
         "type": "query",
         "name": "provider",
-        "query": { "query": "label_values(checkout_charges_total, payment_provider)", "refId": "q" },
+        "query": { "query": "label_values(checkout_charges_total, payment.provider)", "refId": "q" },
         "includeAll": true,
         "multi": true
       },
@@ -21,11 +21,11 @@
       "type": "timeseries",
       "title": "Charges by outcome",
       "interval": "1m",
-      "datasource": { "type": "prometheus", "uid": "primordial-metrics" },
+      "datasource": { "type": "prometheus", "uid": "fixture-metrics" },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (outcome) (rate(checkout_charges_total{payment_provider=~\"$provider\"}[$__rate_interval]))"
+          "expr": "sum by (outcome) (rate(checkout_charges_total{\"payment.provider\"=~\"$provider\"}[$__rate_interval]))"
         }
       ]
     },
@@ -37,7 +37,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{http_route=\"$route\"}[$__rate_interval])))"
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{\"http.route\"=\"$route\"}[$__rate_interval])))"
         }
       ]
     },
@@ -50,7 +50,7 @@
           "id": 4,
           "type": "logs",
           "title": "Failed charges",
-          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "primordial-logs" },
+          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "fixture-logs" },
           "targets": [
             {
               "refId": "A",

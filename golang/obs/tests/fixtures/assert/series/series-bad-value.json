@@ -4,353 +4,353 @@
   "data": [
     {
       "__name__": "checkout_charges_total",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
-      "payment_provider": "stripe",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
+      "payment.provider": "stripe",
       "outcome": "success"
     },
     {
       "__name__": "checkout_charges_total",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
-      "payment_provider": "stripe",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
+      "payment.provider": "stripe",
       "outcome": "declined"
     },
     {
       "__name__": "checkout_charges_total",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
-      "payment_provider": "stripe",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
+      "payment.provider": "stripe",
       "outcome": "error"
     },
     {
       "__name__": "checkout_charges_total",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
-      "payment_provider": "adyen",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
+      "payment.provider": "adyen",
       "outcome": "success"
     },
     {
       "__name__": "checkout_charges_total",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
-      "payment_provider": "adyen",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
+      "payment.provider": "adyen",
       "outcome": "declined"
     },
     {
       "__name__": "checkout_charges_total",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
-      "payment_provider": "adyen",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
+      "payment.provider": "adyen",
       "outcome": "error"
     },
     {
       "__name__": "checkout_charges_total",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
-      "payment_provider": "paypal",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
+      "payment.provider": "paypal",
       "outcome": "success"
     },
     {
       "__name__": "checkout_charges_total",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
-      "payment_provider": "paypal",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
+      "payment.provider": "paypal",
       "outcome": "declined"
     },
     {
       "__name__": "checkout_charges_total",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
-      "payment_provider": "paypal",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
+      "payment.provider": "paypal",
       "outcome": "error"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "success",
       "le": "0.005"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "success",
       "le": "0.01"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "success",
       "le": "0.025"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "success",
       "le": "0.05"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "success",
       "le": "0.1"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "success",
       "le": "0.25"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "success",
       "le": "0.5"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "success",
       "le": "1"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "success",
       "le": "2.5"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "success",
       "le": "5"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "success",
       "le": "10"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "success",
       "le": "+Inf"
     },
     {
       "__name__": "checkout_charge_duration_seconds_sum",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "success"
     },
     {
       "__name__": "checkout_charge_duration_seconds_count",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "success"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "declined",
       "le": "0.005"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "declined",
       "le": "0.01"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "declined",
       "le": "0.025"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "declined",
       "le": "0.05"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "declined",
       "le": "0.1"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "declined",
       "le": "0.25"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "declined",
       "le": "0.5"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "declined",
       "le": "1"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "declined",
       "le": "2.5"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "declined",
       "le": "5"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "declined",
       "le": "10"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "declined",
       "le": "+Inf"
     },
     {
       "__name__": "checkout_charge_duration_seconds_sum",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "declined"
     },
     {
       "__name__": "checkout_charge_duration_seconds_count",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "declined"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "error",
       "le": "0.005"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "error",
       "le": "0.01"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "error",
       "le": "0.025"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "error",
       "le": "0.05"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "error",
       "le": "0.1"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "error",
       "le": "0.25"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "error",
       "le": "0.5"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "error",
       "le": "1"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "error",
       "le": "2.5"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "error",
       "le": "5"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "error",
       "le": "10"
     },
     {
       "__name__": "checkout_charge_duration_seconds_bucket",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "error",
       "le": "+Inf"
     },
     {
       "__name__": "checkout_charge_duration_seconds_sum",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "error"
     },
     {
       "__name__": "checkout_charge_duration_seconds_count",
-      "durian_cloud_landscape": "lab",
-      "durian_cloud_service": "checkout",
+      "durian.cloud.landscape": "lab",
+      "durian.cloud.service": "checkout",
       "outcome": "error"
     }
   ]

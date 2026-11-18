@@ -56,7 +56,7 @@ const dashJSONText = `{"uid":"payments-overview","title":"Payments overview","ti
 "templating":{"list":[
  {"type":"datasource","name":"ds","query":"prometheus"},
  {"type":"query","name":"outcome","query":{"query":"label_values(checkout_charges_total, outcome)"}},
- {"type":"query","name":"provider","query":"label_values(checkout_charges_total, payment_provider)","includeAll":true,"multi":true},
+ {"type":"query","name":"provider","query":"label_values(checkout_charges_total, payment.provider)","includeAll":true,"multi":true},
  {"type":"custom","name":"route","query":"/charge,/refund","current":{"value":"/refund"}},
  {"type":"custom","name":"first","query":"a,b"},
  {"type":"interval","name":"win"}
@@ -318,7 +318,7 @@ const tracesDash = `{"uid":"svc-traces","title":"Service traces","time":{"from":
  {"id":3,"title":"Trace table","type":"table","datasource":{"type":"datasource","uid":"${tdb}"},"targets":[{"refId":"A","datasource":{"type":"tempo","uid":"${tdb}"}}]},
  {"id":4,"title":"CPU flame graph","type":"flamegraph","datasource":{"type":"grafana-pyroscope-datasource","uid":"${pdb}"},"targets":[{"refId":"A"}]},
  {"id":5,"title":"Mixed","type":"timeseries","datasource":{"type":"datasource","uid":"-- Mixed --"},"targets":[{"refId":"A","datasource":{"type":"tempo","uid":"obs-traces"}},{"refId":"B","datasource":{"type":"prometheus","uid":"payments-metrics"}}]},
- {"id":6,"title":"Uid only","type":"table","datasource":{"uid":"primordial-tempo"},"targets":[{"refId":"A"}]}
+ {"id":6,"title":"Uid only","type":"table","datasource":{"uid":"fixture-tempo"},"targets":[{"refId":"A"}]}
 ]}`
 
 func TestTraceAndProfilePanelsAreExpectedEmpty(t *testing.T) {

@@ -1,0 +1,265 @@
+{
+  "schema": "ul/v1",
+  "root": "/ROOT",
+  "namespaces": [
+    {
+      "namespace": "example.org/cooking/kitchen",
+      "breadcrumb": [
+        "example.org",
+        "cooking",
+        "kitchen"
+      ],
+      "premise": "Made-up example for tests; the tools of a kitchen",
+      "file": "docs/standard/kitchen/UL.yaml"
+    },
+    {
+      "namespace": "example.org/cooking/pastry",
+      "breadcrumb": [
+        "example.org",
+        "cooking",
+        "pastry"
+      ],
+      "premise": "Made-up example for tests; a bakery, from the dough to the loaf",
+      "file": "docs/domain/pastry/UL.yaml"
+    },
+    {
+      "namespace": "example.org/cooking/pastry/bread",
+      "breadcrumb": [
+        "example.org",
+        "cooking",
+        "pastry",
+        "bread"
+      ],
+      "premise": "Made-up example for tests; the bread recipes of the bakery",
+      "file": "recipes/bread/UL.yaml"
+    }
+  ],
+  "words": [
+    {
+      "id": "example.org/cooking/kitchen#Frying pan",
+      "word": "Frying pan",
+      "namespace": "example.org/cooking/kitchen",
+      "breadcrumb": [
+        "example.org",
+        "cooking",
+        "kitchen"
+      ],
+      "aliases": [
+        "Fry pan",
+        "Flat Pan"
+      ],
+      "desc": "A flat pan for frying food on a hob.",
+      "details": "A frying pan is **flat** and **shallow**.\n\nHeat it on the hob; it never goes in the Oven.\n",
+      "avoid": [
+        "griddle"
+      ],
+      "see": [
+        "example.org/cooking/kitchen#Oven",
+        "example.org/cooking/kitchen#Wok"
+      ],
+      "mentions": [
+        "example.org/cooking/kitchen#Oven"
+      ],
+      "status": "active",
+      "replacedBy": null,
+      "file": "docs/standard/kitchen/UL.yaml",
+      "line": 4
+    },
+    {
+      "id": "example.org/cooking/kitchen#Oven",
+      "word": "Oven",
+      "namespace": "example.org/cooking/kitchen",
+      "breadcrumb": [
+        "example.org",
+        "cooking",
+        "kitchen"
+      ],
+      "aliases": [],
+      "desc": "A closed box that cooks food with dry heat.",
+      "details": "An oven bakes or roasts; set the heat before the food goes in.\n",
+      "avoid": [],
+      "see": [
+        "example.org/cooking/kitchen#Frying pan"
+      ],
+      "mentions": [],
+      "status": "active",
+      "replacedBy": null,
+      "file": "docs/standard/kitchen/UL.yaml",
+      "line": 13
+    },
+    {
+      "id": "example.org/cooking/kitchen#Skillet",
+      "word": "Skillet",
+      "namespace": "example.org/cooking/kitchen",
+      "breadcrumb": [
+        "example.org",
+        "cooking",
+        "kitchen"
+      ],
+      "aliases": [],
+      "desc": "Old name in this book for a Frying pan.",
+      "details": "",
+      "avoid": [],
+      "see": [],
+      "mentions": [
+        "example.org/cooking/kitchen#Frying pan"
+      ],
+      "status": "retired",
+      "replacedBy": "example.org/cooking/kitchen#Frying pan",
+      "file": "docs/standard/kitchen/UL.yaml",
+      "line": 22
+    },
+    {
+      "id": "example.org/cooking/kitchen#Wok",
+      "word": "Wok",
+      "namespace": "example.org/cooking/kitchen",
+      "breadcrumb": [
+        "example.org",
+        "cooking",
+        "kitchen"
+      ],
+      "aliases": [
+        "Round Pan"
+      ],
+      "desc": "A deep pan for stirring food over high heat.",
+      "details": "Use it in place of a Flat Pan when the oven is full.",
+      "avoid": [],
+      "see": [],
+      "mentions": [
+        "example.org/cooking/kitchen#Frying pan",
+        "example.org/cooking/kitchen#Oven"
+      ],
+      "status": "active",
+      "replacedBy": null,
+      "file": "docs/standard/kitchen/UL.yaml",
+      "line": 18
+    },
+    {
+      "id": "example.org/cooking/pastry#Crust",
+      "word": "Crust",
+      "namespace": "example.org/cooking/pastry",
+      "breadcrumb": [
+        "example.org",
+        "cooking",
+        "pastry"
+      ],
+      "aliases": [],
+      "desc": "The hard outside of a loaf.",
+      "details": "",
+      "avoid": [],
+      "see": [
+        "example.org/cooking/pastry#Loaf"
+      ],
+      "mentions": [
+        "example.org/cooking/pastry#Loaf"
+      ],
+      "status": "active",
+      "replacedBy": null,
+      "file": "docs/domain/pastry/UL.yaml",
+      "line": 12
+    },
+    {
+      "id": "example.org/cooking/pastry#Loaf",
+      "word": "Loaf",
+      "namespace": "example.org/cooking/pastry",
+      "breadcrumb": [
+        "example.org",
+        "cooking",
+        "pastry"
+      ],
+      "aliases": [],
+      "desc": "Bread baked in one piece.",
+      "details": "A loaf has one Crust all round.\n\nIt is done once it sounds hollow.\n",
+      "avoid": [
+        "bun",
+        "roll"
+      ],
+      "see": [
+        "example.org/cooking/pastry#Crust",
+        "example.org/cooking/kitchen#Oven"
+      ],
+      "mentions": [
+        "example.org/cooking/pastry#Crust"
+      ],
+      "status": "active",
+      "replacedBy": null,
+      "file": "docs/domain/pastry/UL.yaml",
+      "line": 4
+    },
+    {
+      "id": "example.org/cooking/pastry#Oven",
+      "word": "Oven",
+      "namespace": "example.org/cooking/pastry",
+      "breadcrumb": [
+        "example.org",
+        "cooking",
+        "pastry"
+      ],
+      "aliases": [
+        "Deck Oven"
+      ],
+      "desc": "The big oven of the bakery, used for bread only.",
+      "details": "",
+      "avoid": [],
+      "see": [],
+      "mentions": [],
+      "status": "active",
+      "replacedBy": null,
+      "file": "docs/domain/pastry/UL.yaml",
+      "line": 15
+    },
+    {
+      "id": "example.org/cooking/pastry/bread#Rise",
+      "word": "Rise",
+      "namespace": "example.org/cooking/pastry/bread",
+      "breadcrumb": [
+        "example.org",
+        "cooking",
+        "pastry",
+        "bread"
+      ],
+      "aliases": [],
+      "desc": "Let one Loaf grow before it is baked.",
+      "details": "",
+      "avoid": [],
+      "see": [
+        "example.org/cooking/pastry#Loaf"
+      ],
+      "mentions": [
+        "example.org/cooking/pastry#Loaf"
+      ],
+      "status": "active",
+      "replacedBy": null,
+      "file": "recipes/bread/UL.yaml",
+      "line": 8
+    },
+    {
+      "id": "example.org/cooking/pastry/bread#Score",
+      "word": "Score",
+      "namespace": "example.org/cooking/pastry/bread",
+      "breadcrumb": [
+        "example.org",
+        "cooking",
+        "pastry",
+        "bread"
+      ],
+      "aliases": [],
+      "desc": "A cut that lets the Crust open.",
+      "details": "Made once; an Oven never makes it.",
+      "avoid": [],
+      "see": [
+        "example.org/cooking/pastry#Crust"
+      ],
+      "mentions": [
+        "example.org/cooking/kitchen#Oven",
+        "example.org/cooking/pastry#Crust",
+        "example.org/cooking/pastry#Oven"
+      ],
+      "status": "active",
+      "replacedBy": null,
+      "file": "recipes/bread/UL.yaml",
+      "line": 4
+    }
+  ],
+  "problems": []
+}

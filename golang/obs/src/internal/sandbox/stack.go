@@ -150,6 +150,49 @@ func checkExisting(c *Config, have map[string]existing) error {
 	return nil
 }
 
+// checkRelabel refuses an existing sandbox whose VictoriaMetrics was created without -relabelConfig (by
+// an older obs): its scraped samples would keep the durian_cloud_* labels and miss the dotted selectors
+// of the standard. The labelmap is a start-up flag, so the container has to be recreated.
+func (c *Config) checkRelabel(ctx context.Context, have map[string]existing) error {
+	for _, k := range Pins {
+		if k.Name != "vm" {
+			continue
+		}
+		name := containerName(c.Project, k)
+		if _, ok := have[name]; !ok {
+			return nil
+		}
+		out, err := c.Runner.Run(ctx, "inspect", "--format", "{{json .Args}}", name)
+		if err != nil {
+			return fmt.Errorf("cannot read the arguments of %s: %w", name, err)
+		}
+		if !strings.Contains(out, "-relabelConfig") {
+			return fmt.Errorf("refusing: %s was made without -relabelConfig (an older obs), so scraped durian_cloud_* labels would not become durian.cloud.*; run `obs sandbox down` then `obs sandbox up` to recreate it", name)
+		}
+	}
+	return nil
+}
+
+// VMRelabelConfig is the sandbox VictoriaMetrics' -relabelConfig: Primordial's real vminsert relabel
+// config, copied exactly (same rules, same order). Source: github.com/AtomiCloud/primordial, branch
+// feat/durian-labels, commit 954508c79c36faa38b221d5eb37c5bada9a03068, apps/vm/chart/values.yaml,
+// vminsert.relabel.config. That branch is not merged yet (main has no relabel config), so this follows an
+// unmerged branch; if the branch changes, change this and the README with it.
+//
+// A scraped sample reaches the store with durian_cloud_* labels (Alloy drops a relabel rule whose
+// target_label has dots) and the labelmap turns the four where-from labels into the stored durian.cloud.*
+// labels. The labeldrop removes the underscore originals, which labelmap keeps, and the cluster label.
+// Only landscape, platform, service and module are mapped: any other durian_cloud_* label is left as sent.
+const VMRelabelConfig = `- action: labelmap
+  regex: 'durian_cloud_(landscape|platform|service|module)'
+  replacement: 'durian.cloud.$1'
+- action: labeldrop
+  regex: 'durian_cloud_(landscape|platform|service|module)|cluster'
+`
+
+// vmRelabelPath is where VMRelabelConfig is copied into the VictoriaMetrics container.
+const vmRelabelPath = "/etc/vm-relabel.yml"
+
 const tempoConfig = `server:
   http_listen_port: 3200
 distributor:
@@ -216,7 +259,8 @@ func (c *Config) createArgs(k Component) []string {
 		// Concept section 10.4 single-instance settings: 30 d retention, 30 labels per series,
 		// 4 concurrent queries, 60 % of memory for caches.
 		a = append(a, "-retentionPeriod=30d", "-storageDataPath="+k.Data,
-			"-maxLabelsPerTimeseries=30", "-search.maxConcurrentRequests=4", "-memory.allowedPercent=60")
+			"-maxLabelsPerTimeseries=30", "-search.maxConcurrentRequests=4", "-memory.allowedPercent=60",
+			"-relabelConfig="+vmRelabelPath)
 	case "vl":
 		// Concept section 10.4: 30 d retention and the 16 GiB laptop disk cap (oldest days go first),
 		// 4 concurrent queries, queue 10 s and query 30 s (the query bounds), 60 % of memory.
@@ -248,6 +292,9 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 		return nil, fmt.Errorf("container runtime: %w", err)
 	}
 	if err := checkExisting(&cfg, have); err != nil {
+		return nil, err
+	}
+	if err := cfg.checkRelabel(ctx, have); err != nil {
 		return nil, err
 	}
 	created := false
@@ -289,6 +336,11 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 		}
 		if k.Name == "tempo" {
 			if err := copyIn(ctx, cfg.Runner, name, "/etc/tempo.yaml", tempoConfig); err != nil {
+				return nil, err
+			}
+		}
+		if k.Name == "vm" {
+			if err := copyIn(ctx, cfg.Runner, name, vmRelabelPath, VMRelabelConfig); err != nil {
 				return nil, err
 			}
 		}
