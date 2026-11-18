@@ -27,6 +27,7 @@ linked module ship in `share/licenses/obs`. Design: `concepts/observability.md` 
 | `obs sandbox up`                            | Starts, stops or inspects (`down`, `status`) the local stack for people; no check needs it.                                                   |
 | `obs look`                                  | Sets up the sandbox with the changed dashboards and prints the screenshot review prompt for the calling agent; never fails CI.                |
 | `obs scrape`                                | Scrapes an app's own metrics into the sandbox.                                                                                                |
+| `obs live usage\|shape\|incidents\|look` | Reads a running stack (the local sandbox, dev, stage or prod; read-only) and compares it with the repo: usage vs contract budgets, the shape of real data vs the seed, fired alerts vs incident files and runbooks, the dashboards already there. See [obs live](#obs-live-read-a-running-stack-and-compare-it-with-the-repo). |
 | `obs symbols put\|decode`                   | The symbol store: stores debug symbol files by build id and decodes a stack trace with them.                                                  |
 | `obs size`                                  | The sizing command: traffic cores, memory, series and storage per day for a given load.                                                       |
 | `obs engines --check-chart <dir>`           | Compares the engine versions in a Helm chart folder with the pins; exit 1 on any drift. See [obs engines](#obs-engines---check-chart).        |
@@ -856,6 +857,109 @@ labels as `durian_cloud_*` (concept §2): pass `--label durian_cloud_landscape=l
 them into `durian.cloud.*`; the sandbox VictoriaMetrics has the same labelmap, see "Label spelling per store"). `--once`
 scrapes once and exits 1 when it failed; otherwise it runs until Ctrl-C and keeps going after a failed
 scrape.
+
+## `obs live`: read a running stack and compare it with the repo
+
+`obs live usage|shape|incidents|look --target local|dev|stage|prod` pulls numbers from a running
+stack (the local sandbox, or a real cluster) and compares them with what the repo declares. obs
+pulls and compares; the calling LLM (or a person) judges. `--json` prints the same content for an
+LLM, the default is a table.
+
+**Read-only guarantee.** obs live sends only `GET` to the stores' query endpoints (the guard would also let a `POST` through to the same endpoints, never anywhere else): `/api/v1/query`, `query_range`, `series`, `status/tsdb` (VictoriaMetrics),
+`/select/logsql/stats_query` and friends (VictoriaLogs), `/api/metrics/query_range` (Tempo), and
+Grafana's `/api/health`, `/api/search`, `/api/annotations`. Every request goes through one guard
+(`internal/live/client.go`, `ReadOnly`) that refuses any other method or path before the network is
+touched; the Go tests run every command against fake stores that record each request and assert that
+nothing else arrived. obs installs nothing into a real cluster: dashboards get there only through the
+platform chart.
+
+### Targets in `obs.yaml`
+
+```yaml
+targets:
+  prod:
+    metrics: https://vm.prod.example # VictoriaMetrics or Prometheus query API
+    logs: https://vl.prod.example # VictoriaLogs
+    traces: https://tempo.prod.example # Tempo
+    grafana: https://grafana.prod.example
+    headers: # request headers; the file names the ENVIRONMENT VARIABLE, never the value
+      Authorization: OBS_PROD_AUTHORIZATION # the variable holds the whole value, e.g. "Bearer ..."
+      X-Scope-OrgID: OBS_PROD_ORG
+
+estimates: # optional: expected log and trace volume (the contract only holds series budgets)
+  logs: { lines_per_min: 600, bytes_per_min: 120000 }
+  traces: { spans_per_min: 3000, bytes_per_min: 900000 }
+```
+
+- A target name is anything (`local`, `dev`, `stage`, `prod`, `eu-prod`); each store URL is optional, a command that needs a missing one says which key to set.
+- A header value that is not a bare environment variable name (a token written into the file) is refused, naming the key; the variable not being set is an error naming file, line, key and variable.
+- `--target local` needs no entry: it reads the running sandbox (`--project name` picks which; the ports it holds), else the default sandbox addresses (`127.0.0.1` ports 8428, 9428, 3200, 3000). A key written under `targets.local` wins.
+- `obs check`, `obs query` and the other commands load a file with these two blocks without complaint; only `obs live` reads them. `estimates:` fills the "vs contract estimates" column; without it the column says "no estimate".
+
+### `obs live usage`
+
+Active time series (ATS) and data points per minute (DPM) per metric, against the contract's worst case
+and budget; log lines/min, message bytes/min and streams; spans/min and bytes/min. It replaces `obs assert`
+and `obs scrape` as the recommended command (`assert` keeps working unchanged).
+
+- Rows are sorted by distance from the contract: over budget first, then above the worst case, then metrics that are not in the contract, then the rest by how full they are, platform metrics last. `--top N` keeps the first N, `--over-only` hides the rows that are fine, `--unknown warn|fail|ignore` says what a metric outside the contract does (as for `assert`).
+- Only the contract's service is counted (`"durian.cloud.service"="<service>"`); `--all-services` counts the whole target. Point the target at one landscape's store: the budget is per landscape.
+- A histogram counts its `_bucket`, `_sum` and `_count` series together, like the worst case does; a per-pod metric may hold worst case x `--pods` series.
+- DPM is measured over `--window` (default 5m) and compared with the worst case times 60 / the contract's aggregation interval; a row above it says so but does not fail.
+- Logs come from VictoriaLogs `stats_query` (`count()`, `sum_len(_msg)`, `count_uniq(_stream_id)`); streams are compared with the contract's worst case (`landscapes x modules`).
+- Spans/min come from Tempo's TraceQL metrics endpoint when it answers (this needs Tempo's local-blocks processor), else from `tempo_distributor_spans_received_total` in the metrics store (the whole Tempo, not one service); bytes/min only from `tempo_distributor_bytes_received_total`. The row names its source, or why it is "not read".
+- **Exit 1 only when a metric is over its budget** (the budget, else the worst case, when the contract names none), when the log streams are over the worst case, or with `--unknown fail` for an undeclared metric; the last line says so. 2 on a usage or input error, including a target that cannot be reached.
+
+### `obs live shape`
+
+Per contract metric over `--window` (default 7d, step `--step`, default 5m): the real data and the seed side by
+side, in five parts plus noise, named like the seed's shape settings (`seed.ShapeSettings`). It never fails: the
+LLM reads the two columns and judges if the seed is realistic.
+
+| Part   | Field                                                                  | Meaning                                                                                               |
+| ------ | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| level  | `level.min`, `typical`, `max`                                          | lowest, median and highest value                                                                      |
+| trend  | `trend.change_per_day`                                                 | least-squares change per day as a fraction of typical (0.03 is up 3 % a day); needs 2 days            |
+| cycle  | `cycle.daily_amplitude`, `peak_hour`, `weekend_factor`                 | half the peak-to-trough of the average hour of day over the mean; UTC peak hour; weekend / weekday (7 days) |
+| spikes | `spikes.count`, `size`                                                 | separate upward jumps far above that hour's typical value; the biggest as a multiple of typical       |
+| gaps   | `gaps.count`, `length`                                                 | runs of two or more steps with no data (and data that stopped early); total missing time              |
+| noise  | `noise`                                                                | the wiggle left after the hour shape, as a fraction of typical                                        |
+
+- The metric is read as one number: a counter as the summed rate per second, a histogram as the summed rate of its observations (`_count`), a gauge as its summed value. The same query runs on the real store and on the seed.
+- The seed column is the seed generator's own data (`seed.Build`) run through the embedded VictoriaMetrics with the same query, over the seed's length: a seed of 4 h cannot show a trend or a daily cycle, and the cell says so (`n/a`). Until the seed carries `traffic.settings` the seed side is computed from the data it makes today.
+
+### `obs live incidents`
+
+Alerts that fired on the target in `--since` (default 7d) plus windows you name with `--window from..to`
+(RFC 3339, `2026-11-10`, `2026-11-10T14:30`, unix seconds or `-6h..-2h`; repeatable), compared with the repo's
+incident files, alert rules and runbooks.
+
+- **Source, and why.** Grafana's alert state history (`/api/annotations?type=alert`) when the target has a `grafana:` URL: Grafana-managed rules keep their state changes there and do not write an `ALERTS` series (only a vmalert-style ruler does). Without a Grafana URL, or when Grafana refuses, the `ALERTS{alertstate="firing"}` series in the metrics store is used; the output says which and why.
+- **fired-but-no-incident:** an alert fired and no incident file lists it under `expect.fire`. **incident-not-alerted:** an incident file with no alert under `expect.fire` (or only unknown ones), and every named window in which nothing fired. **alert-without-runbook:** a rule with no `runbook_url` annotation (marked when it fired).
+- **No capture command.** For each gap it prints the `incident.yaml` entry text an LLM could add; it writes no file. The LLM adds the entry and the alert in a pull request; `obs test` goes red, then green.
+- Exits 0 (the LLM judges).
+
+### `obs live look`
+
+Lists the dashboards the target's Grafana already has, with addresses (last 6 hours of real data) and the visual
+checklist prompt, like `obs look`. It installs nothing. A dashboard that is not deployed yet is checked with `obs look` on the seed, or by
+deploying the chart to the local cluster and using `--target local`. Exits 0 always.
+
+### Migration rows
+
+| 0.4                  | 0.5                                                                                                                     |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `obs assert`         | `obs live usage --target local\|dev\|stage\|prod`: reads the series counts from the store itself; `assert` still works |
+| `obs scrape`         | still feeds the sandbox; read what it stored with `obs live usage --target local`                                       |
+
+The two old commands print one note on stderr naming the new one; their stdout is unchanged.
+
+### What was measured
+
+- **MEASURED** (Go tests, `internal/live`): every command against fake HTTP stores that record each request; the read-only guard (a test plants a widened guard and goes red); the targets and header rules; every shape part on synthetic series; incident matching on a temp repo folder.
+- **MEASURED** (one real run, local sandbox: VictoriaMetrics v1.156.0, VictoriaLogs v1.54.0, Tempo 3.1.1, Grafana 13.3.0, the `tests/fixtures/good` seed): `obs live usage|shape|incidents|look --target local`. See *Not tested* for what that run did not cover.
+- **NOT TESTED**: `dev`, `stage` and `prod` (no access); see *Not tested*.
+
 
 ## Engines and pins
 
@@ -2093,6 +2197,9 @@ source) where its section says so.
 
 **Commands and builds**
 
+- **`obs live` on dev, stage and prod.** No access to any of them; only the local sandbox was read for real, and the fake stores in the Go tests answer with hand-written payloads in the documented shapes. Not run against a real remote store: auth headers from the environment on a real gateway, a very large metrics store (the `count by (__name__)` and `count_over_time` queries scan every series of the service), and a real Tempo with the local-blocks processor on (the sandbox Tempo has none, so spans/min fell back and said so).
+- **`obs live incidents` against a real firing alert.** The local Grafana answered `/api/annotations?type=alert` with an empty history (nothing fired); the parsing of fired, resolved and pending states is tested on payloads written from the Grafana documentation, not recorded from a real firing. The `ALERTS` series path is tested on a fake store only.
+- **`obs live look`** lists dashboards on the local sandbox only; no screenshots are taken by obs (the calling agent takes them).
 - **Live label-spelling check on MetricsQL result labels.** `obs query --live` models which query-made labels
   survive a query (aggregations, binary operations, `group_left`/`group_right`, scalar sides, set operators) for the
   forms checked against the embedded engine in `src/internal/check/engine_controls_test.go`; other forms may be

@@ -36,6 +36,7 @@ usage:
   obs look   [--base origin/main] [--all] [--json] [--file dashboards/x.json] [--checklist file.md] [--out obs-look] [--width 1600] [--height 1000]
            [--dir observability] [--seed seed.yaml] [--project name] [--port-base n] [--runtime docker|podman] [--reseed]
   obs links [--dir observability] [--seed seed.yaml] [--base unix]
+  obs live usage|shape|incidents|look --target local|dev|stage|prod   (read-only; obs live help)
   obs version
   obs store move <store> --config move.yaml [--dry-run] [--rollback]
   obs symbols put|decode --store <dir> --file <file> [options]
@@ -66,6 +67,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runSandbox(args[1:], stdout, stderr)
 	case "look":
 		return runLook(args[1:], stdout, stderr)
+	case "live":
+		return runLive(args[1:], stdout, stderr)
 	case "links":
 		return runLinks(args[1:], stdout, stderr)
 	case "query":
