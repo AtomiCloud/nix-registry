@@ -2,6 +2,8 @@ package live
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -68,7 +71,7 @@ func baseURL(base string) (*url.URL, error) {
 func checkHop(method string, base, hop *url.URL) error {
 	switch {
 	case hop.Scheme != base.Scheme || hop.Host != base.Host:
-		return fmt.Errorf("redirect refused: it leaves the target's host (to %s); obs live never follows one", hop.Host)
+		return fmt.Errorf("redirect refused: it leaves the target's host; obs live never follows one")
 	case hop.User != nil:
 		return fmt.Errorf("redirect refused: it carries credentials")
 	}
@@ -158,7 +161,7 @@ func (c *Client) Get(ctx context.Context, base, path string, q url.Values) ([]by
 	defer resp.Body.Close()
 	b, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
 	if err != nil {
-		return nil, fmt.Errorf("GET %s%s: %v", base, path, err)
+		return nil, fmt.Errorf("GET %s%s: reading the response: %v", base, path, safeDoError(err))
 	}
 	if resp.StatusCode/100 != 2 {
 		body := strings.TrimSpace(string(b))
@@ -170,23 +173,48 @@ func (c *Client) Get(ctx context.Context, base, path string, q url.Values) ([]by
 	return b, nil
 }
 
-// safeDoError is what obs prints for an error of http.Client.Do (url.Error already unwrapped).
-// It is an allowlist: obs's own redirect refusals and network or timeout errors (they name an
-// address at most) are printed as they are; anything else may quote what the store sent (net/http
-// quotes an unparsable Location whole, textproto quotes a malformed header line whole, a Location
-// may carry a token), so it is replaced by a fixed text that prints nothing of the response.
+// safeDoError is what obs prints for an error of http.Client.Do or of reading a response body
+// (url.Error already unwrapped). obs never prints Go's or the store's own error text: net/http
+// quotes an unparsable Location whole, textproto quotes a malformed header or trailer line whole,
+// a deadline error can carry the transport error before it, a certificate error names the
+// certificate's hosts. Each recognised failure gets a fixed text written here; obs's own redirect
+// refusals (fixed texts in checkHop) pass; anything else is one fixed text.
 func safeDoError(err error) error {
 	msg := err.Error()
+	var unknownCA x509.UnknownAuthorityError
+	var hostErr x509.HostnameError
+	var invalidErr x509.CertificateInvalidError
+	var certErr *tls.CertificateVerificationError
+	var recordErr tls.RecordHeaderError
+	var dnsErr *net.DNSError
 	var netErr net.Error
 	switch {
-	case strings.HasPrefix(msg, "redirect refused"):
+	case strings.HasPrefix(msg, "redirect refused: "):
 		return err
 	case strings.Contains(msg, "Location header"):
 		return errors.New("redirect refused: the store sent a Location obs cannot parse")
-	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
-		return err
-	case errors.As(err, &netErr) && !strings.Contains(msg, "malformed"):
-		return err
+	case errors.Is(err, context.Canceled):
+		return errors.New("the request was cancelled")
+	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &netErr) && netErr.Timeout():
+		return errors.New("the request timed out")
+	case errors.As(err, &unknownCA):
+		return errors.New("TLS: the store's certificate is signed by an authority this machine does not trust")
+	case errors.As(err, &hostErr):
+		return errors.New("TLS: the store's certificate is not valid for the target's host name")
+	case errors.As(err, &invalidErr):
+		return errors.New("TLS: the store's certificate is invalid (expired, not yet valid, or not for a server)")
+	case errors.As(err, &certErr):
+		return errors.New("TLS: the store's certificate could not be verified")
+	case strings.Contains(msg, "server gave HTTP response to HTTPS client"), errors.As(err, &recordErr):
+		return errors.New("the target URL is https but the store answered plain HTTP")
+	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
+		return errors.New("the store closed the connection before it answered")
+	case errors.As(err, &dnsErr):
+		return errors.New("the target's host name does not resolve (DNS)")
+	case errors.Is(err, syscall.ECONNREFUSED):
+		return errors.New("connection refused: nothing listens at the target address")
+	case errors.Is(err, syscall.ECONNRESET):
+		return errors.New("the store reset the connection")
 	}
-	return errors.New("the store sent a response obs cannot read (malformed HTTP); nothing of it is printed")
+	return errors.New("the store sent a response obs cannot read; nothing of it is printed")
 }

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // recorder is a fake store that logs every request it receives, so a test can assert that
@@ -338,5 +339,101 @@ func TestMalformedResponseHeaderIsNeverPrinted(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "sekrit-header-token") || strings.Contains(err.Error(), "token=") || strings.Contains(err.Error(), "Location http") {
 		t.Fatalf("the error must not print the malformed header line: %v", err)
+	}
+}
+
+// The allowlist must keep the errors a user needs on a real target readable: none of them carry
+// response bytes, and "malformed HTTP" would send them looking in the wrong place.
+func TestUsefulTransportErrorsStayReadable(t *testing.T) {
+	tlsSrv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer tlsSrv.Close()
+	plain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer plain.Close()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			buf := make([]byte, 4096)
+			conn.Read(buf)
+			conn.Close() // closes without an answer
+		}
+	}()
+	cases := []struct{ name, base, want string }{
+		{"unknown CA", tlsSrv.URL, "authority this machine does not trust"},
+		{"https to a plain-HTTP port", strings.Replace(plain.URL, "http://", "https://", 1), "answered plain HTTP"},
+		{"connection closed", "http://" + ln.Addr().String(), "closed the connection"},
+	}
+	for _, c := range cases {
+		err := (&Client{}).GetJSON(context.Background(), c.base, "/api/v1/query", nil, &struct{}{})
+		if err == nil || strings.Contains(err.Error(), "malformed HTTP") || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s: want a readable error naming %q, got %v", c.name, c.want, err)
+		}
+	}
+}
+
+// obs prints only its own fixed texts: never a host the store named, never a trailer line, never
+// the transport text a deadline error can carry.
+func TestTransportErrorsAreFixedTexts(t *testing.T) {
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer other.Close()
+	otherHost := strings.TrimPrefix(other.URL, "http://")
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL+"/api/v1/query", http.StatusFound)
+	}))
+	defer redirector.Close()
+	err := (&Client{}).GetJSON(context.Background(), redirector.URL, "/api/v1/query", nil, &struct{}{})
+	if err == nil || !strings.Contains(err.Error(), "redirect refused") || strings.Contains(err.Error(), otherHost) {
+		t.Errorf("a refused redirect must not name the host the store sent: %v", err)
+	}
+
+	ln, lerr := net.Listen("tcp", "127.0.0.1:0")
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			buf := make([]byte, 4096)
+			conn.Read(buf)
+			conn.Write([]byte("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n2\r\n{}\r\n0\r\nX-Token: sekrit-trailer\x01\r\n\r\n"))
+			conn.Close()
+		}
+	}()
+	err = (&Client{}).GetJSON(context.Background(), "http://"+ln.Addr().String(), "/api/v1/query", nil, &struct{}{})
+	if err == nil || strings.Contains(err.Error(), "sekrit-trailer") || strings.Contains(err.Error(), "X-Token") {
+		t.Errorf("a malformed trailer must fail without printing it: %v", err)
+	}
+
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	}))
+	defer slow.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	err = (&Client{}).GetJSON(ctx, slow.URL, "/api/v1/query", nil, &struct{}{})
+	if err == nil || !strings.HasSuffix(err.Error(), ": the request timed out") {
+		t.Errorf("a deadline must print the fixed text only: %v", err)
+	}
+
+	closed, cerr := net.Listen("tcp", "127.0.0.1:0")
+	if cerr != nil {
+		t.Fatal(cerr)
+	}
+	addr := closed.Addr().String()
+	closed.Close()
+	err = (&Client{}).GetJSON(context.Background(), "http://"+addr, "/api/v1/query", nil, &struct{}{})
+	if err == nil || !strings.HasSuffix(err.Error(), ": connection refused: nothing listens at the target address") {
+		t.Errorf("connection refused must print the fixed text: %v", err)
 	}
 }
