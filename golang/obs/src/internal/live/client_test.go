@@ -547,3 +547,27 @@ func TestStoreTextHidesGatewayEchoForms(t *testing.T) {
 		t.Fatalf("store text is at most 200 runes including the ellipsis, got %d", n)
 	}
 }
+
+// Forms are found in the original text and merged, so a token that starts with its own scheme
+// word leaves nothing behind; vmauth's bracketed token list is hidden whatever the token length;
+// a short tenant id stays readable.
+func TestStoreTextMergesOverlapsAndHidesVmauthTokenList(t *testing.T) {
+	c := &Client{Headers: map[string]string{"Authorization": "Token Tokenabc123"}}
+	got := c.storeText(`cannot authorize: Bearer Tokenabc123 refused`)
+	if strings.Contains(got, "abc123") {
+		t.Fatalf("an overlapping scheme word must not leave the token suffix: %q", got)
+	}
+	c = &Client{Headers: map[string]string{"X-Custom": "k9z"}}
+	got = c.storeText(`cannot authorize request with auth tokens ["k9z"]`)
+	if strings.Contains(got, "k9z") || !strings.Contains(got, "cannot authorize request") {
+		t.Fatalf("vmauth's token list must be hidden, the diagnostic kept: %q", got)
+	}
+	c = &Client{Headers: map[string]string{"X-Api-Key": "ab1"}}
+	if got = c.storeText(`key ab1 is not valid`); strings.Contains(got, "ab1") {
+		t.Fatalf("a short value on a credential header must be hidden: %q", got)
+	}
+	c = &Client{Headers: map[string]string{"X-Scope-OrgID": "1"}}
+	if got = c.storeText(`tenant 1 over limit 10`); got != `tenant 1 over limit 10` {
+		t.Fatalf("a short tenant id is no secret and must not garble the text: %q", got)
+	}
+}

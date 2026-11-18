@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"syscall"
@@ -234,26 +235,8 @@ func safeDoError(err error) error {
 // word of it, for "Bearer <token>") is replaced by ***, since auth proxies echo the credential
 // they refused, and control characters (a terminal escape) become spaces. At most 200 runes.
 func (c *Client) storeText(s string) string {
-	for _, v := range c.Headers {
-		if len(v) < 4 { // a short value (a tenant id "1") would garble the text; it is no secret
-			continue
-		}
-		// The whole value and each word of it (a gateway may echo only the token of "Bearer <token>",
-		// or rewrite the scheme: vmauth turns "Token x" into "Bearer x"), each as written and as Go's
-		// %q writes it (vmauth quotes the token it refused: backslash escapes).
-		parts := []string{v}
-		for _, w := range strings.Fields(v) {
-			if len(w) >= 4 {
-				parts = append(parts, w)
-			}
-		}
-		for _, p := range parts {
-			q := strconv.Quote(p)
-			for _, form := range []string{q[1 : len(q)-1], p} {
-				s = strings.ReplaceAll(s, form, "***")
-			}
-		}
-	}
+	s = hideSpans(s, c.secretForms())
+	s = hideAuthTokenEcho(s)
 	s = strings.Map(func(r rune) rune {
 		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
 			return ' '
@@ -265,4 +248,106 @@ func (c *Client) storeText(s string) string {
 		s = string(rs[:197]) + "..." // 200 runes with the ellipsis
 	}
 	return s
+}
+
+// secretForms lists the texts storeText hides: each header value obs sent, and each word of it of
+// 4+ chars (a gateway may echo only the token of "Bearer <token>", or rewrite the scheme: vmauth
+// turns "Token x" into "Bearer x"), each as written and as Go's %q writes it (vmauth quotes the
+// token it refused). A value under 4 chars is hidden only on a credential-like header (a tenant id
+// "1" on X-Scope-OrgID would garble the text and is no secret).
+func (c *Client) secretForms() []string {
+	var out []string
+	for name, v := range c.Headers {
+		if v == "" || (len(v) < 4 && !credentialHeader(name)) {
+			continue
+		}
+		parts := []string{v}
+		for _, w := range strings.Fields(v) {
+			if len(w) >= 4 {
+				parts = append(parts, w)
+			}
+		}
+		for _, p := range parts {
+			q := strconv.Quote(p)
+			out = append(out, p, q[1:len(q)-1])
+		}
+	}
+	return out
+}
+
+func credentialHeader(name string) bool {
+	n := strings.ToLower(name)
+	for _, w := range []string{"auth", "token", "key", "secret", "pass", "cookie", "session", "credential"} {
+		if strings.Contains(n, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// hideSpans replaces every occurrence of every form, all found in the ORIGINAL text and merged
+// where they overlap, by one ***: replacing one form at a time can cut another form so that part of
+// it survives (a token that starts with its own scheme word, "Token Tokenabc").
+func hideSpans(s string, forms []string) string {
+	type span struct{ a, b int }
+	var spans []span
+	for _, f := range forms {
+		if f == "" {
+			continue
+		}
+		for i := 0; i <= len(s)-len(f); {
+			j := strings.Index(s[i:], f)
+			if j < 0 {
+				break
+			}
+			spans = append(spans, span{i + j, i + j + len(f)})
+			i += j + 1
+		}
+	}
+	if len(spans) == 0 {
+		return s
+	}
+	sort.Slice(spans, func(x, y int) bool { return spans[x].a < spans[y].a })
+	var out strings.Builder
+	last, cur := 0, spans[0]
+	flush := func() {
+		out.WriteString(s[last:cur.a])
+		out.WriteString("***")
+		last = cur.b
+	}
+	for _, sp := range spans[1:] {
+		if sp.a <= cur.b {
+			cur.b = max(cur.b, sp.b)
+			continue
+		}
+		flush()
+		cur = sp
+	}
+	flush()
+	out.WriteString(s[last:])
+	return out.String()
+}
+
+// hideAuthTokenEcho hides the bracketed token list vmauth prints when it refuses a request
+// ("cannot authorize request with auth tokens [...]"): it can hold a token of any length, from a
+// custom auth header obs did not recognise as a credential.
+func hideAuthTokenEcho(s string) string {
+	const marker = "auth tokens ["
+	var out strings.Builder
+	for {
+		i := strings.Index(s, marker)
+		if i < 0 {
+			out.WriteString(s)
+			return out.String()
+		}
+		out.WriteString(s[:i+len(marker)])
+		rest := s[i+len(marker):]
+		j := strings.Index(rest, "]")
+		if j < 0 {
+			out.WriteString("***]")
+			return out.String()
+		}
+		out.WriteString("***]")
+		s = rest[j+1:]
+	}
 }
