@@ -69,3 +69,48 @@ func PinLines() []string {
 
 // LaptopVLDiskCap is the VictoriaLogs disk cap on a laptop (concept section 10.4, 16 GiB).
 const LaptopVLDiskCap = 16 * 1024 * 1024 * 1024
+
+// obsKey is the obs.yaml `versions` key of each component and pinName its pins.json entry.
+var (
+	obsKey  = map[string]string{"grafana": "grafana", "vm": "victoriametrics", "vl": "victorialogs", "tempo": "tempo", "pyroscope": "pyroscope"}
+	pinName = map[string]string{"grafana": "Grafana", "vm": "VictoriaMetrics", "vl": "VictoriaLogs", "tempo": "Tempo", "pyroscope": "Pyroscope"}
+)
+
+// Resolve returns the stack at the versions obs.yaml names. want maps an obs.yaml key
+// (grafana, victoriametrics, victorialogs, tempo, pyroscope) to a version; a component it
+// does not name keeps its pin. known is the pins table (pins.All()); a version is only run
+// when known records an image digest for it, and the tag is the registry's own spelling.
+// A version with no known digest is an error that names the key; nothing is guessed.
+func Resolve(want map[string]string, known map[string]pins.Pin) ([]Component, error) {
+	out := make([]Component, len(Pins))
+	copy(out, Pins)
+	for i, c := range out {
+		w := want[obsKey[c.Name]]
+		if w == "" {
+			continue
+		}
+		images := known[pinName[c.Name]].Images()
+		found := false
+		var have []string
+		for _, im := range images {
+			have = append(have, im.Version)
+			if pins.SameVersion(im.Version, w) {
+				out[i].Tag = im.Version
+				found = true
+				break
+			}
+		}
+		if !found {
+			// The registry's own spelling is listed, but without a usable digest: say so.
+			for _, im := range known[pinName[c.Name]].Listed() {
+				if pins.SameVersion(im.Version, w) {
+					return nil, fmt.Errorf("versions.%s: %s is listed in internal/pins/pins.json for %s with a missing or malformed image digest %q (want sha256:<64 lower-case hex>); no known image digest, so obs does not run it",
+						obsKey[c.Name], w, c.Image, im.Digest)
+				}
+			}
+			return nil, fmt.Errorf("versions.%s: %s has no known image digest for %s (known: %s); add its tag and digest to internal/pins/pins.json before obs runs it",
+				obsKey[c.Name], w, c.Image, strings.Join(have, ", "))
+		}
+	}
+	return out, nil
+}

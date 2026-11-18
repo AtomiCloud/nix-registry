@@ -169,7 +169,12 @@ func (fe Frontend) validate(req *tempopb.QueryRangeRequest) error {
 // query_frontend.metrics.max_intervals. A key that is absent keeps Tempo's default.
 // Durations are Go durations ("30s") or integer nanoseconds, as Tempo's yaml.v2
 // decoder accepts. Other keys are ignored: obs models only these.
-func ParseFrontend(b []byte) (Frontend, error) {
+func ParseFrontend(b []byte) (Frontend, error) { return ParseFrontendOver(DefaultFrontend, b) }
+
+// ParseFrontendOver is ParseFrontend with base in place of Tempo's defaults: a key the
+// file names replaces base, every other setting keeps base (obs.yaml thresholds.traces is
+// the base, a --tempo-config file overrides it).
+func ParseFrontendOver(base Frontend, b []byte) (Frontend, error) {
 	var doc struct {
 		QueryFrontend struct {
 			QueryEndCutoff any `yaml:"query_end_cutoff"`
@@ -179,7 +184,7 @@ func ParseFrontend(b []byte) (Frontend, error) {
 			} `yaml:"metrics"`
 		} `yaml:"query_frontend"`
 	}
-	fe := DefaultFrontend
+	fe := base
 	if err := yaml.Unmarshal(b, &doc); err != nil {
 		return fe, err
 	}

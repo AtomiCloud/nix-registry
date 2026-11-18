@@ -28,6 +28,11 @@
     "image": "grafana/pyroscope:2.4.3",
     "digest": "sha256:bf667534cd403320573063894e3faba20a5a5d1bfb92eddaecfabeb2446c502b"
   },
+  "Alloy": {
+    "version": "v1.21.3",
+    "image": "grafana/alloy:v1.21.3",
+    "digest": "sha256:8ab871206bd2d8f89277f53abffee5f452a293980788d52f85fa183a87a505a4"
+  },
   "VictoriaLogsDatasource": {
     "version": "v0.34.0",
     "plugin": "victoriametrics-logs-datasource@0.34.0"

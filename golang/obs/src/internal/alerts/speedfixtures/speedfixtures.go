@@ -287,6 +287,7 @@ func Write(out string) error {
 			files["incidents/"+name+".yaml"] = body
 		}
 		files["contract.yaml"] = contract
+		files["obs.yaml"] = obsYAML
 		for _, l := range Lengths {
 			files["seed."+l+".yaml"] = Seed(l)
 		}
@@ -324,4 +325,36 @@ logs:
 
 platform_metrics:
   http.server.request.duration: [http.route, http.response.status_code]
+`
+
+// obsYAML is the obs.yaml every set carries: the versions this obs embeds and the default thresholds.
+const obsYAML = `# The versions and thresholds this repo's observability folder targets. obs reads this file
+# (obs check, obs query, obs alerts, obs sandbox up, obs look); see the obs README.
+# Every key is optional: a key that is absent keeps the version or default built into obs.
+versions:
+  grafana: 13.3.0 # alert rules and dashboards; the alert engine and dashboard schema are checked
+  victoriametrics: v1.156.0 # MetricsQL
+  victorialogs: v1.54.0 # LogsQL
+  tempo: 3.1.1 # TraceQL
+  alloy: v1.21.3 # reference only; no evaluator
+  pyroscope: 2.4.3 # sandbox image
+  dashboard_schema: 42 # Grafana 13.3.0 dashboard schemaVersion
+
+thresholds:
+  logs: # VictoriaLogs query limits (the -search.* flags); victorialogs-settings.yaml overrides
+    max_query_len: 16KiB
+    max_query_time_range: 0
+    max_query_duration: 30s
+    max_queue_duration: 10s
+  metrics:
+    max_points_per_series: 1000000
+  traces: # Tempo query_frontend; --tempo-config overrides
+    query_end_cutoff: 30s
+    metrics_max_duration: 24h
+    metrics_max_intervals: 10000
+  profiles: # obs profile compare, as a fraction (0.05 is 5 %)
+    tolerance_function: 0.05
+    tolerance_span: 0.05
+    tolerance_total: 0.15
+    tolerance_dotnet_trace: 0.30
 `

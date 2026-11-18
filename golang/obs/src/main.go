@@ -23,12 +23,12 @@ const usage = `obs: the observability check tool
 
 usage:
   obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
-  obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names] [--vl-settings victorialogs-settings.yaml]
+  obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names] [--vl-settings victorialogs-settings.yaml] [--tempo-config tempo.yaml]
   obs alerts [--dir observability] [--seed seed.yaml] [--base unix] [--out results.json] [--vl-settings victorialogs-settings.yaml] [--tempo-config tempo.yaml]
               [--workers n] [--steps steps.json] [--recorded recorded.json]
   obs assert --series FILE [--dir observability] [--pods n] [--unknown warn|fail|ignore]
   obs profile summarize|baseline|compare   (obs profile help)
-  obs check [--dir observability] [--pods n] [--landscapes n]
+  obs check [--dir observability] [--pods n] [--landscapes n]   (also: the evaluator versions this obs embeds, against <dir>/obs.yaml)
   obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
   obs sandbox up [--dir observability] [--seed seed.yaml] [--project name] [--port-base n] [--runtime docker|podman] [--reseed]
   obs sandbox down|status [--dir observability] [--project name] [--runtime docker|podman]
@@ -140,7 +140,8 @@ func runQuery(args []string, stdout, stderr io.Writer) int {
 	live := fs.Bool("live", false, "run every alert and dashboard query on the seed; each must return rows")
 	dir := fs.String("dir", "observability", "the observability folder")
 	seedPath := fs.String("seed", "", "seed file (default <dir>/seed.yaml)")
-	vlSettings := fs.String("vl-settings", "", "VictoriaLogs chart args YAML (default <dir>/victorialogs-settings.yaml, else pinned defaults)")
+	vlSettings := fs.String("vl-settings", "", "VictoriaLogs chart args YAML; overrides obs.yaml thresholds.logs (default <dir>/victorialogs-settings.yaml, else obs.yaml, else pinned defaults)")
+	tempoConfig := fs.String("tempo-config", "", "Tempo config file whose query_frontend end cutoff and metrics limits trace panels run under; overrides obs.yaml thresholds.traces (default Tempo 3.1.1: 30s, 24h, 10000)")
 	base := fs.Int64("base", 0, "unix seconds of the seed's start (default: ends in the past)")
 	names := fs.Bool("names", false, "print the names each query reads")
 	eventRule := fs.String("event-rule", "auto", "a LogsQL alert must name a contract event: auto (only when <dir>/contract.yaml exists), on, off")
@@ -157,7 +158,14 @@ func runQuery(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "obs query: --event-rule %q: want auto, on or off\n", *eventRule)
 		return 2
 	}
-	o := check.Options{Dir: *dir, SeedPath: *seedPath, VLSettings: *vlSettings, Base: *base, Names: *names, EventRule: *eventRule, Out: stdout}
+	of, ok := loadObsYaml(*dir, "obs query", stderr)
+	if !ok {
+		return 2
+	}
+	if rc := gateObsYaml(of, "obs query", stdout); rc != 0 {
+		return rc
+	}
+	o := check.Options{Dir: *dir, SeedPath: *seedPath, VLSettings: *vlSettings, TempoConfig: *tempoConfig, Base: *base, Names: *names, EventRule: *eventRule, Obs: of, Out: stdout}
 	set, err := files.Load(*dir)
 	if err != nil {
 		fmt.Fprintf(stderr, "obs query: %v\n", err)

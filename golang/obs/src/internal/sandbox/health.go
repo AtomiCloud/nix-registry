@@ -40,8 +40,8 @@ func probe(ctx context.Context, hc *http.Client, url string) error {
 }
 
 // waitReady polls every component's health path until all answer 200 or ctx ends.
-func waitReady(ctx context.Context, hc *http.Client, urls map[string]string) error {
-	for _, k := range Pins {
+func waitReady(ctx context.Context, hc *http.Client, urls map[string]string, comps []Component) error {
+	for _, k := range comps {
 		var last error
 		for {
 			last = probe(ctx, hc, urls[k.Name]+k.Health)
@@ -64,6 +64,19 @@ var appVersionRe = regexp.MustCompile(`app_version="victoria-[a-z-]+?-\d+-\d+-ta
 // VerifyVersions asks each component which version it runs and refuses when it is not the
 // pin. Pyroscope has no version endpoint obs relies on: its image tag is the pin.
 func VerifyVersions(ctx context.Context, hc *http.Client, urls map[string]string) error {
+	return verifyVersions(ctx, hc, urls, Pins)
+}
+
+// verifyVersions is VerifyVersions against the given stack (the pins, or what obs.yaml names).
+func verifyVersions(ctx context.Context, hc *http.Client, urls map[string]string, comps []Component) error {
+	byName := func(name string) (Component, bool) {
+		for _, c := range comps {
+			if c.Name == name {
+				return c, true
+			}
+		}
+		return Component{}, false
+	}
 	var bad []string
 	check := func(name, want, got string, err error) {
 		switch {
@@ -87,10 +100,10 @@ func VerifyVersions(ctx context.Context, hc *http.Client, urls map[string]string
 		}
 		return m[1], nil
 	}
-	vm, _ := ByName("vm")
+	vm, _ := byName("vm")
 	line, err := metricsLine("vm")
 	check("VictoriaMetrics", vm.Tag, line, err)
-	vl, _ := ByName("vl")
+	vl, _ := byName("vl")
 	line, err = metricsLine("vl")
 	check("VictoriaLogs", vl.Tag, line, err)
 
@@ -113,12 +126,12 @@ func VerifyVersions(ctx context.Context, hc *http.Client, urls map[string]string
 		s, _ := m.(string)
 		return s, nil
 	}
-	gf, _ := ByName("grafana")
+	gf, _ := byName("grafana")
 	v, err := jsonField(urls["grafana"]+"/api/health", false, "version")
 	check("Grafana", gf.Tag, v, err)
 	v, err = jsonField(urls["grafana"]+"/api/plugins/"+PluginID+"/settings", true, "info", "version")
 	check("Grafana plugin "+PluginID, PluginVersion, v, err)
-	tp, _ := ByName("tempo")
+	tp, _ := byName("tempo")
 	v, err = jsonField(urls["tempo"]+"/api/status/buildinfo", false, "version")
 	check("Tempo", tp.Tag, v, err)
 	if len(bad) > 0 {

@@ -167,6 +167,7 @@ func writeTraceSets(out string) error {
 			files["incidents/"+name+".yaml"] = body
 		}
 		files["contract.yaml"] = strings.Replace(traceContract, "types:\n", "types:\n  text: { kind: free }\n", 1)
+		files["obs.yaml"] = obsYAML
 		for _, l := range Lengths {
 			files["seed."+l+".yaml"] = TraceSeed(l)
 		}

@@ -23,7 +23,18 @@ import (
 )
 
 // Engine is one in-process VictoriaMetrics.
-type Engine struct{ dir string }
+type Engine struct {
+	dir string
+	// maxPoints is the points one series may hold (0: DefaultMaxPointsPerSeries).
+	maxPoints int
+}
+
+// DefaultMaxPointsPerSeries is the points per series a query may produce unless SetMaxPoints
+// says otherwise (obs.yaml thresholds.metrics.max_points_per_series).
+const DefaultMaxPointsPerSeries = 1_000_000
+
+// SetMaxPoints sets the points per series a query may produce; n <= 0 restores the default.
+func (e *Engine) SetMaxPoints(n int) { e.maxPoints = n }
 
 // Series is one query result series.
 type Series struct {
@@ -135,13 +146,35 @@ func (e *Engine) SamplesInstant(q string, at time.Time) ([]*seed.Series, error) 
 	return e.execSamples(q, at, at, 5*time.Minute, true)
 }
 
+// LimitKey is the obs.yaml key that sets the points one series may hold.
+const LimitKey = "thresholds.metrics.max_points_per_series"
+
+// checkPoints refuses a window that needs more points per series than the limit.
+// VictoriaMetrics panics ("BUG: too many points") on such a window instead of returning
+// an error, so the count is taken here, before Exec, the way the server counts it:
+// (end - start) / step + 1.
+func (e *Engine) checkPoints(start, end time.Time, step time.Duration) error {
+	if step.Milliseconds() <= 0 || end.Before(start) {
+		return nil // Exec reports a bad window itself
+	}
+	need := (end.UnixMilli()-start.UnixMilli())/step.Milliseconds() + 1
+	if limit := e.pointsLimit(); need > int64(limit) {
+		return fmt.Errorf("the query needs %d points per series (%s to %s at step %s), above the limit of %d; raise %s in obs.yaml or ask for a shorter window or a larger step",
+			need, start.UTC().Format(time.RFC3339), end.UTC().Format(time.RFC3339), step, limit, LimitKey)
+	}
+	return nil
+}
+
 func (e *Engine) execSamples(q string, start, end time.Time, step time.Duration, instant bool) ([]*seed.Series, error) {
+	if err := e.checkPoints(start, end, step); err != nil {
+		return nil, err
+	}
 	ec := &vmpromql.EvalConfig{
 		Context:            context.Background(),
 		Start:              start.UnixMilli(),
 		End:                end.UnixMilli(),
 		Step:               step.Milliseconds(),
-		MaxPointsPerSeries: 1_000_000,
+		MaxPointsPerSeries: e.pointsLimit(),
 		MayCache:           false,
 		RoundDigits:        100,
 	}
@@ -197,4 +230,11 @@ func (e *Engine) Append(series []*seed.Series) error {
 	}
 	vmstorage.DebugFlush()
 	return checkDropped()
+}
+
+func (e *Engine) pointsLimit() int {
+	if e.maxPoints > 0 {
+		return e.maxPoints
+	}
+	return DefaultMaxPointsPerSeries
 }

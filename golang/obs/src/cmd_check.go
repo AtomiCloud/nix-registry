@@ -24,8 +24,16 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "obs check: --pods and --landscapes must be at least 1")
 		return 2
 	}
+	of, ok := loadObsYaml(*dir, "obs check", stderr)
+	if !ok {
+		return 2
+	}
+	versionFails := printObsYamlCheck(of, *dir, stdout)
 	c, rc := loadContract(*dir, "obs check", stdout, stderr)
 	if c == nil {
+		if rc == 1 && versionFails > 0 {
+			fmt.Fprintf(stdout, "obs check: FAILED: %d version mismatch(es) in %s\n", versionFails, of.Path)
+		}
 		return rc
 	}
 	total := int64(0)
@@ -47,6 +55,11 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 	fmt.Fprintf(stdout, "log streams: worst case %d (service %s x %d landscapes x modules %d; log events add no streams)\n",
 		c.StreamCount(*landscapes), c.Service, *landscapes, maxInt(len(c.Modules), 1))
 	fmt.Fprintf(stdout, "events=%v\n", c.EventNames())
+	if versionFails > 0 {
+		fmt.Fprintf(stdout, "obs check: FAILED: %d version mismatch(es) in %s (the contract itself is ok: %d metrics, %d log events, %d spans, %d types, contract hash %s)\n",
+			versionFails, of.Path, len(c.MetricOrder), len(c.LogOrder), len(c.SpanOrder), len(c.TypeOrder), shortHash(c))
+		return 1
+	}
 	fmt.Fprintf(stdout, "obs check: ok: %d metrics, %d log events, %d spans, %d types, contract hash %s\n",
 		len(c.MetricOrder), len(c.LogOrder), len(c.SpanOrder), len(c.TypeOrder), shortHash(c))
 	return 0

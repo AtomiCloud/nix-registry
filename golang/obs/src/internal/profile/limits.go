@@ -34,9 +34,17 @@ type Override struct {
 	Why      string  `yaml:"why"`      // required
 }
 
+// Tolerances replace the default tolerances above; a zero field keeps the built-in value.
+// obs.yaml thresholds.profiles sets them for the whole repo (cmd: Limits.Defaults).
+type Tolerances struct {
+	Function, Span, Total, DotnetTrace float64
+}
+
 // Limits is the config file (default e2e/profile-limits.yaml).
 type Limits struct {
 	Overrides []Override `yaml:"overrides"`
+	// Defaults come from obs.yaml, not from the limits file. A per-service override still wins.
+	Defaults Tolerances `yaml:"-"`
 }
 
 // LoadLimits reads the limits config. A missing file means no overrides.
@@ -87,15 +95,25 @@ func (l *Limits) functionTolerance(b *Baseline, r Row) (float64, string) {
 }
 
 func (l *Limits) rowTolerance(b *Baseline, kind, name, file string, line, column int64) (tol float64, why string) {
-	tol = TolFunction
+	var d Tolerances
+	if l != nil {
+		d = l.Defaults
+	}
+	pick := func(set, builtin float64) float64 {
+		if set > 0 {
+			return set
+		}
+		return builtin
+	}
+	tol = pick(d.Function, TolFunction)
 	switch kind {
 	case "total":
-		tol = TolTotal
+		tol = pick(d.Total, TolTotal)
 	case "span":
-		tol = TolSpan
+		tol = pick(d.Span, TolSpan)
 	}
 	if b.Profiler == ProfilerDotnetTrace {
-		tol, why = TolDotnet, "profiled with dotnet-trace"
+		tol, why = pick(d.DotnetTrace, TolDotnet), "profiled with dotnet-trace"
 	}
 	best := -1
 	if l == nil {

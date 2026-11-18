@@ -28,7 +28,9 @@ type Config struct {
 	SeedPath string // default <Dir>/seed.yaml
 	PortBase int    // 0: the components' own ports (3000, 8428, ...); else base+offset
 	Reseed   bool   // load the seed again even when a sandbox with a seed is already up
-	Timeout  time.Duration
+	// Components are the images to run (see Resolve); nil runs the pins.
+	Components []Component
+	Timeout    time.Duration
 
 	Runner Runner
 	HTTP   *http.Client
@@ -94,6 +96,14 @@ func (c *Config) defaults() {
 	}
 }
 
+// comps is the stack this run starts: Components, else the pins.
+func (c *Config) comps() []Component {
+	if c.Components != nil {
+		return c.Components
+	}
+	return Pins
+}
+
 func hostPort(base int, c Component) int {
 	if base == 0 {
 		return c.Port
@@ -138,7 +148,7 @@ func sameImage(have, want string) bool {
 // checkExisting refuses a sandbox whose containers run other images than the pins.
 func checkExisting(c *Config, have map[string]existing) error {
 	var bad []string
-	for _, k := range Pins {
+	for _, k := range c.comps() {
 		e, ok := have[containerName(c.Project, k)]
 		if ok && !sameImage(e.Image, k.Ref()) {
 			bad = append(bad, fmt.Sprintf("%s runs %s, the pin is %s", containerName(c.Project, k), e.Image, k.Ref()))
@@ -303,7 +313,7 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 			return nil, err
 		}
 	}
-	for _, k := range Pins {
+	for _, k := range cfg.comps() {
 		name := containerName(cfg.Project, k)
 		e, ok := have[name]
 		switch {
@@ -350,15 +360,15 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 	}
 
 	info := &Info{Project: cfg.Project, URLs: map[string]string{}, Reused: !created}
-	for _, k := range Pins {
+	for _, k := range cfg.comps() {
 		info.URLs[k.Name] = cfg.HostURL(k)
 	}
 	info.Grafana = info.URLs["grafana"]
 	fmt.Fprintf(cfg.Out, "waiting for the stack to answer\n")
-	if err := waitReady(ctx, cfg.HTTP, info.URLs); err != nil {
+	if err := waitReady(ctx, cfg.HTTP, info.URLs, cfg.comps()); err != nil {
 		return nil, err
 	}
-	if err := VerifyVersions(ctx, cfg.HTTP, info.URLs); err != nil {
+	if err := verifyVersions(ctx, cfg.HTTP, info.URLs, cfg.comps()); err != nil {
 		return nil, err
 	}
 
