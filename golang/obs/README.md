@@ -810,6 +810,7 @@ What is new in `obs check` and `obs test` for a caller:
 
 - `obs check` now also fails on a query finding, with the same rule ids, files and tokens as `obs query --static`. A CI that ran both can run one. It takes
   `--names`, `--event-rule`, `--vl-settings`, `--tempo-config` (new) next to `--contracts`.
+- `obs check --contracts none` now also runs the query rules with this folder's contract only, so a dashboard that reads a metric another contract declares is red there (as with `obs query --static --contracts none`). The limits it prints are unchanged.
 - `obs check` on a folder with no `contract.yaml` was exit 2; it now skips the limits with a note and checks the queries.
 - `obs check`'s last line is `obs check: ok: <contract counts>; queries: <query totals>` (it was `obs check: ok: <contract counts>`), and a failure line
   lists every failing half. The prefixes `obs check: ok:` and `obs check: FAILED:` are unchanged.
