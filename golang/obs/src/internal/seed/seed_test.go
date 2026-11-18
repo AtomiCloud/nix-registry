@@ -57,7 +57,7 @@ func TestStoredShape(t *testing.T) {
 	if got := a.MetricNames(); !reflect.DeepEqual(got, want) {
 		t.Errorf("metric names %v", got)
 	}
-	if got := a.LabelValues("checkout_charges_total", "payment_provider", start.UnixMilli(), start.Add(time.Hour).UnixMilli()); !reflect.DeepEqual(got, []string{"stripe"}) {
+	if got := a.LabelValues("checkout_charges_total", "payment.provider", start.UnixMilli(), start.Add(time.Hour).UnixMilli()); !reflect.DeepEqual(got, []string{"stripe"}) {
 		t.Errorf("label values %v", got)
 	}
 	// Logs as VictoriaLogs stores them: attribute keys unchanged, severity_text / severity_number, trace_id, span_id.
@@ -98,6 +98,30 @@ func TestLoadRefuses(t *testing.T) {
 		_ = os.WriteFile(p, []byte(body), 0o644)
 		if _, err := Load(p); err == nil {
 			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+// Concept 2.1: VictoriaMetrics keeps a label's dots (metric NAMES use underscores). Every seeded
+// series carries the resource and where labels with their dots, and none with an underscore twin.
+func TestSeededMetricLabelsKeepDots(t *testing.T) {
+	a, err := Build(load(t, doc), time.Unix(1_700_000_000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range a.Series {
+		have := map[string]string{}
+		for _, l := range s.Labels {
+			have[l.Name] = l.Value
+			if l.Name != "__name__" && l.Name != "le" && strings.Contains(l.Name, "_") && strings.Contains(l.Name, "durian") {
+				t.Errorf("label %q has underscores: VictoriaMetrics keeps the dots", l.Name)
+			}
+		}
+		if have["durian.cloud.service"] != "checkout" || have["durian.cloud.platform"] != "payments" {
+			t.Errorf("series %v: want durian.cloud.* labels with dots", s.Labels)
+		}
+		if strings.HasPrefix(have["__name__"], "checkout_charges") && have["payment.provider"] != "stripe" {
+			t.Errorf("series %v: want the where label payment.provider with its dot", s.Labels)
 		}
 	}
 }

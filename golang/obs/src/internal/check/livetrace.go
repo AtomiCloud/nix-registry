@@ -47,7 +47,7 @@ func (l *liveRun) traceAlert(q *files.Query) {
 	start, end := tempoalert.Window(l.end, from, to)
 	var frames []tempoalert.Frame
 	if m.Instant() {
-		resp, err := l.tempo.QueryInstant(tempo.DefaultFrontend, l.end, m.Query, start, end)
+		resp, err := l.tempo.QueryInstant(l.frontend, l.end, m.Query, start, end)
 		if err != nil {
 			l.r.add(Fail, q.File, q.Where, "tempo-alert-run", "%v; instant query over %s..%s; query: %s", err, start.Format(time.RFC3339), end.Format(time.RFC3339), oneLine(m.Query))
 			return
@@ -59,7 +59,7 @@ func (l *liveRun) traceAlert(q *files.Query) {
 			l.r.add(Fail, q.File, q.Where, "tempo-alert-step", "%v; query: %s", err, oneLine(m.Query))
 			return
 		}
-		resp, err := l.tempo.QueryRange(tempo.DefaultFrontend, l.end, m.Query, start, end, step)
+		resp, err := l.tempo.QueryRange(l.frontend, l.end, m.Query, start, end, step)
 		if err != nil {
 			l.r.add(Fail, q.File, q.Where, "tempo-alert-run", "%v; range query over %s..%s step %s; query: %s", err, start.Format(time.RFC3339), end.Format(time.RFC3339), step, oneLine(m.Query))
 			return

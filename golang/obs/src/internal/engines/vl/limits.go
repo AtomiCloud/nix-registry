@@ -54,18 +54,24 @@ func DefaultLimits() Limits {
 // LoadLimits reads the consumer's extracted VictoriaLogs chart args. A missing
 // implicit file returns one note; an explicitly requested missing file is an error.
 func LoadLimits(dir, path string) (Limits, string, error) {
+	return LoadLimitsOver(DefaultLimits(), "VictoriaLogs v1.54.0 query defaults", dir, path)
+}
+
+// LoadLimitsOver is LoadLimits with base (described by baseDesc in the note) under the
+// settings file: the file's flags override base key by key.
+func LoadLimitsOver(base Limits, baseDesc, dir, path string) (Limits, string, error) {
 	explicit := path != ""
 	if !explicit {
 		path = filepath.Join(dir, "victorialogs-settings.yaml")
 	}
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) && !explicit {
-		return DefaultLimits(), "no " + path + "; using VictoriaLogs v1.54.0 query defaults (extract deployed chart args to this file or use --vl-settings)", nil
+		return base, "no " + path + "; using " + baseDesc + " (extract deployed chart args to this file or use --vl-settings)", nil
 	}
 	if err != nil {
 		return Limits{}, "", err
 	}
-	l, err := ParseLimits(b)
+	l, err := ParseLimitsOver(base, b)
 	if err != nil {
 		return Limits{}, "", fmt.Errorf("%s: %w", path, err)
 	}
@@ -75,8 +81,13 @@ func LoadLimits(dir, path string) (Limits, string, error) {
 // ParseLimits accepts a YAML flag map, a list of one-flag maps, or a list of
 // -flag=value strings. Non-query flags are irrelevant to this embedded store.
 // Unknown search flags fail closed so a new server refusal is never ignored.
-func ParseLimits(b []byte) (Limits, error) {
-	l := DefaultLimits()
+func ParseLimits(b []byte) (Limits, error) { return ParseLimitsOver(DefaultLimits(), b) }
+
+// ParseLimitsOver is ParseLimits with base in place of the pinned defaults: a flag the
+// settings name replaces base, every other limit keeps base (obs.yaml thresholds.logs
+// is the base, the settings file overrides it).
+func ParseLimitsOver(base Limits, b []byte) (Limits, error) {
+	l := base
 	var doc yaml.Node
 	d := yaml.NewDecoder(strings.NewReader(string(b)))
 	if err := d.Decode(&doc); err != nil && err != io.EOF {

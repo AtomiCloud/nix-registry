@@ -54,7 +54,7 @@ func ProfileLabels(s *seed.TSpan) (map[string]string, error) {
 	m := map[string]string{"service_name": s.Service, "pod": pod}
 	for _, key := range []string{"service.namespace", "deployment.environment.name", "durian.cloud.landscape", "durian.cloud.platform", "durian.cloud.service", "durian.cloud.module"} {
 		if v := s.Resource[key]; v.S != "" {
-			name := strings.ReplaceAll(key, ".", "_")
+			name := strings.ReplaceAll(key, ".", "_") // Pyroscope drops dotted names: underscores only (concept 2.1)
 			if key == "deployment.environment.name" {
 				name = "deployment_environment"
 			}
@@ -142,12 +142,12 @@ func Check(ds *seed.Dataset, logs Logs, traces Traces) *Report {
 	seenRoutes := map[string]bool{}
 	for _, t := range ds.Traces {
 		for _, s := range t.Spans {
-			inventory["service_name"] = attr{"resource", "service.name", 0}
+			inventory["service.name"] = attr{"resource", "service.name", 0}
 			for k, v := range s.Resource {
-				inventory[strings.ReplaceAll(k, ".", "_")] = attr{"resource", k, v.Kind}
+				inventory[k] = attr{"resource", k, v.Kind} // a series label is stored with its dots (concept 2.1)
 			}
 			for k, v := range s.Attrs {
-				inventory[strings.ReplaceAll(k, ".", "_")] = attr{"span", k, v.Kind}
+				inventory[k] = attr{"span", k, v.Kind}
 			}
 			if s.Kind != 2 {
 				continue

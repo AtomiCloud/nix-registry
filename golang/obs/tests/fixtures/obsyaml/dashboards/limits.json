@@ -1,0 +1,14 @@
+{
+  "title": "Trace limits",
+  "uid": "obs-trace-limits",
+  "time": { "from": "now-5m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Spans per second",
+      "datasource": { "type": "tempo", "uid": "tempo" },
+      "targets": [{ "refId": "A", "queryType": "traceql", "query": "{} | rate()" }]
+    }
+  ]
+}

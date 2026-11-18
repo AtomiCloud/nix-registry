@@ -6,7 +6,9 @@
 // This is the minimal reading (an open point in the PR): one or more targets, scraped on
 // an interval, written through VictoriaMetrics' /api/v1/import/prometheus with the labels
 // given on the command line. Scraped metrics carry their where-from labels as
-// durian_cloud_* (concept section 2), so pass them with --label.
+// durian_cloud_* (concept section 2.1), so pass them with --label. A vminsert labelmap (regex
+// durian_cloud_(landscape|platform|service|module) -> durian.cloud.$1) turns them into the stored dotted labels in the real
+// stack; the sandbox VictoriaMetrics has the same labelmap (sandbox.VMRelabelConfig).
 package scrape
 
 import (

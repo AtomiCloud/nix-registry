@@ -284,6 +284,8 @@ func expression(model map[string]any) (ExprDef, error) {
 	return ExprDef{}, fmt.Errorf("expression type %q: want math, reduce or threshold", m.Type)
 }
 
+// storedName is a metric NAME as VictoriaMetrics stores it (dots become underscores). Label names
+// keep their dots (concept 2.1), so nothing here rewrites a label.
 func storedName(s string) string  { return strings.ReplaceAll(s, ".", "_") }
 func labelsKey(ls []Label) string { b, _ := json.Marshal(ls); return string(b) }
 func sortLabels(ls []Label) []Label {

@@ -10,13 +10,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AtomiCloud/obs/internal/obsyaml"
 	"github.com/AtomiCloud/obs/internal/profile"
 )
 
 const profileUsage = `usage:
   obs profile summarize --format pprof|cpuprofile|speedscope [--own REGEX]... [--run run.json] [--top N] [--json] FILE
   obs profile baseline  --format F --service S --scenario N --own REGEX [--own REGEX]... [--profiler P] [--dir e2e/profile-baseline] [--update] RUN1 RUN2 RUN3
-  obs profile compare   --format F (--baseline FILE | --service S --scenario N [--dir DIR]) [--limits e2e/profile-limits.yaml] [--run run.json] FILE
+  obs profile compare   --format F (--baseline FILE | --service S --scenario N [--dir DIR]) [--limits e2e/profile-limits.yaml] [--obs-yaml observability/obs.yaml] [--run run.json] FILE
 
 A run's OS CPU and runner signal come from <FILE>.run.json next to the profile (or --run).
 All subcommands accept --sample-period DURATION for evented profiles (default 1ms for dotnet-trace).
@@ -208,6 +209,7 @@ func runProfileCompare(args []string, stdout, stderr io.Writer) int {
 	dir := fs.String("dir", "e2e/profile-baseline", "baseline folder")
 	limitsPath := fs.String("limits", "e2e/profile-limits.yaml", "limit overrides (each needs a why)")
 	runPath := fs.String("run", "", "run meta file (default <FILE>.run.json)")
+	obsYaml := fs.String("obs-yaml", "", "obs.yaml whose thresholds.profiles set the default tolerances (default observability/obs.yaml when it exists)")
 	pos, err := parseInterspersed(fs, args)
 	if err != nil {
 		return 2
@@ -232,6 +234,21 @@ func runProfileCompare(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintf(stderr, "obs profile compare: %v\n", err)
 		return 2
+	}
+	if *obsYaml != "" || fileExists("observability/"+obsyaml.FileName) {
+		path := *obsYaml
+		if path == "" {
+			path = "observability/" + obsyaml.FileName
+		}
+		of, err := obsyaml.LoadFile(path)
+		if err != nil {
+			fmt.Fprintf(stderr, "obs profile compare: %v\n", err)
+			return 2
+		}
+		limits.Defaults = of.Profiles
+		if of.Profiles != (profile.Tolerances{}) {
+			fmt.Fprintf(stdout, "obs profile compare: default tolerances from %s thresholds.profiles\n", path)
+		}
 	}
 	if *sourceRoot == "" && b.SourceRootExplicit {
 		*sourceRoot = b.SourceRoot

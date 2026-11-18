@@ -33,6 +33,11 @@ func Static(set *files.Set, o Options) *Report {
 		o.SpanAttributes = c // the contract names the span attributes a TraceQL query may read
 	}
 	eventOn := o.eventRuleOn()
+	if c != nil {
+		for _, d := range set.Dashboards {
+			contractVariables(r, d, c)
+		}
+	}
 	for i := range set.Queries {
 		q := &set.Queries[i]
 		if q.Problem != "" {

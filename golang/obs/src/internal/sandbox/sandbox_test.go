@@ -64,6 +64,8 @@ type fakeRunner struct {
 	lists         map[string]string // first args ("network ls") -> output
 	// imageVolumes is what `image inspect --format ...Volumes` answers (default: none declared).
 	imageVolumes string
+	// vmArgs is what `inspect --format {{json .Args}}` answers for the vm container (default: it has -relabelConfig).
+	vmArgs string
 }
 
 func (f *fakeRunner) Run(_ context.Context, args ...string) (string, error) {
@@ -78,6 +80,11 @@ func (f *fakeRunner) Run(_ context.Context, args ...string) (string, error) {
 		return "null", nil
 	case args[0] == "ps":
 		return f.ps, nil
+	case args[0] == "inspect" && len(args) > 2 && args[2] == "{{json .Args}}":
+		if f.vmArgs != "" {
+			return f.vmArgs, nil
+		}
+		return `["-retentionPeriod=30d","-relabelConfig=/etc/vm-relabel.yml"]`, nil
 	case args[0] == "network" && args[1] == "inspect":
 		if f.networkExists {
 			return "", nil
@@ -330,6 +337,16 @@ func TestUpStartsLoadsAndRemembersTheSeedWindow(t *testing.T) {
 	if !fr.has("cp") {
 		t.Errorf("tempo config not copied in")
 	}
+	// the VictoriaMetrics container gets the labelmap config it is started with (-relabelConfig)
+	vmCopied := false
+	for _, c := range fr.calls {
+		if len(c) == 3 && c[0] == "cp" && c[2] == "obs-sandbox-demo-vm:/etc/vm-relabel.yml" {
+			vmCopied = true
+		}
+	}
+	if !vmCopied {
+		t.Errorf("the vm relabel config is not copied into the vm container: %v", fr.calls)
+	}
 	for _, c := range fr.calls {
 		if strings.Contains(strings.Join(c, " "), "prune") {
 			t.Errorf("prune: %v", c)
@@ -464,7 +481,7 @@ func TestCreateArgsCarryTheSingleInstanceSettings(t *testing.T) {
 	cfg := Config{Project: "demo"}
 	cfg.defaults()
 	want := map[string][]string{
-		"vm": {"-retentionPeriod=30d", "-maxLabelsPerTimeseries=30", "-search.maxConcurrentRequests=4", "-memory.allowedPercent=60"},
+		"vm": {"-retentionPeriod=30d", "-maxLabelsPerTimeseries=30", "-search.maxConcurrentRequests=4", "-memory.allowedPercent=60", "-relabelConfig=/etc/vm-relabel.yml"},
 		"vl": {"-retentionPeriod=30d", "-retention.maxDiskSpaceUsageBytes=17179869184", "-search.maxConcurrentRequests=4",
 			"-search.maxQueueDuration=10s", "-search.maxQueryDuration=30s", "-memory.allowedPercent=60"},
 	}
@@ -511,5 +528,27 @@ func TestUpRefusesAnImageThatDeclaresAnUnknownVolume(t *testing.T) {
 	s2 := newStackServer(t)
 	if _, err := Up(context.Background(), s2.cfg(t, fr)); err != nil {
 		t.Fatalf("known volumes refused: %v", err)
+	}
+}
+
+// Opus 4: a sandbox made by an older obs has a VictoriaMetrics without -relabelConfig; Up refuses to reuse it
+// and says how to recreate it, and starts and creates nothing.
+func TestUpRefusesAnExistingVMWithoutRelabelConfig(t *testing.T) {
+	s := newStackServer(t)
+	fr := &fakeRunner{networkExists: true, vmArgs: `["-retentionPeriod=30d","-storageDataPath=/victoria-metrics-data"]`}
+	for _, k := range Pins {
+		fr.ps += fmt.Sprintf("obs-sandbox-demo-%s|%s|running\n", k.Name, k.Ref())
+	}
+	_, err := Up(context.Background(), s.cfg(t, fr))
+	if err == nil || !strings.Contains(err.Error(), "-relabelConfig") || !strings.Contains(err.Error(), "obs sandbox down") || !strings.Contains(err.Error(), "obs-sandbox-demo-vm") {
+		t.Fatalf("want a refusal naming -relabelConfig and the down/up fix, got %v", err)
+	}
+	for _, c := range fr.calls {
+		if c[0] == "create" || c[0] == "start" {
+			t.Errorf("the refused up ran %v", c)
+		}
+	}
+	if len(s.dashes) != 0 || s.vmBody != "" {
+		t.Errorf("the refused up loaded something")
 	}
 }

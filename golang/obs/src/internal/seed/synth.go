@@ -44,7 +44,9 @@ type Dataset struct {
 	Traces     []*TTrace
 }
 
-// storedName is a metric or label name as the OTLP -> VictoriaMetrics path stores it.
+// storedName is a metric NAME as VictoriaMetrics stores it: dots become underscores (a bare name
+// cannot hold a dot in a selector). Label names are different: VictoriaMetrics keeps their dots and a
+// query quotes them, {"durian.cloud.service"="checkout"} (concept 2.1), so seed labels are not rewritten.
 func storedName(s string) string { return strings.ReplaceAll(s, ".", "_") }
 
 func key(ls []Label) string {
@@ -66,7 +68,7 @@ func sorted(ls []Label) []Label {
 func whereLabels(w map[string]string) []Label {
 	var out []Label
 	for k, v := range w {
-		out = append(out, Label{storedName(k), v})
+		out = append(out, Label{k, v})
 	}
 	return sorted(out)
 }
@@ -170,10 +172,10 @@ func BuildIncident(s *Seed, start time.Time, incident *Incident) (*Dataset, erro
 		return nil, err
 	}
 
-	// Metric labels: the resource attributes, dots become underscores.
+	// Metric labels: the resource attributes, dots kept (concept 2.1).
 	var resource []Label
 	for k, v := range s.Resource {
-		resource = append(resource, Label{storedName(k), v})
+		resource = append(resource, Label{k, v})
 	}
 	sorted(resource)
 

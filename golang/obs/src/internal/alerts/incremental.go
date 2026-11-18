@@ -61,7 +61,7 @@ func metricSelectors(q string) ([]selector, bool) {
 }
 
 func storedNames(metric string, def MetricDef) []string {
-	n := storedName(metric)
+	n := storedName(metric) // a metric NAME is stored with underscores
 	if def.Type == "histogram" {
 		s := ""
 		if def.Unit == "s" {
@@ -87,7 +87,7 @@ func incidentFootprints(p *Project, inc *Incident) []footprint {
 			fp.names[n] = true
 		}
 		for k, v := range c.Where {
-			fp.where[storedName(k)] = v
+			fp.where[k] = v // a label is stored with its dots (concept 2.1)
 		}
 		fps = append(fps, fp)
 	}

@@ -12,25 +12,25 @@ linked module ship in `share/licenses/obs`. Design: `concepts/observability.md` 
 
 ## Available commands
 
-| Command                                    | What it does                                                                                                                              |
-| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `obs gen`                                  | Writes bounded types, event constants, `contract/events.json` and the aggregation file for bun, go, dotnet and dart from the contract.    |
-| `obs gen --check`                          | Regenerates into a temp folder and diffs; fails on a hand edit or a stale generate.                                                       |
-| `obs check`                                | Checks the contract rules, worst-case metric series, budgets and log stream count.                                                        |
-| `obs query --static`                       | Parses every MetricsQL, LogsQL and TraceQL query in the alerts and dashboards with the real parsers and applies the rules below.          |
-| `obs query --live`                         | Loads the seed into the embedded VictoriaMetrics, VictoriaLogs and Tempo and runs every alert and dashboard query; each must return rows. |
-| `obs alerts`                               | Evaluates every alert at every minute of the seed and each incident; must fire inside incident windows and stay quiet outside them.       |
-| `obs links`                                | Checks trace → logs, metric → traces and backend span → profile links on the seed.                                                        |
-| `obs assert`                               | Checks real metric series counts, labels and values from an e2e series export against the contract.                                       |
-| `obs profile summarize\|baseline\|compare` | Summarizes CPU profiles, builds a median baseline and compares function and span shares against it.                                       |
-| `obs store move <store>`                   | Runs the single → scaled store move steps in order, none skipped, with `--dry-run` and `--rollback`.                                      |
-| `obs sandbox up`                           | Starts, stops or inspects (`down`, `status`) the local stack for people; no check needs it.                                               |
-| `obs look`                                 | Sets up the sandbox with the changed dashboards and prints the screenshot review prompt for the calling agent; never fails CI.            |
-| `obs scrape`                               | Scrapes an app's own metrics into the sandbox.                                                                                            |
-| `obs symbols put\|decode`                  | The symbol store: stores debug symbol files by build id and decodes a stack trace with them.                                              |
-| `obs size`                                 | The sizing command: traffic cores, memory, series and storage per day for a given load.                                                   |
-| `obs engines --check-chart <dir>`          | Compares the engine versions in a Helm chart folder with the pins; exit 1 on any drift. See [obs engines](#obs-engines---check-chart).    |
-| `obs version`                              | The obs version and every engine pin.                                                                                                     |
+| Command                                     | What it does                                                                                                                                  |
+| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `obs gen`                                   | Writes bounded types, event constants, `contract/events.json` and the aggregation file for bun, go, dotnet and dart from the contract.        |
+| `obs gen --check`                           | Regenerates into a temp folder and diffs; fails on a hand edit or a stale generate.                                                           |
+| `obs check`                                 | Checks the contract rules, worst-case metric series, budgets and log stream count; prints the embedded evaluator versions and checks `obs.yaml`. |
+| `obs query --static`                        | Parses every MetricsQL, LogsQL and TraceQL query in the alerts and dashboards with the real parsers and applies the rules below.              |
+| `obs query --live`                          | Loads the seed into the embedded VictoriaMetrics, VictoriaLogs and Tempo and runs every alert and dashboard query; each must return rows.     |
+| `obs alerts`                                | Evaluates every alert at every minute of the seed and each incident; must fire inside incident windows and stay quiet outside them.           |
+| `obs links`                                 | Checks trace → logs, metric → traces and backend span → profile links on the seed.                                                            |
+| `obs assert`                                | Checks real metric series counts, labels and values from an e2e series export against the contract.                                           |
+| `obs profile summarize\|baseline\|compare`  | Summarizes CPU profiles, builds a median baseline and compares function and span shares against it.                                           |
+| `obs store move <store>`                    | Runs the single → scaled store move steps in order, none skipped, with `--dry-run` and `--rollback`.                                          |
+| `obs sandbox up`                            | Starts, stops or inspects (`down`, `status`) the local stack for people; no check needs it.                                                   |
+| `obs look`                                  | Sets up the sandbox with the changed dashboards and prints the screenshot review prompt for the calling agent; never fails CI.                |
+| `obs scrape`                                | Scrapes an app's own metrics into the sandbox.                                                                                                |
+| `obs symbols put\|decode`                   | The symbol store: stores debug symbol files by build id and decodes a stack trace with them.                                                  |
+| `obs size`                                  | The sizing command: traffic cores, memory, series and storage per day for a given load.                                                       |
+| `obs engines --check-chart <dir>`           | Compares the engine versions in a Helm chart folder with the pins; exit 1 on any drift. See [obs engines](#obs-engines---check-chart).        |
+| `obs version`                               | The obs version and every engine pin.                                                                                                         |
 
 Not tested items are collected in [Not tested](#not-tested), at the end of this file.
 
@@ -64,7 +64,7 @@ Not tested items are collected in [Not tested](#not-tested), at the end of this 
 
 ```text
 obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
-obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names] [--vl-settings victorialogs-settings.yaml]
+obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names] [--vl-settings victorialogs-settings.yaml] [--tempo-config tempo.yaml]
 obs alerts [--dir observability] [--seed seed.yaml] [--base unix] [--out results.json] [--vl-settings victorialogs-settings.yaml] [--tempo-config tempo.yaml]
             [--workers n] [--steps steps.json] [--recorded recorded.json]
 obs assert --series FILE [--dir observability] [--pods n] [--unknown warn|fail|ignore]
@@ -194,7 +194,7 @@ A filter on any other (free-form) field is _assumed true_: obs drops it and prin
 ```yaml
 length: 4h # how much time to make
 random_seed: 42 # the same file gives the same data
-resource: # resource attributes, dots kept; become metric labels (dots -> _) and log fields
+resource: # resource attributes, dots kept; become metric labels (dots kept, concept §2.1) and log fields
   durian.cloud.landscape: fixture-dev
   durian.cloud.platform: payments
   durian.cloud.service: checkout
@@ -223,8 +223,42 @@ logs: # which log event each metric event writes
 
 `incidents:` names files in `incidents/` that `obs alerts` plays (see `obs alerts`). `traces:` defines the seed's traces (see `obs links`); they drive `obs query --live` (Tempo) and `obs links`.
 
+### Label spelling per store (concept §2.1)
+
+A name is spelled the way its store keeps it. obs seeds, checks and queries every store in that spelling, so a
+dashboard or alert written to the standard returns rows on an obs seed and on the real stack alike.
+
+| Store           | Label spelling                                         | Query example                                                         |
+| --------------- | ------------------------------------------------------ | --------------------------------------------------------------------- |
+| VictoriaMetrics | dots kept, quoted (metric NAMES still use `_`)         | `checkout_charges_total{"durian.cloud.service"="checkout"}`           |
+| VictoriaLogs    | dots kept, as sent; quoted                             | `_stream:{"durian.cloud.landscape"="fixture-dev"}`                          |
+| Tempo           | dots, as sent                                          | `{resource.durian.cloud.landscape="fixture-dev"}`                           |
+| Pyroscope       | underscores only (a dotted name is dropped)            | `{durian_cloud_service="checkout", service_name="checkout"}`          |
+
+- The underscore form of a dotted VictoriaMetrics label (`durian_cloud_service`, `payment_provider`) selects
+  nothing. `obs query --static` fails it with `contract-undeclared-label` and names the dotted spelling to write;
+  `--live` fails it with `label-spelling` (with a contract, the same `contract-undeclared-label` finding, reported
+  once); a query form the label check does not model still fails `no-rows` with a "stored as" hint.
+- **Scraped (non-OTLP) metrics** reach VictoriaMetrics as `durian_cloud_*` (Alloy drops a relabel rule whose
+  `target_label` has dots), and a vminsert `-relabelConfig` `labelmap` rule (landscape, platform, service and module only: see below;
+  `replacement: durian.cloud.$1`) turns them back into `durian.cloud.*`. `obs scrape` takes the underscore input
+  (`--label durian_cloud_landscape=local`), exactly like the real collector. The sandbox's VictoriaMetrics is started
+  with the production vminsert relabel config, copied exactly (same rules, same order:
+  `labelmap` of `durian_cloud_(landscape|platform|service|module)` to `durian.cloud.$1`, then `labeldrop` of those four
+  and `cluster`; `-relabelConfig=/etc/vm-relabel.yml`, copied in at `obs sandbox up`). Source: the production landscape's
+  repo (the comment above `VMRelabelConfig` in `src/internal/sandbox/stack.go` names it), branch `feat/durian-labels`, commit
+  `954508c79c36faa38b221d5eb37c5bada9a03068`, file `apps/vm/chart/values.yaml`, key `vminsert.relabel.config`; **that
+  branch is not merged yet** (its main has no relabel config), so this follows an unmerged
+  branch. Scraped samples are stored dotted and `{"durian.cloud.service"="checkout"}` returns rows there; any other
+  `durian_cloud_*` label is not mapped. A sandbox created by an older obs has no labelmap: run
+  `obs sandbox down` and `up` again. NOT TESTED: the labelmap on the real stack with our Alloy v1.21.3.
+- **TraceQL** names are exact too: Tempo keeps attribute names as sent, so a resource or span attribute the contract
+  spells dotted must be written dotted (`span.payment.provider`). The underscore form fails `traceql-attribute` and
+  names the right spelling.
+
 Seed data is made to look like stored data (concept §11.2). Metrics: counters get `_total`, seconds
-histograms `_seconds_bucket`/`_sum`/`_count` with `le`, dots become `_`. Logs, as VictoriaLogs stores an OTLP
+histograms `_seconds_bucket`/`_sum`/`_count` with `le`; dots in a metric NAME become `_`, dots in a LABEL name stay
+(see "Label spelling per store" above). Logs, as VictoriaLogs stores an OTLP
 log record (FROM SOURCE, v1.54.0; **not yet compared with a real VictoriaLogs through Alloy**): attribute
 keys unchanged (`durian.cloud/event`, `payment.provider`), the body as `_msg`, `severity_text` (upper case,
 e.g. `ERROR`) and `severity_number`, `trace_id`, `span_id`. Stream fields are the bounded where-from set
@@ -289,6 +323,110 @@ streams) and `events=[...]`. It fails (exit 1, `FAIL <file> <yaml path>: [rule] 
 - `metric-kind`: no kind or an unknown kind; and the schema rules (`label-type`, `enum-empty`, `int-bounds`, `event-level`, ...).
 
 The after-start pod-key check of §4.1 is not here (it needs a running store: `obs assert`).
+
+`obs check` also prints the evaluator versions this binary embeds and fails when `observability/obs.yaml` names a store version they do not match: see [`obs.yaml`](#obsyaml-the-versions-and-thresholds-a-repo-targets).
+
+## `obs.yaml`: the versions and thresholds a repo targets
+
+`observability/obs.yaml` (next to `contract.yaml`) says which store and tool versions the repo's
+charts run and which query limits the stores run under. One loader reads it for `obs check`,
+`obs query`, `obs alerts`, `obs sandbox up` and `obs look`, so no command reads it its own way.
+Every key is optional: a key that is absent keeps the version or default built into obs.
+
+```yaml
+versions:
+  grafana: 13.3.0 # alert rules and dashboards
+  victoriametrics: v1.156.0 # MetricsQL
+  victorialogs: v1.54.0 # LogsQL
+  tempo: 3.1.1 # TraceQL
+  alloy: v1.21.3 # reference only: no evaluator is embedded for it
+  pyroscope: 2.4.3 # the sandbox image
+  dashboard_schema: 42 # Grafana 13.3.0 dashboard schemaVersion
+thresholds:
+  logs: # the VictoriaLogs -search.* flags, under the names below
+    max_query_len: 16KiB # -search.maxQueryLen
+    max_query_time_range: 0 # -search.maxQueryTimeRange
+    max_query_duration: 30s # -search.maxQueryDuration
+    max_queue_duration: 10s # -search.maxQueueDuration
+    max_concurrent_requests: 8 # -search.maxConcurrentRequests (default: from the CPU count)
+  metrics:
+    max_points_per_series: 1000000 # points one series may hold in a query (obs default 1,000,000)
+  traces: # Tempo query_frontend
+    query_end_cutoff: 30s # query_frontend.query_end_cutoff
+    metrics_max_duration: 24h # query_frontend.metrics.max_duration
+    metrics_max_intervals: 10000 # query_frontend.metrics.max_intervals
+  profiles: # obs profile compare default tolerances, as a fraction (0.05 is 5 %)
+    tolerance_function: 0.05
+    tolerance_span: 0.05
+    tolerance_total: 0.15
+    tolerance_dotnet_trace: 0.30
+```
+
+Per-metric series budgets stay in `contract.yaml`.
+
+**What `obs check` prints and fails on.** It always prints the evaluator versions this binary
+embeds, then compares them with `obs.yaml`:
+
+```text
+evaluators embedded in this obs:
+  MetricsQL             VictoriaMetrics v1.156.0
+  LogsQL                VictoriaLogs v1.54.0
+  TraceQL               Tempo 3.1.1
+  Grafana alert engine  Grafana 13.3.0
+  dashboard schema      Grafana 13.3.0 schemaVersion 42
+  reference pins        Alloy v1.21.3, Pyroscope 2.4.3 (pins; no evaluator)
+```
+
+- A store version in `versions` that the embedded evaluator does not match (`victoriametrics`,
+  `victorialogs`, `tempo`, `grafana`, `dashboard_schema`) fails with exit 1:
+  `FAIL <obs.yaml> versions.victorialogs: obs.yaml wants v1.53.0, this obs embeds v1.54.0 (LogsQL of VictoriaLogs)`.
+  `v1.54.0` and `1.54.0` are the same release.
+- `pyroscope` has no embedded evaluator, but obs runs it as a sandbox image, and the sandbox refuses a
+  version whose image digest `pins.json` does not record. So a Pyroscope version with no known image
+  fails the same way (exit 1, `FAIL <obs.yaml> versions.pyroscope: obs.yaml wants 2.5.0, this obs embeds
+  2.4.3 (sandbox image of Pyroscope: no known image digest, known: 2.4.3)`), in `obs check`, `obs query`
+  and `obs alerts` alike. `alloy` has no evaluator and no image: a different version is a `note` and exit 0.
+- An empty section (`versions:` or `thresholds:` with every child commented out) names nothing: it
+  counts as absent, not as an error.
+- An unknown key, a wrong type or a bad value is an input error (exit 2) that names the file, the
+  line and the key: `obs.yaml:15: unknown key thresholds.logs.max_query_lenn`. A tolerance that is not
+  a finite number (`.nan`, `.inf`) is one too.
+- **No `obs.yaml`**: `obs check` prints a note and the embedded versions and exits 0, so repos that
+  have no file keep working. `obs query` and `obs alerts` print nothing new.
+
+`obs query` and `obs alerts` read the same file the same way: the same version check (exit 1 before
+any work, naming the key), the same thresholds. They print one line, `versions match the evaluators
+embedded in this obs; thresholds applied: logs, ...`, when the file exists.
+
+**Order of precedence** (for each key): the defaults built into obs, then `obs.yaml`, then
+`--vl-settings` / `<dir>/victorialogs-settings.yaml` (VictoriaLogs) or `--tempo-config` (Tempo).
+`--vl-settings` (`obs query --live`, `obs alerts`) and `--tempo-config` (`obs query --live`, `obs alerts`)
+keep working and override `obs.yaml` key by key; a key the file
+does not name keeps the `obs.yaml` value. For profiles, a per-service override in
+`e2e/profile-limits.yaml` beats `obs.yaml`, which beats the built-in 5 / 5 / 15 / 30 %;
+`obs profile compare` reads `observability/obs.yaml` when it exists (`--obs-yaml` names another).
+
+**The sandbox.** `obs sandbox up` and `obs look` start exactly the images `versions` names for
+Grafana, VictoriaMetrics, VictoriaLogs, Tempo and Pyroscope (and print them). A version obs has no
+recorded image digest for (`src/internal/pins/pins.json`: the pin, plus an optional `also` list of
+`{version, digest}`) is refused: `obs sandbox up` exits 2 with `<obs.yaml>: versions.pyroscope: 2.4.2
+has no known image digest for grafana/pyroscope (known: 2.4.3)`; `obs look` prints the same and, as
+always, exits 0. Nothing is guessed. An `also` entry counts only with a valid image digest
+(`sha256:` and 64 lower-case hex characters); an absent or malformed digest is refused by name, with the
+reason, the same way. `obs sandbox down` and `status` never read the file.
+
+**Where the thresholds apply.**
+
+- `thresholds.metrics.max_points_per_series` caps the points one series may hold in a query. A window that
+  needs more (`(end - start) / step + 1` points) is a `FAIL` line naming the key and the numbers (exit 1 in
+  `obs query --live`; in `obs alerts` the rule's line says why it errored, or the run stops with the same text);
+  it is never a VictoriaMetrics panic.
+- `thresholds.traces` shapes every Tempo metrics query obs runs: alert rules (`obs alerts`) and TraceQL
+  metrics panels in dashboards (`obs query --live`). A panel is validated and run as Tempo's query-frontend
+  does, with the seed's end as "now": the end is pulled in by `query_end_cutoff`, a window longer than
+  `metrics_max_duration` or finer than `metrics_max_intervals` is an error that names the limit. With
+  Tempo's defaults (30s, 24h, 10000) a `{} | rate()` panel over `now-5m` to `now` is green; with
+  `metrics_max_duration: 1s` it is red. Trace searches and trace ID lookups do not go through these limits.
 
 ## `obs gen`
 
@@ -434,8 +572,44 @@ bounded number; a value that holds a dashboard variable is not judged),
 `contract-pod-label` (a pod key on a business metric, §4.1), `contract-undeclared-event` and
 `contract-undeclared-stream-field` (a stream tag outside the where-from set). Regex metric names (`{__name__=~"..."}`) are matched against the known names and a regex that matches none is
 undeclared; regex label values must match an allowed value; label functions (`label_replace`, ...) must read
-labels their input has. Names compare with dots
-and underscores equal. Other log fields are free-form (§6): not judged.
+labels their input has. A metric label is compared in its stored spelling, dots
+kept and quoted (`{"payment.provider"="stripe"}`, `by ("payment.provider")`); the underscore form of a dotted label is
+`contract-undeclared-label` and the finding names the dotted spelling (a pod key in either spelling is
+`contract-pod-label`). Other log fields are free-form (§6): not judged.
+
+## Migrating from 0.2 to 0.3
+
+obs 0.2 stored seeded VictoriaMetrics labels with dots turned into underscores and accepted both spellings in
+checks. Concept §2.1 says VictoriaMetrics keeps the dots and a query quotes them, so obs now follows the concept.
+This is a correction to the standard, not a flag or exit-code change, so it ships as a minor release. A dashboard,
+alert or TraceQL query written with the underscore spelling of a dotted label now fails, once, with the fix in
+the message:
+
+| Where it fails                    | The message names                                                                          | Fix                                                |
+| --------------------------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------- |
+| `obs query --static`, a selector  | `[contract-undeclared-label] label "durian_cloud_service" ... write "durian.cloud.service"` | `{"durian.cloud.service"="checkout"}`              |
+| `obs query --static`, a grouping  | the same finding for the `by (...)` / `on (...)` label                                     | `by ("durian.cloud.service")`                      |
+| `obs query --static`, a variable  | `variable $provider: [contract-undeclared-label] label_values reads label "payment_provider"` | `label_values(checkout_charges_total, payment.provider)` |
+| `obs query --live`                | with a contract: the same `[contract-undeclared-label]` finding, once; with no contract: `[label-spelling] VictoriaMetrics keeps a label's dots: label "x_y" is stored as "x.y"` | write the dotted name, quoted in a selector        |
+| TraceQL attribute                 | `[traceql-attribute] undeclared attribute span.payment_provider (Tempo keeps the dots: write "payment.provider")` | `span.payment.provider`                            |
+
+- A pod key on a per_pod or platform metric is a label too: `k8s_pod_name` fails the same way, naming `k8s.pod.name`.
+- Pyroscope labels do not change: they stay underscores.
+- **Alert templates** (annotations, labels) must use `{{ index $labels "durian.cloud.service" }}`: the dotted path
+  `$labels.durian.cloud.service` is a template error and the underscore form renders empty. (From review of the Grafana
+  template rules; obs does not render templates.)
+- **Trace panels now run under Tempo's query limits, even with no `obs.yaml`.** `obs query --live` applies
+  Tempo 3.1.1's defaults (30 s end cutoff, 24 h maximum duration, 10000 intervals) or the `thresholds.traces`
+  values in `obs.yaml`. A TraceQL metrics panel longer than the maximum duration or with more intervals than the
+  limit now fails as it would in Grafana against real Tempo; a panel ending inside the end cutoff is not a failure
+  (the end is clamped, as Tempo does). Raise the limit in `obs.yaml` to match the deployed Tempo.
+- **An old sandbox must be recreated.** A sandbox made before this release has a VictoriaMetrics without the
+  relabel config; `obs sandbox up` refuses it, naming `-relabelConfig`. Run `obs sandbox down` and then
+  `obs sandbox up`.
+- NOT TESTED: `label_values` with a quoted dotted label (`label_values(m, "payment.provider")`) in Grafana itself; obs
+  accepts both quoted and bare, but only the bare form is what the fixtures use.
+- The production landscape's current charts (its main, release 1.5.0, `scripts/ci/obs-query.sh`) pass with this obs: 6 charts, 0 failures.
+  They have no `contract.yaml` and use no `durian.*` label, so nothing in them was judged for spelling.
 
 ## `obs sandbox`: the local stack, for people
 
@@ -527,22 +701,24 @@ Concept §11.8 names `obs scrape` next to the sandbox but does not define it; th
 It scrapes Prometheus text endpoints (an app's `/metrics`) on an interval and writes them into the running
 sandbox's VictoriaMetrics (`/api/v1/import/prometheus`), with `job`, `instance` and the `--label`s on every
 sample, so the app's metrics can be looked at next to the seed. Scraped metrics carry their where-from
-labels as `durian_cloud_*` (concept §2): pass `--label durian_cloud_landscape=local` and so on. `--once`
+labels as `durian_cloud_*` (concept §2): pass `--label durian_cloud_landscape=local` and so on (a vminsert labelmap turns
+them into `durian.cloud.*`; the sandbox VictoriaMetrics has the same labelmap, see "Label spelling per store"). `--once`
 scrapes once and exits 1 when it failed; otherwise it runs until Ctrl-C and keeps going after a failed
 scrape.
 
 ## Engines and pins
 
-| Signal   | Engine or reference                                        | Version                          |
-| -------- | ---------------------------------------------------------- | -------------------------------- |
-| metrics  | VictoriaMetrics (`metricsql`, storage and evaluator)       | v1.156.0                         |
-| logs     | VictoriaLogs `lib/logstorage`                              | v1.54.0, tag commit `6433dae5`   |
-| traces   | Tempo (TraceQL parser, evaluator and frontend rules)       | 3.1.1, tag commit `9db7df79d2af` |
-| alerts   | Grafana (alert math and state machine, ported)             | 13.3.0, tag commit `752e3462`    |
-| profiles | Pyroscope (reference: sandbox and parity only, not linked) | 2.4.3                            |
-| logs UI  | VictoriaLogs Grafana datasource (reference, parity only)   | v0.34.0                          |
+| Signal   | Engine or reference                                         | Version                          |
+| -------- | ----------------------------------------------------------- | -------------------------------- |
+| metrics  | VictoriaMetrics (`metricsql`, storage and evaluator)        | v1.156.0                         |
+| logs     | VictoriaLogs `lib/logstorage`                               | v1.54.0, tag commit `6433dae5`   |
+| traces   | Tempo (TraceQL parser, evaluator and frontend rules)        | 3.1.1, tag commit `9db7df79d2af` |
+| alerts   | Grafana (alert math and state machine, ported)              | 13.3.0, tag commit `752e3462`    |
+| profiles | Pyroscope (reference: sandbox and parity only, not linked)  | 2.4.3                            |
+| agent    | Grafana Alloy (reference: pin only, no image is run)        | v1.21.3                          |
+| logs UI  | VictoriaLogs Grafana datasource (reference, parity only)    | v0.34.0                          |
 
-The first four are engines linked into the binary; the last two are references only.
+The first four are engines linked into the binary; the last three are references only.
 `obs version` prints every pin, with `engine` or `reference` in front of it, and
 `obs engines --check-chart` compares the charts with them.
 
@@ -661,13 +837,14 @@ obs assert --series FILE [--dir observability] [--pods n] [--unknown warn|fail|i
 
 - **Input** (`--series`): `/api/v1/series` JSON (`{"status":"success","data":[{"__name__":...}]}`) or
   `/api/v1/export` lines (`{"metric":{...},"values":[...],"timestamps":[...]}`), for example
-  `curl -g "$VM/api/v1/series?match[]={durian_cloud_service=\"checkout\"}&start=<e2e start>"`. Scope the export to the
+  `curl -g "$VM/api/v1/series?match[]={\"durian.cloud.service\"=\"checkout\"}&start=<e2e start>"`. Scope the export to the
   service under test: obs counts every series it is given. A series repeated in an export counts once.
-  Label names compare with dots and underscores equal (`payment.provider` = `payment_provider`).
+  Label names are the stored spelling, dots kept (`payment.provider`). An underscore spelling (`payment_provider`) is a
+  `label-not-in-contract` finding that names the dotted spelling.
 - **Count.** A series belongs to the contract metric whose stored names it carries (`checkout_charges_total`,
   `checkout_charge_duration_seconds_bucket|_sum|_count`: a histogram counts all three, like the worst case of
   `obs check`, buckets + 2 per label set). The series are counted **per landscape** (label
-  `durian_cloud_landscape`; none = one group), since the worst case is per landscape.
+  `durian.cloud.landscape`; none = one group), since the worst case is per landscape.
 - **Limit.** `contract.WorstCase(metric)`; for a `per_pod` metric worst case × `--pods` (the pods per landscape,
   from the landscape config). Fails with `series-over-worst-case`, naming the series file, the metric, the count,
   the stored names and the worst case. Platform metrics (`platform_metrics:`) are counted and printed, with no
@@ -1765,6 +1942,10 @@ source) where its section says so.
 
 **Commands and builds**
 
+- **Live label-spelling check on MetricsQL result labels.** `obs query --live` models which query-made labels
+  survive a query (aggregations, binary operations, `group_left`/`group_right`, scalar sides, set operators) for the
+  forms checked against the embedded engine in `src/internal/check/engine_controls_test.go`; other forms may be
+  judged leniently (a wrong spelling then passes), never the other way round by design.
 - `obs engines --check-chart` wired into a consumer's CI: the real chart's location in the chart registry is not specified, so the command is tested only on fixture charts ([obs engines --check-chart](#obs-engines---check-chart)). Chart pins in the nightly parity job are in the same position.
 - `obs engines --check-chart` does not check a component whose image the values never set (it uses the chart default), and reads only the image paths listed under its section.
 - `obs engines --check-chart` reads `Chart.yaml` and `values.yaml` only: an engine image set in a template or in another values file is not read, and a digest is compared with the recorded image digest, not resolved against a registry.
@@ -1784,6 +1965,13 @@ source) where its section says so.
 - Each language's generated types compile and run against a stub written from the goal, not the real interfaces library ([obs gen](#obs-gen)).
 - The per-language lint rules (`forbidigo` and the others in the table) are documented here; the lint config lives in the templates and is not run by obs.
 - Actual NativeAOT or Flutter release artifacts, and a compiler-produced .NET PDB ([obs symbols](#obs-symbols)). Not checked: a Portable PDB carries no module MVID, so the uploader supplies it; obfuscation-map provenance comes from the build.
+
+**obs.yaml**
+
+- `obs sandbox up` with an image named by `obs.yaml` other than the pins: no container runtime ran it. Only the refusal of an unknown version (including an `also` entry with an absent or malformed digest), the choice of tags and the refusal to start over a container that runs another image (tested directly, with a fake runtime) are tested. `pins.json` records no extra (`also`) image yet, so today the only runnable versions are the pins.
+- Trace panels run under `thresholds.traces` with the seed's end as the query-frontend's "now"; that choice is ours, not measured against a real Grafana panel refresh. A per-tenant `max_metrics_duration` override is not modelled.
+- `dashboard_schema: 42` was read from the Grafana v13.3.0 source (`DashboardMigrator.ts`, `schemaversion/v42.go`), not measured against a running Grafana; `obs check` does not read the `schemaVersion` of the repo's dashboards.
+- `thresholds.metrics.max_points_per_series` against a real VictoriaMetrics `-search.maxPointsPerTimeseries` (obs's default is the embedded engine's own 1,000,000, not the server's 30,000); `obs profile compare` reading `thresholds.profiles` is unit-tested, not run end to end; a Helm chart's values are not read, so the repo must keep `obs.yaml` equal to the chart by hand.
 
 **Alerts**
 

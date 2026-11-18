@@ -56,7 +56,7 @@ const dashJSONText = `{"uid":"payments-overview","title":"Payments overview","ti
 "templating":{"list":[
  {"type":"datasource","name":"ds","query":"prometheus"},
  {"type":"query","name":"outcome","query":{"query":"label_values(checkout_charges_total, outcome)"}},
- {"type":"query","name":"provider","query":"label_values(checkout_charges_total, payment_provider)","includeAll":true,"multi":true},
+ {"type":"query","name":"provider","query":"label_values(checkout_charges_total, payment.provider)","includeAll":true,"multi":true},
  {"type":"custom","name":"route","query":"/charge,/refund","current":{"value":"/refund"}},
  {"type":"custom","name":"first","query":"a,b"},
  {"type":"interval","name":"win"}

@@ -254,3 +254,42 @@ func TestUnknownUnitRefused(t *testing.T) {
 		}
 	}
 }
+
+// Concept 2.1: Tempo keeps attribute names as sent, dots included. The underscore form of a dotted
+// attribute is not declared, and the contract names the dotted spelling.
+func TestTraceAttributesKeepTheirDots(t *testing.T) {
+	c := parse(t, `
+service: s
+types: { t: { kind: enum, values: [x] } }
+spans: { a.b: { attributes: { payment.provider: t } } }
+`)
+	for _, tc := range []struct {
+		scope, name string
+		want        bool
+	}{
+		{"span", "payment.provider", true},
+		{"", "payment.provider", true},
+		{"span", "payment_provider", false},
+		{"", "payment_provider", false},
+		{"resource", "k8s.pod.name", true},
+		{"resource", "k8s_pod_name", false},
+		{"", "durian_cloud_service", false},
+		{"resource", "durian.cloud.service", true},
+	} {
+		if got := c.HasSpanAttribute(tc.scope, tc.name); got != tc.want {
+			t.Errorf("HasSpanAttribute(%q, %q) = %v, want %v", tc.scope, tc.name, got, tc.want)
+		}
+	}
+	for _, tc := range []struct{ scope, name, want string }{
+		{"span", "payment_provider", "payment.provider"},
+		{"", "payment_provider", "payment.provider"},
+		{"resource", "durian_cloud_service", "durian.cloud.service"},
+		{"span", "durian_cloud_service", ""}, // not a span attribute of this contract
+		{"span", "payment.provider", ""},
+		{"span", "nonsense", ""},
+	} {
+		if got := c.DottedSpanAttribute(tc.scope, tc.name); got != tc.want {
+			t.Errorf("DottedSpanAttribute(%q, %q) = %q, want %q", tc.scope, tc.name, got, tc.want)
+		}
+	}
+}

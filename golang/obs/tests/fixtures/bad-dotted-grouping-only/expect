@@ -1,0 +1,6 @@
+# No contract.yaml, and the underscore label is only in a grouping: the live run still fails it, naming the dotted label.
+mode: live
+exit: 1
+contains: alerts/where-from/critical.yaml rule where-from-critical query A
+contains: [label-spelling]
+contains: write "durian.cloud.service"

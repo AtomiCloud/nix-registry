@@ -20,6 +20,7 @@ import (
 	"github.com/AtomiCloud/obs/internal/engines/vm"
 	"github.com/AtomiCloud/obs/internal/files"
 	"github.com/AtomiCloud/obs/internal/logevent"
+	"github.com/AtomiCloud/obs/internal/obsyaml"
 	"github.com/AtomiCloud/obs/internal/seed"
 )
 
@@ -29,9 +30,11 @@ type Options struct {
 	// cutoff, metrics max_duration and max_intervals) trace rules run under;
 	// empty means Tempo 3.1.1's defaults.
 	TempoConfig string
-	Base        int64
-	Workers     int
-	LogsGuard   QueryGuard
+	// Obs is <Dir>/obs.yaml (nil when absent): its thresholds sit under VLSettings and TempoConfig.
+	Obs       *obsyaml.File
+	Base      int64
+	Workers   int
+	LogsGuard QueryGuard
 }
 
 // TempoAlertingNote is printed once per obs alerts run that has trace rules.
@@ -68,20 +71,21 @@ func Check(o Options, stdout, stderr io.Writer) int {
 		return 2
 	}
 	var tempoFrontend *tempo.Frontend
-	if o.TempoConfig != "" {
-		b, err := os.ReadFile(o.TempoConfig)
+	{
+		fe, err := o.Obs.TempoFrontend(o.TempoConfig)
 		if err != nil {
-			fmt.Fprintln(stderr, "obs alerts: --tempo-config:", err)
+			fmt.Fprintln(stderr, "obs alerts:", err)
 			return 2
 		}
-		fe, err := tempo.ParseFrontend(b)
-		if err != nil {
-			fmt.Fprintf(stderr, "obs alerts: --tempo-config %s: %v\n", o.TempoConfig, err)
-			return 2
+		if fe != nil {
+			tempoFrontend = fe
+			// Part of every cached result's key: the settings change what trace rules read.
+			p.Files["tempo-frontend"] = []byte(fmt.Sprintf("%+v", *fe))
 		}
-		tempoFrontend = &fe
-		// Part of every cached result's key: the settings change what trace rules read.
-		p.Files["tempo-frontend"] = []byte(fmt.Sprintf("%+v", fe))
+	}
+	if o.Obs != nil && o.Obs.MaxPoints != 0 {
+		// Part of every cached result's key, as the settings above.
+		p.Files["metrics-max-points"] = []byte(fmt.Sprint(o.Obs.MaxPoints))
 	}
 	if hasTraceRules(p) {
 		fmt.Fprintln(stdout, TempoAlertingNote)
@@ -137,7 +141,7 @@ func Check(o Options, stdout, stderr io.Writer) int {
 	}
 	if hasLogs || o.VLSettings != "" {
 		var note string
-		limits, note, err = vl.LoadLimits(o.Dir, o.VLSettings)
+		limits, note, err = o.Obs.VLLimits(o.Dir, o.VLSettings)
 		if err != nil {
 			fmt.Fprintln(stderr, "obs alerts:", err)
 			return 2
@@ -303,6 +307,7 @@ func Check(o Options, stdout, stderr io.Writer) int {
 				return 2
 			}
 			defer m.Close()
+			m.SetMaxPoints(o.Obs.MetricsMaxPoints())
 			eng.Metrics = m
 			eng.Datasources["metrics"] = metricEngine{m}
 		}

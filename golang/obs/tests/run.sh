@@ -56,7 +56,7 @@ run() {
 run version
 [ "$rc" -eq 0 ] && grep -q '^obs [0-9]' "$work/out.txt" && ok "version" || bad "version: $(cat "$work/out.txt")"
 # obs's own version, set once in default.nix for the whole obs-full release (not the registry release).
-grep -qx 'obs 0.2.0' "$work/out.txt" && ok "version prints obs 0.2.0" || bad "version is not 0.2.0: $(head -1 "$work/out.txt")"
+grep -qx 'obs 0.3.0' "$work/out.txt" && ok "version prints obs 0.3.0" || bad "version is not 0.3.0: $(head -1 "$work/out.txt")"
 grep -q 'VictoriaMetrics v1.156.0' "$work/out.txt" && grep -q 'VictoriaLogs v1.54.0 (tag commit 6433dae5' "$work/out.txt" &&
   ok "version prints every engine pin" || bad "version engine pins"
 run
@@ -122,6 +122,15 @@ rm -rf "${work:?}/rec/alerts/record-rule"
 run query --live --dir "$work/rec" --base "$base"
 [ "$rc" -eq 1 ] && grep -q '\[no-rows\].*fixture_recorded' "$work/out.txt" && ! grep -q 'recording-rule' "$work/out.txt" &&
   ok "recording-rule read: a metric no rule records still fails no-rows" || bad "unrecorded metric live: exit $rc: $(cat "$work/out.txt")"
+
+# A wrong label spelling fails once, even in a live run that also applies the static rules: two wrong labels
+# (a selector and a grouping) in one query are exactly two failures, not four.
+run query --live --dir "$fx/bad-dotted-underscore/observability" --seed "$fx/shared-seed.yaml" --base "$base"
+[ "$rc" -eq 1 ] && grep -q ': FAILED: .* 2 failures' "$work/out.txt" && ! grep -q '\[label-spelling\]' "$work/out.txt" &&
+  ok "bad-dotted-underscore (live): two wrong labels are exactly two failures, each reported once" || bad "bad-dotted-underscore live count: exit $rc: $(cat "$work/out.txt")"
+run query --live --dir "$fx/bad-dotted-label-values/observability" --seed "$fx/shared-seed.yaml" --base "$base"
+[ "$rc" -eq 1 ] && grep -q ': FAILED: .* 1 failures' "$work/out.txt" &&
+  ok "bad-dotted-label-values (live): the wrong variable label fails once" || bad "bad-dotted-label-values live count: exit $rc: $(cat "$work/out.txt")"
 
 # ---- planted failures: each red, naming file + rule/panel + the bad token ------------
 for d in "$fx"/bad-* "$fx"/ok-*; do
@@ -202,6 +211,7 @@ bash "$here/store-symbols-sizing.sh" "$OBS" && ok "store/symbols/size fixtures" 
 
 bash "$here/links.sh" "$OBS" "${OUT:-}"
 bash "$here/engines.sh" "$OBS" && ok "engines --check-chart (tests/engines.sh)" || bad "engines --check-chart (tests/engines.sh)"
+bash "$here/obsyaml.sh" "$OBS" && ok "obs.yaml versions and thresholds (tests/obsyaml.sh)" || bad "obs.yaml versions and thresholds (tests/obsyaml.sh)"
 echo "obs tests: $pass passed, $fail failed"
 bash "$here/alerts.sh" "$OBS"
 [ "$fail" -eq 0 ]

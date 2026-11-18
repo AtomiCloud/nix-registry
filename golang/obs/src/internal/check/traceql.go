@@ -18,6 +18,12 @@ import (
 // the implementation as well as the contract's span attributes.
 type SpanAttributeNames interface{ HasSpanAttribute(scope, name string) bool }
 
+// dottedSpanAttributes is optional on a SpanAttributeNames: it names the dotted spelling of an
+// attribute written with underscores (Tempo keeps the dots, so the underscore form finds nothing).
+type dottedSpanAttributes interface {
+	DottedSpanAttribute(scope, name string) string
+}
+
 func staticTraces(r *Report, q *files.Query, o Options) {
 	expr := staticFill(q)
 	if q.IsAlert {
@@ -58,7 +64,13 @@ func staticTraceQL(r *Report, q *files.Query, o Options, expr string) *tempo.Que
 	}
 	for _, a := range p.Attributes {
 		if o.SpanAttributes != nil && !o.SpanAttributes.HasSpanAttribute(a.Scope, a.Name) {
-			r.add(Fail, q.File, q.Where, "traceql-attribute", "undeclared attribute %s; query: %s", a, oneLine(expr))
+			hint := ""
+			if d, ok := o.SpanAttributes.(dottedSpanAttributes); ok {
+				if w := d.DottedSpanAttribute(a.Scope, a.Name); w != "" {
+					hint = fmt.Sprintf(" (Tempo keeps the dots: write %q)", w)
+				}
+			}
+			r.add(Fail, q.File, q.Where, "traceql-attribute", "undeclared attribute %s%s; query: %s", a, hint, oneLine(expr))
 		}
 	}
 	return p
@@ -115,13 +127,17 @@ func (l *liveRun) tracePanel(q *files.Query, expr string, start, end time.Time, 
 		hits, err := l.tempo.Search(expr, start, end, 20)
 		return len(hits) > 0, err
 	}
-	rows, err := l.tempo.MetricsRange(expr, start, end, step)
+	// The dashboard is viewed at the end of the seed's time line, so that is the
+	// query-frontend's "now": its end cutoff, duration and interval limits apply as they
+	// do in Tempo (thresholds.traces in obs.yaml, --tempo-config over it).
+	resp, err := l.tempo.QueryRange(l.frontend, l.end, expr, start, end, step)
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("%w (Tempo query-frontend limits in force: thresholds.traces.query_end_cutoff %s, metrics_max_duration %s, metrics_max_intervals %d; set them in obs.yaml or with --tempo-config)",
+			err, l.frontend.QueryEndCutoff, l.frontend.MaxDuration, l.frontend.MaxIntervals)
 	}
-	for _, row := range rows {
-		for _, v := range row.Points {
-			if !math.IsNaN(v) {
+	for _, s := range resp.Series {
+		for _, sm := range s.Samples {
+			if !math.IsNaN(sm.Value) {
 				return true, nil
 			}
 		}

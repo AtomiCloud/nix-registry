@@ -72,17 +72,17 @@ var base = []tmpl{
 	{slug: "charge-errors", file: "increase", title: "Charge errors in the last 10 minutes", sev: "warning", forD: "0s", t: 300, win: "10m", cnt: 1,
 		queries: []query{{"A", false, `sum(increase(` + chg + `{outcome="error"}` + m5 + `))`}}, cond: "$A > {T}"},
 	{slug: "charge-errors", file: "by-provider", title: "Charge errors by provider", sev: "warning", forD: "5m", t: 0.5, win: "5m",
-		queries: []query{{"A", false, `sum by (payment_provider) (rate(` + chg + `{outcome="error"}` + m5 + `))`}}, cond: "$A > {T}"},
+		queries: []query{{"A", false, `sum by ("payment.provider") (rate(` + chg + `{outcome="error"}` + m5 + `))`}}, cond: "$A > {T}"},
 	{slug: "charge-errors", file: "no-window", title: "Charge errors (MetricsQL, no window)", sev: "warning", forD: "5m", t: 1,
 		queries: []query{{"A", false, `sum(rate(` + chg + `{outcome="error"}))`}}, cond: "$A > {T}"},
 	{slug: "latency", file: "p95-critical", title: "Charge p95 very slow", sev: "critical", forD: "10m", t: 0.8, win: "5m",
-		queries: []query{{"A", false, `histogram_quantile(0.95, sum by (le) (rate(` + dur + `_bucket{http_route="/charge"}` + m5 + `)))`}}, cond: "$A > {T}"},
+		queries: []query{{"A", false, `histogram_quantile(0.95, sum by (le) (rate(` + dur + `_bucket{"http.route"="/charge"}` + m5 + `)))`}}, cond: "$A > {T}"},
 	{slug: "latency", file: "p95-warning", title: "Charge p95 slow", sev: "warning", forD: "5m", t: 0.5, win: "5m",
-		queries: []query{{"A", false, `histogram_quantile(0.95, sum by (le) (rate(` + dur + `_bucket{http_route="/charge"}` + m5 + `)))`}}, cond: "$A > {T}"},
+		queries: []query{{"A", false, `histogram_quantile(0.95, sum by (le) (rate(` + dur + `_bucket{"http.route"="/charge"}` + m5 + `)))`}}, cond: "$A > {T}"},
 	{slug: "latency", file: "avg", title: "Average request time high", sev: "warning", forD: "5m", t: 0.3, win: "5m",
 		queries: []query{{"A", false, `sum(rate(` + dur + `_sum` + m5 + `)) / sum(rate(` + dur + `_count` + m5 + `))`}}, cond: "$A > {T}"},
 	{slug: "latency", file: "5xx-ratio", title: "5xx ratio", sev: "warning", forD: "5m", t: 0.05, win: "5m",
-		queries: []query{{"A", false, `sum(rate(` + dur + `_count{http_response_status_code=~"5.."}` + m5 + `)) / sum(rate(` + dur + `_count` + m5 + `))`}}, cond: "$A > {T}"},
+		queries: []query{{"A", false, `sum(rate(` + dur + `_count{"http.response.status_code"=~"5.."}` + m5 + `)) / sum(rate(` + dur + `_count` + m5 + `))`}}, cond: "$A > {T}"},
 	{slug: "mixed", file: "errors-or-latency", title: "Checkout unhealthy", sev: "critical", forD: "5m", t: 1, t2: 0.5, win: "5m",
 		queries: []query{
 			{"A", false, `sum(rate(` + chg + `{outcome="error"}` + m5 + `))`},
@@ -93,7 +93,7 @@ var base = []tmpl{
 	{slug: "metricsql", file: "with-template", title: "Charge errors (MetricsQL WITH)", sev: "warning", forD: "5m", t: 1, win: "5m",
 		queries: []query{{"A", false, `WITH (errs = ` + chg + `{outcome="error"}) sum(rate(errs` + m5 + `))`}}, cond: "$A > {T}"},
 	{slug: "declines", file: "adyen-metric", title: "Adyen declines (metric)", sev: "warning", forD: "5m", t: 0.5, win: "5m",
-		queries: []query{{"A", false, `sum(rate(` + chg + `{payment_provider="adyen", outcome="declined"}` + m5 + `))`}}, cond: "$A > {T}"},
+		queries: []query{{"A", false, `sum(rate(` + chg + `{"payment.provider"="adyen", outcome="declined"}` + m5 + `))`}}, cond: "$A > {T}"},
 	{slug: "declines", file: "adyen-logs", title: "Adyen declines (logs)", sev: "warning", forD: "5m", t: 150, win: "5m", cnt: 1,
 		queries: []query{{"A", true, `_time:{W} ` + svc + ` ` + evt + `"checkout.charge.declined" "payment.provider":="adyen"` + cnt}}, cond: "$A > {T}"},
 	{slug: "logs", file: "failed-count", title: "Failed charge log lines", sev: "warning", forD: "5m", t: 100, win: "5m", cnt: 1,
@@ -287,6 +287,7 @@ func Write(out string) error {
 			files["incidents/"+name+".yaml"] = body
 		}
 		files["contract.yaml"] = contract
+		files["obs.yaml"] = obsYAML
 		for _, l := range Lengths {
 			files["seed."+l+".yaml"] = Seed(l)
 		}
@@ -324,4 +325,36 @@ logs:
 
 platform_metrics:
   http.server.request.duration: [http.route, http.response.status_code]
+`
+
+// obsYAML is the obs.yaml every set carries: the versions this obs embeds and the default thresholds.
+const obsYAML = `# The versions and thresholds this repo's observability folder targets. obs reads this file
+# (obs check, obs query, obs alerts, obs sandbox up, obs look); see the obs README.
+# Every key is optional: a key that is absent keeps the version or default built into obs.
+versions:
+  grafana: 13.3.0 # alert rules and dashboards; the alert engine and dashboard schema are checked
+  victoriametrics: v1.156.0 # MetricsQL
+  victorialogs: v1.54.0 # LogsQL
+  tempo: 3.1.1 # TraceQL
+  alloy: v1.21.3 # reference only; no evaluator
+  pyroscope: 2.4.3 # sandbox image
+  dashboard_schema: 42 # Grafana 13.3.0 dashboard schemaVersion
+
+thresholds:
+  logs: # VictoriaLogs query limits (the -search.* flags); victorialogs-settings.yaml overrides
+    max_query_len: 16KiB
+    max_query_time_range: 0
+    max_query_duration: 30s
+    max_queue_duration: 10s
+  metrics:
+    max_points_per_series: 1000000
+  traces: # Tempo query_frontend; --tempo-config overrides
+    query_end_cutoff: 30s
+    metrics_max_duration: 24h
+    metrics_max_intervals: 10000
+  profiles: # obs profile compare, as a fraction (0.05 is 5 %)
+    tolerance_function: 0.05
+    tolerance_span: 0.05
+    tolerance_total: 0.15
+    tolerance_dotnet_trace: 0.30
 `
