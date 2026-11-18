@@ -1,3 +1,17 @@
+## [6.5.0](https://github.com/AtomiCloud/nix-registry/compare/v6.4.0...v6.5.0) (2026-11-18)
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **obs:** contract round 2: VM stored names, clash table ([10ca453](https://github.com/AtomiCloud/nix-registry/commit/10ca453365a999a6a046c206ba615d2b4436593b))
+* **obs:** contract round 3 fixes ([1e6e94d](https://github.com/AtomiCloud/nix-registry/commit/1e6e94d9f6a0e7b569e31a3adc26bb075b626fd4))
+* **obs:** migration note names obs alerts as reading every contract ([9d05be1](https://github.com/AtomiCloud/nix-registry/commit/9d05be12d09a39cd22f311c544097e461a671ec5))
+* **obs:** obs 0.4.0, migration notes for the contract step ([6ec8fa9](https://github.com/AtomiCloud/nix-registry/commit/6ec8fa9e112e454113d4847043447f0e058e9957))
+* **obs:** regex name selectors see expanded platform names ([37495c0](https://github.com/AtomiCloud/nix-registry/commit/37495c07dc97e87b7e4e30b676ab53382e1b763c))
+* **obs:** settle the CodeRabbit findings on the contract step ([dc2fbea](https://github.com/AtomiCloud/nix-registry/commit/dc2fbea9b3e58818f3195c5c1b74efdcec49d3a5))
+* **obs:** source: entries, estimate labels, keep-list ([65fc914](https://github.com/AtomiCloud/nix-registry/commit/65fc91481032a5125786a6c5013f90bc7dbeef65))
+* **obs:** vendorHash for the VictoriaMetrics OTLP parity test ([8c5328a](https://github.com/AtomiCloud/nix-registry/commit/8c5328a014519aef3241855f10a3c5c0e92addc3))
+
 ## [6.4.0](https://github.com/AtomiCloud/nix-registry/compare/v6.3.0...v6.4.0) (2026-11-18)
 
 
