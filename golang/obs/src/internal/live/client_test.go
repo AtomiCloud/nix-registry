@@ -531,3 +531,19 @@ func TestJSONDecodeErrorsPrintNothingOfTheAnswer(t *testing.T) {
 		}
 	}
 }
+
+// vmauth (v1.156.0) quotes the token it refused with %q and rewrites a legacy "Token x" to
+// "Bearer x": the quoted (backslash-escaped) form and a short token are hidden too. The text is
+// capped at 200 runes including the ellipsis.
+func TestStoreTextHidesGatewayEchoForms(t *testing.T) {
+	c := &Client{Headers: map[string]string{"Authorization": `Token ab"c\9`}}
+	echo := `cannot authorize request with auth tokens ["Bearer ab\"c\\9"]`
+	got := c.storeText(echo)
+	if strings.Contains(got, `ab\"c\\9`) || strings.Contains(got, `ab"c\9`) || !strings.Contains(got, "cannot authorize request") {
+		t.Fatalf("the quoted and rewritten token must be hidden, the diagnostic kept: %q", got)
+	}
+	long := strings.Repeat("é", 201)
+	if n := len([]rune((&Client{}).storeText(long))); n != 200 {
+		t.Fatalf("store text is at most 200 runes including the ellipsis, got %d", n)
+	}
+}

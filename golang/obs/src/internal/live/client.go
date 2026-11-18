@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -237,10 +238,19 @@ func (c *Client) storeText(s string) string {
 		if len(v) < 4 { // a short value (a tenant id "1") would garble the text; it is no secret
 			continue
 		}
-		s = strings.ReplaceAll(s, v, "***")
+		// The whole value and each word of it (a gateway may echo only the token of "Bearer <token>",
+		// or rewrite the scheme: vmauth turns "Token x" into "Bearer x"), each as written and as Go's
+		// %q writes it (vmauth quotes the token it refused: backslash escapes).
+		parts := []string{v}
 		for _, w := range strings.Fields(v) {
-			if len(w) >= 8 {
-				s = strings.ReplaceAll(s, w, "***")
+			if len(w) >= 4 {
+				parts = append(parts, w)
+			}
+		}
+		for _, p := range parts {
+			q := strconv.Quote(p)
+			for _, form := range []string{q[1 : len(q)-1], p} {
+				s = strings.ReplaceAll(s, form, "***")
 			}
 		}
 	}
@@ -252,7 +262,7 @@ func (c *Client) storeText(s string) string {
 	}, s)
 	s = strings.TrimSpace(s)
 	if rs := []rune(s); len(rs) > 200 {
-		s = string(rs[:200]) + "..."
+		s = string(rs[:197]) + "..." // 200 runes with the ellipsis
 	}
 	return s
 }
