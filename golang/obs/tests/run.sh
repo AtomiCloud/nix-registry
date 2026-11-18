@@ -56,7 +56,7 @@ run() {
 run version
 [ "$rc" -eq 0 ] && grep -q '^obs [0-9]' "$work/out.txt" && ok "version" || bad "version: $(cat "$work/out.txt")"
 # obs's own version, set once in default.nix for the whole obs-full release (not the registry release).
-grep -qx 'obs 0.3.0' "$work/out.txt" && ok "version prints obs 0.3.0" || bad "version is not 0.3.0: $(head -1 "$work/out.txt")"
+grep -qx 'obs 0.4.0' "$work/out.txt" && ok "version prints obs 0.4.0" || bad "version is not 0.4.0: $(head -1 "$work/out.txt")"
 grep -q 'VictoriaMetrics v1.156.0' "$work/out.txt" && grep -q 'VictoriaLogs v1.54.0 (tag commit 6433dae5' "$work/out.txt" &&
   ok "version prints every engine pin" || bad "version engine pins"
 run
