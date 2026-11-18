@@ -704,8 +704,9 @@ kept and quoted (`{"payment.provider"="stripe"}`, `by ("payment.provider")`); th
 - `obs gen` now also writes `contract/keep.yaml` (the collector keep-list) next to the other generated files. After
   upgrading, `obs gen --check` fails `[gen-missing] contract/keep.yaml` in every folder with a contract until
   `obs gen` is run once and the new file committed.
-- `obs check` and `obs query` load every `contract.yaml` in the repo (`--contracts none` keeps the old
-  single-contract behaviour); two contracts that claim the same stored metric name now fail `[metric-clash]`.
+- `obs check`, `obs query` and `obs alerts` load every `contract.yaml` in the repo; two contracts that claim the same
+  stored metric name now fail `[metric-clash]`. `obs check` and `obs query` take `--contracts none` to keep the old
+  single-contract behaviour; `obs alerts` has no such flag yet.
 - Contract entries may carry `source:`, `estimate`, `follows:` and `used_by:` (see the contract section). Nothing
   changes for a contract that uses none of them.
 
