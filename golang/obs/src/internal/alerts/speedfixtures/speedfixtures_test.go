@@ -133,6 +133,7 @@ var realLandscapes = []string{realLandscape, "prim" + "ordial", "char" + "lotte"
 // TestNoRealLandscapeAnywhere scans every fixture, every Go test and the README, not only the
 // speed-fixture seed.
 func TestNoRealLandscapeAnywhere(t *testing.T) {
+	const readmePath = "../../../../README.md"         // golang/obs/README.md, from src/internal/alerts/speedfixtures
 	roots := []string{"../../..", "../../../../tests"} // the source root and the tests folder beside it
 	var scanned int
 	for _, root := range roots {
@@ -176,11 +177,18 @@ func TestNoRealLandscapeAnywhere(t *testing.T) {
 	if scanned == 0 {
 		t.Fatal("scanned no files")
 	}
-	if b, err := os.ReadFile("../../../../README.md"); err == nil {
-		for _, bad := range realLandscapes {
-			if strings.Contains(strings.ToLower(string(b)), bad) {
-				t.Errorf("README.md names the real landscape %q", bad)
-			}
+	// golang/obs/README.md (the nix build copies it beside the tests folder). The tests folder is there, so the
+	// README must be too: a missing README is a failure, never a silent skip.
+	if _, err := os.Stat("../../../../tests"); err != nil {
+		return // a build from src/ alone has no tests/ folder and no README beside it
+	}
+	b, err := os.ReadFile(readmePath)
+	if err != nil {
+		t.Fatalf("cannot read golang/obs/README.md at %s: %v (the scan would silently skip it)", readmePath, err)
+	}
+	for _, bad := range realLandscapes {
+		if strings.Contains(strings.ToLower(string(b)), bad) {
+			t.Errorf("%s names the real landscape %q", readmePath, bad)
 		}
 	}
 }
