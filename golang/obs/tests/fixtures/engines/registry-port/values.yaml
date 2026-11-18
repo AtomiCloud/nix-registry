@@ -1,0 +1,2 @@
+pyroscope:
+  image: myreg.io:5000/grafana/pyroscope:2.4.0

@@ -1,7 +1,5 @@
-// obs: the observability check tool. This release (0.1.0) ships `obs query --static`,
-// `obs query --live` and `obs version`: every alert and dashboard query is parsed by
-// the embedded VictoriaMetrics and VictoriaLogs parsers and run on a seed, with no
-// network and no containers.
+// obs checks observability queries and links with embedded store engines,
+// seeded data, no network and no containers.
 package main
 
 import (
@@ -10,26 +8,39 @@ import (
 	"io"
 	"os"
 	"runtime/debug"
+	"sort"
 
 	"github.com/AtomiCloud/obs/internal/check"
 	"github.com/AtomiCloud/obs/internal/files"
+	"github.com/AtomiCloud/obs/internal/pins"
+	"github.com/AtomiCloud/obs/internal/sandbox"
 )
 
 // version is set by the nix build (-X main.version=...).
 var version = "dev"
 
-// Engine pins: each equals the version in the charts (concept section 1).
-const (
-	pinVictoriaMetrics = "v1.156.0"
-	pinVictoriaLogs    = "v1.54.0 (tag commit 6433dae5, vendored in third_party/VictoriaLogs)"
-)
-
 const usage = `obs: the observability check tool
 
 usage:
   obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
-  obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names]
+  obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names] [--vl-settings victorialogs-settings.yaml]
+  obs alerts [--dir observability] [--seed seed.yaml] [--base unix] [--out results.json] [--vl-settings victorialogs-settings.yaml] [--tempo-config tempo.yaml]
+              [--workers n] [--steps steps.json] [--recorded recorded.json]
+  obs assert --series FILE [--dir observability] [--pods n] [--unknown warn|fail|ignore]
+  obs profile summarize|baseline|compare   (obs profile help)
+  obs check [--dir observability] [--pods n] [--landscapes n]
+  obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
+  obs sandbox up [--dir observability] [--seed seed.yaml] [--project name] [--port-base n] [--runtime docker|podman] [--reseed]
+  obs sandbox down|status [--dir observability] [--project name] [--runtime docker|podman]
+  obs scrape --target <url> [--label name=value] [--interval 15s] [--once] [--job name] [--vm-url url] [--dir observability] [--project name]
+  obs look   [--base origin/main] [--all] [--json] [--file dashboards/x.json] [--checklist file.md] [--out obs-look] [--width 1600] [--height 1000]
+           [--dir observability] [--seed seed.yaml] [--project name] [--port-base n] [--runtime docker|podman] [--reseed]
+  obs links [--dir observability] [--seed seed.yaml] [--base unix]
   obs version
+  obs store move <store> --config move.yaml [--dry-run] [--rollback]
+  obs symbols put|decode --store <dir> --file <file> [options]
+  obs size --req-per-second <n> --services <n> --pods <n> --profiled-pods <n>
+  obs engines --check-chart <chart folder>
 
 exit 0 when clean, 1 when a check failed, 2 on a usage or input error.
 `
@@ -45,8 +56,34 @@ func run(args []string, stdout, stderr io.Writer) int {
 	case "version", "--version", "-version":
 		printVersion(stdout)
 		return 0
+	case "alerts":
+		return runAlerts(args[1:], stdout, stderr)
+	case "profile":
+		return runProfile(args[1:], stdout, stderr)
+	case "scrape":
+		return runScrape(args[1:], stdout, stderr)
+	case "sandbox":
+		return runSandbox(args[1:], stdout, stderr)
+	case "look":
+		return runLook(args[1:], stdout, stderr)
+	case "links":
+		return runLinks(args[1:], stdout, stderr)
 	case "query":
 		return runQuery(args[1:], stdout, stderr)
+	case "assert":
+		return runAssert(args[1:], stdout, stderr)
+	case "check":
+		return runCheck(args[1:], stdout, stderr)
+	case "gen":
+		return runGen(args[1:], stdout, stderr)
+	case "store":
+		return runStore(args[1:], stdout, stderr)
+	case "symbols":
+		return runSymbols(args[1:], stdout, stderr)
+	case "size":
+		return runSize(args[1:], stdout, stderr)
+	case "engines":
+		return runEngines(args[1:], stdout, stderr)
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usage)
 		return 0
@@ -57,8 +94,39 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 func printVersion(w io.Writer) {
 	fmt.Fprintf(w, "obs %s\n", version)
-	fmt.Fprintf(w, "engine VictoriaMetrics %s (MetricsQL)\n", pinVictoriaMetrics)
-	fmt.Fprintf(w, "engine VictoriaLogs %s (LogsQL)\n", pinVictoriaLogs)
+	p := pins.All()
+	var names []string
+	for name := range p {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	// Built-in engines and what each evaluates; every other pin is a reference
+	// (sandbox / parity containers only).
+	roles := map[string]string{
+		"VictoriaMetrics": "MetricsQL",
+		"VictoriaLogs":    "LogsQL, vendored in third_party/VictoriaLogs",
+		"Tempo":           "TraceQL",
+		"Grafana":         "alert math and state machine",
+	}
+	for _, name := range names {
+		kind := "reference"
+		if roles[name] != "" {
+			kind = "engine"
+		}
+		fmt.Fprintf(w, "%s %s %s", kind, name, p[name].Version)
+		switch {
+		case p[name].Commit != "" && roles[name] != "":
+			fmt.Fprintf(w, " (tag commit %s; %s)", p[name].Commit, roles[name])
+		case p[name].Commit != "":
+			fmt.Fprintf(w, " (tag commit %s)", p[name].Commit)
+		case roles[name] != "":
+			fmt.Fprintf(w, " (%s)", roles[name])
+		}
+		fmt.Fprintln(w)
+	}
+	for _, line := range sandbox.PinLines() {
+		fmt.Fprintln(w, line)
+	}
 	fmt.Fprintln(w, "licence AGPL-3.0-only; source: https://github.com/AtomiCloud/nix-registry/tree/main/golang/obs (each release also attaches a source and vendored-modules tarball)")
 	if bi, ok := debug.ReadBuildInfo(); ok {
 		fmt.Fprintf(w, "go %s\n", bi.GoVersion)
@@ -72,6 +140,7 @@ func runQuery(args []string, stdout, stderr io.Writer) int {
 	live := fs.Bool("live", false, "run every alert and dashboard query on the seed; each must return rows")
 	dir := fs.String("dir", "observability", "the observability folder")
 	seedPath := fs.String("seed", "", "seed file (default <dir>/seed.yaml)")
+	vlSettings := fs.String("vl-settings", "", "VictoriaLogs chart args YAML (default <dir>/victorialogs-settings.yaml, else pinned defaults)")
 	base := fs.Int64("base", 0, "unix seconds of the seed's start (default: ends in the past)")
 	names := fs.Bool("names", false, "print the names each query reads")
 	eventRule := fs.String("event-rule", "auto", "a LogsQL alert must name a contract event: auto (only when <dir>/contract.yaml exists), on, off")
@@ -88,7 +157,7 @@ func runQuery(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "obs query: --event-rule %q: want auto, on or off\n", *eventRule)
 		return 2
 	}
-	o := check.Options{Dir: *dir, SeedPath: *seedPath, Base: *base, Names: *names, EventRule: *eventRule, Out: stdout}
+	o := check.Options{Dir: *dir, SeedPath: *seedPath, VLSettings: *vlSettings, Base: *base, Names: *names, EventRule: *eventRule, Out: stdout}
 	set, err := files.Load(*dir)
 	if err != nil {
 		fmt.Fprintf(stderr, "obs query: %v\n", err)

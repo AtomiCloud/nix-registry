@@ -1,0 +1,10 @@
+bad-enum-value.ts "visa"
+bad-number-range.ts 16
+bad-missing-label.ts hour
+bad-extra-key.ts user_id
+bad-event-level.ts "error"
+bad-metric-name.ts checkout.chargez
+bad-span-attr.ts "visa"
+bad-large-unchecked.ts Sequence
+bad-raw-event.ts Event
+bad-nonobject-fields.ts number

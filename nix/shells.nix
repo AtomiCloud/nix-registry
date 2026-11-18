@@ -2,7 +2,7 @@
 with env;
 {
   default = pkgs.mkShell {
-    buildInputs = system ++ main ++ lint ++ dev;
+    buildInputs = system ++ main ++ lint ++ dev ++ [ pkgs.llvmPackages.llvm ];
     inherit shellHook;
   };
   ci = pkgs.mkShell {

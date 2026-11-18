@@ -1,0 +1,5 @@
+mode: check
+exit: 1
+contains: [date-no-window]
+contains: types.billing_day
+contains: window_days

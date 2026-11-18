@@ -8,9 +8,12 @@ import (
 
 	"github.com/VictoriaMetrics/metricsql"
 
+	"github.com/AtomiCloud/obs/internal/contract"
+	"github.com/AtomiCloud/obs/internal/engines/tempo"
 	"github.com/AtomiCloud/obs/internal/engines/vl"
 	"github.com/AtomiCloud/obs/internal/engines/vm"
 	"github.com/AtomiCloud/obs/internal/files"
+	"github.com/AtomiCloud/obs/internal/logevent"
 	"github.com/AtomiCloud/obs/internal/seed"
 	"github.com/AtomiCloud/obs/internal/vars"
 )
@@ -67,6 +70,7 @@ func Live(set *files.Set, o Options) (*Report, error) {
 	}
 	var m metricsEngine
 	var l logsEngine
+	var settingsNote string
 	if needVM {
 		e, err := vm.New(ds)
 		if err != nil {
@@ -76,26 +80,49 @@ func Live(set *files.Set, o Options) (*Report, error) {
 		m = e
 	}
 	if needVL {
-		e, err := vl.New(ds)
+		limits, note, err := vl.LoadLimits(o.Dir, o.VLSettings)
+		if err != nil {
+			return nil, err
+		}
+		settingsNote = note
+		e, err := vl.NewWithLimits(ds, limits)
 		if err != nil {
 			return nil, err
 		}
 		defer e.Close()
 		l = e
 	}
-	return runLive(set, o, ds, m, l), nil
+	r := runLive(set, o, ds, m, l)
+	if settingsNote != "" {
+		r.add(Note, "", "", "vl-settings", "%s", settingsNote)
+	}
+	return r, nil
 }
 
 // runLive runs every query of set on the given engines.
 func runLive(set *files.Set, o Options, ds *seed.Dataset, m metricsEngine, l logsEngine) *Report {
 	r := newReport()
 	lv := &liveRun{r: r, o: o, ds: ds, end: ds.End, vm: m, vl: l}
+	lv.tempo = tempo.NewTempoEngine(ds.Traces)
 	lv.logFields = logFieldSet(ds)
 	lv.metricNames = toSet(ds.MetricNames())
 	lv.labelNames = labelNameSet(ds)
+	// The contract decides the event rule exactly as --static does: when it applies, a log alert's
+	// filters on free-form fields are assumed true and dropped, as `obs alerts` does.
+	lv.eventOn = lv.o.eventRuleOn()
+	if c, problems := loadContract(&lv.o); len(problems) == 0 {
+		lv.contract = c
+	}
+	// A recording rule's output exists only once `obs alerts` evaluates the rule: the seed never holds it.
+	lv.recorded = map[string]string{}
+	for _, rule := range set.Rules {
+		if rec := rule.Definition.Record; rec != nil && rec.Metric != "" {
+			lv.recorded[rec.Metric] = rec.Metric
+		}
+	}
 	for i := range set.Queries {
 		q := &set.Queries[i]
-		if q.Problem != "" || (q.Kind != files.Metrics && q.Kind != files.Logs) {
+		if q.Problem != "" || (q.Kind != files.Metrics && q.Kind != files.Logs && q.Kind != files.Traces && !(q.IsAlert && q.Kind == files.Loki)) {
 			continue
 		}
 		r.Counts[q.Kind.String()]++
@@ -118,6 +145,10 @@ type liveRun struct {
 	logFields   map[string]bool
 	metricNames map[string]bool
 	labelNames  map[string]bool
+	tempo       *tempo.TempoEngine
+	contract    *contract.Contract
+	eventOn     bool
+	recorded    map[string]string // metric a recording rule writes
 }
 
 func toSet(a []string) map[string]bool {
@@ -173,10 +204,15 @@ func (l *liveRun) alert(q *files.Query) {
 		if err != nil {
 			return // the static check reports it
 		}
+		if names := l.recordedReads(e); len(names) > 0 {
+			// Not silent and not a failure: the query cannot run on the seed, and `obs alerts` checks it.
+			l.r.add(Note, q.File, q.Where, "recording-rule", "reads recording rule %s: checked by obs alerts", strings.Join(names, ", "))
+			return
+		}
 		e, n := stripThresholds(e)
 		expr := string(e.AppendString(nil))
 		if n > 0 {
-			l.r.add(Note, q.File, q.Where, "threshold-removed", "ran the query without its %d comparison(s): a threshold filters rows out on a quiet seed; query run: %s", n, oneLine(expr))
+			l.r.add(Note, q.File, q.Where, "threshold-removed", "ran the query without its %d comparison(s) or absence check(s): a threshold filters rows out on a quiet seed; query run: %s", n, oneLine(expr))
 		}
 		rs, err := l.vm.Instant(expr, l.end)
 		if err != nil {
@@ -191,22 +227,50 @@ func (l *liveRun) alert(q *files.Query) {
 		if rng <= 0 {
 			rng = 10 * time.Minute
 		}
-		parsed, err := vl.Parse(q.Expr, l.end)
+		expr := q.Expr
+		if l.eventOn && l.contract != nil {
+			// Same analysis as --static and `obs alerts`: filters on free-form fields are assumed true.
+			a, err := logevent.Analyze(expr, l.contract)
+			if err != nil {
+				return // reported by the static check
+			}
+			expr = a.Expr
+			for _, assumed := range a.Assumed {
+				l.r.add(Note, q.File, q.Where, "assumed-filter", "assumed true (free-form fields): %s", assumed)
+			}
+		}
+		parsed, err := vl.Parse(expr, l.end)
 		if err != nil {
 			return
 		}
 		if _, err := parsed.StatsLabels(); err != nil {
 			return // reported by the static check
 		}
-		rs, err := l.vl.Stats(q.Expr, l.end.Add(-rng), l.end, true)
+		rs, err := l.vl.Stats(expr, l.end.Add(-rng), l.end, true)
 		if err != nil {
-			l.r.add(Fail, q.File, q.Where, "logsql-run", "%v; query: %s", err, oneLine(q.Expr))
+			l.r.add(Fail, q.File, q.Where, "logsql-run", "%v; query: %s", err, oneLine(expr))
 			return
 		}
 		if len(rs) == 0 || allZeroNoBy(rs) {
-			l.noRows(q, q.Expr, fmt.Sprintf("; ran as the datasource does, start=end-%s, end=%s", rng, l.end.Format(time.RFC3339)))
+			l.noRows(q, expr, fmt.Sprintf("; ran as the datasource does, start=end-%s, end=%s", rng, l.end.Format(time.RFC3339)))
+		}
+	case files.Traces:
+		l.traceAlert(q) // livetrace.go
+	default:
+		l.r.add(Fail, q.File, q.Where, "live-unsupported-query", "datasource kind %s: obs cannot run this alert query live, so it was not run", q.Kind)
+	}
+}
+
+// recordedReads names the recording-rule outputs the expression reads that the seed does not hold.
+func (l *liveRun) recordedReads(e metricsql.Expr) []string {
+	ms, _ := metricNames(e)
+	var out []string
+	for _, m := range ms {
+		if _, ok := l.recorded[m]; ok && !l.metricNames[m] {
+			out = append(out, m)
 		}
 	}
+	return out
 }
 
 // allZeroNoBy: a `stats count()` with no `by` always answers one row, 0 when nothing matched.
@@ -292,6 +356,8 @@ func (l *liveRun) panel(q *files.Query) {
 
 func (l *liveRun) runPanel(q *files.Query, res vars.Result, start, end time.Time) (bool, error) {
 	switch q.Kind {
+	case files.Traces:
+		return l.tracePanel(q, res.Expr, start, end, time.Duration(max(res.StepMs, 1000))*time.Millisecond)
 	case files.Metrics:
 		if _, err := metricsql.Parse(res.Expr); err != nil {
 			return true, nil // the static check reports it
@@ -300,6 +366,12 @@ func (l *liveRun) runPanel(q *files.Query, res vars.Result, start, end time.Time
 		if step <= 0 {
 			step = 15 * time.Second
 		}
+		// Grafana's Prometheus backend aligns range endpoints to the step's
+		// Unix-time grid. Evaluating at the unaligned seed end shifts rollup
+		// windows and can change panel values even with identical samples.
+		grid := step.Milliseconds()
+		start = time.UnixMilli(start.UnixMilli() / grid * grid)
+		end = time.UnixMilli(end.UnixMilli() / grid * grid)
 		rs, err := l.vm.Range(res.Expr, start, end, step)
 		return len(rs) > 0, err
 	default:
@@ -367,6 +439,8 @@ func (l *liveRun) varValues(v files.Variable, start, end time.Time) []string {
 func (l *liveRun) noRows(q *files.Query, expr, extra string) {
 	var missing []string
 	switch q.Kind {
+	case files.Traces:
+		missing = l.missingTraceAttrs(expr)
 	case files.Metrics:
 		if e, err := metricsql.Parse(expr); err == nil {
 			ms, ls := metricNames(e)

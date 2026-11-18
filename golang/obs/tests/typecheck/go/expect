@@ -1,0 +1,6 @@
+bad-wrong-kind.go.txt DurianSignalHistogram
+bad-wrong-level.go.txt InfoLevel
+bad-forged-enum.go.txt unexported field
+bad-wrong-labels.go.txt CheckoutChargeDurationLabels
+bad-raw-event.go.txt obs.Event
+bad-nonobject-fields.go.txt obs.Field

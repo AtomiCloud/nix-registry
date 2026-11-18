@@ -1,0 +1,12 @@
+forge-event-typo.go.txt dropped.unknown_event: event "checkout.chrage.faild" is not in the generated event table
+forge-event-level.go.txt dropped.unknown_event: event "checkout.charge.succeeded" is info in the generated event table, not error
+forge-counter-name.go.txt dropped.unknown_metric: metric "checkout.chargez" is not in the generated metric table
+forge-counter-kind.go.txt dropped.unknown_metric: metric "checkout.charge.duration" is a histogram in the generated metric table, not a counter
+forge-counter-labels.go.txt dropped.unknown_key: metric "checkout.charges" labels type signals.CheckoutChargeDurationLabels is not its generated type signals.CheckoutChargesLabels
+forge-counter-free-labels.go.txt dropped.unknown_metric: metric "not.in.contract" is not in the generated metric table
+forge-same-keys.go.txt dropped.unknown_key: metric "checkout.charges" labels type main.Raw is not its generated type signals.CheckoutChargesLabels
+forge-private-fields.go.txt dropped.unknown_key: metric "checkout.charges" labels type main.raw is not its generated type signals.CheckoutChargesLabels
+forge-second-register.go.txt dropped.register: the tables are already registered once in this process; the port is now poisoned and refuses every signal until restart
+forge-mutate-table.go.txt dropped.unknown_event: event "checkout.chrage.faild" is not in the generated event table
+forge-unsafe-enum.go.txt dropped.unknown_value: metric "checkout.charges" label provider value "visa" is not one of [stripe adyen paypal]
+forge-register-first.go.txt dropped.poisoned: event "checkout.chrage.faild": the port is poisoned (a second registration was refused); every signal is refused until restart

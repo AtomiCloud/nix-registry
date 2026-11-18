@@ -1,0 +1,24 @@
+victoria-metrics-cluster:
+  vmstorage:
+    image:
+      repository: victoriametrics/vmstorage
+      tag: v1.156.0-cluster
+  vmselect:
+    image:
+      repository: victoriametrics/vmselect
+      tag: v1.156.0-cluster
+victoria-logs-single:
+  server:
+    image:
+      repository: victoriametrics/victoria-logs
+      tag: v1.54.0
+tempo:
+  tempo:
+    repository: grafana/tempo
+    tag: 3.1.1
+grafana:
+  image:
+    repository: grafana/grafana
+    tag: 13.3.0
+pyroscope:
+  image: grafana/pyroscope:2.4.3

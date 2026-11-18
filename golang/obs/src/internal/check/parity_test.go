@@ -4,9 +4,8 @@ package check
 
 // Local parity run: obs's embedded engines against real VictoriaMetrics and VictoriaLogs.
 //
-//	docker run -d --name obs-parity-vm -p 127.0.0.1::8428 victoriametrics/victoria-metrics:v1.156.0 \
-//	    -retentionPeriod=10y -search.latencyOffset=0s -search.disableCache
-//	docker run -d --name obs-parity-vl -p 127.0.0.1::9428 victoriametrics/victoria-logs:v1.54.0 -retentionPeriod=10y
+// Start fresh, labeled, digest-pinned containers with parity/stack.sh (see README).
+//
 //	OBS_PARITY_VM=http://127.0.0.1:<port> OBS_PARITY_VL=http://127.0.0.1:<port> \
 //	    go test -tags parity -run Parity -v ./internal/check
 //
@@ -38,10 +37,11 @@ import (
 )
 
 type tally struct {
-	compared  int
-	empty     int
-	mismatch  []string
-	byFixture map[string]int
+	compared      int
+	empty         int
+	mismatch      []string
+	byFixture     map[string]int
+	grafanaPanels int
 }
 
 func labelKey(ls []seed.Label) string {
@@ -58,17 +58,23 @@ func near(a, b float64) bool {
 	if a == b {
 		return true
 	}
-	return math.Abs(a-b) <= 1e-9*math.Max(math.Abs(a), math.Abs(b))
+	if math.IsNaN(a) || math.IsNaN(b) || math.IsInf(a, 0) || math.IsInf(b, 0) {
+		return false
+	}
+	return math.Abs(a-b) <= 1e-11*math.Max(math.Abs(a), math.Abs(b))
 }
 
 func get(t *testing.T, u string) []byte {
 	t.Helper()
-	resp, err := http.Get(u)
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Get(u)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	b, _ := io.ReadAll(resp.Body)
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if resp.StatusCode/100 != 2 {
 		return []byte(fmt.Sprintf(`{"status":"error","error":%q}`, strings.TrimSpace(string(b))))
 	}
@@ -172,6 +178,23 @@ func (e *teeVM) Range(q string, start, end time.Time, step time.Duration) ([]vm.
 	v := url.Values{"query": {q}, "start": {strconv.FormatInt(start.Unix(), 10)}, "end": {strconv.FormatInt(end.Unix(), 10)}, "step": {strconv.FormatInt(int64(step/time.Second), 10)}, "nocache": {"1"}}
 	_ = json.Unmarshal(get(e.t, e.base+"/api/v1/query_range?"+v.Encode()), &real)
 	e.record(fmt.Sprintf("range %s step %s", q, step), ours, real, false)
+	if os.Getenv("OBS_PARITY_GRAFANA") != "" {
+		frames := grafanaQuery(e.t, map[string]any{"datasource": map[string]string{"uid": "parity-metrics", "type": "prometheus"}, "expr": q, "range": true, "instant": false, "intervalMs": step.Milliseconds(), "maxDataPoints": 100000}, start, end)
+		got := map[string][]float64{}
+		for _, series := range ours {
+			var labels []seed.Label
+			for _, label := range series.Labels {
+				if label.Name != "__name__" {
+					labels = append(labels, label)
+				}
+			}
+			got[labelKey(labels)] = series.Values
+		}
+		if err := compareNumbers(got, frameNumbers(e.t, frames)); err != nil {
+			e.ta.mismatch = append(e.ta.mismatch, fmt.Sprintf("Grafana panel fixture %s query %q: %v", e.fx, q, err))
+		}
+		e.ta.grafanaPanels++
+	}
 	return ours, nil
 }
 
@@ -225,12 +248,12 @@ func (e *teeVL) Stats(qs string, start, end time.Time, drop bool) ([]vl.Result, 
 			}
 		}
 		f, _ := strconv.ParseFloat(r.Value[1].(string), 64)
-		want[labelKey(ls)] = f
+		want[r.Metric["__name__"]+"\x00"+labelKey(ls)] = f
 	}
 	got := map[string]float64{}
 	for _, r := range ours {
 		f, _ := r.Float()
-		got[labelKey(r.Labels[:len(r.Labels)])] = f
+		got[r.Name+"\x00"+labelKey(r.Labels)] = f
 	}
 	if len(got) != len(want) {
 		e.ta.mismatch = append(e.ta.mismatch, fmt.Sprintf("%s: obs %d rows %v, real %d rows %v", what, len(got), got, len(want), want))
@@ -286,9 +309,7 @@ func loadReal(t *testing.T, vmURL, vlURL string, ds *seed.Dataset) {
 			t.Fatal(err)
 		}
 	}
-	if resp, err := http.Post(vmURL+"/api/v1/import", "application/json", &vmBody); err != nil || resp.StatusCode/100 != 2 {
-		t.Fatalf("vm import: %v %v", err, resp)
-	}
+	postReal(t, vmURL+"/api/v1/import", "application/json", &vmBody)
 	get(t, vmURL+"/internal/force_flush")
 	for _, st := range ds.Streams {
 		var names []string
@@ -310,13 +331,27 @@ func loadReal(t *testing.T, vmURL, vlURL string, ds *seed.Dataset) {
 			}
 		}
 		q := url.Values{"_stream_fields": {strings.Join(names, ",")}, "_msg_field": {"_msg"}, "_time_field": {"_time"}}
-		resp, err := http.Post(vlURL+"/insert/jsonline?"+q.Encode(), "application/stream+json", &body)
-		if err != nil || resp.StatusCode/100 != 2 {
-			t.Fatalf("vl insert: %v %v", err, resp)
-		}
+		postReal(t, vlURL+"/insert/jsonline?"+q.Encode(), "application/stream+json", &body)
 	}
 	get(t, vlURL+"/internal/force_flush")
 	time.Sleep(2 * time.Second)
+}
+
+func postReal(t *testing.T, endpoint, contentType string, body io.Reader) []byte {
+	t.Helper()
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Post(endpoint, contentType, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode/100 != 2 {
+		t.Fatalf("POST %s: HTTP %d: %s", endpoint, resp.StatusCode, b)
+	}
+	return b
 }
 
 func TestParity(t *testing.T) {
@@ -331,7 +366,7 @@ func TestParity(t *testing.T) {
 	type run struct{ name, dir, seed string }
 	runs := []run{
 		{"good", fx + "/good/observability", ""},
-		{"charlotte", fx + "/charlotte/observability", ""},
+		{"sample-app", fx + "/sample-app/observability", ""},
 	}
 	for _, n := range []string{"bad-no-rows", "bad-drifted-field", "bad-dashboard-label", "ok-rollup-no-window"} {
 		runs = append(runs, run{n, filepath.Join(fx, n, "observability"), fx + "/shared-seed.yaml"})
@@ -360,8 +395,19 @@ func TestParity(t *testing.T) {
 		ours.Close()
 		lours.Close()
 		t.Logf("%s: %s", r.name, rep.Summary("live"))
+		if ta.byFixture[r.name] == 0 {
+			t.Errorf("%s: no fixture queries were compared", r.dir)
+		}
+		if strings.HasPrefix(r.name, "bad-") {
+			if rep.Failures() == 0 {
+				t.Errorf("%s: planted bad fixture unexpectedly passed", r.dir)
+			}
+		} else if rep.Failures() != 0 {
+			t.Errorf("%s: baseline fixture failed: %s", r.dir, rep.Summary("live"))
+		}
 	}
 	t.Logf("compared %d query executions (%d with an empty result on both sides): %v", ta.compared, ta.empty, ta.byFixture)
+	t.Logf("compared %d metric panel executions through Grafana /api/ds/query", ta.grafanaPanels)
 	for _, m := range ta.mismatch {
 		t.Errorf("MISMATCH %s", m)
 	}

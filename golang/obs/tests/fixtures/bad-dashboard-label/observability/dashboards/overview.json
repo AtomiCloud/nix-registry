@@ -6,7 +6,7 @@
       "id": 3,
       "type": "timeseries",
       "title": "Charges by provider",
-      "datasource": { "type": "prometheus", "uid": "primordial-metrics" },
+      "datasource": { "type": "prometheus", "uid": "fixture-metrics" },
       "targets": [
         { "refId": "A", "expr": "sum(rate(checkout_charges_total{payment_providr=\"stripe\"}[$__rate_interval]))" }
       ]

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -54,10 +55,77 @@ func obs(args ...string) (int, string) {
 	return rc, out.String() + errb.String()
 }
 
+func TestVLSettingsCLI(t *testing.T) {
+	dir := project(t, map[string]string{"logs/warning.yaml": alert("fixture-logs", `_time:5m "durian.cloud/event":="checkout.charge.failed" | stats count() n`, "stats")})
+	if rc, out := obs("query", "--live", "--dir", dir); rc != 0 || strings.Count(out, "[vl-settings]") != 1 {
+		t.Fatalf("default note: rc=%d %s", rc, out)
+	}
+	path := filepath.Join(dir, "victorialogs-settings.yaml")
+	if err := os.WriteFile(path, []byte("-search.maxQueryLen: 5"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"query", "--live", "--dir", dir}, {"query", "--live", "--dir", dir, "--vl-settings", path}} {
+		rc, out := obs(args...)
+		if rc != 1 || !strings.Contains(out, "-search.maxQueryLen=5") || !strings.Contains(out, "logs/warning.yaml") || !strings.Contains(out, "rule r1 query A") || strings.Contains(out, "[vl-settings]") {
+			t.Fatalf("settings refusal: rc=%d %s", rc, out)
+		}
+	}
+	if rc, out := obs("query", "--live", "--dir", dir, "--vl-settings", path+".missing"); rc != 2 || !strings.Contains(out, ".missing") {
+		t.Fatalf("explicit missing settings: rc=%d %s", rc, out)
+	}
+}
+
+func TestAlertsVLSettingsCache(t *testing.T) {
+	dir := project(t, map[string]string{"logs/warning.yaml": `apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata: {name: settings}
+spec:
+  interval: 1m
+  rules:
+    - uid: r1
+      condition: B
+      data:
+        - refId: A
+          datasourceUid: fixture-logs
+          relativeTimeRange: {from: 60, to: 0}
+          model: {expr: '"durian.cloud/event":="checkout.charge.failed" | stats count() n', queryType: stats}
+        - refId: B
+          datasourceUid: __expr__
+          model: {type: math, expression: '$A > 1000000'}
+`})
+	if err := os.WriteFile(filepath.Join(dir, "seed.yaml"), []byte(strings.Replace(seedDoc, "length: 1h", "length: 1m", 1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("OBS_CACHE_DIR", t.TempDir())
+	path := filepath.Join(dir, "victorialogs-settings.yaml")
+	if err := os.WriteFile(path, []byte("search.maxQueryLen: 1KiB"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		rc, out := obs("alerts", "--dir", dir, "--base", "1700000000", "--vl-settings", path)
+		if rc != 0 || (i == 1 && !strings.Contains(out, "cached=1")) {
+			t.Fatalf("settings cache baseline %d: rc=%d %s", i, rc, out)
+		}
+	}
+	for _, tc := range []struct{ settings, flag string }{
+		{"search.maxQueryLen: 1", "-search.maxQueryLen=1"},
+		{"search.maxQueryDuration: 0s", "-search.maxQueryDuration=0s"},
+		{"search.maxConcurrentRequests: 0\nsearch.maxQueueDuration: 1ns", "-search.maxConcurrentRequests=0"},
+	} {
+		if err := os.WriteFile(path, []byte(tc.settings), 0600); err != nil {
+			t.Fatal(err)
+		}
+		rc, out := obs("alerts", "--dir", dir, "--base", "1700000000")
+		if rc != 1 || !strings.Contains(out, tc.flag) || !strings.Contains(out, "logs/warning.yaml") || !strings.Contains(out, "rule r1") {
+			t.Fatalf("changed settings must invalidate cached success and name flag/rule: rc=%d %s", rc, out)
+		}
+	}
+}
+
 func TestEndToEnd(t *testing.T) {
 	good := project(t, map[string]string{
-		"a/critical.yaml": alert("primordial-metrics", `sum(rate(checkout_charges_total{outcome="error"}[5m])) > 1`, "instant"),
-		"b/warning.yaml":  alert("primordial-logs", `_time:5m {durian.cloud.service="checkout"} "durian.cloud/event":="checkout.charge.failed" | stats by (outcome) count() n`, "stats"),
+		"a/critical.yaml": alert("fixture-metrics", `sum(rate(checkout_charges_total{outcome="error"}[5m])) > 1`, "instant"),
+		"b/warning.yaml":  alert("fixture-logs", `_time:5m {durian.cloud.service="checkout"} "durian.cloud/event":="checkout.charge.failed" | stats by (outcome) count() n`, "stats"),
 	})
 	for _, mode := range []string{"--static", "--live"} {
 		if rc, out := obs("query", mode, "--dir", good); rc != 0 {
@@ -70,12 +138,12 @@ func TestEndToEnd(t *testing.T) {
 		alerts     map[string]string
 		want       []string
 	}{
-		{"syntax", "--static", map[string]string{"x/critical.yaml": alert("primordial-logs", `_time:5m {a="b" | stats count() c`, "stats")}, []string{"x/critical.yaml", "rule r1 query A", "[logsql-syntax]"}},
-		{"no stats", "--static", map[string]string{"x/critical.yaml": alert("primordial-logs", `_time:5m error`, "stats")}, []string{"[logsql-alert-needs-stats]"}},
+		{"syntax", "--static", map[string]string{"x/critical.yaml": alert("fixture-logs", `_time:5m {a="b" | stats count() c`, "stats")}, []string{"x/critical.yaml", "rule r1 query A", "[logsql-syntax]"}},
+		{"no stats", "--static", map[string]string{"x/critical.yaml": alert("fixture-logs", `_time:5m error`, "stats")}, []string{"[logsql-alert-needs-stats]"}},
 		{"loki", "--static", map[string]string{"x/critical.yaml": alert("loki", `{a="b"}`, "range")}, []string{"[loki-datasource]", `"loki"`}},
-		{"prom-only", "--static", map[string]string{"x/critical.yaml": alert("primordial-metrics", `double_exponential_smoothing(up[5m], 0.5, 0.5)`, "instant")}, []string{"[metricsql-unsupported-function]", `"double_exponential_smoothing"`}},
-		{"no rows", "--live", map[string]string{"x/critical.yaml": alert("primordial-metrics", `sum(rate(nope_total[5m]))`, "instant")}, []string{"[no-rows]", "metric nope_total"}},
-		{"drifted field", "--live", map[string]string{"x/critical.yaml": alert("primordial-logs", `_time:5m severity:ERROR | stats count() n`, "stats")}, []string{"[no-rows]", "log field severity"}},
+		{"prom-only", "--static", map[string]string{"x/critical.yaml": alert("fixture-metrics", `double_exponential_smoothing(up[5m], 0.5, 0.5)`, "instant")}, []string{"[metricsql-unsupported-function]", `"double_exponential_smoothing"`}},
+		{"no rows", "--live", map[string]string{"x/critical.yaml": alert("fixture-metrics", `sum(rate(nope_total[5m]))`, "instant")}, []string{"[no-rows]", "metric nope_total"}},
+		{"drifted field", "--live", map[string]string{"x/critical.yaml": alert("fixture-logs", `_time:5m severity:ERROR | stats count() n`, "stats")}, []string{"[no-rows]", "log field severity"}},
 	}
 	for _, c := range cases {
 		rc, out := obs("query", c.mode, "--dir", project(t, c.alerts))
@@ -93,5 +161,69 @@ func TestEndToEnd(t *testing.T) {
 	}
 	if rc, out := obs("version"); rc != 0 || !strings.Contains(out, "VictoriaMetrics v1.156.0") || !strings.Contains(out, "VictoriaLogs v1.54.0") {
 		t.Errorf("version: rc %d\n%s", rc, out)
+	}
+	_, out := obs("version")
+	for _, line := range []string{"engine VictoriaMetrics ", "engine VictoriaLogs ", "engine Grafana ", "reference Pyroscope ", "reference VictoriaLogsDatasource "} {
+		if !strings.Contains(out, line) {
+			t.Errorf("version missing %q: %s", line, out)
+		}
+	}
+}
+
+// Every flag of these commands is named in the usage lines (main.go) and in the README
+// Usage block: the flag set's own listing is the source of truth.
+func TestUsageListsEveryFlag(t *testing.T) {
+	readme, _ := os.ReadFile("../README.md") // absent in a build from src/ alone: then only main.go is checked
+	block := string(readme)
+	if i := strings.Index(block, "## Usage"); i >= 0 {
+		block = block[i:]
+		if j := strings.Index(block[3:], "\n## "); j >= 0 {
+			block = block[:j+3]
+		}
+	}
+	flagRE := regexp.MustCompile(`(?m)^\s+-([a-z][a-z0-9-]*)`)
+	for _, c := range []struct {
+		name string
+		args []string
+		line string // the usage lines that belong to the command start with this
+	}{
+		{"alerts", []string{"alerts", "-h"}, "obs alerts"},
+		{"query", []string{"query", "-h"}, "obs query"},
+		{"sandbox", []string{"sandbox", "up", "-h"}, "obs sandbox"},
+		{"look", []string{"look", "-h"}, "obs look"},
+		{"scrape", []string{"scrape", "-h"}, "obs scrape"},
+	} {
+		_, listing := obs(c.args...)
+		flags := flagRE.FindAllStringSubmatch(listing, -1)
+		if len(flags) == 0 {
+			t.Fatalf("%s: no flags listed by -h: %s", c.name, listing)
+		}
+		for _, f := range flags {
+			if f[1] == "h" || f[1] == "help" {
+				continue
+			}
+			for label, src := range map[string]string{"main.go usage": usage, "README Usage": block} {
+				if src == "" {
+					continue
+				}
+				var own []string
+				in := false
+				for _, l := range strings.Split(src, "\n") {
+					t := strings.TrimSpace(l)
+					switch {
+					case strings.HasPrefix(t, c.line):
+						in = true
+						own = append(own, l)
+					case in && strings.HasPrefix(t, "["): // a continuation line
+						own = append(own, l)
+					default:
+						in = false
+					}
+				}
+				if !strings.Contains(strings.Join(own, "\n"), "--"+f[1]) {
+					t.Errorf("obs %s --%s is not in the %s", c.name, f[1], label)
+				}
+			}
+		}
 	}
 }

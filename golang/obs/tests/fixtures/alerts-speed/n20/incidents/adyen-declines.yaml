@@ -1,0 +1,28 @@
+story: Adyen declines a burst of cards for 20 minutes.
+window: { start: 60m, duration: 20m }
+change:
+  - { metric: checkout.charges, where: { payment.provider: adyen, outcome: declined }, rate: 0.8/s }
+expect:
+  fire: [declines-adyen-metric, declines-adyen-logs, logs-slow-unwrap]
+  quiet:
+    [
+      charge-errors-critical,
+      charge-errors-warning,
+      charge-errors-ratio,
+      charge-errors-increase,
+      charge-errors-by-provider,
+      charge-errors-no-window,
+      latency-p95-critical,
+      latency-p95-warning,
+      latency-avg,
+      latency-5xx-ratio,
+      mixed-errors-or-latency,
+      traffic-low,
+      metricsql-with-template,
+      logs-failed-count,
+      logs-failed-json,
+      logs-failed-by-provider,
+      logs-error-rate,
+    ]
+  fire_within: 30m
+  resolve_within: 20m

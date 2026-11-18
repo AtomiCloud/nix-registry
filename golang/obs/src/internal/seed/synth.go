@@ -41,6 +41,7 @@ type Dataset struct {
 	Start, End time.Time
 	Series     map[string]*Series
 	Streams    map[string]*Stream
+	Traces     []*TTrace
 }
 
 // storedName is a metric or label name as the OTLP -> VictoriaMetrics path stores it.
@@ -152,6 +153,16 @@ var streamFieldNames = map[string]bool{
 // Build makes one baseline run starting at start. The run is laid out on a time
 // line that ends in the past, because stores drop data dated in the future.
 func Build(s *Seed, start time.Time) (*Dataset, error) {
+	return BuildIncident(s, start, nil)
+}
+
+// BuildIncident uses the same deterministic stream as Build, changing only the
+// matching series inside the incident's half-open window.
+func BuildIncident(s *Seed, start time.Time, incident *Incident) (*Dataset, error) {
+	traceDefs, err := s.traceDefs()
+	if err != nil {
+		return nil, err
+	}
 	length := s.Duration()
 	ds := &Dataset{Start: start, End: start.Add(length), Series: map[string]*Series{}, Streams: map[string]*Stream{}}
 	reqRate, err := ParseRate(s.Traffic.Requests)
@@ -239,6 +250,7 @@ func Build(s *Seed, start time.Time) (*Dataset, error) {
 		buckets []float64
 		targets []*Series
 		logs    []LogDef
+		shapes  []*traceShape // the trace definitions of this series, in definition order
 	}
 	accs := make([]*acc, len(gens))
 	for i, g := range gens {
@@ -264,6 +276,11 @@ func Build(s *Seed, start time.Time) (*Dataset, error) {
 		for _, ld := range s.Logs {
 			if ld.From.Metric == g.metric && matches(g.where, ld.From.Where) {
 				a.logs = append(a.logs, ld)
+			}
+		}
+		for _, td := range traceDefs {
+			if td.From.Metric == g.metric && matches(g.where, td.From.Where) {
+				a.shapes = append(a.shapes, newTraceShape(td, g.where, res))
 			}
 		}
 		accs[i] = a
@@ -301,12 +318,30 @@ func Build(s *Seed, start time.Time) (*Dataset, error) {
 		for _, a := range accs {
 			g := a.g
 			r := newRnd(s.RandomSeed, g.k, sec)
-			n := r.poisson(reqRate * shape * g.share)
+			rate, latencyX := reqRate*shape*g.share, 1.0
+			if incident != nil && incident.Contains(at) {
+				for _, c := range incident.Change {
+					if c.Metric != g.metric || !matches(g.where, c.Where) {
+						continue
+					}
+					if c.ShareX != nil {
+						rate *= *c.ShareX
+					}
+					if c.Rate != "" {
+						extra, _ := ParseRate(c.Rate)
+						rate += extra
+					}
+					if c.LatencyX != 0 {
+						latencyX *= c.LatencyX
+					}
+				}
+			}
+			n := r.poisson(rate)
 			for e := 0; e < n; e++ {
 				a.count++
 				frac := r.float()
 				if g.def.Type == "histogram" && g.def.Latency != nil {
-					v := g.def.Latency.Median * math.Exp(g.def.Latency.Sigma*r.normal())
+					v := g.def.Latency.Median * latencyX * math.Exp(g.def.Latency.Sigma*r.normal())
 					a.sum += v
 					for bi, le := range g.def.Buckets {
 						if v <= le {
@@ -315,8 +350,33 @@ func Build(s *Seed, start time.Time) (*Dataset, error) {
 					}
 				}
 				tsNs := start.Add(at).UnixNano() + int64(frac*1e9)
+				// Separate trace randomness keeps existing metric and log seeds stable.
+				// It is drawn only when a trace definition exists (nothing else reads it).
+				var trace *TTrace
+				if len(traceDefs) > 0 {
+					tr := newRnd(s.RandomSeed, g.k+fmt.Sprint("/trace/", e), sec)
+					hi, lo := tr.next(), tr.next()
+					for _, sh := range a.shapes {
+						trace = sh.trace(hi, lo, uint64(tsNs), latencyX, tr)
+						ds.Traces = append(ds.Traces, trace)
+					}
+				}
 				for _, ld := range a.logs {
-					stream.Rows = append(stream.Rows, makeRow(ld, g.where, resourceFields, tsNs, r))
+					// Log IDs use an independent stream: lazy log loading must not
+					// change histogram values or timestamps of the same metric seed.
+					rowRng := newRnd(s.RandomSeed, g.k+":log:"+ld.Event, sec*1_000_000+int64(e))
+					row := makeRow(ld, g.where, resourceFields, tsNs, rowRng)
+					if trace != nil {
+						for i := range row.Fields {
+							switch row.Fields[i].Name {
+							case "trace_id":
+								row.Fields[i].Value = fmt.Sprintf("%x", trace.TraceID)
+							case "span_id":
+								row.Fields[i].Value = fmt.Sprintf("%x", trace.Spans[0].SpanID)
+							}
+						}
+					}
+					stream.Rows = append(stream.Rows, row)
 				}
 			}
 		}

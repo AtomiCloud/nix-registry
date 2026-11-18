@@ -1,0 +1,23 @@
+{
+  "input": {
+    "requests_per_second": 0,
+    "services": 0,
+    "pods": 0,
+    "profiled_pods": 0
+  },
+  "traffic_cores": 0,
+  "traffic_memory_gib": 0,
+  "pod_index_mib": 0,
+  "stored_series": 0,
+  "metrics_ingest_memory_gb_low": 0,
+  "metrics_ingest_memory_gb_high": 0,
+  "metrics_disk_gb_per_day": 0,
+  "bucket_gb_per_day": 0,
+  "loki_logs_reference_gb_per_day": 0,
+  "victorialogs_disk_gb_per_day": 0,
+  "traces_bucket_gb_per_day": 0,
+  "profiles_bucket_gb_per_day": 0,
+  "class_a_per_day": 0,
+  "class_b_per_day": 0,
+  "basis": "EXTRAPOLATED: concept 10.7 Loki-era logs (not VictoriaLogs); 8 spans and 3.2 log lines/request, tail sampling on. Traffic cores/memory are incremental; exclude idle base, query peaks, app and control-plane resources. Series: 2520/service + 60/pod; metrics ingest memory 0.6–1.1 KB/series, disk 5.3 GB/day/M series at 30s. Bucket = traces (4 GB/day per 1000 req/s) + profiles. loki_logs_reference_gb_per_day is a Loki-era reference only, excluded from bucket total. VictoriaLogs disk: 8.3 GB/day per 1000 req/s (concept 10.4, measured spike 6; 28 B/line). Class A/B retain the Loki-era write-path reference (not current VictoriaLogs bucket operations); profile operations and read workload not measured."
+}

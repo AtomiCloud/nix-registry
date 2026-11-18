@@ -1,0 +1,18 @@
+service: checkout
+
+types:
+  provider: { kind: enum, values: [stripe, adyen] }
+
+metrics:
+  checkout.charges:
+    kind: counter
+    budget: 20
+    labels: { payment.provider: provider }
+
+logs:
+  ChargeSucceeded: { event: checkout.charge.succeeded, level: info }
+  ChargeFailed: { event: checkout.charge.failed, level: error }
+
+spans:
+  checkout.charge:
+    attributes: { provider: provider }

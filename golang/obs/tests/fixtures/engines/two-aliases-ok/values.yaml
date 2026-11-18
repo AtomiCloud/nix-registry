@@ -1,0 +1,6 @@
+dashboards:
+  image:
+    tag: 13.3.0
+second:
+  image:
+    tag: 13.3.0

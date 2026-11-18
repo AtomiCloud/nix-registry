@@ -1,0 +1,5 @@
+mode: static
+exit: 1
+contains: [contract-undeclared-stream-field]
+contains: durian.cloud.servise
+contains: did you mean "durian.cloud.service"

@@ -8,20 +8,29 @@
 # One static Go binary (`go` = Go 1.27.4 from golang/obs/go.nix, see there). The licence and
 # notice files of every linked module ship in share/licenses/obs. AGPL-3.0-only (golang/obs/LICENSE).
 let
-  version = "0.1.0";
+  version = "0.2.0";
 
   obs = (nixpkgs.buildGoModule.override { inherit go; }) {
     pname = "obs";
     inherit version;
     src = ./src;
-    vendorHash = "sha256-E+SO5TfljE7KgJr3l0l/WmzeWbLHYkmVqkkOUSerOw4=";
+    vendorHash = "sha256-TJBIlSGKPPlmAkE2d2acm9Et5fkvRJSCx3VJOORkmiI=";
     env.CGO_ENABLED = "0";
+    env.OBS_REQUIRE_LLVM = "1";
+    nativeCheckInputs = [ nixpkgs.llvmPackages.llvm ];
     ldflags = [ "-w" "-s" "-X main.version=${version}" ];
     # third_party/VictoriaLogs is its own Go module (wired by a go.mod replace), not part of this one.
     excludedPackages = [ "third_party" ];
     # go test: field walker, tree drift against the VictoriaLogs tag, rules, seed shape, and
     # `obs` end to end on temp projects.
     doCheck = true;
+    # The Go tests read the fixture contract and the golden files under tests/ (outside src/): give them
+    # the tests folder next to the source root, where ../../../tests resolves from internal/<pkg>.
+    preCheck = ''
+      cp -r --no-preserve=mode ${./tests} ../tests
+      # TestNoRealLandscapeAnywhere also scans golang/obs/README.md (beside the tests folder).
+      cp --no-preserve=mode ${./README.md} ../README.md
+    '';
     postInstall = ''
       # Third-party notices: every LICENSE/NOTICE/COPYING/PATENTS file of the vendored modules,
       # kept under its module path (Apache-2.0 requires NOTICE files to travel with binaries),
@@ -30,6 +39,7 @@ let
         -exec install -Dm444 {} "$out/share/licenses/obs/{}" \;)
       install -Dm444 vendor/modules.txt "$out/share/licenses/obs/modules.txt"
       install -Dm444 ${./LICENSE} "$out/share/licenses/obs/LICENSE"
+      install -Dm444 ${./src/internal/alerts/gfexpr/LICENSE-grafana-AGPL} "$out/share/licenses/obs/grafana/LICENSE"
     '';
     meta = {
       mainProgram = "obs";
@@ -38,12 +48,13 @@ let
     };
   };
 
-  # End-to-end run of the built binary in the sandbox (no network): the good fixtures run green,
+  # End-to-end run of the built binary in the sandbox (no network): the good fixtures run green, the generated Go and
+  # TypeScript, C# and Dart compile (go, tsc, the dotnet SDK and dart are inputs here),
   # every planted failure runs red naming file + rule + token, the vendored tree equals its tag.
   tests = nixpkgs.runCommand "obs-tests"
-    { nativeBuildInputs = [ obs nixpkgs.bash nixpkgs.gnugrep nixpkgs.gnused nixpkgs.coreutils nixpkgs.findutils nixpkgs.diffutils ]; }
+    { nativeBuildInputs = [ obs nixpkgs.bash nixpkgs.gnugrep nixpkgs.gnused nixpkgs.coreutils nixpkgs.findutils nixpkgs.diffutils go nixpkgs.typescript nixpkgs.dotnet-sdk_10 nixpkgs.dart nixpkgs.llvmPackages.llvm ]; }
     ''
-      bash ${./tests}/run.sh --obs ${obs}/bin/obs --src ${./src} --out ${obs}
+      OBS_REQUIRE_LLVM=1 bash ${./tests}/run.sh --obs ${obs}/bin/obs --src ${./src} --out ${obs}
       mkdir -p "$out"
     '';
 
@@ -58,6 +69,8 @@ let
       mkdir -p "build/$name" "$out"
       cp -r --no-preserve=mode ${./src}/. "build/$name/"
       cp -r --no-preserve=mode ${obs.goModules} "build/$name/vendor"
+      # the fixtures and golden files the Go tests and tests/run.sh read (the tests find tests/ in an ancestor)
+      cp -r --no-preserve=mode ${./tests} "build/$name/tests"
       install -Dm444 ${./LICENSE} "build/$name/LICENSE"
       install -Dm444 ${./README.md} "build/$name/README.md"
       tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -C build -cf - "$name" \

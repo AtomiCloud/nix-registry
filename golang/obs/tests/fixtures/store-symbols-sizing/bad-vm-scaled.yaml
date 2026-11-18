@@ -1,0 +1,25 @@
+# New VictoriaMetrics storage nodes; obs derives the -storageNode endpoints from the
+# StatefulSet name, its replicas, this headless Service, the namespace and router ports.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata: { name: vmstorage-b }
+spec:
+  replicas: 2
+  serviceName: vmstorag-b
+  selector: { matchLabels: { app: vmstorage-b } }
+  template:
+    metadata: { labels: { app: vmstorage-b } }
+    spec:
+      containers:
+        - name: vmstorage
+          image: victoriametrics/vmstorage:v1.156.0-cluster
+          args: ['-retentionPeriod=30d', '-storageDataPath=/storage']
+          ports: [{ containerPort: 8482 }, { containerPort: 8400 }, { containerPort: 8401 }]
+  volumeClaimTemplates:
+    - metadata: { name: storage }
+      spec: { accessModes: [ReadWriteOnce], resources: { requests: { storage: 50Gi } } }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: vmstorage-b }
+spec: { clusterIP: None, selector: { app: vmstorage-b } }

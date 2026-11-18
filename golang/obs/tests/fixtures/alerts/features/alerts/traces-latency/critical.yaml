@@ -1,0 +1,45 @@
+{
+  apiVersion: grafana.integreatly.org/v1beta1,
+  kind: GrafanaAlertRuleGroup,
+  metadata: { name: fixture-traces-latency },
+  spec:
+    {
+      interval: 1m,
+      rules:
+        [
+          {
+            uid: traces-latency,
+            title: traces-latency,
+            condition: C,
+            for: 1m,
+            data:
+              [
+                {
+                  refId: A,
+                  queryType: traceql,
+                  datasourceUid: fixture-traces,
+                  relativeTimeRange: { from: 180, to: 0 },
+                  model:
+                    {
+                      datasource: { type: tempo, uid: fixture-traces },
+                      queryType: traceql,
+                      metricsQueryType: range,
+                      step: 1m,
+                      query: '{ span.outcome = "ok" } | quantile_over_time(duration, .9) with (exemplars=false)',
+                    },
+                },
+                {
+                  refId: B,
+                  datasourceUid: __expr__,
+                  model: { type: reduce, expression: A, reducer: max, settings: { mode: dropNN } },
+                },
+                {
+                  refId: C,
+                  datasourceUid: __expr__,
+                  model: { type: threshold, expression: B, conditions: [{ evaluator: { type: gt, params: [0.5] } }] },
+                },
+              ],
+          },
+        ],
+    },
+}

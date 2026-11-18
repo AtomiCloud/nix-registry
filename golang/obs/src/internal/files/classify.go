@@ -12,7 +12,7 @@ const (
 	Metrics Kind = iota // MetricsQL (VictoriaMetrics)
 	Logs                // LogsQL (VictoriaLogs)
 	Loki                // a Loki-type datasource: refused (logs are LogsQL)
-	Traces              // TraceQL: not checked until the trace milestone
+	Traces              // Tempo TraceQL; other trace plugins remain classified but are skipped
 	Other               // expressions, annotations, Grafana's own source: nothing to parse
 )
 
@@ -21,7 +21,7 @@ func (k Kind) String() string {
 }
 
 // Classify tells the kind of a datasource from its plugin type, else from its uid
-// (a platform pins its datasource uids: primordial-metrics, primordial-logs, mimir ...).
+// (a platform pins its datasource uids: fixture-metrics, fixture-logs, mimir ...).
 // An error names what could not be told.
 func Classify(dsType, dsUID string) (Kind, error) {
 	t := strings.ToLower(dsType)

@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/VictoriaMetrics/VictoriaMetrics/lib/logger"
+	"golang.org/x/sys/unix"
 )
 
 var once sync.Once
@@ -35,4 +36,15 @@ func Init() {
 
 // TmpBase is the directory the engines keep their storage in. OBS_TMPDIR wins;
 // otherwise the system temp dir (TMPDIR in the nix sandbox).
-func TmpBase() string { return os.Getenv("OBS_TMPDIR") }
+func TmpBase() string {
+	if d := os.Getenv("OBS_TMPDIR"); d != "" {
+		return d
+	}
+	// A container often has only a 64 MiB /dev/shm. Use RAM storage only when
+	// it has room for a CI seed; otherwise the normal temp directory is safer.
+	var fs unix.Statfs_t
+	if err := unix.Statfs("/dev/shm", &fs); err == nil && uint64(fs.Bavail)*uint64(fs.Bsize) >= 1<<30 && unix.Access("/dev/shm", unix.W_OK) == nil {
+		return "/dev/shm"
+	}
+	return ""
+}

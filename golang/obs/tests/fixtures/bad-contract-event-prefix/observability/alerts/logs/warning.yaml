@@ -1,0 +1,23 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata:
+  name: payments-checkout-logs-warning
+spec:
+  folderRef: payments-checkout-folder
+  interval: 1m
+  rules:
+    - uid: logs-warning
+      title: Charge log lines
+      condition: A
+      for: 5m
+      noDataState: OK
+      execErrState: Error
+      data:
+        - refId: A
+          relativeTimeRange: { from: 300, to: 0 }
+          datasourceUid: fixture-logs
+          model:
+            expr: '_time:5m {durian.cloud.service="checkout"} "durian.cloud/event":checkout.chrge* | stats by (payment.provider) count() failed | filter failed:>100'
+            queryType: stats
+      labels: { severity: warning }
+      annotations: { summary: 'Charge log lines' }

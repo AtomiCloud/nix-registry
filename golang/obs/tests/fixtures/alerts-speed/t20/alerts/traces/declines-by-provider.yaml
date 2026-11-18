@@ -1,0 +1,32 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata:
+  name: speed-checkout-traces-declines-by-provider
+spec:
+  folderRef: speed-checkout-folder
+  interval: 1m
+  rules:
+    - uid: traces-declines-by-provider
+      title: 'Declines by provider'
+      condition: E
+      for: 5m
+      noDataState: OK
+      execErrState: Error
+      data:
+        - refId: A
+          queryType: traceql
+          relativeTimeRange: { from: 300, to: 0 }
+          datasourceUid: speed-traces
+          model:
+            datasource: { type: tempo, uid: speed-traces }
+            queryType: traceql
+            metricsQueryType: instant
+            query: '{ span.outcome = "declined" } | count_over_time() by (span.payment.provider)'
+        - refId: B
+          datasourceUid: __expr__
+          model: { type: reduce, expression: A, reducer: last, settings: { mode: dropNN } }
+        - refId: E
+          datasourceUid: __expr__
+          model: { type: threshold, expression: B, conditions: [{ evaluator: { type: gt, params: [150] } }] }
+      labels: { severity: warning }
+      annotations: { summary: 'Declines by provider' }

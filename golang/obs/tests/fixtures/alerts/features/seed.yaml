@@ -1,0 +1,29 @@
+{
+  length: 40m,
+  random_seed: 42,
+  resource:
+    {
+      durian.cloud.landscape: fixture,
+      durian.cloud.platform: fixture,
+      durian.cloud.service: checkout,
+      durian.cloud.module: api,
+    },
+  traffic: { requests: 3/s, shape: flat },
+  metrics:
+    {
+      fixture.requests:
+        { type: counter, series: [{ where: { outcome: ok }, share: 1 }, { where: { outcome: error }, share: 0 }] },
+    },
+  logs: [{ event: fixture.failed, level: error, from: { metric: fixture.requests, where: { outcome: error } } }],
+  traces:
+    [
+      {
+        from: { metric: fixture.requests },
+        server: POST /charge,
+        route: /charge,
+        error_when: { outcome: error },
+        median_s: 0.05,
+      },
+    ],
+  incidents: [spike],
+}

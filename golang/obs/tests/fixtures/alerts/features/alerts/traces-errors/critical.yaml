@@ -1,0 +1,41 @@
+{
+  apiVersion: grafana.integreatly.org/v1beta1,
+  kind: GrafanaAlertRuleGroup,
+  metadata: { name: fixture-traces-errors },
+  spec:
+    {
+      interval: 1m,
+      rules:
+        [
+          {
+            uid: traces-errors,
+            title: traces-errors,
+            condition: C,
+            for: 1m,
+            noDataState: OK,
+            data:
+              [
+                {
+                  refId: A,
+                  queryType: traceql,
+                  datasourceUid: fixture-traces,
+                  relativeTimeRange: { from: 60, to: 0 },
+                  model:
+                    {
+                      datasource: { type: tempo, uid: fixture-traces },
+                      queryType: traceql,
+                      metricsQueryType: instant,
+                      query: '{ resource.service.name = "checkout" && status = error } | rate() by (span.outcome)',
+                    },
+                },
+                { refId: B, datasourceUid: __expr__, model: { type: reduce, expression: A, reducer: last } },
+                {
+                  refId: C,
+                  datasourceUid: __expr__,
+                  model: { type: threshold, expression: B, conditions: [{ evaluator: { type: gt, params: [0.5] } }] },
+                },
+              ],
+          },
+        ],
+    },
+}

@@ -27,6 +27,8 @@ type Query struct {
 	Expr    string
 	// Alerts: the rule's relative time range in seconds ("from" of relativeTimeRange).
 	RangeSecs int64
+	// ToSecs is the "to" of relativeTimeRange: the window ends this many seconds before the evaluation.
+	ToSecs int64
 	QueryType string // the model's queryType (stats, instant, range ...)
 	// Dashboards.
 	Dash          *Dashboard
@@ -37,6 +39,9 @@ type Query struct {
 	Problem string
 	DSType  string
 	DSUID   string
+	// Model is an alert query's raw model (nil for dashboards): datasource options the
+	// alert checks need beyond the expression, such as Tempo's metricsQueryType and step.
+	Model map[string]any
 }
 
 // Dashboard is the parts of a dashboard JSON obs needs.
@@ -71,7 +76,8 @@ type Set struct {
 	Queries    []Query
 	Dashboards []*Dashboard
 	Problems   []Problem
-	Alerts     int // alert files read
+	Alerts     int    // alert files read
+	Rules      []Rule // complete alert definitions, including Grafana expressions
 }
 
 // Load reads dir. A missing dashboards/ or alerts/ folder is fine; nothing at all is not.
@@ -129,18 +135,30 @@ type alertDoc struct {
 		Name string `yaml:"name"`
 	} `yaml:"metadata"`
 	Spec struct {
-		Rules []alertRule `yaml:"rules"`
+		Interval string      `yaml:"interval"`
+		Rules    []alertRule `yaml:"rules"`
 	} `yaml:"spec"`
-	// Keys of Primordial's flat authoring form: refused with a pointer to the CR.
+	// Keys of a platform's flat authoring form: refused with a pointer to the CR.
 	Title      string `yaml:"title"`
 	Datasource string `yaml:"datasource"`
 	Expr       string `yaml:"expr"`
 }
 
 type alertRule struct {
-	UID   string `yaml:"uid"`
-	Title string `yaml:"title"`
-	Data  []struct {
+	UID                         string            `yaml:"uid"`
+	Title                       string            `yaml:"title"`
+	Condition                   string            `yaml:"condition"`
+	For                         string            `yaml:"for"`
+	KeepFiringFor               string            `yaml:"keepFiringFor"`
+	NoDataState                 string            `yaml:"noDataState"`
+	ExecErrState                string            `yaml:"execErrState"`
+	MissingSeriesEvalsToResolve int               `yaml:"missingSeriesEvalsToResolve"`
+	Labels                      map[string]string `yaml:"labels"`
+	Record                      *struct {
+		Metric string `yaml:"metric"`
+		From   string `yaml:"from"`
+	} `yaml:"record"`
+	Data []struct {
 		RefID             string `yaml:"refId"`
 		QueryType         string `yaml:"queryType"`
 		DatasourceUID     string `yaml:"datasourceUid"`
@@ -150,6 +168,13 @@ type alertRule struct {
 		} `yaml:"relativeTimeRange"`
 		Model map[string]any `yaml:"model"`
 	} `yaml:"data"`
+}
+
+// Rule is a Grafana-managed rule read by Load, shared with obs alerts. File and
+// Interval come from the containing CR, all other fields are Grafana's schema.
+type Rule struct {
+	File, Interval, Name string
+	Definition           alertRule
 }
 
 func (s *Set) readAlert(rel string, b []byte) {
@@ -177,6 +202,7 @@ func (s *Set) readAlert(rel string, b []byte) {
 		return
 	}
 	for _, r := range d.Spec.Rules {
+		s.Rules = append(s.Rules, Rule{File: rel, Interval: d.Spec.Interval, Name: d.Metadata.Name, Definition: r})
 		id := r.UID
 		if id == "" {
 			id = d.Metadata.Name
@@ -200,9 +226,13 @@ func (s *Set) readAlert(rel string, b []byte) {
 				qt = t
 			}
 			expr, _ := q.Model["expr"].(string)
+			if expr == "" && (dsType == "tempo" || strings.Contains(dsUID, "tempo") || strings.Contains(dsUID, "traces")) {
+				expr, _ = q.Model["query"].(string)
+			}
 			qu := Query{
-				File: rel, IsAlert: true, Expr: expr, RangeSecs: q.RelativeTimeRange.From,
+				File: rel, IsAlert: true, Expr: expr, RangeSecs: q.RelativeTimeRange.From, ToSecs: q.RelativeTimeRange.To,
 				QueryType: qt, DSType: dsType, DSUID: dsUID,
+				Model: q.Model,
 				Where: fmt.Sprintf("rule %s query %s", id, q.RefID),
 			}
 			kind, err := Classify(dsType, dsUID)
@@ -260,6 +290,7 @@ type targetDoc struct {
 	Datasource any    `json:"datasource"`
 	Expr       string `json:"expr"`
 	Expression string `json:"expression"`
+	Query      string `json:"query"` // Tempo's TraceQL query model
 	QueryType  string `json:"queryType"`
 	Hide       bool   `json:"hide"`
 }
@@ -329,7 +360,7 @@ func (s *Set) readDashboard(rel string, b []byte) {
 					expr = t.Expression
 				}
 				if expr == "" {
-					continue
+					expr = t.Query
 				}
 				ref := t.RefID
 				if ref == "" {
@@ -355,6 +386,9 @@ func (s *Set) readDashboard(rel string, b []byte) {
 					Where: fmt.Sprintf("panel %d %q target %s", p.ID, p.Title, ref),
 				}
 				kind, err := Classify(dsType, dsUID)
+				if expr == "" && (kind != Traces || t.QueryType == "") {
+					continue
+				}
 				qu.Kind = kind
 				if err != nil {
 					qu.Problem = err.Error()

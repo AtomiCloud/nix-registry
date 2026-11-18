@@ -1,0 +1,22 @@
+length: 3m
+random_seed: 42
+resource:
+  durian.cloud.service: checkout
+  durian.cloud.platform: payments
+  k8s.pod.name: checkout-abc
+traffic: { requests: 2/s }
+metrics:
+  requests:
+    type: counter
+    series:
+      - { where: { provider: stripe }, share: 0.5 }
+      - { where: { provider: adyen }, share: 0.5 }
+logs:
+  - { event: charged, from: { metric: requests } }
+traces:
+  - from: { metric: requests }
+    server: POST /charge
+    client: charge
+    route: /charge
+    median_s: 2
+    attributes: { http.response.status_code: 200, cached: true }

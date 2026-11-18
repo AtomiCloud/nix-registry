@@ -1,0 +1,27 @@
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata:
+  name: speed-checkout-v11-charge-errors-by-provider
+spec:
+  folderRef: speed-checkout-folder
+  interval: 1m
+  rules:
+    - uid: v11-charge-errors-by-provider
+      title: 'Charge errors by provider'
+      condition: B
+      for: 5m
+      noDataState: OK
+      execErrState: Error
+      data:
+        - refId: A
+          relativeTimeRange: { from: 300, to: 0 }
+          datasourceUid: speed-metrics
+          model:
+            datasource: { type: prometheus, uid: speed-metrics }
+            expr: 'sum by (payment_provider) (rate(checkout_charges_total{outcome="error"}[5m]))'
+            instant: true
+        - refId: B
+          datasourceUid: __expr__
+          model: { type: math, expression: '$A > 0.5' }
+      labels: { severity: warning }
+      annotations: { summary: 'Charge errors by provider' }

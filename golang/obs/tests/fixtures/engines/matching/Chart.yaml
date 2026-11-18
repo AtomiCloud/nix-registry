@@ -1,0 +1,21 @@
+# Fixture umbrella chart: every engine image tag equals internal/pins/pins.json.
+# The dependency versions are chart versions (not engine versions) and are never compared.
+apiVersion: v2
+name: observability
+version: 0.1.0
+dependencies:
+  - name: victoria-metrics-cluster
+    version: 0.99.0
+    repository: https://victoriametrics.github.io/helm-charts
+  - name: victoria-logs-single
+    version: 0.50.0
+    repository: https://victoriametrics.github.io/helm-charts
+  - name: tempo
+    version: 1.30.0
+    repository: https://grafana.github.io/helm-charts
+  - name: grafana
+    version: 9.9.9
+    repository: https://grafana.github.io/helm-charts
+  - name: pyroscope
+    version: 1.2.0
+    repository: https://grafana.github.io/helm-charts

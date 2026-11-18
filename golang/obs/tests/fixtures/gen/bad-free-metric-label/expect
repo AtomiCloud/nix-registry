@@ -1,0 +1,5 @@
+mode: check
+exit: 1
+contains: [free-metric-label]
+contains: user_id
+contains: metrics.checkout.charges.labels.user_id
