@@ -72,8 +72,8 @@ expect_exit 0 "clean: lookup by alias" "$UL" lookup "flat pan" --root "$clean" -
 [ "$(jq -r '.matches[0].word' <<<"$out")" = "Frying pan" ] && ok "clean: lookup finds Frying pan" || bad "clean: lookup: $out"
 expect_exit 1 "clean: lookup not found" "$UL" lookup Ovn --root "$clean"
 grep -q 'near: Oven' <<<"$err" && ok "clean: near matches" || bad "clean: near matches: $err"
-expect_exit 0 "clean: lookup --from ranks the closest namespace" "$UL" lookup oven --root "$clean" --from recipes/bread/x.go --format json
-[ "$(jq -r '.matches[0].namespace' <<<"$out")" = example.org/cooking/kitchen ] && ok "clean: --from order" || bad "clean: --from order: $out"
+expect_exit 0 "clean: lookup --from ranks the closest namespace" "$UL" lookup oven --root "$clean" --from "$clean/docs/domain/pastry/x.go" --format json
+[ "$(jq -r '.matches[0].namespace' <<<"$out")" = example.org/cooking/pastry ] && ok "clean: --from order" || bad "clean: --from order: $out"
 
 # --- every planted failure is red with its code, and only its code -----------------------
 for d in "$SRC"/testdata/bad/*/; do
