@@ -1,0 +1,13 @@
+namespace: example.org/area/demo
+premise: A demo area
+language:
+  Alpha:
+    desc: The first word.
+  Old:
+    desc: A dropped word.
+    status: retired
+    replacedBy: Older
+  Older:
+    desc: A word dropped before.
+    status: retired
+    replacedBy: Alpha

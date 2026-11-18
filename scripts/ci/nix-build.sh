@@ -46,6 +46,7 @@ nix shell --max-jobs 1 --cores 2 nixpkgs#bash \
   dlint --version &&
   chart-checks --version &&
   problemgen --version &&
+  ul --version | grep -q "^ul [0-9]" &&
   obs version &&
   coderabbit --version &&
   ccc --version &&

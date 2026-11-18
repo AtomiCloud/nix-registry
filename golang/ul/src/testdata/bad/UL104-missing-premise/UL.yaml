@@ -1,0 +1,4 @@
+namespace: example.org/area/demo
+language:
+  Alpha:
+    desc: The first word.
