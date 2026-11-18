@@ -133,7 +133,7 @@ func ShapeReport(ctx context.Context, c *Client, t *Target, ct *contract.Contrac
 		case len(mats) == 0 || len(mats[0].Samples) == 0:
 			ms.RealNote = "the target has no data for this metric in the window"
 		default:
-			sh := Analyze(mats[0].Samples, o.Step, now)
+			sh := Analyze(mats[0].Samples, o.Step, now.Add(-o.Window), now)
 			ms.Real = &sh
 		}
 		switch {
@@ -150,7 +150,7 @@ func ShapeReport(ctx context.Context, c *Client, t *Target, ct *contract.Contrac
 						ss = append(ss, Sample{T: ts / 1000, V: v})
 					}
 				}
-				sh := Analyze(ss, o.Step, ds.End)
+				sh := Analyze(ss, o.Step, ds.Start, ds.End)
 				ms.Seed = &sh
 			}
 		default:

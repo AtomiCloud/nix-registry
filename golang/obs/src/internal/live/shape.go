@@ -75,9 +75,39 @@ func median(v []float64) float64 {
 
 func hourOf(t int64) int { return int(((t % 86400) + 86400) % 86400 / 3600) }
 
-// Analyze describes samples taken every step up to windowEnd. Samples with no data at a step are
-// simply absent: that is how gaps are found.
-func Analyze(s []Sample, step time.Duration, windowEnd time.Time) Shape {
+// peakHourOf is the UTC hour of day at which the daily wave peaks, from the first harmonic of the
+// samples' own timestamps (so a sample at 20:04 counts at 20:04, not in hour 19 or 20). It is
+// rounded to a tenth of an hour. A flat series has no peak: 0.
+func peakHourOf(s []Sample, mean float64) float64 {
+	const w = 2 * math.Pi / 86400
+	var a, b, scale float64
+	for _, x := range s {
+		tod := float64(((x.T % 86400) + 86400) % 86400)
+		d := x.V - mean
+		a += d * math.Cos(w*tod)
+		b += d * math.Sin(w*tod)
+		scale += math.Abs(d)
+	}
+	if scale == 0 || math.Hypot(a, b) < 1e-9*scale {
+		return 0
+	}
+	h := math.Atan2(b, a) / w / 3600
+	if h < 0 {
+		h += 24
+	}
+	h = math.Round(h*10) / 10
+	if h >= 24 {
+		h = 0
+	}
+	return h
+}
+
+// Analyze describes samples taken every step in the window windowStart..windowEnd. Samples with
+// no data at a step are simply absent: that is how gaps are found, at the start and the end of
+// the window as well as between samples. What the window is long enough to show (trend and daily
+// cycle: two days, weekly cycle: a week) is judged on the window asked for, not on the first and
+// last sample: a seven day window read at a step holds samples that span seven days minus one step.
+func Analyze(s []Sample, step time.Duration, windowStart, windowEnd time.Time) Shape {
 	var sh Shape
 	sh.Points = len(s)
 	if len(s) == 0 {
@@ -95,9 +125,14 @@ func Analyze(s []Sample, step time.Duration, windowEnd time.Time) Shape {
 	typical := median(vals)
 	sh.Level.Typical = typical
 	span := time.Duration(sh.To-sh.From) * time.Second
+	window := windowEnd.Sub(windowStart)
+	if windowStart.IsZero() || window < span {
+		window = span + step
+	}
+	covers := func(need time.Duration) bool { return window >= need && span >= need-2*step }
 
 	// Trend: least squares slope per day over the typical value.
-	if span >= 48*time.Hour {
+	if covers(48 * time.Hour) {
 		sh.Trend.Known = true
 		var sx, sy, sxx, sxy float64
 		n := float64(len(s))
@@ -115,7 +150,7 @@ func Analyze(s []Sample, step time.Duration, windowEnd time.Time) Shape {
 	for _, x := range s {
 		hourVals[hourOf(x.T)] = append(hourVals[hourOf(x.T)], x.V)
 	}
-	if span >= 48*time.Hour {
+	if covers(48 * time.Hour) {
 		sh.Cycle.DailyKnown = true
 		var all, peak, trough float64
 		peak, trough = math.Inf(-1), math.Inf(1)
@@ -123,22 +158,20 @@ func Analyze(s []Sample, step time.Duration, windowEnd time.Time) Shape {
 			all += x.V
 		}
 		mean := all / float64(len(s))
-		for h, v := range hourVals {
+		for _, v := range hourVals {
 			sum := 0.0
 			for _, x := range v {
 				sum += x
 			}
 			m := sum / float64(len(v))
-			if m > peak || (m == peak && float64(h) < sh.Cycle.PeakHour) {
-				peak, sh.Cycle.PeakHour = m, float64(h)
-			}
-			trough = math.Min(trough, m)
+			peak, trough = math.Max(peak, m), math.Min(trough, m)
 		}
 		if mean != 0 {
 			sh.Cycle.DailyAmplitude = (peak - trough) / (2 * math.Abs(mean))
 		}
+		sh.Cycle.PeakHour = peakHourOf(s, mean)
 	}
-	if span >= 7*24*time.Hour {
+	if covers(7 * 24 * time.Hour) {
 		var we, wd []float64
 		for _, x := range s {
 			switch time.Unix(x.T, 0).UTC().Weekday() {
@@ -207,9 +240,15 @@ func Analyze(s []Sample, step time.Duration, windowEnd time.Time) Shape {
 	}
 	sh.Spikes.Size = peakRatio
 
-	// Gaps: two or more steps without data.
+	// Gaps: two or more steps without data, before the first sample and after the last one too.
 	stepS := int64(step.Seconds())
 	if stepS > 0 {
+		if !windowStart.IsZero() {
+			if lead := (sh.From - windowStart.Unix()) / stepS; lead >= 2 {
+				sh.Gaps.Count++
+				sh.Gaps.total += time.Duration(lead) * step
+			}
+		}
 		for i := 1; i < len(s); i++ {
 			missing := (s[i].T-s[i-1].T)/stepS - 1
 			if missing >= 2 {
