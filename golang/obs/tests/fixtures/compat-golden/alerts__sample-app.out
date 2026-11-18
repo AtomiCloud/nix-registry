@@ -1,0 +1,13 @@
+args: alerts --dir sample-app/observability --base 1700000000
+exit: 1
+--- stdout
+obs alerts: sample-app/observability/obs.yaml: versions match the evaluators embedded in this obs; thresholds applied: logs, metrics, traces, profiles
+note alerts/crash-logs/warning.yaml rule crash-logs-warning query A: [event-rule] event rule skipped: no contract.yaml
+note: [vl-settings] no sample-app/observability/victorialogs-settings.yaml; using obs.yaml thresholds.logs over VictoriaLogs v1.54.0 query defaults (extract deployed chart args to this file or use --vl-settings)
+FAIL alerts/crash-logs/warning.yaml rule crash-logs-warning window baseline expect quiet: fired at +6m0s, firing 115 min
+  rule input: {"ID":"crash-logs-warning","File":"alerts/crash-logs/warning.yaml","Title":"⚠️ Crash logs (panic / fatal)","Condition":"A","For":"5m","KeepFiringFor":"","NoDataState":"OK","ExecErrState":"Error","Interval":"1m","Queries":{"A":{"Datasource":"logs","UID":"fixture-logs","Expr":"_time:10m {cluster=\"fixture-cluster\",service!~\"logs|traces\"} ~`(?i)(panic:|fatal error:|panicked|segmentation fault)` | stats by (service) count() hits","Range":"","OriginalExpr":"_time:10m {cluster=\"fixture-cluster\",service!~\"logs|traces\"} ~`(?i)(panic:|fatal error:|panicked|segmentation fault)` | stats by (service) count() hits","From":600000000000,"To":0}},"Expressions":{},"MissingSeriesEvalsToResolve":0,"Labels":{"platform":"box","severity":"warning"},"Record":null,"LoadErr":""}
+FAIL alerts/pod-crashloop/critical.yaml rule pod-crashloop-critical window baseline expect quiet: fired at +10m0s, firing 111 min
+  rule input: {"ID":"pod-crashloop-critical","File":"alerts/pod-crashloop/critical.yaml","Title":"🚨 Pod restarting repeatedly","Condition":"A","For":"5m","KeepFiringFor":"","NoDataState":"OK","ExecErrState":"Error","Interval":"1m","Queries":{"A":{"Datasource":"metrics","UID":"fixture-metrics","Expr":"max by (namespace, pod) (increase(kube_pod_container_status_restarts_total{cluster=\"fixture-cluster\"}[15m])) \u003e 10","Range":"","OriginalExpr":"max by (namespace, pod) (increase(kube_pod_container_status_restarts_total{cluster=\"fixture-cluster\"}[15m])) \u003e 10","From":600000000000,"To":0}},"Expressions":{},"MissingSeriesEvalsToResolve":0,"Labels":{"platform":"box","severity":"critical"},"Record":null,"LoadErr":""}
+obs alerts: alerts=2 recording=0 runs=1 expectations=2 failed=2 cached=0 pruned=2 recorded_samples=0 pruned_log_events=0
+verify fast: compared=0 mismatches=0; verify skip: compared=0 mismatches=0; reused=0
+--- stderr

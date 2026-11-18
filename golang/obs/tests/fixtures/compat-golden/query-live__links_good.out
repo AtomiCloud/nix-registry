@@ -1,0 +1,5 @@
+args: query --live --dir links/good --base 1700000000
+exit: 0
+--- stdout
+obs query --live: ok: 3 queries (3 traces), 0 failures, 0 warnings
+--- stderr

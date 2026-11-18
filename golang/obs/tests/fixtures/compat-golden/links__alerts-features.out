@@ -1,0 +1,8 @@
+args: links --dir alerts/features --base 1700000000
+exit: 1
+--- stdout
+FAIL alerts/features/seed.yaml route "POST /charge" trace_id=bfb698aaf8fdd1499024b962ab337d2a span_id=9e9f6735969fa60f: [trace-to-logs] no seeded log lines for trace_id=bfb698aaf8fdd1499024b962ab337d2a service.name="checkout" in span range; query: trace_id:="bfb698aaf8fdd1499024b962ab337d2a" AND service.name:="checkout"
+FAIL alerts/features/seed.yaml route "POST /charge" trace_id=bfb698aaf8fdd1499024b962ab337d2a span_id=9e9f6735969fa60f: [span-to-profile] missing k8s.pod.name for profile label pod; query: 
+FAIL alerts/features/seed.yaml series [{__name__ fixture_requests_total} {durian.cloud.landscape fixture} {durian.cloud.module api} {durian.cloud.platform fixture} {durian.cloud.service checkout} {outcome error}]: [metric-to-traces] TraceQL returned no traces for series [{__name__ fixture_requests_total} {durian.cloud.landscape fixture} {durian.cloud.module api} {durian.cloud.platform fixture} {durian.cloud.service checkout} {outcome error}] in [2023-11-14T22:52:20Z,2023-11-14T22:53:20Z]; example seeded span attributes=map[http.route:{0 /charge 0 0 false} outcome:{0 ok 0 0 false}]; query: { resource.durian.cloud.landscape = "fixture" && resource.durian.cloud.module = "api" && resource.durian.cloud.platform = "fixture" && resource.durian.cloud.service = "checkout" && span.outcome = "error" }
+obs links: trace-to-logs=1 metric-to-traces=2 span-to-profile=1 failures=3
+--- stderr

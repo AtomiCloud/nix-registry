@@ -1,0 +1,6 @@
+args: query --static --dir bad-contract-span-attribute/observability --seed shared-seed.yaml --base 1700000000
+exit: 1
+--- stdout
+FAIL dashboards/traces.json panel 7 "Trace search" target A: [traceql-attribute] undeclared attribute span.provder; query: {resource.k8s.pod.name="checkout-0" && span.provder="stripe"}
+obs query --static: FAILED: 1 queries (1 traces), 1 failures, 0 warnings
+--- stderr

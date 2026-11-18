@@ -1,0 +1,6 @@
+args: links --dir good/observability --base 1700000000
+exit: 1
+--- stdout
+FAIL good/observability/seed.yaml traces: [seed] no traces in seed.traces; query: 
+obs links: trace-to-logs=0 metric-to-traces=0 span-to-profile=0 failures=1
+--- stderr

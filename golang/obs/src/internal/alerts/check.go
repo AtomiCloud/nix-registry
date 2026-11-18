@@ -35,13 +35,42 @@ type Options struct {
 	Base      int64
 	Workers   int
 	LogsGuard QueryGuard
+	// EventRule is --event-rule of `obs test` ("auto", "on", "off"; empty = auto): whether a LogsQL alert
+	// must name a contract event. `obs alerts` leaves it empty (it has no such flag).
+	EventRule string
+	// AllowEmptyExpect lets an incident with no fire and no quiet alert load (`obs test` reports it as
+	// [incident-uncaught]); `obs alerts` keeps refusing it.
+	AllowEmptyExpect bool
 }
 
 // TempoAlertingNote is printed once per obs alerts run that has trace rules.
 const TempoAlertingNote = "note: Grafana 13.3.0 runs Tempo alerts only with feature toggle tempoAlerting enabled (FROM SOURCE: without it the Tempo plugin's alerting flag is false); enable it in the Grafana chart"
 
+// RunResult is what a finished `obs alerts` run judged, for a caller that wants more than the exit code
+// (`obs test` decides from it whether every incident was caught). Judged is false when the run ended
+// before the verdicts (an input error, a failed static check or a refused query).
+type RunResult struct {
+	Judged       bool
+	Alerts       int
+	Records      int
+	Runs         int
+	Expectations int
+	Failed       int
+	Verdicts     []Verdict
+	Incidents    []Incident
+}
+
 // Check evaluates each rule at every minute on the baseline and each incident.
-func Check(o Options, stdout, stderr io.Writer) int {
+func Check(o Options, stdout, stderr io.Writer) int { return run(o, stdout, stderr, nil) }
+
+// CheckResult is Check that also returns what it judged; the output and exit code are the same.
+func CheckResult(o Options, stdout, stderr io.Writer) (RunResult, int) {
+	var res RunResult
+	rc := run(o, stdout, stderr, &res)
+	return res, rc
+}
+
+func run(o Options, stdout, stderr io.Writer, res *RunResult) int {
 	started := time.Now()
 	// The embedded VictoriaLogs allocates fresh per-query buffers (64 KiB chunks) for
 	// every stats query, while the data kept alive stays small: with Go's default
@@ -65,7 +94,7 @@ func Check(o Options, stdout, stderr io.Writer) int {
 	VerifyMismatch.Store(0)
 	verifyExamples.Store(0)
 	SkippedRuns, SkipChecked, SkipMismatch = 0, 0, 0
-	p, err := loadProject(o.Dir, o.SeedPath)
+	p, err := loadProject(o.Dir, o.SeedPath, o.AllowEmptyExpect)
 	if err != nil {
 		fmt.Fprintln(stderr, "obs alerts:", err)
 		return 2
@@ -129,7 +158,7 @@ func Check(o Options, stdout, stderr io.Writer) int {
 		}
 	}
 	set.Queries, set.Dashboards = queries, nil
-	rep := check.Static(set, check.Options{Dir: o.Dir})
+	rep := check.Static(set, check.Options{Dir: o.Dir, EventRule: o.EventRule})
 	rep.Print(stdout)
 	if rep.Failures() > 0 {
 		return 1
@@ -152,6 +181,12 @@ func Check(o Options, stdout, stderr io.Writer) int {
 		// Include effective settings, not unrelated chart/auth args, in cache keys.
 		p.Files["victorialogs-query-limits"] = []byte(fmt.Sprintf("%#v", limits))
 	}
+	// --event-rule off (obs test): the contract's events are not required in log queries, as in obs query --live;
+	// the queries run as written. The seed is still checked against the contract above.
+	queryEvents := events
+	if o.EventRule == "off" {
+		queryEvents = nil
+	}
 	logEvents := logEventSets{}
 	for _, group := range [][]Alert{p.Alerts, p.Records} {
 		for i := range group {
@@ -159,14 +194,14 @@ func Check(o Options, stdout, stderr io.Writer) int {
 				if q.Datasource != "logs" {
 					continue
 				}
-				analysis, err := logevent.Analyze(q.Expr, events)
+				analysis, err := logevent.Analyze(q.Expr, queryEvents)
 				if err != nil {
 					fmt.Fprintf(stderr, "%s rule %s query %s: %v\n", group[i].File, group[i].ID, ref, err)
 					return 1
 				}
 				q.Expr = analysis.Expr
 				group[i].Queries[ref] = q
-				logEvents[q.Expr] = rootEvents(q.Expr, events)
+				logEvents[q.Expr] = rootEvents(q.Expr, queryEvents)
 			}
 		}
 	}
@@ -391,6 +426,9 @@ func Check(o Options, stdout, stderr io.Writer) int {
 	}
 	if VerifyMismatch.Load() > 0 || SkipMismatch > 0 {
 		failed++
+	}
+	if res != nil {
+		*res = RunResult{Judged: true, Alerts: len(allAlerts), Records: len(p.Records), Runs: len(runs), Expectations: len(vs), Failed: failed, Verdicts: vs, Incidents: p.Incidents}
 	}
 	fmt.Fprintf(stdout, "obs alerts: alerts=%d recording=%d runs=%d expectations=%d failed=%d cached=%d pruned=%d recorded_samples=%d pruned_log_events=%d\n", len(allAlerts), len(p.Records), len(runs), len(vs), failed, len(cached)/len(runs), pruned, recorded, prunedEvents)
 	fmt.Fprintf(stdout, "verify fast: compared=%d mismatches=%d; verify skip: compared=%d mismatches=%d; reused=%d\n", VerifiedTicks.Load(), VerifyMismatch.Load(), SkipChecked, SkipMismatch, SkippedRuns)

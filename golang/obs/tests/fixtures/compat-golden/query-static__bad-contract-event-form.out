@@ -1,0 +1,6 @@
+args: query --static --dir bad-contract-event-form/observability --seed shared-seed.yaml --base 1700000000
+exit: 1
+--- stdout
+FAIL alerts/logs/warning.yaml rule logs-warning query A: [contract-event-filter-form] event filter form not checkable: "durian.cloud/event":>a; use :=, phrase, prefix, :~ or in(...)
+obs query --static: FAILED: 1 queries (1 logs), 1 failures, 0 warnings
+--- stderr

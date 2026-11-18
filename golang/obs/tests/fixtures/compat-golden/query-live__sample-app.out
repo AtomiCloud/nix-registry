@@ -1,0 +1,9 @@
+args: query --live --dir sample-app/observability --base 1700000000
+exit: 0
+--- stdout
+obs query: sample-app/observability/obs.yaml: versions match the evaluators embedded in this obs; thresholds applied: logs, metrics, traces, profiles
+note : [vl-settings] no sample-app/observability/victorialogs-settings.yaml; using obs.yaml thresholds.logs over VictoriaLogs v1.54.0 query defaults (extract deployed chart args to this file or use --vl-settings)
+note alerts/crash-logs/warning.yaml rule crash-logs-warning query A: [event-rule] event rule skipped: no contract.yaml
+note alerts/pod-crashloop/critical.yaml rule pod-crashloop-critical query A: [threshold-removed] ran the query without its 1 comparison(s) or absence check(s): a threshold filters rows out on a quiet seed; query run: max(increase(kube_pod_container_status_restarts_total{cluster="fixture-cluster"}[15m])) by(namespace,pod)
+obs query --live: ok: 6 queries (3 logs, 3 metrics), 0 failures, 0 warnings
+--- stderr

@@ -1,0 +1,6 @@
+args: query --live --dir ok-dotted-labels/observability --seed shared-seed.yaml --base 1700000000
+exit: 0
+--- stdout
+note alerts/where-from/critical.yaml rule where-from-critical query A: [threshold-removed] ran the query without its 1 comparison(s) or absence check(s): a threshold filters rows out on a quiet seed; query run: sum(rate(checkout_charges_total{durian.cloud.service="checkout",outcome="error"}[5m])) by(durian.cloud.service)
+obs query --live: ok: 2 queries (2 metrics), 0 failures, 0 warnings
+--- stderr

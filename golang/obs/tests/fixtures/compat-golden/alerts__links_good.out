@@ -1,0 +1,5 @@
+args: alerts --dir links/good/observability --base 1700000000
+exit: 2
+--- stdout
+--- stderr
+obs alerts: stat links/good/observability: no such file or directory

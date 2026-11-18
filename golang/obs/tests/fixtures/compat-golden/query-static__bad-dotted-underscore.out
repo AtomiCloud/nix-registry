@@ -1,0 +1,7 @@
+args: query --static --dir bad-dotted-underscore/observability --seed shared-seed.yaml --base 1700000000
+exit: 1
+--- stdout
+FAIL alerts/where-from/critical.yaml rule where-from-critical query A: [contract-undeclared-label] label "durian_cloud_service" is not a label of metric "checkout_charges_total" in the contract; VictoriaMetrics stores this label with its dots, write "durian.cloud.service" (a selector is {"durian.cloud.service"="..."}, a grouping is by ("durian.cloud.service"))
+FAIL alerts/where-from/critical.yaml rule where-from-critical query A: [contract-undeclared-label] grouping label "durian_cloud_platform" is not a label of the metrics this query reads; VictoriaMetrics stores this label with its dots, write "durian.cloud.platform" (a selector is {"durian.cloud.platform"="..."}, a grouping is by ("durian.cloud.platform"))
+obs query --static: FAILED: 1 queries (1 metrics), 2 failures, 0 warnings
+--- stderr

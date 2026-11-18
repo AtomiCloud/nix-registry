@@ -1,0 +1,6 @@
+args: query --static --dir bad-contract-undeclared-event/observability --seed shared-seed.yaml --base 1700000000
+exit: 1
+--- stdout
+FAIL alerts/undeclared-event/critical.yaml rule failed-logs-warning query A: [contract-undeclared-event] event "checkout.charge.faild" is not in the contract; did you mean "checkout.charge.failed"
+obs query --static: FAILED: 1 queries (1 logs), 1 failures, 0 warnings
+--- stderr

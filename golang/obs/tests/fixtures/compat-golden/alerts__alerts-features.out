@@ -1,0 +1,32 @@
+args: alerts --dir alerts/features --base 1700000000
+exit: 0
+--- stdout
+obs alerts: alerts/features/obs.yaml: versions match the evaluators embedded in this obs; thresholds applied: logs, metrics, traces, profiles
+note: Grafana 13.3.0 runs Tempo alerts only with feature toggle tempoAlerting enabled (FROM SOURCE: without it the Tempo plugin's alerting flag is false); enable it in the Grafana chart
+note alerts/logs/critical.yaml rule logs query A: [event-rule] events=[fixture.failed]
+note alerts/logs/critical.yaml rule logs query A: [assumed-filter] assumed true (free-form fields): customer_tier:=gold
+note alerts/logs/critical.yaml rule logs query A: [assumed-filter] assumed true (free-form fields): timeout
+note: [vl-settings] no alerts/features/victorialogs-settings.yaml; using obs.yaml thresholds.logs over VictoriaLogs v1.54.0 query defaults (extract deployed chart args to this file or use --vl-settings)
+ok alerts/error/critical.yaml rule error window baseline expect quiet: quiet, Error 40 (first error: can only reduce type series, got type scalar)
+ok alerts/hyst/critical.yaml rule hyst window baseline expect quiet: quiet
+ok alerts/keep/critical.yaml rule keep window baseline expect quiet: quiet
+ok alerts/logs/critical.yaml rule logs window baseline expect quiet: quiet
+ok alerts/metric/critical.yaml rule metric window baseline expect quiet: quiet
+ok alerts/nodata/critical.yaml rule nodata window baseline expect quiet: quiet, NoData 40
+ok alerts/range/critical.yaml rule range window baseline expect quiet: quiet
+ok alerts/recorded/critical.yaml rule recorded window baseline expect quiet: quiet
+ok alerts/traces-errors/critical.yaml rule traces-errors window baseline expect quiet: quiet
+ok alerts/traces-latency/critical.yaml rule traces-latency window baseline expect quiet: quiet, NoData 1
+ok alerts/metric/critical.yaml rule metric window spike expect fire: fired at +12m0s, firing 9 min; incident [10m0s,20m0s), fire_within=5m0s
+ok alerts/logs/critical.yaml rule logs window spike expect fire: fired at +12m0s, firing 9 min; incident [10m0s,20m0s), fire_within=5m0s
+ok alerts/recorded/critical.yaml rule recorded window spike expect fire: fired at +12m0s, firing 9 min; incident [10m0s,20m0s), fire_within=5m0s
+ok alerts/range/critical.yaml rule range window spike expect fire: fired at +12m0s, firing 10 min; incident [10m0s,20m0s), fire_within=5m0s
+ok alerts/hyst/critical.yaml rule hyst window spike expect fire: fired at +12m0s, firing 9 min; incident [10m0s,20m0s), fire_within=5m0s
+ok alerts/keep/critical.yaml rule keep window spike expect fire: fired at +12m0s, firing 12 min; incident [10m0s,20m0s), fire_within=5m0s
+ok alerts/traces-errors/critical.yaml rule traces-errors window spike expect fire: fired at +12m0s, firing 9 min; incident [10m0s,20m0s), fire_within=5m0s
+ok alerts/traces-latency/critical.yaml rule traces-latency window spike expect fire: fired at +13m0s, firing 12 min, NoData 1; incident [10m0s,20m0s), fire_within=5m0s
+ok alerts/nodata/critical.yaml rule nodata window spike expect quiet: quiet, NoData 40
+ok alerts/error/critical.yaml rule error window spike expect quiet: quiet, Error 40 (first error: can only reduce type series, got type scalar) (baseline)
+obs alerts: alerts=10 recording=1 runs=2 expectations=20 failed=0 cached=0 pruned=0 recorded_samples=80 pruned_log_events=0
+verify fast: compared=0 mismatches=0; verify skip: compared=0 mismatches=0; reused=1
+--- stderr

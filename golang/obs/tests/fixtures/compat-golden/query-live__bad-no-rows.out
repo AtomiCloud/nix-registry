@@ -1,0 +1,7 @@
+args: query --live --dir bad-no-rows/observability --seed shared-seed.yaml --base 1700000000
+exit: 1
+--- stdout
+FAIL alerts/charges/critical.yaml rule charges-critical query A: [no-rows] returned no rows on the seed; not in the seed: metric checkout_chargez_total; query: sum(rate(checkout_chargez_total{outcome="error"}[5m]))
+note alerts/charges/critical.yaml rule charges-critical query A: [threshold-removed] ran the query without its 1 comparison(s) or absence check(s): a threshold filters rows out on a quiet seed; query run: sum(rate(checkout_chargez_total{outcome="error"}[5m]))
+obs query --live: FAILED: 1 queries (1 metrics), 1 failures, 0 warnings
+--- stderr

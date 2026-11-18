@@ -1,0 +1,9 @@
+args: alerts --dir test/alert-quiet/observability --base 1700000000
+exit: 1
+--- stdout
+ok alerts/metric/critical.yaml rule metric window baseline expect quiet: quiet
+FAIL alerts/metric/critical.yaml rule metric window spike expect fire: quiet; incident [10m0s,20m0s), fire_within=5m0s
+  rule input: {"ID":"metric","File":"alerts/metric/critical.yaml","Title":"metric","Condition":"C","For":"1m","KeepFiringFor":"","NoDataState":"","ExecErrState":"","Interval":"1m","Queries":{"A":{"Datasource":"metrics","UID":"fixture-metrics","Expr":"sum(rate(fixture_requests_total{outcome=\"error\"}[1m]))","Range":"","OriginalExpr":"sum(rate(fixture_requests_total{outcome=\"error\"}[1m]))","From":60000000000,"To":0}},"Expressions":{"C":{"Math":"$A \u003e 500","Reduce":null,"Threshold":null}},"MissingSeriesEvalsToResolve":0,"Labels":null,"Record":null,"LoadErr":""}
+obs alerts: alerts=1 recording=0 runs=2 expectations=2 failed=1 cached=0 pruned=0 recorded_samples=0 pruned_log_events=0
+verify fast: compared=0 mismatches=0; verify skip: compared=0 mismatches=0; reused=0
+--- stderr

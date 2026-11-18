@@ -114,8 +114,8 @@ func (r *Report) Print(w io.Writer) {
 	}
 }
 
-// Summary is the one-line result.
-func (r *Report) Summary(cmd string) string {
+// Totals is the counts part of Summary: "7 queries (3 logs, 4 metrics), 0 failures, 0 warnings".
+func (r *Report) Totals() string {
 	kinds := make([]string, 0, len(r.Counts))
 	for k := range r.Counts {
 		kinds = append(kinds, k)
@@ -127,9 +127,14 @@ func (r *Report) Summary(cmd string) string {
 		parts = append(parts, fmt.Sprintf("%d %s", r.Counts[k], k))
 		total += r.Counts[k]
 	}
+	return fmt.Sprintf("%d queries (%s), %d failures, %d warnings", total, strings.Join(parts, ", "), r.Failures(), r.Warnings())
+}
+
+// Summary is the one-line result.
+func (r *Report) Summary(cmd string) string {
 	res := "ok"
 	if r.Failures() > 0 {
 		res = "FAILED"
 	}
-	return fmt.Sprintf("%s: %s: %d queries (%s), %d failures, %d warnings", cmd, res, total, strings.Join(parts, ", "), r.Failures(), r.Warnings())
+	return fmt.Sprintf("%s: %s: %s", cmd, res, r.Totals())
 }

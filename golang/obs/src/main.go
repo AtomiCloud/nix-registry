@@ -28,7 +28,11 @@ usage:
               [--workers n] [--steps steps.json] [--recorded recorded.json]
   obs assert --series FILE [--dir observability] [--pods n] [--unknown warn|fail|ignore]
   obs profile summarize|baseline|compare   (obs profile help)
-  obs check [--dir observability] [--pods n] [--landscapes n] [--contracts auto|none]   (also: the evaluator versions this obs embeds, against <dir>/obs.yaml)
+  obs check [--dir observability] [--pods n] [--landscapes n] [--names] [--event-rule auto|on|off] [--vl-settings victorialogs-settings.yaml] [--tempo-config tempo.yaml] [--contracts auto|none]
+              (limits, query rules and the evaluator versions against <dir>/obs.yaml: everything obs query --static does)
+  obs test  [--dir observability] [--seed seed.yaml] [--base unix] [--names] [--event-rule auto|on|off] [--vl-settings victorialogs-settings.yaml] [--tempo-config tempo.yaml]
+              [--contracts auto|none] [--workers n] [--out results.json] [--steps steps.json] [--recorded recorded.json]
+              (obs query --live + obs alerts + obs links, and every incident is caught by an alert)
   obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
   obs sandbox up [--dir observability] [--seed seed.yaml] [--project name] [--port-base n] [--runtime docker|podman] [--reseed]
   obs sandbox down|status [--dir observability] [--project name] [--runtime docker|podman]
@@ -77,6 +81,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runAssert(args[1:], stdout, stderr)
 	case "check":
 		return runCheck(args[1:], stdout, stderr)
+	case "test":
+		return runTest(args[1:], stdout, stderr)
 	case "gen":
 		return runGen(args[1:], stdout, stderr)
 	case "store":
@@ -180,16 +186,13 @@ func runQuery(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	cmd := "obs query --static"
-	rep := check.Static(set, o)
 	if *live {
 		cmd = "obs query --live"
-		lr, err := check.Live(set, o)
-		if err != nil {
-			fmt.Fprintf(stderr, "obs query --live: %v\n", err)
-			return 2
-		}
-		// A live run also applies the static rules: a query that does not parse cannot run.
-		rep.AppendLive(lr)
+	}
+	rep, err := queryReport(set, o, *live) // cmd_parts.go
+	if err != nil {
+		fmt.Fprintf(stderr, "obs query --live: %v\n", err)
+		return 2
 	}
 	rep.Print(stdout)
 	fmt.Fprintln(stdout, rep.Summary(cmd))
