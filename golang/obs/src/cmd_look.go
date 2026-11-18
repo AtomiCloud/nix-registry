@@ -28,6 +28,8 @@ func runLook(args []string, stdout, stderr io.Writer) (code int) {
 	f.register(fs)
 	base := fs.String("base", "origin/main", "git ref the changed dashboards are measured against (merge base, so edits and new files count)")
 	all := fs.Bool("all", false, "review every dashboard, not only the changed ones")
+	keep := fs.Bool("keep", false, "leave the sandbox running for a person after the calling agent reviews it")
+	seedBase := fs.Int64("seed-base", 0, "explicit seed start as unix seconds (historical replay); default places the latest incident over now")
 	checklist := fs.String("checklist", "docs/standards/grafana-dashboards/index.md", "the visual checklist (a markdown file with a \"Visual checklist\" bullet list)")
 	out := fs.String("out", "obs-look", "folder the screenshots are saved in (as written in the prompt)")
 	width := fs.Int("width", 1600, "viewport width in px")
@@ -64,10 +66,13 @@ func runLook(args []string, stdout, stderr io.Writer) (code int) {
 		if err != nil {
 			return nil, err
 		}
+		cfg.ApplyIncidents = true
+		cfg.LiveIncident = *seedBase == 0
+		cfg.SeedBase = *seedBase
 		return sandbox.Up(ctx, cfg)
 	}
 	plan := look.Setup(ctx, look.Options{
-		Dir: f.dir, SeedPath: f.seed, Base: *base, All: *all, Files: files, Checklist: *checklist,
+		Dir: f.dir, SeedPath: f.seed, Base: *base, All: *all, Keep: *keep, Files: files, Checklist: *checklist,
 		Out: *out, Width: *width, Height: *height,
 		// The cleanup command in the prompt names the project and runtime this run uses.
 		Project: projectName(f.project, f.dir), Runtime: runtimeName(f.runtime),

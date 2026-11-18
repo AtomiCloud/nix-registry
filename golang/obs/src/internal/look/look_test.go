@@ -362,3 +362,24 @@ func TestTraceAndProfilePanelsAreExpectedEmpty(t *testing.T) {
 		t.Errorf("prompt differs from %s (run go test ./internal/look -update to rewrite it)\n--- got ---\n%s", golden, got2)
 	}
 }
+
+func TestSeededPanelsIncidentsAndKeepPrompt(t *testing.T) {
+	dir, cl := project(t)
+	if err := os.WriteFile(filepath.Join(dir, "dashboards", "traces.json"), []byte(tracesDash), 0644); err != nil {
+		t.Fatal(err)
+	}
+	info := *testInfo
+	info.TracesSeeded, info.ProfilesSeeded = true, true
+	info.Incidents = []sandbox.IncidentInfo{{Name: "payment-spike", From: info.From + 60000, To: info.From + 120000, Fire: []string{"payment-errors"}, Quiet: []string{"latency"}}}
+	p := Setup(context.Background(), Options{Dir: dir, Checklist: cl, Keep: true, Files: []string{"dashboards/traces.json"}}, fakeUp(&info, nil))
+	for _, panel := range p.Dashboards[0].Panels {
+		if panel.ExpectedEmpty != "" {
+			t.Errorf("seeded panel still expected empty: %+v", panel)
+		}
+	}
+	for _, want := range []string{"payment-spike", "payment-errors", "latency", "--keep", "leaves the stack running"} {
+		if !strings.Contains(p.Prompt, want) {
+			t.Errorf("prompt lacks %s: %s", want, p.Prompt)
+		}
+	}
+}

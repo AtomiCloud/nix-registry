@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AtomiCloud/obs/internal/alerts"
 	"github.com/AtomiCloud/obs/internal/files"
 	"github.com/AtomiCloud/obs/internal/seed"
 )
@@ -23,11 +24,14 @@ const LabelKey = "obs.sandbox"
 
 // Config is one sandbox run.
 type Config struct {
-	Project  string // the label value; names derive from it
-	Dir      string // the observability folder (dashboards, seed)
-	SeedPath string // default <Dir>/seed.yaml
-	PortBase int    // 0: the components' own ports (3000, 8428, ...); else base+offset
-	Reseed   bool   // load the seed again even when a sandbox with a seed is already up
+	Project        string // the label value; names derive from it
+	Dir            string // the observability folder (dashboards, seed)
+	SeedPath       string // default <Dir>/seed.yaml
+	PortBase       int    // 0: the components' own ports (3000, 8428, ...); else base+offset
+	Reseed         bool   // load the seed again even when a sandbox with a seed is already up
+	ApplyIncidents bool   // obs look: apply incident changes and provision rules/markers
+	LiveIncident   bool   // default look: make the latest incident current
+	SeedBase       int64  // explicit seed start (unix seconds), 0: automatic
 	// Components are the images to run (see Resolve); nil runs the pins.
 	Components []Component
 	Timeout    time.Duration
@@ -40,6 +44,7 @@ type Config struct {
 	StateDir string
 	// HostURL overrides where obs reaches a component from the host (tests).
 	HostURL func(Component) string
+	dataset *seed.Dataset // current setup's exact snapshot, for the native-state forecast
 }
 
 // Info is what a running sandbox tells its users.
@@ -51,8 +56,17 @@ type Info struct {
 	From int64 `json:"from_ms"`
 	To   int64 `json:"to_ms"`
 	// Datasources maps a kind (metrics, logs, traces, profiles) to the Grafana datasource uids.
-	Datasources map[string][]string `json:"datasources"`
-	Reused      bool                `json:"reused"`
+	Datasources         map[string][]string `json:"datasources"`
+	Reused              bool                `json:"reused"`
+	Incidents           []IncidentInfo      `json:"incidents,omitempty"`
+	TracesSeeded        bool                `json:"traces_seeded,omitempty"`
+	ProfilesSeeded      bool                `json:"profiles_seeded,omitempty"`
+	IncidentSeed        bool                `json:"incident_seed,omitempty"`
+	LiveIncident        string              `json:"live_incident,omitempty"`
+	Replay              []ReplayTransition  `json:"alert_replay,omitempty"`
+	AlertStatePanels    map[string]int64    `json:"alert_state_panels,omitempty"`
+	AnnotatedDashboards []string            `json:"annotated_dashboards,omitempty"`
+	LiveRules           []NativeRuleWindow  `json:"live_rules,omitempty"`
 }
 
 var nameRe = regexp.MustCompile(`[^a-z0-9]+`)
@@ -219,10 +233,18 @@ storage:
     backend: local
     wal:
       path: /var/tempo/wal
+      ingestion_time_range_slack: 720h
     local:
       path: /var/tempo/blocks
 live_store:
+  wal:
+    path: /var/tempo/live-store
+    ingestion_time_range_slack: 720h
+  max_trace_idle: 1s
+  max_trace_live: 2s
   max_block_duration: 5m
+query_frontend:
+  query_end_cutoff: 0s
 `
 
 // mount is one named volume of a component.
@@ -249,6 +271,9 @@ func (c *Config) createArgs(k Component) []string {
 	a = append(a, c.labelArgs(k.Name)...)
 	a = append(a, "--network", Prefix(c.Project),
 		"-p", fmt.Sprintf("127.0.0.1:%d:%d", hostPort(c.PortBase, k), k.Port))
+	if k.Name == "tempo" {
+		a = append(a, "-p", fmt.Sprintf("127.0.0.1:%d:4318", hostPort(c.PortBase, otlpComponent)))
+	}
 	for _, v := range c.volumes(k) {
 		a = append(a, "-v", v.Name+":"+v.Path)
 	}
@@ -258,6 +283,7 @@ func (c *Config) createArgs(k Component) []string {
 			"GF_SECURITY_ADMIN_USER=admin", "GF_SECURITY_ADMIN_PASSWORD=admin",
 			"GF_AUTH_ANONYMOUS_ENABLED=true", "GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer",
 			"GF_ANALYTICS_REPORTING_ENABLED=false", "GF_ANALYTICS_CHECK_FOR_UPDATES=false",
+			"GF_FEATURE_TOGGLES_ENABLE=tempoAlerting",
 			"GF_INSTALL_PLUGINS=" + PluginID + " " + PluginVersion,
 		} {
 			a = append(a, "-e", e)
@@ -381,17 +407,91 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 	if err := Provision(ctx, cfg.HTTP, info.Grafana, dss); err != nil {
 		return nil, err
 	}
-	n, err := ImportDashboards(ctx, cfg.HTTP, info.Grafana, set)
+	dashProject := ""
+	if cfg.ApplyIncidents {
+		dashProject = cfg.Project
+	}
+	n, err := importDashboards(ctx, cfg.HTTP, info.Grafana, set, dashProject)
 	if err != nil {
 		return nil, err
 	}
 	fmt.Fprintf(cfg.Out, "loaded %d dashboard(s) into Grafana\n", n)
 
-	if st != nil && !created && !cfg.Reseed && st.From != 0 {
+	seedReused := st != nil && !created && !cfg.Reseed && st.From != 0
+	if seedReused && cfg.ApplyIncidents && !st.IncidentSeed {
+		return nil, fmt.Errorf("sandbox contains a baseline seed from sandbox up; run `obs sandbox down --project %s` then `obs look --keep` to apply incidents without mixing datasets", cfg.Project)
+	}
+	if seedReused {
 		info.From, info.To = st.From, st.To
+		info.Incidents, info.IncidentSeed = st.Incidents, st.IncidentSeed
+		info.LiveIncident, info.Replay = st.LiveIncident, st.Replay
+		info.AnnotatedDashboards = append([]string(nil), st.AnnotatedDashboards...)
+		info.LiveRules = st.LiveRules
+		if cfg.SeedBase != 0 && st.From != cfg.SeedBase*1000 {
+			return nil, fmt.Errorf("sandbox has another seed base; run `obs sandbox down --project %s` first", cfg.Project)
+		}
+		for _, inc := range info.Incidents {
+			if inc.Name == info.LiveIncident && cfg.Now().UnixMilli() >= inc.To {
+				info.LiveIncident = ""
+			}
+		}
+		info.TracesSeeded, info.ProfilesSeeded = st.TracesSeeded, st.ProfilesSeeded
 		fmt.Fprintf(cfg.Out, "seed already loaded (kept; --reseed loads it again)\n")
 	} else if err := loadSeed(ctx, &cfg, info); err != nil {
 		return nil, err
+	}
+	if cfg.ApplyIncidents {
+		if err := ProvisionAlerts(ctx, cfg.HTTP, info.Grafana, cfg.Project, set); err != nil {
+			return nil, err
+		}
+		if cfg.dataset != nil && info.LiveIncident != "" && len(set.Rules) > 0 {
+			p := cfg.SeedPath
+			if p == "" {
+				p = filepath.Join(cfg.Dir, "seed.yaml")
+			}
+			for _, inc := range info.Incidents {
+				if inc.Name == info.LiveIncident {
+					info.LiveRules, err = nativeForecast(cfg.Dir, p, set, cfg.dataset, cfg.Now().UTC().Truncate(time.Second), inc.Fire)
+					if err != nil {
+						return nil, fmt.Errorf("live alert forecast: %w", err)
+					}
+				}
+			}
+		}
+		var uids []string
+		info.AlertStatePanels = map[string]int64{}
+		for _, d := range set.Dashboards {
+			b, err := os.ReadFile(filepath.Join(set.Dir, filepath.FromSlash(d.File)))
+			if err != nil {
+				return nil, err
+			}
+			var raw struct{ UID string }
+			if err := json.Unmarshal(b, &raw); err != nil {
+				return nil, err
+			}
+			uids = append(uids, DashboardUID(d.File, raw.UID))
+			if len(set.Rules) > 0 {
+				var m map[string]any
+				_ = json.Unmarshal(b, &m)
+				info.AlertStatePanels[DashboardUID(d.File, raw.UID)] = addAlertStatePanel(m, cfg.Project)
+			}
+		}
+		annotated := map[string]bool{}
+		for _, uid := range info.AnnotatedDashboards {
+			annotated[uid] = true
+		}
+		for _, uid := range uids {
+			if annotated[uid] {
+				continue
+			}
+			if err := AnnotateIncidents(ctx, cfg.HTTP, info.Grafana, []string{uid}, info.Incidents); err != nil {
+				return nil, err
+			}
+			if err := AnnotateReplay(ctx, cfg.HTTP, info.Grafana, []string{uid}, info.Replay); err != nil {
+				return nil, err
+			}
+			info.AnnotatedDashboards = append(info.AnnotatedDashboards, uid)
+		}
 	}
 	writeState(cfg, info)
 	return info, nil
@@ -410,20 +510,79 @@ func loadSeed(ctx context.Context, cfg *Config, info *Info) error {
 	if err != nil {
 		return err
 	}
-	// The time line ends now (rounded down to the minute), so a dashboard's last-hours view has data.
-	to := cfg.Now().UTC().Truncate(time.Minute)
-	from := to.Add(-sd.Duration())
-	ds, err := seed.Build(sd, from)
+	var incidents []seed.Incident
+	if cfg.ApplyIncidents {
+		incidents, err = seed.LoadIncidents(sd, cfg.Dir)
+		if err != nil {
+			return err
+		}
+	}
+	set, err := files.Load(cfg.Dir)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(cfg.Out, "loading the seed (%s of data)\n", sd.Length)
+	from, to, live, err := seedWindow(sd, incidents, set, cfg.Now(), cfg.SeedBase, cfg.LiveIncident)
+	if err != nil {
+		return err
+	}
+	info.LiveIncident = live
+	for _, incident := range incidents {
+		at, _ := time.ParseDuration(incident.Window.Start)
+		duration, _ := time.ParseDuration(incident.Window.Duration)
+		info.Incidents = append(info.Incidents, IncidentInfo{Name: incident.Name, Story: incident.Story,
+			From: from.Add(at).UnixMilli(), To: from.Add(at + duration).UnixMilli(), Fire: incident.Expect.Fire, Quiet: incident.Expect.Quiet})
+	}
+	ds, err := seed.BuildIncidents(sd, from, incidents)
+	if err != nil {
+		return err
+	}
+	clipDataset(ds, to)
+	if cfg.ApplyIncidents && len(set.Rules) > 0 {
+		runs, recorded, err := alerts.ReplayDataset(cfg.Dir, p, ds)
+		if err != nil {
+			return fmt.Errorf("alert replay: %w", err)
+		}
+		for j, sr := range recorded {
+			ds.Series[fmt.Sprintf("obs-look-recording/%d", j)] = sr
+		}
+		for _, run := range runs {
+			if len(run.Steps) > 0 {
+				var instances []string
+				for instance := range run.Steps[0].States {
+					instances = append(instances, instance)
+				}
+				sort.Strings(instances)
+				for _, instance := range instances {
+					info.Replay = append(info.Replay, ReplayTransition{Alert: run.Alert, At: run.Steps[0].T, To: run.Steps[0].States[instance]})
+				}
+			}
+			for _, tr := range run.Transitions {
+				info.Replay = append(info.Replay, ReplayTransition{Alert: run.Alert, At: tr.T, From: tr.From, To: tr.To})
+			}
+		}
+	}
+	if live != "" {
+		fmt.Fprintf(cfg.Out, "loading the seed prefix (%s of data; %s is live)\n", to.Sub(from), live)
+	} else {
+		fmt.Fprintf(cfg.Out, "loading the seed (%s of data)\n", sd.Length)
+	}
 	if err := LoadSeed(ctx, cfg.HTTP, info.URLs["vm"], info.URLs["vl"], ds); err != nil {
 		return err
 	}
+	if err := LoadTraces(ctx, cfg.HTTP, cfg.HostURL(otlpComponent), ds); err != nil {
+		return fmt.Errorf("loading traces: %w", err)
+	}
+	if err := LoadProfiles(ctx, cfg.HTTP, info.URLs["pyroscope"], sd, ds); err != nil {
+		return fmt.Errorf("loading profiles: %w", err)
+	}
+	info.TracesSeeded, info.ProfilesSeeded = len(ds.Traces) > 0, true
+	info.IncidentSeed = cfg.ApplyIncidents
 	info.From, info.To = from.UnixMilli(), to.UnixMilli()
+	cfg.dataset = ds
 	return nil
 }
+
+var otlpComponent = Component{Name: "otlp", Port: 4318, Offset: 5}
 
 // checkDeclaredVolumes refuses an image that declares a VOLUME the pin list does not know:
 // that path would become an anonymous volume no label finds. It guards a pin bump.

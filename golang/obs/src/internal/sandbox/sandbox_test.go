@@ -227,6 +227,12 @@ func newStackServer(t *testing.T) *stackServer {
 	ok := func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, "OK") }
 	mux.HandleFunc("/health", ok)
 	mux.HandleFunc("/ready", ok)
+	mux.HandleFunc("/ingest", ok)
+	mux.HandleFunc("/api/folders", ok)
+	mux.HandleFunc("/api/folders/", ok)
+	mux.HandleFunc("/api/v1/provisioning/", ok)
+	mux.HandleFunc("/api/annotations", ok)
+	mux.HandleFunc("/v1/traces", func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, `{}`) })
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, `{"version":%q}`, s.versions["grafana"])
 	})
