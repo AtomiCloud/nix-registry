@@ -17,21 +17,26 @@ import (
 )
 
 func post(ctx context.Context, hc *http.Client, u, ctype string, body []byte) error {
+	_, err := postResult(ctx, hc, u, ctype, body)
+	return err
+}
+
+func postResult(ctx context.Context, hc *http.Client, u, ctype string, body []byte) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", ctype)
 	resp, err := hc.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("POST %s: HTTP %d: %s", u, resp.StatusCode, strings.TrimSpace(string(b)))
+		return nil, fmt.Errorf("POST %s: HTTP %d: %s", u, resp.StatusCode, strings.TrimSpace(string(b)))
 	}
-	return nil
+	return b, nil
 }
 
 // LoadSeed pushes the seed's samples to VictoriaMetrics (/api/v1/import) and its log

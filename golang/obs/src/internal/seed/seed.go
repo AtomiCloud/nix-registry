@@ -31,8 +31,9 @@ type Seed struct {
 }
 
 type Traffic struct {
-	Requests string `yaml:"requests"` // "3/s"
-	Shape    string `yaml:"shape"`    // flat | daily_wave
+	Requests string         `yaml:"requests"` // "3/s"
+	Shape    string         `yaml:"shape"`    // flat | daily_wave
+	Settings *ShapeSettings `yaml:"settings,omitempty"`
 }
 
 type MetricDef struct {
@@ -79,6 +80,13 @@ func Load(path string) (*Seed, error) {
 	}
 	if err := s.validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if s.Traffic.Settings != nil {
+		if err := s.Traffic.Settings.validate(s.Duration()); err != nil {
+			var root yaml.Node
+			_ = yaml.Unmarshal(b, &root)
+			return nil, fmt.Errorf("%s:%d: traffic.settings.%w", path, shapeErrorLine(&root, err), err)
+		}
 	}
 	return &s, nil
 }

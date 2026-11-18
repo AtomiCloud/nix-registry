@@ -74,6 +74,13 @@ func render(p *Plan) string {
 	for _, x := range p.Warnings {
 		w("  note: %s", x)
 	}
+	if p.Sandbox.LiveIncident != "" {
+		w("  live incident: %s; inspect Grafana's native current Firing/Normal state in Alerting. The seed is a fixed snapshot: current state can change as it ages.", p.Sandbox.LiveIncident)
+	} else if len(p.Sandbox.Incidents) > 0 {
+		w("  no live incident: this is a historical seed (--seed-base or a reused seed). Grafana's native state is current; historical annotations are replay (computed by obs).")
+	} else {
+		w("  no incidents in this seed: Grafana's native state is current; no incident Firing state is expected.")
+	}
 	w("")
 	w("STEPS")
 	w("  1. For each dashboard below, open its URL in a browser with a viewport of %d x %d px.", p.Viewport.Width, p.Viewport.Height)
@@ -86,13 +93,46 @@ func render(p *Plan) string {
 	w("     If the pull request already has a comment that starts with %s, edit that one instead of adding a second.", marker)
 	w("     GitHub has no image-upload API: paste or drag each PNG into the comment box in the browser (GitHub uploads it and inserts the link),")
 	w("     or upload it where the repo keeps assets and link it. If you cannot attach images, say so in the comment and give the file names.")
-	w("  4. When done, `%s` stops the stack (only the containers, volumes and network labelled obs.sandbox=%s).", cleanup(p), p.Sandbox.Project)
+	if p.Keep {
+		w("  4. --keep leaves the stack running for a person after review. When they are done, `%s` stops it.", cleanup(p))
+	} else {
+		w("  4. When done, `%s` stops the stack (only the containers, volumes and network labelled obs.sandbox=%s).", cleanup(p), p.Sandbox.Project)
+	}
 	w("")
 	w("DASHBOARDS")
 	for i, d := range p.Dashboards {
 		w("  %d. %s  (%s)", i+1, d.Title, d.File)
 		w("     open: %s", d.URL)
 		w("     save: %s", d.Shot)
+		for _, incident := range p.Sandbox.Incidents {
+			w("     incident marker to see: %s (%s to %s)", incident.Name, time.UnixMilli(incident.From).UTC().Format(time.RFC3339), time.UnixMilli(incident.To).UTC().Format(time.RFC3339))
+			if len(incident.Fire) > 0 {
+				w("     expected firing inside that window: %s", strings.Join(incident.Fire, ", "))
+			}
+			if len(incident.Quiet) > 0 {
+				w("     expected normal for that incident: %s", strings.Join(incident.Quiet, ", "))
+			}
+			if incident.Name == p.Sandbox.LiveIncident {
+				w("     LIVE: inspect Grafana's native current alert state for this incident; wait through each rule's pending duration and evaluation interval.")
+				for _, rule := range p.Sandbox.LiveRules {
+					provisioned := time.UnixMilli(rule.ProvisionedAt).UTC().Format(time.RFC3339)
+					if rule.Expected == "Normal" {
+						w("     live rule %s: expected Normal; provisioned %s (for=%s, interval=%s).", rule.UID, provisioned, rule.For, rule.Interval)
+						if !rule.Supported {
+							w("     snapshot prediction disagrees with Normal for %s; inspect the native state and record a finding.", rule.UID)
+						}
+						continue
+					}
+					if rule.Supported {
+						w("     live rule %s: provisioned %s; expected Firing by %s (= provisioned + for %s + interval %s). Snapshot predicted to hold Firing until %s; screenshot in that window (prediction computed by obs, verify Grafana).", rule.UID, provisioned, time.UnixMilli(rule.FiringAt).UTC().Format(time.RFC3339), rule.For, rule.Interval, time.UnixMilli(rule.HoldUntil).UTC().Format(time.RFC3339))
+					} else {
+						w("     live rule %s: snapshot does not support the expected Firing window (for=%s, interval=%s). Record a finding; do not claim native Firing from replay annotations.", rule.UID, rule.For, rule.Interval)
+					}
+				}
+			} else {
+				w("     REPLAY: state-change annotations say 'replay (computed by obs)'; they come from obs's existing Grafana state-machine port, not Grafana's own history.")
+			}
+		}
 		if len(d.Vars) > 0 {
 			var vs []string
 			for _, v := range d.Vars {
@@ -109,7 +149,7 @@ func render(p *Plan) string {
 				}
 			}
 			if len(empty) > 0 {
-				w("     expected empty in the sandbox; mark %s n/a for these panels (no trace or profile seed is loaded): %s", noDataItem(p.Checklist), strings.Join(empty, "; "))
+				w("     expected empty in the sandbox; mark %s n/a for these panels (no seed for the named signal was loaded): %s", noDataItem(p.Checklist), strings.Join(empty, "; "))
 				w("     judge %s on the other panels, and judge every other item on these panels too", noDataItem(p.Checklist))
 			}
 			w("     panels (open one only when the board shot is not enough):")

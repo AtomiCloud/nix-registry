@@ -161,6 +161,16 @@ func Build(s *Seed, start time.Time) (*Dataset, error) {
 // BuildIncident uses the same deterministic stream as Build, changing only the
 // matching series inside the incident's half-open window.
 func BuildIncident(s *Seed, start time.Time, incident *Incident) (*Dataset, error) {
+	var incidents []Incident
+	if incident != nil {
+		incidents = []Incident{*incident}
+	}
+	return BuildIncidents(s, start, incidents)
+}
+
+// BuildIncidents applies all incident changes on one timeline. Overlapping changes
+// compose in file order; a single incident is identical to BuildIncident.
+func BuildIncidents(s *Seed, start time.Time, incidents []Incident) (*Dataset, error) {
 	traceDefs, err := s.traceDefs()
 	if err != nil {
 		return nil, err
@@ -291,8 +301,12 @@ func BuildIncident(s *Seed, start time.Time, incident *Incident) (*Dataset, erro
 	stream := getStream()
 	startMs := start.UnixMilli()
 	seconds := int64(length / time.Second)
+	shapeRun := newShapeRun(s, start)
 	next := sampleOffset
 	emit := func(at time.Duration) {
+		if shapeRun.gap(at) {
+			return
+		}
 		ts := startMs + at.Milliseconds()
 		for _, a := range accs {
 			var vals []float64
@@ -317,26 +331,35 @@ func BuildIncident(s *Seed, start time.Time, incident *Incident) (*Dataset, erro
 		if s.Traffic.Shape == "daily_wave" {
 			shape = 1 + 0.25*math.Sin(2*math.Pi*float64(sec)/86400.0)
 		}
+		currentRate := reqRate * shape
+		if shapeRun != nil {
+			currentRate = shapeRun.rate(sec)
+		}
 		for _, a := range accs {
 			g := a.g
 			r := newRnd(s.RandomSeed, g.k, sec)
-			rate, latencyX := reqRate*shape*g.share, 1.0
-			if incident != nil && incident.Contains(at) {
-				for _, c := range incident.Change {
-					if c.Metric != g.metric || !matches(g.where, c.Where) {
-						continue
-					}
-					if c.ShareX != nil {
-						rate *= *c.ShareX
-					}
-					if c.Rate != "" {
-						extra, _ := ParseRate(c.Rate)
-						rate += extra
-					}
-					if c.LatencyX != 0 {
-						latencyX *= c.LatencyX
+			rate, latencyX := currentRate*g.share, 1.0
+			for _, incident := range incidents {
+				if incident.Contains(at) {
+					for _, c := range incident.Change {
+						if c.Metric != g.metric || !matches(g.where, c.Where) {
+							continue
+						}
+						if c.ShareX != nil {
+							rate *= *c.ShareX
+						}
+						if c.Rate != "" {
+							extra, _ := ParseRate(c.Rate)
+							rate += extra
+						}
+						if c.LatencyX != 0 {
+							latencyX *= c.LatencyX
+						}
 					}
 				}
+			}
+			if shapeRun.gap(at) {
+				continue
 			}
 			n := r.poisson(rate)
 			for e := 0; e < n; e++ {
