@@ -237,7 +237,8 @@ dashboard or alert written to the standard returns rows on an obs seed and on th
 
 - The underscore form of a dotted VictoriaMetrics label (`durian_cloud_service`, `payment_provider`) selects
   nothing. `obs query --static` fails it with `contract-undeclared-label` and names the dotted spelling to write;
-  `--live` fails it with `no-rows` and the same hint.
+  `--live` fails it with `label-spelling` (with a contract, the same `contract-undeclared-label` finding, reported
+  once); a query form the label check does not model still fails `no-rows` with a "stored as" hint.
 - **Scraped (non-OTLP) metrics** reach VictoriaMetrics as `durian_cloud_*` (Alloy drops a relabel rule whose
   `target_label` has dots), and a vminsert `-relabelConfig` `labelmap` rule (landscape, platform, service and module only: see below;
   `replacement: durian.cloud.$1`) turns them back into `durian.cloud.*`. `obs scrape` takes the underscore input
@@ -589,7 +590,7 @@ the message:
 | `obs query --static`, a selector  | `[contract-undeclared-label] label "durian_cloud_service" ... write "durian.cloud.service"` | `{"durian.cloud.service"="checkout"}`              |
 | `obs query --static`, a grouping  | the same finding for the `by (...)` / `on (...)` label                                     | `by ("durian.cloud.service")`                      |
 | `obs query --static`, a variable  | `variable $provider: [contract-undeclared-label] label_values reads label "payment_provider"` | `label_values(checkout_charges_total, payment.provider)` |
-| `obs query --live` (any seed)     | `[label-spelling] VictoriaMetrics keeps a label's dots: label "x_y" is stored as "x.y"`      | write the dotted name, quoted in a selector        |
+| `obs query --live`                | with a contract: the same `[contract-undeclared-label]` finding, once; with no contract: `[label-spelling] VictoriaMetrics keeps a label's dots: label "x_y" is stored as "x.y"` | write the dotted name, quoted in a selector        |
 | TraceQL attribute                 | `[traceql-attribute] undeclared attribute span.payment_provider (Tempo keeps the dots: write "payment.provider")` | `span.payment.provider`                            |
 
 - A pod key on a per_pod or platform metric is a label too: `k8s_pod_name` fails the same way, naming `k8s.pod.name`.
@@ -599,8 +600,9 @@ the message:
   template rules; obs does not render templates.)
 - **Trace panels now run under Tempo's query limits, even with no `obs.yaml`.** `obs query --live` applies
   Tempo 3.1.1's defaults (30 s end cutoff, 24 h maximum duration, 10000 intervals) or the `thresholds.traces`
-  values in `obs.yaml`. A TraceQL metrics panel wider than 24 h, or ending inside the last 30 s, now fails as it
-  would in Grafana against real Tempo; raise the limit in `obs.yaml` to match the deployed Tempo.
+  values in `obs.yaml`. A TraceQL metrics panel longer than the maximum duration or with more intervals than the
+  limit now fails as it would in Grafana against real Tempo; a panel ending inside the end cutoff is not a failure
+  (the end is clamped, as Tempo does). Raise the limit in `obs.yaml` to match the deployed Tempo.
 - **An old sandbox must be recreated.** A sandbox made before this release has a VictoriaMetrics without the
   relabel config; `obs sandbox up` refuses it, naming `-relabelConfig`. Run `obs sandbox down` and then
   `obs sandbox up`.
