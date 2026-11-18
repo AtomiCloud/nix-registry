@@ -145,7 +145,7 @@ func (c *Client) TempoRange(ctx context.Context, base, q string, start, end time
 	var r struct {
 		Series []struct {
 			Samples []struct {
-				Value float64 `json:"value"`
+				Value *float64 `json:"value"` // null: a step with no value, which is not a zero
 			} `json:"samples"`
 		} `json:"series"`
 	}
@@ -155,8 +155,8 @@ func (c *Client) TempoRange(ctx context.Context, base, q string, start, end time
 	var out []float64
 	for _, s := range r.Series {
 		for _, x := range s.Samples {
-			if !math.IsNaN(x.Value) {
-				out = append(out, x.Value)
+			if x.Value != nil && !math.IsNaN(*x.Value) {
+				out = append(out, *x.Value)
 			}
 		}
 	}

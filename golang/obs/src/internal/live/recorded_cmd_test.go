@@ -39,8 +39,8 @@ func TestRecordedUsage(t *testing.T) {
 	assertReadOnly(t, h.rec)
 	// 2 series (outcome ok and error) in landscape "fixture", budget 4, worst case 2. The sandbox
 	// seed writes a point every 15 s; the contract's 30 s interval allows 4 points/min for the
-	// worst case (8 for the budget): the recorded 38 points in 5 minutes are 7.6/min, above the
-	// worst case and inside the budget.
+	// worst case (8 for the budget): the recorded 40 points in 5 minutes are 8/min, above the
+	// worst case and at the budget (not over it).
 	if len(res.Metrics) != 1 {
 		t.Fatalf("rows: %+v", res.Metrics)
 	}
@@ -48,7 +48,7 @@ func TestRecordedUsage(t *testing.T) {
 	if m.Metric != "checkout.requests" || m.Series != 2 || m.Worst != 2 || m.Budget != 4 || len(m.Landscapes) != 1 || m.Landscapes[0].Landscape != "fixture" {
 		t.Fatalf("%+v", m)
 	}
-	near(t, "points/min", m.DPM, 7.6, 1e-9)
+	near(t, "points/min", m.DPM, 8, 1e-9)
 	if m.WorstDPM != 4 || m.BudgetDPM != 8 || m.Status != StatusAboveWorst || !m.DPMOver {
 		t.Fatalf("both thresholds and the status: %+v", m)
 	}
@@ -60,12 +60,12 @@ func TestRecordedUsage(t *testing.T) {
 	near(t, "lines/min", l.LinesPerMin, 59.8, 1e-9)
 	near(t, "bytes/min", l.BytesPerMin, 897, 1e-9)
 	near(t, "lines ratio", l.LinesRatio, 59.8/60, 1e-9)
-	if !l.Available || !l.Compared || l.Streams != 1 || l.StreamsOver {
+	if !l.Available || !l.Compared || l.Streams != 1 || l.StreamsOver || len(l.Landscapes) != 1 || l.Landscapes[0].Landscape != "fixture" {
 		t.Fatalf("%+v", l)
 	}
-	// traces: Tempo's TraceQL metrics answered for the service: the mean of six one-minute rates x 60
+	// traces: Tempo's TraceQL metrics answered for the service: the mean of the five one-minute rates that have a value (the first step is null) x 60
 	tr := res.Traces
-	near(t, "spans/min", tr.SpansPerMin, (0.43333333333333335+2.5+2.5666666666666664+2.966666666666667+6.366666666666666+6.6)/6*60, 1e-9)
+	near(t, "spans/min", tr.SpansPerMin, (2.433333333333333+2.2666666666666666+2.433333333333333+6+6.2)/5*60, 1e-9)
 	if !tr.SpansAvailable || tr.SpansSource != "tempo metrics" || tr.BytesAvailable || tr.BytesPerMin != 0 {
 		t.Fatalf("%+v", tr)
 	}
@@ -166,7 +166,7 @@ func TestRecordedUsageAllServices(t *testing.T) {
 		t.Fatalf("%+v", res.Logs)
 	}
 	tr := res.Traces
-	near(t, "spans/min", tr.SpansPerMin, (2.5+2.5666666666666664+2.966666666666667+6.366666666666666+6.6+2.2333333333333334)/6*60, 1e-9)
+	near(t, "spans/min", tr.SpansPerMin, (2.433333333333333+2.2666666666666666+2.433333333333333+6+6.2)/5*60, 1e-9)
 	if !tr.SpansAvailable || tr.SpansRatio != 0 || tr.BytesAvailable || !strings.Contains(tr.BytesNote, "no tempo_distributor_bytes_received_total") {
 		t.Fatalf("Tempo's own counters are not in the sandbox's VictoriaMetrics: %+v", tr)
 	}

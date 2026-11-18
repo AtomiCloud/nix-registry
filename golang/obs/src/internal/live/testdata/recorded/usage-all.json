@@ -1,12 +1,12 @@
 {
   "scenario": "usage-all",
-  "now_unix": 1795033039,
+  "now_unix": 1795034631,
   "sandbox": "obs look --keep on tests/fixtures/live-recorded, sandbox livesrec, port base 24000, obs dev built from origin/obs-regroup-look 3f87272",
   "exchanges": [
     {
       "method": "GET",
       "path": "/api/metrics/query_range",
-      "query": "end=1795033039\u0026q=%7B+%7D+%7C+rate%28%29\u0026start=1795032739\u0026step=60s",
+      "query": "end=1795034631\u0026q=%7B+%7D+%7C+rate%28%29\u0026start=1795034331\u0026step=60s",
       "status": 200,
       "json": {
         "series": [
@@ -21,31 +21,42 @@
             ],
             "samples": [
               {
-                "timestampMs": "1795032720000",
-                "value": 2.5
+                "timestampMs": "1795034280000"
               },
               {
-                "timestampMs": "1795032780000",
-                "value": 2.5666666666666664
+                "timestampMs": "1795034340000",
+                "value": 2.433333333333333
               },
               {
-                "timestampMs": "1795032840000",
-                "value": 2.966666666666667
+                "timestampMs": "1795034400000",
+                "value": 2.2666666666666666
               },
               {
-                "timestampMs": "1795032900000",
-                "value": 6.366666666666666
+                "timestampMs": "1795034460000",
+                "value": 2.433333333333333
               },
               {
-                "timestampMs": "1795032960000",
-                "value": 6.6
+                "timestampMs": "1795034520000",
+                "value": 6
               },
               {
-                "timestampMs": "1795033020000",
-                "value": 2.2333333333333334
+                "timestampMs": "1795034580000",
+                "value": 6.2
               }
             ],
             "exemplars": [
+              {
+                "labels": [
+                  {
+                    "key": "trace:id",
+                    "value": {
+                      "stringValue": "2e84170cd84ec23ae30866a06b113ce"
+                    }
+                  }
+                ],
+                "value": 2.433333333333333,
+                "timestampMs": "1795034340000"
+              },
               {
                 "labels": [
                   {
@@ -55,20 +66,8 @@
                     }
                   }
                 ],
-                "value": 2.5,
-                "timestampMs": "1795032720000"
-              },
-              {
-                "labels": [
-                  {
-                    "key": "trace:id",
-                    "value": {
-                      "stringValue": "ba9a68231d218d383f0812600cbd1b6"
-                    }
-                  }
-                ],
-                "value": 2.5,
-                "timestampMs": "1795032720000"
+                "value": 2.433333333333333,
+                "timestampMs": "1795034340000"
               },
               {
                 "labels": [
@@ -79,8 +78,8 @@
                     }
                   }
                 ],
-                "value": 2.5666666666666664,
-                "timestampMs": "1795032780000"
+                "value": 2.2666666666666666,
+                "timestampMs": "1795034400000"
               },
               {
                 "labels": [
@@ -91,32 +90,32 @@
                     }
                   }
                 ],
-                "value": 2.5666666666666664,
-                "timestampMs": "1795032780000"
+                "value": 2.2666666666666666,
+                "timestampMs": "1795034400000"
               },
               {
                 "labels": [
                   {
                     "key": "trace:id",
                     "value": {
-                      "stringValue": "3190157d7221af2d64779520826628e"
+                      "stringValue": "4642698b84f4b0e1e7ea3ac3a18009e"
                     }
                   }
                 ],
-                "value": 2.966666666666667,
-                "timestampMs": "1795032840000"
+                "value": 2.433333333333333,
+                "timestampMs": "1795034460000"
               },
               {
                 "labels": [
                   {
                     "key": "trace:id",
                     "value": {
-                      "stringValue": "3c216c6bfdf7ccb14ba5d0f511793a6"
+                      "stringValue": "e5cd7871e9e6911ef714a6e26eb3072"
                     }
                   }
                 ],
-                "value": 2.966666666666667,
-                "timestampMs": "1795032840000"
+                "value": 2.433333333333333,
+                "timestampMs": "1795034460000"
               },
               {
                 "labels": [
@@ -127,8 +126,20 @@
                     }
                   }
                 ],
-                "value": 6.366666666666666,
-                "timestampMs": "1795032900000"
+                "value": 6,
+                "timestampMs": "1795034520000"
+              },
+              {
+                "labels": [
+                  {
+                    "key": "trace:id",
+                    "value": {
+                      "stringValue": "3190157d7221af2d64779520826628e"
+                    }
+                  }
+                ],
+                "value": 6,
+                "timestampMs": "1795034520000"
               },
               {
                 "labels": [
@@ -139,8 +150,8 @@
                     }
                   }
                 ],
-                "value": 6.366666666666666,
-                "timestampMs": "1795032900000"
+                "value": 6.2,
+                "timestampMs": "1795034580000"
               },
               {
                 "labels": [
@@ -151,50 +162,14 @@
                     }
                   }
                 ],
-                "value": 6.6,
-                "timestampMs": "1795032960000"
-              },
-              {
-                "labels": [
-                  {
-                    "key": "trace:id",
-                    "value": {
-                      "stringValue": "39088834bd9864adcc92c2e12f1dd1b"
-                    }
-                  }
-                ],
-                "value": 6.6,
-                "timestampMs": "1795032960000"
-              },
-              {
-                "labels": [
-                  {
-                    "key": "trace:id",
-                    "value": {
-                      "stringValue": "1d814f21d9e6a36baea7d4d2a1caafe"
-                    }
-                  }
-                ],
-                "value": 2.2333333333333334,
-                "timestampMs": "1795033020000"
-              },
-              {
-                "labels": [
-                  {
-                    "key": "trace:id",
-                    "value": {
-                      "stringValue": "2e0a124663e39d0dbd79599f1b8daa1"
-                    }
-                  }
-                ],
-                "value": 2.2333333333333334,
-                "timestampMs": "1795033020000"
+                "value": 6.2,
+                "timestampMs": "1795034580000"
               }
             ]
           }
         ],
         "metrics": {
-          "inspectedBytes": "33940",
+          "inspectedBytes": "33903",
           "completedJobs": 1,
           "totalJobs": 1
         },
@@ -204,7 +179,7 @@
     {
       "method": "GET",
       "path": "/api/v1/query",
-      "query": "query=sum%28rate%28tempo_distributor_bytes_received_total%5B300s%5D%29%29\u0026time=1795033039",
+      "query": "query=sum%28rate%28tempo_distributor_bytes_received_total%5B300s%5D%29%29\u0026time=1795034631",
       "status": 200,
       "json": {
         "status": "success",
@@ -221,7 +196,7 @@
     {
       "method": "GET",
       "path": "/api/v1/query",
-      "query": "query=sum+by+%28%22durian.cloud.landscape%22%29+%28count_over_time%28%7B__name__%3D%22checkout_requests_total%22%7D%5B300s%5D%29%29\u0026time=1795033039",
+      "query": "query=sum+by+%28%22durian.cloud.landscape%22%29+%28count_over_time%28%7B__name__%3D%22checkout_requests_total%22%7D%5B300s%5D%29%29\u0026time=1795034631",
       "status": 200,
       "json": {
         "status": "success",
@@ -232,7 +207,7 @@
               "metric": {
                 "durian.cloud.landscape": "fixture"
               },
-              "value": [1795033039, "36"]
+              "value": [1795034631, "40"]
             }
           ]
         },
@@ -245,7 +220,7 @@
     {
       "method": "GET",
       "path": "/api/v1/series",
-      "query": "end=1795033039\u0026match%5B%5D=%7B__name__%3D~%22.%2B%22%7D\u0026start=1795032739",
+      "query": "end=1795034631\u0026match%5B%5D=%7B__name__%3D~%22.%2B%22%7D\u0026start=1795034331",
       "status": 200,
       "json": {
         "status": "success",
@@ -272,7 +247,7 @@
     {
       "method": "GET",
       "path": "/select/logsql/stats_query",
-      "query": "query=_time%3A300s+%7C+stats+count%28%29+as+lines%2C+sum_len%28_msg%29+as+msg_bytes%2C+count_uniq%28_stream_id%29+as+streams\u0026time=1795033039",
+      "query": "query=_time%3A300s+%7C+stats+by+%28%22durian.cloud.landscape%22%29+count%28%29+as+lines%2C+sum_len%28_msg%29+as+msg_bytes%2C+count_uniq%28_stream_id%29+as+streams\u0026time=1795034631",
       "status": 200,
       "json": {
         "status": "success",
@@ -281,21 +256,24 @@
           "result": [
             {
               "metric": {
-                "__name__": "lines"
+                "__name__": "lines",
+                "durian.cloud.landscape": "fixture"
               },
-              "value": [1795033039, "299"]
+              "value": [1795034631, "299"]
             },
             {
               "metric": {
-                "__name__": "msg_bytes"
+                "__name__": "msg_bytes",
+                "durian.cloud.landscape": "fixture"
               },
-              "value": [1795033039, "4485"]
+              "value": [1795034631, "4485"]
             },
             {
               "metric": {
-                "__name__": "streams"
+                "__name__": "streams",
+                "durian.cloud.landscape": "fixture"
               },
-              "value": [1795033039, "1"]
+              "value": [1795034631, "1"]
             }
           ]
         }

@@ -65,7 +65,8 @@ type fakeStores struct {
 	dpm     map[string]map[string]float64 // stored name -> landscape -> points per minute
 	dpmFail map[string]bool               // stored name -> the query answers an error
 	vlStat  map[string]float64
-	tempo   []float64 // nil: the metrics endpoint answers 404
+	vlLand  map[string]map[string]float64 // landscape -> lines / msg_bytes / streams
+	tempo   []float64                     // nil: the metrics endpoint answers 404
 	self    map[string]float64
 	matches []string // every match[] received
 }
@@ -164,7 +165,21 @@ func (f *fakeStores) serve(w http.ResponseWriter, r *http.Request) {
 		}
 		w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[]}}`))
 	case r.URL.Path == "/select/logsql/stats_query":
-		w.Write([]byte(vector(f.vlStat, "__name__")))
+		// one vector entry per stat, and per landscape when the query groups by it
+		var parts []string
+		for k, v := range f.vlStat {
+			parts = append(parts, fmt.Sprintf(`{"metric":{"__name__":%q},"value":[1700000000,"%v"]}`, k, v))
+		}
+		for land, st := range f.vlLand {
+			if !strings.Contains(q, "by (") {
+				continue // an ungrouped query cannot tell the landscapes apart: it sums them
+			}
+			for k, v := range st {
+				parts = append(parts, fmt.Sprintf(`{"metric":{"__name__":%q,"durian.cloud.landscape":%q},"value":[1700000000,"%v"]}`, k, land, v))
+			}
+		}
+		sort.Strings(parts)
+		w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[` + strings.Join(parts, ",") + `]}}`))
 	case r.URL.Path == "/api/metrics/query_range":
 		if f.tempo == nil {
 			http.Error(w, "metrics generator not enabled", 404)
@@ -538,5 +553,82 @@ func TestUsageUnreachableTargetIsAnError(t *testing.T) {
 	_, err := Usage(context.Background(), &Client{}, &Target{Name: "x", Metrics: "http://127.0.0.1:1"}, testContract(t), UsageOptions{Window: time.Minute, Pods: 1, Unknown: "warn"})
 	if err == nil || !strings.Contains(err.Error(), "127.0.0.1:1") {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestUsageSeriesAboveTheWorstCaseButInsideTheBudgetExitsZeroAndSaysSo(t *testing.T) {
+	// 21 series, worst case 20, budget 24 (per-pod series from 21 pods are no hole in a label):
+	// the worst-case finding is reported, the exit stays 0 because only the budget and the label checks fail the run.
+	c, err := contract.Parse("contract.yaml", []byte(strings.Replace(usageContract, "    kind: counter\n", "    kind: counter\n    per_pod: true\n", 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := newFake(t)
+	for i := 0; i < 21; i++ {
+		f.series = append(f.series, map[string]string{"__name__": "checkout_charges_total", "durian.cloud.service": "checkout", "payment.provider": "stripe", "shard": "0", "service.instance.id": "pod-" + strconv.Itoa(i)})
+	}
+	res, err := Usage(context.Background(), &Client{}, f.target(), c, UsageOptions{Window: 5 * time.Minute, Pods: 1, Now: at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := row(t, res, "checkout.charges")
+	if m.Series != 21 || m.Worst != 20 || m.Budget != 24 || m.Status != StatusAboveWorst {
+		t.Fatalf("%+v", m)
+	}
+	if res.OverBudget() {
+		t.Fatalf("21 series is inside the budget of 24: exit 0: %+v", res.Findings)
+	}
+	found := false
+	for _, fd := range res.Findings {
+		found = found || fd.Rule == "series-over-worst-case"
+	}
+	var sb strings.Builder
+	res.Print(&sb)
+	if !found || !strings.Contains(sb.String(), "series-over-worst-case") || !strings.Contains(sb.String(), "exit 0") {
+		t.Fatalf("the worst-case finding must still be reported:\n%s", sb.String())
+	}
+}
+
+func TestUsageLogStreamsAreComparedPerLandscape(t *testing.T) {
+	// Two landscapes each hold one valid stream (the worst case is one per landscape): 1 + 1 = 2
+	// streams was compared with the single landscape's worst case of 1 and exited 1.
+	f := newFake(t)
+	f.vlLand = map[string]map[string]float64{
+		"prod-a": {"lines": 1500, "msg_bytes": 300000, "streams": 1},
+		"prod-b": {"lines": 1500, "msg_bytes": 300000, "streams": 1},
+	}
+	res := usage(t, f, UsageOptions{Pods: 1, Unknown: "warn"})
+	l := res.Logs
+	if res.OverBudget() || l.StreamsOver || l.Streams != 1 || len(l.Landscapes) != 2 {
+		t.Fatalf("one stream in each of two landscapes is within the worst case of 1 per landscape: %+v", l)
+	}
+	if l.LinesPerMin != 600 || l.BytesPerMin != 120000 {
+		t.Fatalf("lines and bytes are the sum of the landscapes: %+v", l)
+	}
+	f.vlLand["prod-b"]["streams"] = 3
+	res = usage(t, f, UsageOptions{Pods: 1, Unknown: "warn"})
+	if !res.OverBudget() || !res.Logs.StreamsOver || res.Logs.Streams != 3 {
+		t.Fatalf("a landscape over its own worst case fails: %+v", res.Logs)
+	}
+	var sb strings.Builder
+	res.Print(&sb)
+	if !strings.Contains(sb.String(), "prod-b: 3") {
+		t.Fatalf("the text lists each landscape:\n%s", sb.String())
+	}
+}
+
+func TestTempoRangeSkipsAStepWithNoValue(t *testing.T) {
+	// A real Tempo answers "value": null for a step with no spans yet. It is no sample, not a zero:
+	// counting it as 0 lowered the mean (193 spans/min instead of 232 on the recorded sandbox).
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"series":[{"samples":[{"timestampMs":"1","value":null},{"timestampMs":"2","value":3},{"timestampMs":"3","value":5}]}]}`))
+	}))
+	defer srv.Close()
+	vals, err := (&Client{}).TempoRange(context.Background(), srv.URL, "{ } | rate()", at().Add(-time.Minute), at(), time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vals) != 2 || vals[0] != 3 || vals[1] != 5 {
+		t.Fatalf("%v", vals)
 	}
 }

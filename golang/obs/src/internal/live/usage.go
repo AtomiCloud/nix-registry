@@ -81,18 +81,25 @@ type Finding struct {
 
 // LogsUsage is the log volume of the service on the target.
 type LogsUsage struct {
-	Available     bool    `json:"available"`
-	Note          string  `json:"note,omitempty"`
-	LinesPerMin   float64 `json:"lines_per_min"`
-	BytesPerMin   float64 `json:"msg_bytes_per_min"`
-	Streams       int64   `json:"streams"`
-	StreamWorst   int64   `json:"stream_worst_case"`
-	LinesEstimate float64 `json:"lines_estimate,omitempty"`
-	LinesRatio    float64 `json:"lines_ratio,omitempty"`
-	BytesEstimate float64 `json:"bytes_estimate,omitempty"`
-	BytesRatio    float64 `json:"bytes_ratio,omitempty"`
-	StreamsOver   bool    `json:"streams_over"`
-	Compared      bool    `json:"compared_with_estimates"`
+	Available     bool           `json:"available"`
+	Note          string         `json:"note,omitempty"`
+	LinesPerMin   float64        `json:"lines_per_min"`
+	BytesPerMin   float64        `json:"msg_bytes_per_min"`
+	Streams       int64          `json:"streams"` // of the fullest landscape: the worst case is per landscape
+	Landscapes    []LogLandscape `json:"landscapes,omitempty"`
+	StreamWorst   int64          `json:"stream_worst_case"`
+	LinesEstimate float64        `json:"lines_estimate,omitempty"`
+	LinesRatio    float64        `json:"lines_ratio,omitempty"`
+	BytesEstimate float64        `json:"bytes_estimate,omitempty"`
+	BytesRatio    float64        `json:"bytes_ratio,omitempty"`
+	StreamsOver   bool           `json:"streams_over"`
+	Compared      bool           `json:"compared_with_estimates"`
+}
+
+// LogLandscape is the streams one landscape holds.
+type LogLandscape struct {
+	Landscape string `json:"landscape"`
+	Streams   int64  `json:"streams"`
 }
 
 // TracesUsage is the span volume on the target.
@@ -185,9 +192,10 @@ func Usage(ctx context.Context, c *Client, t *Target, ct *contract.Contract, o U
 	res.TotalMetrics = len(res.Metrics)
 	for _, f := range chk.Findings {
 		res.Findings = append(res.Findings, Finding{Level: f.Level.String(), Metric: f.Metric, Rule: f.Rule, Msg: f.Msg})
-		// Every failure assert would report (series over the worst case, a label outside the
-		// contract, a pod label on a non-per_pod metric, a value outside its type) fails here too.
-		if f.Level == assert.Fail {
+		// The run fails on the budget (the rows) and on assert's label checks (a label outside the
+		// contract, a pod label on a non-per_pod metric, a value outside its type). A series count
+		// above the worst case but inside the budget is reported as a finding and fails nothing.
+		if f.Level == assert.Fail && f.Rule != "series-over-worst-case" {
 			res.IsOverBudget = true
 		}
 	}
@@ -470,7 +478,7 @@ func logsUsage(ctx context.Context, c *Client, t *Target, ct *contract.Contract,
 	if scoped {
 		filter = " " + strconv.Quote("durian.cloud.service") + ":=" + strconv.Quote(ct.Service)
 	}
-	q := fmt.Sprintf("_time:%ds%s | stats count() as lines, sum_len(_msg) as msg_bytes, count_uniq(_stream_id) as streams", int(o.Window.Seconds()), filter)
+	q := fmt.Sprintf("_time:%ds%s | stats by (%s) count() as lines, sum_len(_msg) as msg_bytes, count_uniq(_stream_id) as streams", int(o.Window.Seconds()), filter, strconv.Quote(landscapeLabel))
 	vs, err := c.InstantAt(ctx, t.Logs, "/select/logsql/stats_query", q, now)
 	if err != nil {
 		l.Note = err.Error()
@@ -478,22 +486,35 @@ func logsUsage(ctx context.Context, c *Client, t *Target, ct *contract.Contract,
 	}
 	l.Available = true
 	mins := o.Window.Minutes()
+	// The stream worst case (modules per landscape) is per landscape, like the series budget: the
+	// streams are read per landscape and the fullest one is compared. Lines and bytes are summed.
+	streams := map[string]int64{}
 	for _, v := range vs {
 		switch v.Labels["__name__"] {
 		case "lines":
-			l.LinesPerMin = v.V / mins
+			l.LinesPerMin += v.V / mins
 		case "msg_bytes":
-			l.BytesPerMin = v.V / mins
+			l.BytesPerMin += v.V / mins
 		case "streams":
-			l.Streams = int64(math.Round(v.V))
+			streams[v.Labels[landscapeLabel]] += int64(math.Round(v.V))
 		}
+	}
+	for land, n := range streams {
+		l.Landscapes = append(l.Landscapes, LogLandscape{Landscape: land, Streams: n})
+		if n > l.Streams {
+			l.Streams = n
+		}
+	}
+	sort.Slice(l.Landscapes, func(i, j int) bool { return l.Landscapes[i].Landscape < l.Landscapes[j].Landscape })
+	if len(l.Landscapes) == 1 && l.Landscapes[0].Landscape == "" {
+		l.Landscapes = nil
 	}
 	if scoped {
 		// the estimates and the stream worst case are the service's: compared only when the read is too
 		l.Compared = true
 		l.LinesEstimate, l.BytesEstimate = o.Estimates.Logs.LinesPerMin, o.Estimates.Logs.BytesPerMin
 		l.LinesRatio, l.BytesRatio = ratio(l.LinesPerMin, l.LinesEstimate), ratio(l.BytesPerMin, l.BytesEstimate)
-		l.StreamsOver = l.Streams > l.StreamWorst
+		l.StreamsOver = l.Streams > l.StreamWorst // the fullest landscape
 	} else {
 		l.Note = "every service on the target is counted, so nothing is compared: the estimates and the stream worst case are this service's"
 	}
@@ -636,7 +657,14 @@ func (r *UsageResult) Print(w io.Writer) {
 		case l.StreamsOver:
 			st = "OVER BUDGET"
 		}
-		fmt.Fprintf(w, "  streams: %d, worst case %d: %s\n", l.Streams, l.StreamWorst, st)
+		fmt.Fprintf(w, "  streams: %d, worst case %d per landscape: %s\n", l.Streams, l.StreamWorst, st)
+		if len(l.Landscapes) > 0 {
+			var parts []string
+			for _, ls := range l.Landscapes {
+				parts = append(parts, fmt.Sprintf("%s: %d", ls.Landscape, ls.Streams))
+			}
+			fmt.Fprintf(w, "    per landscape (each is compared on its own): %s\n", strings.Join(parts, "; "))
+		}
 		if l.Note != "" {
 			fmt.Fprintf(w, "  note: %s\n", l.Note)
 		}
