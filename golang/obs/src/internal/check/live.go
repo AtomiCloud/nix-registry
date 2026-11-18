@@ -504,9 +504,23 @@ func (l *liveRun) spelling(q *files.Query) bool {
 		case *metricsql.AggrFuncExpr:
 			c := union(t.Args)
 			check(t.Modifier.Args, c)
-			if strings.ToLower(t.Name) == "count_values" && len(t.Args) > 0 {
+			name := strings.ToLower(t.Name)
+			// The output keeps only the labels the aggregation keeps: by() keeps its list, without() drops
+			// its list, and a reducing aggregation with no modifier keeps none. A query-made label that the
+			// aggregation removes is gone from the output, so an outer reader of it reads nothing.
+			switch strings.ToLower(t.Modifier.Op) {
+			case "by":
+				c = keepOnly(c, t.Modifier.Args)
+			case "without":
+				c = dropAll(c, t.Modifier.Args)
+			default:
+				if reducingAggregations[name] {
+					c = map[string]bool{}
+				}
+			}
+			if name == "count_values" && len(t.Args) > 0 {
 				if se, ok := t.Args[0].(*metricsql.StringExpr); ok {
-					c[se.S] = true
+					c[se.S] = true // the label count_values makes is on its output
 				}
 			}
 			return c
@@ -514,6 +528,16 @@ func (l *liveRun) spelling(q *files.Query) bool {
 			c := union([]metricsql.Expr{t.Left, t.Right})
 			check(t.GroupModifier.Args, c)
 			check(t.JoinModifier.Args, c)
+			// One-to-one matching with on() keeps only the on() labels, with ignoring() drops them; a
+			// group_left/group_right match keeps the many side's labels whole.
+			if t.JoinModifier.Op == "" {
+				switch strings.ToLower(t.GroupModifier.Op) {
+				case "on":
+					c = keepOnly(c, t.GroupModifier.Args)
+				case "ignoring":
+					c = dropAll(c, t.GroupModifier.Args)
+				}
+			}
 			return c
 		}
 		return map[string]bool{}
@@ -523,6 +547,35 @@ func (l *liveRun) spelling(q *files.Query) bool {
 		l.r.add(Fail, q.File, q.Where, "label-spelling", "VictoriaMetrics keeps a label's dots: %s", w)
 	}
 	return len(wrong) > 0
+}
+
+// reducingAggregations are the aggregations that, without by()/without(), return one series with no labels.
+var reducingAggregations = map[string]bool{
+	"sum": true, "avg": true, "min": true, "max": true, "count": true, "group": true, "stddev": true, "stdvar": true,
+	"quantile": true, "median": true, "sum2": true, "geomean": true, "mad": true, "distinct": true, "mode": true,
+	"count_values": true,
+}
+
+// keepOnly is the labels of set that are in keep; dropAll is the labels of set that are not in drop.
+func keepOnly(set map[string]bool, keep []string) map[string]bool {
+	out := map[string]bool{}
+	for _, k := range keep {
+		if set[k] {
+			out[k] = true
+		}
+	}
+	return out
+}
+
+func dropAll(set map[string]bool, drop []string) map[string]bool {
+	out := map[string]bool{}
+	for k := range set {
+		out[k] = true
+	}
+	for _, k := range drop {
+		delete(out, k)
+	}
+	return out
 }
 
 // ---- messages ----

@@ -119,3 +119,46 @@ func TestStaticLabelValuesSelectorWithMatchers(t *testing.T) {
 		}
 	}
 }
+
+// An aggregation keeps only the labels it keeps: a query-made label that by() leaves out or without() drops is
+// gone from its output, so an outer reader of it reads nothing and the underscore twin of the stored label it
+// meant is still a wrong spelling (review 120, jayci). The reviewer's regression plus by/without/on/ignoring.
+func TestLiveAggregationsResetTheGeneratedLabelScope(t *testing.T) {
+	const made = `label_set(checkout_charges_total, "payment_provider", "review")`
+	// one series only, so a binary match has no duplicates
+	const one = `label_set(checkout_charges_total{outcome="error"}, "payment_provider", "review")`
+	for _, expr := range []string{
+		`sum by (payment_provider) (sum by (outcome) (` + made + `))`,
+		`sum by (payment_provider) (sum without (payment_provider) (` + made + `))`,
+		`sum by (payment_provider) (sum(` + made + `))`,
+		`sum by (payment_provider) (count(` + made + `))`,
+		`sum by (payment_provider) (count_values("v", ` + made + `))`,
+		`sum by (payment_provider) (` + one + ` / on (outcome) ` + one + `)`,
+		`sum by (payment_provider) (` + one + ` / ignoring (payment_provider) ` + one + `)`,
+	} {
+		r := dottedLive(t, expr)
+		if r.Failures() != 2 {
+			t.Errorf("a label the inner aggregation or match dropped must not exempt the outer grouping: %s: %+v", expr, r.Findings)
+		}
+		for _, f := range r.Findings {
+			if f.Level == Fail && (f.Rule != "label-spelling" || !strings.Contains(f.Msg, `write "payment.provider"`)) {
+				t.Errorf("%s: wrong diagnostic %+v", expr, f)
+			}
+		}
+	}
+	// ... while a label the aggregation keeps stays in scope
+	for _, expr := range []string{
+		`sum by (payment_provider) (sum by (payment_provider, outcome) (` + made + `))`,
+		`sum by (payment_provider) (sum without (outcome) (` + made + `))`,
+		`sum by (payment_provider) (topk(2, ` + made + `))`,
+		`sum by (payment_provider) (` + one + ` / on (payment_provider) ` + one + `)`,
+		`sum by (payment_provider) (` + one + ` / ignoring (outcome) ` + one + `)`,
+		`sum by (payment_provider) (` + one + ` / on (outcome) group_left ` + one + `)`,
+		`sum by (v) (count_values("v", checkout_charges_total))`,
+		`sum by (payment_provider) (sum by (payment_provider) (` + made + `))`,
+	} {
+		if r := dottedLive(t, expr); r.Failures() != 0 {
+			t.Errorf("%s: want it to pass, got %+v", expr, r.Findings)
+		}
+	}
+}
