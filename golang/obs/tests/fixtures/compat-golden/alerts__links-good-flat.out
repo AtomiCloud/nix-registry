@@ -1,0 +1,8 @@
+args: alerts --dir links/good --base 1700000000
+exit: 0
+--- stdout
+note: Grafana 13.3.0 runs Tempo alerts only with feature toggle tempoAlerting enabled (FROM SOURCE: without it the Tempo plugin's alerting flag is false); enable it in the Grafana chart
+ok alerts/trace-rate/warning.yaml rule trace-rate-warning window baseline expect quiet: quiet
+obs alerts: alerts=1 recording=0 runs=1 expectations=1 failed=0 cached=0 pruned=2 recorded_samples=0 pruned_log_events=0
+verify fast: compared=0 mismatches=0; verify skip: compared=0 mismatches=0; reused=0
+--- stderr

@@ -1,0 +1,9 @@
+args: query --static --dir good/observability --seed shared-seed.yaml --base 1700000000
+exit: 0
+--- stdout
+obs query: good/observability/obs.yaml: versions match the evaluators embedded in this obs; thresholds applied: logs, metrics, traces, profiles
+note alerts/error-logs/warning.yaml rule error-logs-warning query A: [event-rule] events=[checkout.charge.failed]
+note alerts/error-logs/warning.yaml rule error-logs-warning query A: [assumed-filter] assumed true (free-form fields): severity_text:ERROR
+note alerts/failed-logs/warning.yaml rule failed-logs-warning query A: [event-rule] events=[checkout.charge.failed]
+obs query --static: ok: 7 queries (3 logs, 4 metrics), 0 failures, 0 warnings
+--- stderr

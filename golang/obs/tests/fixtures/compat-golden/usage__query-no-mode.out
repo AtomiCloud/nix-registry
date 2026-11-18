@@ -1,0 +1,5 @@
+args: query
+exit: 2
+--- stdout
+--- stderr
+obs query: give exactly one of --static or --live

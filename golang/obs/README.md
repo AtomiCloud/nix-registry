@@ -12,25 +12,26 @@ linked module ship in `share/licenses/obs`. Design: `concepts/observability.md` 
 
 ## Available commands
 
-| Command                                     | What it does                                                                                                                                  |
-| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `obs gen`                                   | Writes bounded types, event constants, `contract/events.json` and the aggregation file for bun, go, dotnet and dart from the contract.        |
-| `obs gen --check`                           | Regenerates into a temp folder and diffs; fails on a hand edit or a stale generate.                                                           |
-| `obs check`                                 | Checks the contract rules, worst-case metric series, budgets and log stream count; prints the embedded evaluator versions and checks `obs.yaml`. |
-| `obs query --static`                        | Parses every MetricsQL, LogsQL and TraceQL query in the alerts and dashboards with the real parsers and applies the rules below.              |
-| `obs query --live`                          | Loads the seed into the embedded VictoriaMetrics, VictoriaLogs and Tempo and runs every alert and dashboard query; each must return rows.     |
-| `obs alerts`                                | Evaluates every alert at every minute of the seed and each incident; must fire inside incident windows and stay quiet outside them.           |
-| `obs links`                                 | Checks trace → logs, metric → traces and backend span → profile links on the seed.                                                            |
-| `obs assert`                                | Checks real metric series counts, labels and values from an e2e series export against the contract.                                           |
-| `obs profile summarize\|baseline\|compare`  | Summarizes CPU profiles, builds a median baseline and compares function and span shares against it.                                           |
-| `obs store move <store>`                    | Runs the single → scaled store move steps in order, none skipped, with `--dry-run` and `--rollback`.                                          |
-| `obs sandbox up`                            | Starts, stops or inspects (`down`, `status`) the local stack for people; no check needs it.                                                   |
-| `obs look`                                  | Sets up the sandbox with the changed dashboards and prints the screenshot review prompt for the calling agent; never fails CI.                |
-| `obs scrape`                                | Scrapes an app's own metrics into the sandbox.                                                                                                |
-| `obs symbols put\|decode`                   | The symbol store: stores debug symbol files by build id and decodes a stack trace with them.                                                  |
-| `obs size`                                  | The sizing command: traffic cores, memory, series and storage per day for a given load.                                                       |
-| `obs engines --check-chart <dir>`           | Compares the engine versions in a Helm chart folder with the pins; exit 1 on any drift. See [obs engines](#obs-engines---check-chart).        |
-| `obs version`                               | The obs version and every engine pin.                                                                                                         |
+| Command                                    | What it does                                                                                                                                                                     |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `obs gen`                                  | Writes bounded types, event constants, `contract/events.json` and the aggregation file for bun, go, dotnet and dart from the contract.                                           |
+| `obs gen --check`                          | Regenerates into a temp folder and diffs; fails on a hand edit or a stale generate.                                                                                              |
+| `obs check`                                | The static check in one run: contract limits (worst-case series, budgets, log streams), the evaluator versions against `obs.yaml`, and every query rule of `obs query --static`. |
+| `obs test`                                 | The seed-based check in one run: `obs query --live` + `obs alerts` + `obs links`, and every incident is caught by at least one alert.                                            |
+| `obs query --static`                       | (Part of `obs check`; unchanged.) Parses every MetricsQL, LogsQL and TraceQL query in the alerts and dashboards with the real parsers and applies the rules below.               |
+| `obs query --live`                         | (Part of `obs test`; unchanged.) Loads the seed into the embedded VictoriaMetrics, VictoriaLogs and Tempo and runs every alert and dashboard query; each must return rows.       |
+| `obs alerts`                               | (Part of `obs test`; unchanged.) Evaluates every alert at every minute of the seed and each incident; must fire inside incident windows and stay quiet outside them.             |
+| `obs links`                                | (Part of `obs test`; unchanged.) Checks trace → logs, metric → traces and backend span → profile links on the seed.                                                              |
+| `obs assert`                               | Checks real metric series counts, labels and values from an e2e series export against the contract.                                                                              |
+| `obs profile summarize\|baseline\|compare` | Summarizes CPU profiles, builds a median baseline and compares function and span shares against it.                                                                              |
+| `obs store move <store>`                   | Runs the single → scaled store move steps in order, none skipped, with `--dry-run` and `--rollback`.                                                                             |
+| `obs sandbox up`                           | Starts, stops or inspects (`down`, `status`) the local stack for people; no check needs it.                                                                                      |
+| `obs look`                                 | Sets up the sandbox with the changed dashboards and prints the screenshot review prompt for the calling agent; never fails CI.                                                   |
+| `obs scrape`                               | Scrapes an app's own metrics into the sandbox.                                                                                                                                   |
+| `obs symbols put\|decode`                  | The symbol store: stores debug symbol files by build id and decodes a stack trace with them.                                                                                     |
+| `obs size`                                 | The sizing command: traffic cores, memory, series and storage per day for a given load.                                                                                          |
+| `obs engines --check-chart <dir>`          | Compares the engine versions in a Helm chart folder with the pins; exit 1 on any drift. See [obs engines](#obs-engines---check-chart).                                           |
+| `obs version`                              | The obs version and every engine pin.                                                                                                                                            |
 
 Not tested items are collected in [Not tested](#not-tested), at the end of this file.
 
@@ -69,7 +70,9 @@ obs alerts [--dir observability] [--seed seed.yaml] [--base unix] [--out results
             [--workers n] [--steps steps.json] [--recorded recorded.json]
 obs assert --series FILE [--dir observability] [--pods n] [--unknown warn|fail|ignore]
 obs profile summarize|baseline|compare   (obs profile help)
-obs check [--dir observability] [--pods n] [--landscapes n] [--contracts auto|none]
+obs check [--dir observability] [--pods n] [--landscapes n] [--names] [--event-rule auto|on|off] [--vl-settings victorialogs-settings.yaml] [--tempo-config tempo.yaml] [--contracts auto|none]
+obs test  [--dir observability] [--seed seed.yaml] [--base unix] [--names] [--event-rule auto|on|off] [--vl-settings victorialogs-settings.yaml] [--tempo-config tempo.yaml]
+          [--contracts auto|none] [--workers n] [--out results.json] [--steps steps.json] [--recorded recorded.json]
 obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
 obs sandbox up [--dir observability] [--seed seed.yaml] [--project name] [--port-base n] [--runtime docker|podman] [--reseed]
 obs sandbox down|status [--dir observability] [--project name] [--runtime docker|podman]
@@ -99,7 +102,7 @@ the file, the rule or panel, the rule id in `[brackets]` and the offending name 
   are not queries and are skipped. A flat authoring file (`title/datasource/expr`) is refused
   with a pointer to the CR. More than one YAML document in a file is refused.
 - **`dashboards/**/\*.json`**: dashboard JSON. Panels (also inside collapsed rows), `targets[].expr`,
-`templating.list`, `time.from/to` are read. Annotation queries are not checked.
+  `templating.list`, `time.from/to` are read. Annotation queries are not checked.
 - **`seed.yaml`** (`--live` only; `--seed` overrides the path): see below.
 - **`contract.yaml`**: the contract (see "The contract" below); its presence switches on the contract name checks and the event rule.
 
@@ -228,12 +231,12 @@ logs: # which log event each metric event writes
 A name is spelled the way its store keeps it. obs seeds, checks and queries every store in that spelling, so a
 dashboard or alert written to the standard returns rows on an obs seed and on the real stack alike.
 
-| Store           | Label spelling                                         | Query example                                                         |
-| --------------- | ------------------------------------------------------ | --------------------------------------------------------------------- |
-| VictoriaMetrics | dots kept, quoted (metric NAMES still use `_`)         | `checkout_charges_total{"durian.cloud.service"="checkout"}`           |
-| VictoriaLogs    | dots kept, as sent; quoted                             | `_stream:{"durian.cloud.landscape"="fixture-dev"}`                          |
-| Tempo           | dots, as sent                                          | `{resource.durian.cloud.landscape="fixture-dev"}`                           |
-| Pyroscope       | underscores only (a dotted name is dropped)            | `{durian_cloud_service="checkout", service_name="checkout"}`          |
+| Store           | Label spelling                                 | Query example                                                |
+| --------------- | ---------------------------------------------- | ------------------------------------------------------------ |
+| VictoriaMetrics | dots kept, quoted (metric NAMES still use `_`) | `checkout_charges_total{"durian.cloud.service"="checkout"}`  |
+| VictoriaLogs    | dots kept, as sent; quoted                     | `_stream:{"durian.cloud.landscape"="fixture-dev"}`           |
+| Tempo           | dots, as sent                                  | `{resource.durian.cloud.landscape="fixture-dev"}`            |
+| Pyroscope       | underscores only (a dotted name is dropped)    | `{durian_cloud_service="checkout", service_name="checkout"}` |
 
 - The underscore form of a dotted VictoriaMetrics label (`durian_cloud_service`, `payment_provider`) selects
   nothing. `obs query --static` fails it with `contract-undeclared-label` and names the dotted spelling to write;
@@ -383,10 +386,23 @@ a folder in one never looks for company; outside a Git repository only `--dir`'s
 ## `obs check`
 
 ```text
-obs check [--dir observability] [--pods n] [--landscapes n] [--contracts auto|none]
+obs check [--dir observability] [--pods n] [--landscapes n] [--names] [--event-rule auto|on|off]
+          [--vl-settings victorialogs-settings.yaml] [--tempo-config tempo.yaml] [--contracts auto|none]
 ```
 
-Prints the worst-case series per metric (the product of its label sizes, times buckets + 2 for a
+`obs check` is the whole static check in one run and one summary. It runs three things:
+
+1. **limits** (the contract rules below);
+2. **versions**: the evaluator versions this obs embeds, against `observability/obs.yaml`;
+3. **queries**: everything `obs query --static` does ([the rules](#obs-query---static-the-rules)): every alert and dashboard query parsed by the embedded engines and checked against the contract. `--vl-settings`, `--tempo-config`, `--event-rule`, `--contracts` and `--names` mean what they mean there. A folder with no alert and no dashboard is fine (the `[empty]` rule belongs to `obs query --static`); a folder with no `contract.yaml` skips the limits with a note and still checks the queries. Each query finding keeps its rule id.
+
+It exits 1 when any half fails and prints one summary line at the end, for example
+`obs check: ok: 1 metrics, 3 log events, 0 spans, 2 types, contract hash 754fae475354; queries: 7 queries (3 logs, 4 metrics), 0 failures, 0 warnings`
+or `obs check: FAILED: 1 contract failures in <file>; 2 query failures`. A contract problem is printed once, not again by the query half.
+
+**Speed (MEASURED, 18 Nov 2026, x86_64 Linux, one run each):** `obs check` takes 21 ms on `tests/fixtures/good` (4 h seed fixture, 7 queries) and 23 ms on `tests/fixtures/alerts-speed/n1`; `obs gen --check` takes 36 ms. Gen plus check stay far under 1 second; the check never reads the seed, so the seed length does not matter for it.
+
+The contract part prints the worst-case series per metric (the product of its label sizes, times buckets + 2 for a
 histogram: 14 for the default 12 buckets), the worst case times `--pods` for a `per_pod` metric, the
 log stream count (modules x `--landscapes`, times any declared stream label; log events add no
 streams) and `events=[...]`. It fails (exit 1, `FAIL <file> <yaml path>: [rule] ...`) on:
@@ -402,7 +418,73 @@ streams) and `events=[...]`. It fails (exit 1, `FAIL <file> <yaml path>: [rule] 
 
 The after-start pod-key check of §4.1 is not here (it needs a running store: `obs assert`).
 
-`obs check` also prints the evaluator versions this binary embeds and fails when `observability/obs.yaml` names a store version they do not match: see [`obs.yaml`](#obsyaml-the-versions-and-thresholds-a-repo-targets).
+The versions half prints the evaluator versions this binary embeds and fails when `observability/obs.yaml` names a store version they do not match: see [`obs.yaml`](#obsyaml-the-versions-and-thresholds-a-repo-targets).
+
+## `obs test`
+
+```text
+obs test [--dir observability] [--seed seed.yaml] [--base unix] [--names] [--event-rule auto|on|off]
+         [--vl-settings victorialogs-settings.yaml] [--tempo-config tempo.yaml] [--contracts auto|none]
+         [--workers n] [--out results.json] [--steps steps.json] [--recorded recorded.json]
+```
+
+`obs test` is everything that needs the seed, in one run and one summary. It runs, in this order:
+
+| Part        | Same as                    | What fails it                                                                                  |
+| ----------- | -------------------------- | ---------------------------------------------------------------------------------------------- |
+| `queries`   | `obs query --live`         | an alert or dashboard query that does not return rows on the seed, and every static query rule |
+| `alerts`    | `obs alerts`               | an alert that does not fire inside its incident, or fires outside it                           |
+| `links`     | `obs links`                | a trace, log, metric or profile link that does not resolve on the seed                         |
+| `incidents` | new, `[incident-uncaught]` | an incident no alert catches                                                                   |
+
+The flags mean what they mean on the old commands (`--dir`, `--seed`, `--base`, `--names`, `--event-rule`,
+`--contracts`, `--vl-settings`, `--tempo-config`, `--workers`, `--out`, `--steps`, `--recorded`). Each part prints its own
+findings as the old command does, then one total per part and one last line:
+
+```text
+obs test: queries: ok: 7 queries (3 logs, 4 metrics), 0 failures, 0 warnings
+obs test: alerts: ok: 1 alerts (0 recording rules), 2 runs, 2 expectations, 0 failed
+obs test: links: skipped: the seed has no traces, so there is no trace, log or profile link to follow
+obs test: incidents: ok: 1 incidents, 1 caught, 0 uncaught
+obs test: ok
+```
+
+Exit 0 when every part passes, 1 when a part failed, 2 on a usage or input error. A part that fails does not
+stop the next one. `obs.yaml` is gated first, as in `obs query` and `obs alerts`: a version it names that the embedded
+evaluators do not match fails the run before any part. The `obs alerts` part still prints its own result line
+(`obs alerts: alerts=...`) and the `links` part is skipped, with a line saying so, when the seed has no traces. A folder
+with no alert rule has nothing for `obs alerts` to run (a note, not the exit 2 of the old command), so its incidents are all uncaught.
+
+### Every incident is caught by at least one alert (`[incident-uncaught]`)
+
+An incident in `incidents/<name>.yaml` (the files the seed names under `incidents:`) must be caught by an alert.
+**Caught** means the expectations `obs alerts` already judges: at least one alert listed in the incident's `expect.fire`
+passed its fire verdict, that is it fired inside the incident window (within `fire_within`, and not outside the window
+plus `resolve_within`). An incident is **uncaught** when
+
+- `expect.fire` is empty (only quiet alerts, or none), or
+- no alert in `expect.fire` fired inside the window, or
+- the folder has no alert rule at all.
+
+An alert that fires without being listed is not a catch: it already fails as an unexpected fire in the `alerts` part. The line names the
+incident file, the incident and its window:
+
+```text
+FAIL incidents/slow-burn.yaml incident slow-burn window [10m0s,20m0s): [incident-uncaught] expect.fire is empty: no alert is expected to fire in this window; add the alert that should catch it to expect.fire
+```
+
+The flow when a real incident was missed (written as a pull request, no capture command): add `incidents/<name>.yaml` (the story,
+the window, the change, `expect`), list it under `incidents:` in `seed.yaml` and run `obs test`: it is red with `[incident-uncaught]`.
+Add the alert that would have caught it and list its uid in `expect.fire` (also in every other incident the alert fires in:
+an unlisted alert is expected quiet): `obs test` is green. `tests/check-test.sh` runs exactly this flow.
+
+An incident that is deliberately not covered by any alert (for example a slowdown no alert should page for) is red under this rule
+by decision (owner pick, agenda A371); there is no way to waive one. The fixtures `tests/fixtures/alerts-speed/*` have such incidents, so `obs test` is red on them
+and `obs alerts` still green.
+
+**Speed (MEASURED, 18 Nov 2026, x86_64 Linux, one run each, all four parts):** `obs test` takes 0.06 s on `tests/fixtures/test/good`
+(40 min seed, one alert), 0.76 s on `alerts-speed/n1` with its 4 h seed and 2.6 s with its 24 h seed
+(3 incidents, 1 alert, 2 queries; red there on `[incident-uncaught]`, the time is the same). It is not under 1 second on a 24 h seed. Of the 2.6 s, `obs alerts` alone takes 0.77 s and `obs query --live` alone 2.0 s on that seed (separate runs; each builds the seed again).
 
 ## `obs.yaml`: the versions and thresholds a repo targets
 
@@ -462,7 +544,7 @@ evaluators embedded in this obs:
 - `pyroscope` has no embedded evaluator, but obs runs it as a sandbox image, and the sandbox refuses a
   version whose image digest `pins.json` does not record. So a Pyroscope version with no known image
   fails the same way (exit 1, `FAIL <obs.yaml> versions.pyroscope: obs.yaml wants 2.5.0, this obs embeds
-  2.4.3 (sandbox image of Pyroscope: no known image digest, known: 2.4.3)`), in `obs check`, `obs query`
+2.4.3 (sandbox image of Pyroscope: no known image digest, known: 2.4.3)`), in `obs check`, `obs query`
   and `obs alerts` alike. `alloy` has no evaluator and no image: a different version is a `note` and exit 0.
 - An empty section (`versions:` or `thresholds:` with every child commented out) names nothing: it
   counts as absent, not as an error.
@@ -587,7 +669,7 @@ metrics:
   `obs gen` skips every one of them.
 - **Upgrading:** after this release, `obs gen --check` fails `[gen-missing] contract/keep.yaml` in every folder with a contract until
   `obs gen` has been run once (the keep-list is a new generated file); commit the file it writes.
-- The always-kept names (`up`, `scrape_*`), collecting every `apps/*/observability/contract/keep.yaml` and the vminsert relabel rule are the platform's; see *Not tested*.
+- The always-kept names (`up`, `scrape_*`), collecting every `apps/*/observability/contract/keep.yaml` and the vminsert relabel rule are the platform's; see _Not tested_.
 
 **Each language compiles and runs against a stub written from the goal; NOT TESTED against the real library.**
 `tests/typecheck/<lang>/stub/` holds a minimal assumed interfaces API with just enough body to run the
@@ -709,6 +791,30 @@ kept and quoted (`{"payment.provider"="stripe"}`, `by ("payment.provider")`); th
 `contract-undeclared-label` and the finding names the dotted spelling (a pod key in either spelling is
 `contract-pod-label`). Other log fields are free-form (§6): not judged.
 
+## Migrating from 0.4 to 0.5
+
+Nothing is removed. Every command of 0.4 keeps its flags and prints the same output (`tests/compat.sh` compares `obs query --static`,
+`obs query --live`, `obs alerts` and `obs links` with golden files captured from the 0.4 binary on the fixtures: stdout, stderr and exit code,
+byte for byte). Scripts that call `obs query ...` need no change. The old commands print no deprecation note. 0.5 adds the grouped commands:
+
+| In 0.4                                        | In 0.5                                                        |
+| --------------------------------------------- | ------------------------------------------------------------- |
+| `obs query --static`                          | part of `obs check` (also runs the limits and the versions)   |
+| `obs query --live`, `obs alerts`, `obs links` | `obs test` (also checks every incident is caught by an alert) |
+| `obs sandbox up`                              | `obs look --keep`                                             |
+| `obs assert`, `obs scrape`                    | `obs live usage`                                              |
+
+`obs profile` and `obs store move` are unchanged. The `obs look` and `obs live` rows arrive with their own parts of 0.5.
+
+What is new in `obs check` and `obs test` for a caller:
+
+- `obs check` now also fails on a query finding, with the same rule ids, files and tokens as `obs query --static`. A CI that ran both can run one. It takes
+  `--names`, `--event-rule`, `--vl-settings`, `--tempo-config` (new) next to `--contracts`.
+- `obs check` on a folder with no `contract.yaml` was exit 2; it now skips the limits with a note and checks the queries.
+- `obs check`'s last line is `obs check: ok: <contract counts>; queries: <query totals>` (it was `obs check: ok: <contract counts>`), and a failure line
+  lists every failing half. The prefixes `obs check: ok:` and `obs check: FAILED:` are unchanged.
+- `obs test` is new, including the rule `[incident-uncaught]`: a folder whose incidents list only quiet alerts is red there.
+
 ## Migrating from 0.3 to 0.4
 
 - `obs gen` now also writes `contract/keep.yaml` (the collector keep-list) next to the other generated files. After
@@ -736,13 +842,13 @@ This is a correction to the standard, not a flag or exit-code change, so it ship
 alert or TraceQL query written with the underscore spelling of a dotted label now fails, once, with the fix in
 the message:
 
-| Where it fails                    | The message names                                                                          | Fix                                                |
-| --------------------------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------- |
-| `obs query --static`, a selector  | `[contract-undeclared-label] label "durian_cloud_service" ... write "durian.cloud.service"` | `{"durian.cloud.service"="checkout"}`              |
-| `obs query --static`, a grouping  | the same finding for the `by (...)` / `on (...)` label                                     | `by ("durian.cloud.service")`                      |
-| `obs query --static`, a variable  | `variable $provider: [contract-undeclared-label] label_values reads label "payment_provider"` | `label_values(checkout_charges_total, payment.provider)` |
-| `obs query --live`                | with a contract: the same `[contract-undeclared-label]` finding, once; with no contract: `[label-spelling] VictoriaMetrics keeps a label's dots: label "x_y" is stored as "x.y"` | write the dotted name, quoted in a selector        |
-| TraceQL attribute                 | `[traceql-attribute] undeclared attribute span.payment_provider (Tempo keeps the dots: write "payment.provider")` | `span.payment.provider`                            |
+| Where it fails                   | The message names                                                                                                                                                                | Fix                                                      |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `obs query --static`, a selector | `[contract-undeclared-label] label "durian_cloud_service" ... write "durian.cloud.service"`                                                                                      | `{"durian.cloud.service"="checkout"}`                    |
+| `obs query --static`, a grouping | the same finding for the `by (...)` / `on (...)` label                                                                                                                           | `by ("durian.cloud.service")`                            |
+| `obs query --static`, a variable | `variable $provider: [contract-undeclared-label] label_values reads label "payment_provider"`                                                                                    | `label_values(checkout_charges_total, payment.provider)` |
+| `obs query --live`               | with a contract: the same `[contract-undeclared-label]` finding, once; with no contract: `[label-spelling] VictoriaMetrics keeps a label's dots: label "x_y" is stored as "x.y"` | write the dotted name, quoted in a selector              |
+| TraceQL attribute                | `[traceql-attribute] undeclared attribute span.payment_provider (Tempo keeps the dots: write "payment.provider")`                                                                | `span.payment.provider`                                  |
 
 - A pod key on a per_pod or platform metric is a label too: `k8s_pod_name` fails the same way, naming `k8s.pod.name`.
 - Pyroscope labels do not change: they stay underscores.
@@ -859,15 +965,15 @@ scrape.
 
 ## Engines and pins
 
-| Signal   | Engine or reference                                         | Version                          |
-| -------- | ----------------------------------------------------------- | -------------------------------- |
-| metrics  | VictoriaMetrics (`metricsql`, storage and evaluator)        | v1.156.0                         |
-| logs     | VictoriaLogs `lib/logstorage`                               | v1.54.0, tag commit `6433dae5`   |
-| traces   | Tempo (TraceQL parser, evaluator and frontend rules)        | 3.1.1, tag commit `9db7df79d2af` |
-| alerts   | Grafana (alert math and state machine, ported)              | 13.3.0, tag commit `752e3462`    |
-| profiles | Pyroscope (reference: sandbox and parity only, not linked)  | 2.4.3                            |
-| agent    | Grafana Alloy (reference: pin only, no image is run)        | v1.21.3                          |
-| logs UI  | VictoriaLogs Grafana datasource (reference, parity only)    | v0.34.0                          |
+| Signal   | Engine or reference                                        | Version                          |
+| -------- | ---------------------------------------------------------- | -------------------------------- |
+| metrics  | VictoriaMetrics (`metricsql`, storage and evaluator)       | v1.156.0                         |
+| logs     | VictoriaLogs `lib/logstorage`                              | v1.54.0, tag commit `6433dae5`   |
+| traces   | Tempo (TraceQL parser, evaluator and frontend rules)       | 3.1.1, tag commit `9db7df79d2af` |
+| alerts   | Grafana (alert math and state machine, ported)             | 13.3.0, tag commit `752e3462`    |
+| profiles | Pyroscope (reference: sandbox and parity only, not linked) | 2.4.3                            |
+| agent    | Grafana Alloy (reference: pin only, no image is run)       | v1.21.3                          |
+| logs UI  | VictoriaLogs Grafana datasource (reference, parity only)   | v0.34.0                          |
 
 The first four are engines linked into the binary; the last three are references only.
 `obs version` prints every pin, with `engine` or `reference` in front of it, and
@@ -1186,6 +1292,10 @@ not touched. obs builds with `golang/obs/go.nix`: Go 1.27.4 from the narrow `nix
     `bad-event-missing`, `bad-no-rows` (a metric the seed does not hold), `bad-drifted-field`
     (`severity` for `severity_text`), `bad-dashboard-label`; `ok-rollup-no-window` is green with a warning.
     Each fixture's `expect` file lists what its output must contain.
+
+- `tests/check-test.sh` (run by `tests/run.sh`): `obs check` on every static fixture (same rule and token as `obs query --static`), its flags, an over-budget contract and a broken query red in one run with one summary, an
+  `obs.yaml` mismatch, a folder with no contract; `obs test` green on `tests/fixtures/test/good` and `links/good`, each part red (queries, alerts, links, incidents), the incident flow (red `[incident-uncaught]`, then green after the alert is added),
+  and a folder with no alert. It starts with `tests/compat.sh`. To refresh the golden files (only with the 0.4 binary): `tests/compat.sh <obs-0.4> --capture`.
 
 ## Parity with the real stores (local run)
 
@@ -2103,6 +2213,9 @@ source) where its section says so.
 - `obs sandbox up` on aarch64 and macOS, and with podman (the box that ran it has docker only); Tempo and Pyroscope take no data from the seed yet ([`obs sandbox`](#obs-sandbox-the-local-stack-for-people)).
 - `obs look` with a pull request on GitHub: the agent posts the comment; obs only prints the prompt ([`obs look`](#obs-look-dashboard-screenshots-reviewed-by-the-calling-agent)).
 - aarch64 and macOS builds run in CI; only x86_64 Linux was run by hand.
+
+- `obs test` and `obs check` on a real repository's observability folder and in a consumer's CI: only the fixtures ran. `obs test` was not timed on a 24 h seed with traces or with many alerts.
+- The old commands print no note naming the new commands (a stderr line was allowed; it was left out so that a script capturing both streams sees byte-identical output).
 
 **Source entries and the keep-list**
 

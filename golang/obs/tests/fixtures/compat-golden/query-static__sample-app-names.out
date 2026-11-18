@@ -1,0 +1,13 @@
+args: query --static --dir sample-app/observability --names
+exit: 0
+--- stdout
+obs query: sample-app/observability/obs.yaml: versions match the evaluators embedded in this obs; thresholds applied: logs, metrics, traces, profiles
+note alerts/crash-logs/warning.yaml rule crash-logs-warning query A: [event-rule] event rule skipped: no contract.yaml
+note alerts/crash-logs/warning.yaml rule crash-logs-warning query A: [names] reads filter fields=[_msg _stream _stream:cluster _stream:service _time] pipe fields=[service] wildcard=false stats labels=[service]
+note alerts/pod-crashloop/critical.yaml rule pod-crashloop-critical query A: [names] reads metrics=[kube_pod_container_status_restarts_total] labels=[cluster namespace pod]
+note dashboards/overview.json panel 1 "Restarts by pod" target A: [names] reads metrics=[kube_pod_container_status_restarts_total] labels=[cluster pod]
+note dashboards/overview.json panel 2 "Request error ratio" target A: [names] reads metrics=[sample_app_requests_total] labels=[outcome]
+note dashboards/overview.json panel 3 "Crash lines by service" target A: [names] reads filter fields=[_msg _stream _stream:cluster] pipe fields=[service] wildcard=false stats labels=[service]
+note dashboards/overview.json panel 4 "Platform errors & crashes" target A: [names] reads filter fields=[_msg _stream _stream:cluster _stream:service] pipe fields=[] wildcard=true stats labels=[]
+obs query --static: ok: 6 queries (3 logs, 3 metrics), 0 failures, 0 warnings
+--- stderr

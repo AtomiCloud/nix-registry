@@ -40,8 +40,31 @@ type Options struct {
 // TempoAlertingNote is printed once per obs alerts run that has trace rules.
 const TempoAlertingNote = "note: Grafana 13.3.0 runs Tempo alerts only with feature toggle tempoAlerting enabled (FROM SOURCE: without it the Tempo plugin's alerting flag is false); enable it in the Grafana chart"
 
+// RunResult is what a finished `obs alerts` run judged, for a caller that wants more than the exit code
+// (`obs test` decides from it whether every incident was caught). Judged is false when the run ended
+// before the verdicts (an input error, a failed static check or a refused query).
+type RunResult struct {
+	Judged       bool
+	Alerts       int
+	Records      int
+	Runs         int
+	Expectations int
+	Failed       int
+	Verdicts     []Verdict
+	Incidents    []Incident
+}
+
 // Check evaluates each rule at every minute on the baseline and each incident.
-func Check(o Options, stdout, stderr io.Writer) int {
+func Check(o Options, stdout, stderr io.Writer) int { return run(o, stdout, stderr, nil) }
+
+// CheckResult is Check that also returns what it judged; the output and exit code are the same.
+func CheckResult(o Options, stdout, stderr io.Writer) (RunResult, int) {
+	var res RunResult
+	rc := run(o, stdout, stderr, &res)
+	return res, rc
+}
+
+func run(o Options, stdout, stderr io.Writer, res *RunResult) int {
 	started := time.Now()
 	// The embedded VictoriaLogs allocates fresh per-query buffers (64 KiB chunks) for
 	// every stats query, while the data kept alive stays small: with Go's default
@@ -391,6 +414,9 @@ func Check(o Options, stdout, stderr io.Writer) int {
 	}
 	if VerifyMismatch.Load() > 0 || SkipMismatch > 0 {
 		failed++
+	}
+	if res != nil {
+		*res = RunResult{Judged: true, Alerts: len(allAlerts), Records: len(p.Records), Runs: len(runs), Expectations: len(vs), Failed: failed, Verdicts: vs, Incidents: p.Incidents}
 	}
 	fmt.Fprintf(stdout, "obs alerts: alerts=%d recording=%d runs=%d expectations=%d failed=%d cached=%d pruned=%d recorded_samples=%d pruned_log_events=%d\n", len(allAlerts), len(p.Records), len(runs), len(vs), failed, len(cached)/len(runs), pruned, recorded, prunedEvents)
 	fmt.Fprintf(stdout, "verify fast: compared=%d mismatches=%d; verify skip: compared=%d mismatches=%d; reused=%d\n", VerifiedTicks.Load(), VerifyMismatch.Load(), SkipChecked, SkipMismatch, SkippedRuns)

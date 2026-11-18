@@ -1,0 +1,5 @@
+args: links extra
+exit: 2
+--- stdout
+--- stderr
+obs links: unexpected arguments [extra]

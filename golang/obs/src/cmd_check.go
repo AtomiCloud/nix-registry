@@ -4,15 +4,24 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 
+	"github.com/AtomiCloud/obs/internal/check"
 	"github.com/AtomiCloud/obs/internal/contract"
+	"github.com/AtomiCloud/obs/internal/files"
 	"github.com/AtomiCloud/obs/internal/gen"
 )
 
-// runCheck is `obs check` (concept section 11.4): it prints the worst-case series per metric and
-// the log stream count, and fails on a free metric label, a free stream label, a calendar date
-// without window_days, a metric over budget and a gauge with neither across_pods nor per_pod.
+// runCheck is `obs check` (concept section 11.4), the static check of the observability folder in
+// one run and one summary. It does what it always did and what `obs query --static` does:
+//
+//	limits    the worst-case series per metric and the log stream count; fails on a free metric label, a
+//	          free stream label, a calendar date without window_days, a metric over budget and a gauge
+//	          with neither across_pods nor per_pod
+//	versions  the evaluator versions this obs embeds, against <dir>/obs.yaml
+//	queries   every alert and dashboard query parsed by the embedded engines and checked against the
+//	          contract (each finding keeps its rule id); a folder with no queries is fine
 func runCheck(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("obs check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -20,6 +29,10 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 	pods := fs.Int("pods", 1, "pods per landscape, for the worst case x pods line (from the landscape config)")
 	landscapes := fs.Int("landscapes", 1, "landscapes that share the log store, for the stream count")
 	contracts := fs.String("contracts", "auto", "which contracts to read: auto (this folder's and every other observability/contract.yaml of the repository) or none (this folder's only)")
+	names := fs.Bool("names", false, "print the names each query reads")
+	eventRule := fs.String("event-rule", "auto", "a LogsQL alert must name a contract event: auto (only when <dir>/contract.yaml exists), on, off")
+	vlSettings := fs.String("vl-settings", "", "VictoriaLogs chart args YAML; overrides obs.yaml thresholds.logs (default <dir>/victorialogs-settings.yaml, else obs.yaml, else pinned defaults)")
+	tempoConfig := fs.String("tempo-config", "", "Tempo config file whose query_frontend end cutoff and metrics limits trace panels run under; overrides obs.yaml thresholds.traces (default Tempo 3.1.1: 30s, 24h, 10000)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -31,71 +44,139 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "obs check: --contracts %q: want auto or none\n", *contracts)
 		return 2
 	}
+	switch *eventRule {
+	case "auto", "on", "off":
+	default:
+		fmt.Fprintf(stderr, "obs check: --event-rule %q: want auto, on or off\n", *eventRule)
+		return 2
+	}
 	of, ok := loadObsYaml(*dir, "obs check", stderr)
 	if !ok {
 		return 2
 	}
 	versionFails := printObsYamlCheck(of, *dir, stdout)
-	c, rc := loadContract(*dir, "obs check", stdout, stderr)
-	if c == nil {
-		if rc == 1 && versionFails > 0 {
-			fmt.Fprintf(stdout, "obs check: FAILED: %d version mismatch(es) in %s\n", versionFails, of.Path)
+	var c *contract.Contract
+	contractFails := 0 // contract problems printed above (the queries half does not print them twice)
+	contractPath := ""
+	noContract := !fileExists(filepath.Join(*dir, "contract.yaml"))
+	if noContract {
+		// Nothing to measure: the limits half is skipped, the queries half still runs (it reads no contract names then).
+		fmt.Fprintf(stdout, "note: %s/contract.yaml not found: limits (series per metric, log streams) not checked\n", *dir)
+	} else {
+		// Not loadContract: that prints its own "obs check: FAILED" line, and this command has one summary.
+		cpath := filepath.Join(*dir, "contract.yaml")
+		var err error
+		c, err = contract.Load(cpath)
+		if err != nil {
+			fmt.Fprintf(stderr, "obs check: %v\n", err)
+			return 2
 		}
-		return rc
-	}
-	printWarnings(c, stdout)
-	// The repository's other contracts: each is validated and printed, and no stored name may be in two.
-	var others []*contract.Contract
-	otherFails := 0
-	if *contracts == "auto" {
-		found, derr := contract.Discover(*dir)
-		if derr != nil {
-			fmt.Fprintf(stdout, "FAIL %s\n", derr)
-			otherFails++
-		}
-		for _, p := range found {
-			oc, err := contract.Load(p)
-			if err != nil {
-				fmt.Fprintf(stdout, "FAIL %s\n", strings.ReplaceAll(err.Error(), p, contract.RelPath(p)))
-				otherFails++
-				continue
+		if is := c.Validate(); len(is) > 0 {
+			for _, i := range is {
+				fmt.Fprintf(stdout, "FAIL %s %s\n", cpath, i)
 			}
-			if is := oc.Validate(); len(is) > 0 {
-				for _, i := range is {
-					fmt.Fprintf(stdout, "FAIL %s %s\n", oc.Rel(), i)
-				}
-				otherFails += len(is)
-				continue
-			}
-			printWarnings(oc, stdout)
-			others = append(others, oc)
-		}
-		for _, i := range contract.Clashes(append([]*contract.Contract{c}, others...)) {
-			fmt.Fprintf(stdout, "FAIL %s %s\n", c.Rel(), i)
-			otherFails++
+			contractFails = len(is)
+			contractPath = cpath
+			c = nil
 		}
 	}
-	if otherFails > 0 {
-		fmt.Fprintf(stdout, "obs check: FAILED: %d contract failures in the repository's other contracts or across contracts\n", otherFails)
-		return 1
-	}
-	total := printMetrics(c, *pods, stdout)
-	fmt.Fprintf(stdout, "metrics total: worst case %d series per landscape\n", total)
-	for _, oc := range others {
-		fmt.Fprintf(stdout, "contract %s (service %s, read with this one):\n", gen.ContractPath(oc), oc.Service)
-		ot := printMetrics(oc, *pods, stdout)
-		fmt.Fprintf(stdout, "metrics total (%s): worst case %d series per landscape\n", oc.Service, ot)
-	}
-	fmt.Fprintf(stdout, "log streams: worst case %d (service %s x %d landscapes x modules %d; log events add no streams)\n",
-		c.StreamCount(*landscapes), c.Service, *landscapes, maxInt(len(c.Modules), 1))
-	fmt.Fprintf(stdout, "events=%v\n", c.EventNames())
+	// reasons is what fails the run, one entry per half; the one summary line at the end lists them.
+	var reasons []string
 	if versionFails > 0 {
-		fmt.Fprintf(stdout, "obs check: FAILED: %d version mismatch(es) in %s (the contract itself is ok: %d metrics, %d log events, %d spans, %d types, contract hash %s)\n",
-			versionFails, of.Path, len(c.MetricOrder), len(c.LogOrder), len(c.SpanOrder), len(c.TypeOrder), shortHash(c))
+		reasons = append(reasons, fmt.Sprintf("%d version mismatch(es) in %s", versionFails, of.Path))
+	}
+	if contractFails > 0 {
+		// Every issue is printed above; the contract cannot be used.
+		reasons = append([]string{fmt.Sprintf("%d contract failures in %s", contractFails, contractPath)}, reasons...)
+	}
+	okLine := ""
+	if noContract {
+		okLine = "no contract.yaml, limits not checked"
+	}
+	if c != nil {
+		printWarnings(c, stdout)
+		// The repository's other contracts: each is validated and printed, and no stored name may be in two.
+		var others []*contract.Contract
+		otherFails := 0
+		if *contracts == "auto" {
+			found, derr := contract.Discover(*dir)
+			if derr != nil {
+				fmt.Fprintf(stdout, "FAIL %s\n", derr)
+				otherFails++
+			}
+			for _, p := range found {
+				oc, err := contract.Load(p)
+				if err != nil {
+					fmt.Fprintf(stdout, "FAIL %s\n", strings.ReplaceAll(err.Error(), p, contract.RelPath(p)))
+					otherFails++
+					continue
+				}
+				if is := oc.Validate(); len(is) > 0 {
+					for _, i := range is {
+						fmt.Fprintf(stdout, "FAIL %s %s\n", oc.Rel(), i)
+					}
+					otherFails += len(is)
+					continue
+				}
+				printWarnings(oc, stdout)
+				others = append(others, oc)
+			}
+			for _, i := range contract.Clashes(append([]*contract.Contract{c}, others...)) {
+				fmt.Fprintf(stdout, "FAIL %s %s\n", c.Rel(), i)
+				otherFails++
+			}
+		}
+		if otherFails > 0 {
+			contractFails += otherFails
+			reasons = append(reasons, fmt.Sprintf("%d contract failures in the repository's other contracts or across contracts", otherFails))
+		} else {
+			total := printMetrics(c, *pods, stdout)
+			fmt.Fprintf(stdout, "metrics total: worst case %d series per landscape\n", total)
+			for _, oc := range others {
+				fmt.Fprintf(stdout, "contract %s (service %s, read with this one):\n", gen.ContractPath(oc), oc.Service)
+				ot := printMetrics(oc, *pods, stdout)
+				fmt.Fprintf(stdout, "metrics total (%s): worst case %d series per landscape\n", oc.Service, ot)
+			}
+			fmt.Fprintf(stdout, "log streams: worst case %d (service %s x %d landscapes x modules %d; log events add no streams)\n",
+				c.StreamCount(*landscapes), c.Service, *landscapes, maxInt(len(c.Modules), 1))
+			fmt.Fprintf(stdout, "events=%v\n", c.EventNames())
+			okLine = fmt.Sprintf("%d metrics, %d log events, %d spans, %d types, contract hash %s",
+				len(c.MetricOrder), len(c.LogOrder), len(c.SpanOrder), len(c.TypeOrder), shortHash(c))
+		}
+	}
+
+	// The queries half: what `obs query --static` does (cmd_parts.go), on the same folder.
+	set, err := files.Load(*dir)
+	if err != nil {
+		fmt.Fprintf(stderr, "obs check: %v\n", err)
+		return 2
+	}
+	qo := check.Options{Dir: *dir, VLSettings: *vlSettings, TempoConfig: *tempoConfig, Names: *names, EventRule: *eventRule, Obs: of, Out: stdout, NoOtherContracts: *contracts == "none", AllowEmpty: true}
+	rep, _ := queryReport(set, qo, false)
+	if contractFails > 0 {
+		// The contract problems were printed above; the query rules must not print them again.
+		kept := rep.Findings[:0]
+		for _, f := range rep.Findings {
+			if f.Rule != "contract" {
+				kept = append(kept, f)
+			}
+		}
+		rep.Findings = kept
+	}
+	rep.Print(stdout)
+	if rep.Failures() > 0 {
+		reasons = append(reasons, fmt.Sprintf("%d query failures", rep.Failures()))
+	}
+
+	if len(reasons) > 0 {
+		tail := ""
+		if okLine != "" && !noContract {
+			tail = fmt.Sprintf(" (the contract itself is ok: %s; queries: %s)", okLine, rep.Totals())
+		}
+		fmt.Fprintf(stdout, "obs check: FAILED: %s%s\n", strings.Join(reasons, "; "), tail)
 		return 1
 	}
-	fmt.Fprintf(stdout, "obs check: ok: %d metrics, %d log events, %d spans, %d types, contract hash %s\n",
-		len(c.MetricOrder), len(c.LogOrder), len(c.SpanOrder), len(c.TypeOrder), shortHash(c))
+	fmt.Fprintf(stdout, "obs check: ok: %s; queries: %s\n", okLine, rep.Totals())
 	return 0
 }
 

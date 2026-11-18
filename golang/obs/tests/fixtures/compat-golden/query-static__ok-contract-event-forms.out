@@ -1,0 +1,7 @@
+args: query --static --dir ok-contract-event-forms/observability --seed shared-seed.yaml --base 1700000000
+exit: 0
+--- stdout
+note alerts/logs/phrase.yaml rule phrase-warning query A: [event-rule] events=[checkout.charge.failed]
+note alerts/prefix/warning.yaml rule prefix-warning query A: [event-rule] events=[checkout.charge.succeeded]
+obs query --static: ok: 2 queries (2 logs), 0 failures, 0 warnings
+--- stderr
