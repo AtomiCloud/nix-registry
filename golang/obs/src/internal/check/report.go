@@ -4,6 +4,7 @@ package check
 import (
 	"fmt"
 	"io"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -39,6 +40,42 @@ func newReport() *Report { return &Report{Counts: map[string]int{}} }
 func (r *Report) add(l Level, file, where, rule, format string, a ...any) {
 	r.Findings = append(r.Findings, Finding{Level: l, File: file, Where: where, Rule: rule, Msg: fmt.Sprintf(format, a...)})
 }
+
+// AppendLive adds a live run's findings to the static report of the same command. A live run also
+// applies the static rules, so a wrong label spelling the contract check already flagged (and a
+// label_values variable it already flagged) is not reported a second time by the live label-spelling
+// check: "fails once, with the fix in the message".
+func (r *Report) AppendLive(live *Report) {
+	flagged := map[string]bool{} // file \x00 where \x00 quoted label, from the contract checks
+	vars := map[string]bool{}    // file \x00 variable where
+	for _, f := range r.Findings {
+		if f.Rule != "contract-undeclared-label" && f.Rule != "contract-pod-label" {
+			continue
+		}
+		vars[f.File+"\x00"+f.Where] = true
+		for _, m := range quotedRe.FindAllString(f.Msg, -1) {
+			flagged[f.File+"\x00"+f.Where+"\x00"+m] = true
+		}
+	}
+	for _, f := range live.Findings {
+		if f.Rule == "label-spelling" {
+			if m := spellingVarRe.FindStringSubmatch(f.Msg); m != nil && vars[f.File+"\x00variable $"+m[1]] {
+				continue
+			}
+			if m := spellingLabelRe.FindStringSubmatch(f.Msg); m != nil && flagged[f.File+"\x00"+f.Where+"\x00"+m[1]] {
+				continue
+			}
+		}
+		r.Findings = append(r.Findings, f)
+	}
+	r.Counts = live.Counts
+}
+
+var (
+	quotedRe        = regexp.MustCompile(`"[^"]+"`)
+	spellingVarRe   = regexp.MustCompile(`^variable \$(\S+): `)
+	spellingLabelRe = regexp.MustCompile(`label ("[^"]+") is stored as`)
+)
 
 // Failures is the number of FAIL findings.
 func (r *Report) Failures() int { return r.count(Fail) }

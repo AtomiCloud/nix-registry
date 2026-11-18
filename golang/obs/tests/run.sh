@@ -123,6 +123,15 @@ run query --live --dir "$work/rec" --base "$base"
 [ "$rc" -eq 1 ] && grep -q '\[no-rows\].*fixture_recorded' "$work/out.txt" && ! grep -q 'recording-rule' "$work/out.txt" &&
   ok "recording-rule read: a metric no rule records still fails no-rows" || bad "unrecorded metric live: exit $rc: $(cat "$work/out.txt")"
 
+# A wrong label spelling fails once, even in a live run that also applies the static rules: two wrong labels
+# (a selector and a grouping) in one query are exactly two failures, not four.
+run query --live --dir "$fx/bad-dotted-underscore/observability" --seed "$fx/shared-seed.yaml" --base "$base"
+[ "$rc" -eq 1 ] && grep -q ': FAILED: .* 2 failures' "$work/out.txt" && ! grep -q '\[label-spelling\]' "$work/out.txt" &&
+  ok "bad-dotted-underscore (live): two wrong labels are exactly two failures, each reported once" || bad "bad-dotted-underscore live count: exit $rc: $(cat "$work/out.txt")"
+run query --live --dir "$fx/bad-dotted-label-values/observability" --seed "$fx/shared-seed.yaml" --base "$base"
+[ "$rc" -eq 1 ] && grep -q ': FAILED: .* 1 failures' "$work/out.txt" &&
+  ok "bad-dotted-label-values (live): the wrong variable label fails once" || bad "bad-dotted-label-values live count: exit $rc: $(cat "$work/out.txt")"
+
 # ---- planted failures: each red, naming file + rule/panel + the bad token ------------
 for d in "$fx"/bad-* "$fx"/ok-*; do
   name=$(basename "$d")

@@ -102,7 +102,7 @@ func Live(set *files.Set, o Options) (*Report, error) {
 // runLive runs every query of set on the given engines.
 func runLive(set *files.Set, o Options, ds *seed.Dataset, m metricsEngine, l logsEngine) *Report {
 	r := newReport()
-	lv := &liveRun{r: r, o: o, ds: ds, end: ds.End, vm: m, vl: l}
+	lv := &liveRun{r: r, o: o, ds: ds, end: ds.End, vm: m, vl: l, varSpelling: map[string]bool{}}
 	lv.tempo = tempo.NewTempoEngine(ds.Traces)
 	lv.logFields = logFieldSet(ds)
 	lv.metricNames = toSet(ds.MetricNames())
@@ -148,6 +148,7 @@ type liveRun struct {
 	logFields   map[string]bool
 	metricNames map[string]bool
 	labelNames  map[string]bool
+	varSpelling map[string]bool // dashboard file + variable: a wrong label_values spelling already reported
 	tempo       *tempo.TempoEngine
 	contract    *contract.Contract
 	eventOn     bool
@@ -303,6 +304,9 @@ func (l *liveRun) panel(q *files.Query) {
 	for _, n := range names {
 		if v, ok := defs[n]; ok {
 			vs := l.varValues(q, v, start, end)
+			if len(vs) == 0 {
+				return
+			}
 			if !v.Multi {
 				// One value at a time, as the dashboard shows it: the current one, else the first.
 				pick := vs[0]
@@ -411,8 +415,11 @@ func (l *liveRun) varValues(q *files.Query, v files.Variable, start, end time.Ti
 			}
 			// VictoriaMetrics stores a dotted label with its dots (concept 2.1): name the right spelling.
 			if d := contract.Dotted(label, l.labelNames); d != "" {
-				l.r.add(Fail, q.File, q.Where, "label-spelling", "variable $%s: %s reads label %q, which VictoriaMetrics stores as %q: write %q", v.Name, v.Query, label, d, d)
-				return []string{""}
+				if k := q.File + "\x00" + v.Name; !l.varSpelling[k] { // once per variable, not once per panel that uses it
+					l.varSpelling[k] = true
+					l.r.add(Fail, q.File, q.Where, "label-spelling", "variable $%s: %s reads label %q, which VictoriaMetrics stores as %q: write %q", v.Name, v.Query, label, d, d)
+				}
+				return nil // the panel is not run: its values are unknown, and it would only add a no-rows
 			}
 			l.r.add(Warn, "", "", "variable", "variable $%s: %s has no values on the seed", v.Name, v.Query)
 		}

@@ -204,3 +204,28 @@ func TestLiveGroupingOnlyUnderscoreSpellingFails(t *testing.T) {
 		t.Errorf("dotted grouping must pass: %+v", r.Findings)
 	}
 }
+
+// A live run also applies the static rules. A wrong label spelling the contract check already flagged is
+// not reported a second time by the live label-spelling check: each wrong label fails once.
+func TestAppendLiveReportsAWrongSpellingOnce(t *testing.T) {
+	static := newReport()
+	static.add(Fail, "alerts/a.yaml", "rule a query A", "contract-undeclared-label", `label "durian_cloud_service" is not a label of metric "m" in the contract; VictoriaMetrics stores this label with its dots, write "durian.cloud.service"`)
+	static.add(Fail, "dashboards/d.json", "variable $provider", "contract-undeclared-label", `label_values reads label "payment_provider", which is not a label ...`)
+	live := newReport()
+	live.add(Fail, "alerts/a.yaml", "rule a query A", "label-spelling", `VictoriaMetrics keeps a label's dots: label "durian_cloud_service" is stored as "durian.cloud.service": write "durian.cloud.service"`)
+	live.add(Fail, "alerts/a.yaml", "rule a query A", "label-spelling", `VictoriaMetrics keeps a label's dots: label "durian_cloud_platform" is stored as "durian.cloud.platform": write "durian.cloud.platform"`)
+	live.add(Fail, "dashboards/d.json", "panel 1", "label-spelling", `variable $provider: label_values(m, payment_provider) reads label "payment_provider", which VictoriaMetrics stores as "payment.provider": write "payment.provider"`)
+	live.add(Fail, "dashboards/d.json", "panel 1", "no-rows", "unrelated")
+	static.AppendLive(live)
+	var got []string
+	for _, f := range static.Findings {
+		got = append(got, f.Rule+"|"+f.Where)
+	}
+	want := []string{"contract-undeclared-label|rule a query A", "contract-undeclared-label|variable $provider", "label-spelling|rule a query A", "no-rows|panel 1"}
+	if strings.Join(got, ";") != strings.Join(want, ";") {
+		t.Errorf("got %v, want %v", got, want)
+	}
+	if !strings.Contains(static.Findings[2].Msg, "durian_cloud_platform") {
+		t.Errorf("the unflagged label must still be reported: %+v", static.Findings[2])
+	}
+}
