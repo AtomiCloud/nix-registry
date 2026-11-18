@@ -20,7 +20,7 @@
       "type": "timeseries",
       "title": "Charges by outcome",
       "interval": "1m",
-      "datasource": { "type": "prometheus", "uid": "primordial-metrics" },
+      "datasource": { "type": "prometheus", "uid": "fixture-metrics" },
       "targets": [
         {
           "refId": "A",

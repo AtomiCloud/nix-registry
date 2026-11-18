@@ -120,7 +120,7 @@ func TestScrapedSamplesAreStoredWithDottedLabels(t *testing.T) {
 	if n := rowsOf(t, e, `app_up{durian_cloud_service="checkout"}`); n != 0 {
 		t.Errorf("underscore selector: want 0 rows, got %d", n)
 	}
-	// Primordial's rules, exactly: `cluster` is dropped, and only the four where-from labels are mapped,
+	// The production rules, exactly: `cluster` is dropped, and only the four where-from labels are mapped,
 	// so any other durian_cloud_* label stays as sent.
 	if n := rowsOf(t, e, `app_up{cluster="c1"}`); n != 0 {
 		t.Errorf("cluster label: want it dropped, got %d rows", n)

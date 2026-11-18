@@ -242,11 +242,12 @@ dashboard or alert written to the standard returns rows on an obs seed and on th
   `target_label` has dots), and a vminsert `-relabelConfig` `labelmap` rule (landscape, platform, service and module only: see below;
   `replacement: durian.cloud.$1`) turns them back into `durian.cloud.*`. `obs scrape` takes the underscore input
   (`--label durian_cloud_landscape=local`), exactly like the real collector. The sandbox's VictoriaMetrics is started
-  with Primordial's real vminsert relabel config, copied exactly (same rules, same order:
+  with the production vminsert relabel config, copied exactly (same rules, same order:
   `labelmap` of `durian_cloud_(landscape|platform|service|module)` to `durian.cloud.$1`, then `labeldrop` of those four
-  and `cluster`; `-relabelConfig=/etc/vm-relabel.yml`, copied in at `obs sandbox up`). Source: AtomiCloud/primordial, branch
-  `feat/durian-labels`, commit `954508c79c36faa38b221d5eb37c5bada9a03068`, `apps/vm/chart/values.yaml`,
-  `vminsert.relabel.config`; **that branch is not merged yet** (main has no relabel config), so this follows an unmerged
+  and `cluster`; `-relabelConfig=/etc/vm-relabel.yml`, copied in at `obs sandbox up`). Source: the production landscape's
+  repo (the comment above `VMRelabelConfig` in `src/internal/sandbox/stack.go` names it), branch `feat/durian-labels`, commit
+  `954508c79c36faa38b221d5eb37c5bada9a03068`, file `apps/vm/chart/values.yaml`, key `vminsert.relabel.config`; **that
+  branch is not merged yet** (its main has no relabel config), so this follows an unmerged
   branch. Scraped samples are stored dotted and `{"durian.cloud.service"="checkout"}` returns rows there; any other
   `durian_cloud_*` label is not mapped. A sandbox created by an older obs has no labelmap: run
   `obs sandbox down` and `up` again. NOT TESTED: the labelmap on the real stack with our Alloy v1.21.3.
@@ -497,7 +498,7 @@ the message:
   `obs sandbox up`.
 - NOT TESTED: `label_values` with a quoted dotted label (`label_values(m, "payment.provider")`) in Grafana itself; obs
   accepts both quoted and bare, but only the bare form is what the fixtures use.
-- Primordial's current charts (main, release 1.5.0, `scripts/ci/obs-query.sh`) pass with this obs: 6 charts, 0 failures.
+- The production landscape's current charts (its main, release 1.5.0, `scripts/ci/obs-query.sh`) pass with this obs: 6 charts, 0 failures.
   They have no `contract.yaml` and use no `durian.*` label, so nothing in them was judged for spelling.
 
 ## `obs sandbox`: the local stack, for people

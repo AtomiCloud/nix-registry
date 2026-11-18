@@ -15,7 +15,7 @@ spec:
       data:
         - refId: A
           relativeTimeRange: { from: 600, to: 0 }
-          datasourceUid: primordial-metrics
+          datasourceUid: fixture-metrics
           model:
             expr: 'sum by (durian_cloud_platform) (rate(checkout_charges_total{durian_cloud_service="checkout", outcome="error"}[5m])) > 0.0001'
             instant: true
