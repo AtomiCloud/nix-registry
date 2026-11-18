@@ -399,16 +399,7 @@ func (l *liveRun) runPanel(q *files.Query, res vars.Result, start, end time.Time
 func (l *liveRun) varValues(q *files.Query, v files.Variable, start, end time.Time) []string {
 	switch v.Type {
 	case "query":
-		if m := labelValuesRe.FindStringSubmatch(v.Query); m != nil {
-			metric, label := "", strings.Trim(strings.TrimSpace(m[2]), "\"")
-			if label == "" {
-				label = strings.Trim(strings.TrimSpace(m[1]), "\"")
-			} else {
-				metric = strings.TrimSpace(m[1])
-				if i := strings.IndexAny(metric, "{"); i >= 0 {
-					metric = metric[:i]
-				}
-			}
+		if metric, label, ok := parseLabelValues(v.Query); ok {
 			vs := l.ds.LabelValues(metric, label, start.UnixMilli(), end.UnixMilli())
 			if len(vs) > 0 {
 				return vs
@@ -459,28 +450,75 @@ func (l *liveRun) spelling(q *files.Query) bool {
 	}
 	seen := map[string]bool{}
 	var wrong []string
-	metricsql.VisitAll(e, func(x metricsql.Expr) {
-		var read []string
-		switch t := x.(type) {
-		case *metricsql.MetricExpr:
-			for _, lfs := range t.LabelFilterss {
-				for _, lf := range lfs {
-					read = append(read, lf.Label)
-				}
+	// check reports a read of a label this query did not create that the seed stores dotted. A label the
+	// query itself makes (label_set, label_replace, label_join, label_copy, label_move, count_values) is
+	// not a stored label: reading it back is fine, whatever its spelling.
+	check := func(names []string, created map[string]bool) {
+		for _, name := range names {
+			if created[name] {
+				continue
 			}
-		case *metricsql.AggrFuncExpr:
-			read = append(read, t.Modifier.Args...)
-		case *metricsql.BinaryOpExpr:
-			read = append(read, t.GroupModifier.Args...)
-			read = append(read, t.JoinModifier.Args...)
-		}
-		for _, name := range read {
 			if d := contract.Dotted(name, l.labelNames); d != "" && !seen[name] {
 				seen[name] = true
 				wrong = append(wrong, fmt.Sprintf("label %q is stored as %q: write %q (a selector is {%q=\"...\"}, a grouping is by (%q))", name, d, d, d, d))
 			}
 		}
-	})
+	}
+	var walk func(e metricsql.Expr) map[string]bool
+	union := func(es []metricsql.Expr) map[string]bool {
+		c := map[string]bool{}
+		for _, x := range es {
+			for k := range walk(x) {
+				c[k] = true
+			}
+		}
+		return c
+	}
+	walk = func(e metricsql.Expr) map[string]bool {
+		switch t := e.(type) {
+		case *metricsql.MetricExpr:
+			var names []string
+			for _, lfs := range t.LabelFilterss {
+				for _, lf := range lfs {
+					names = append(names, lf.Label)
+				}
+			}
+			check(names, nil) // a selector reads stored labels
+			return map[string]bool{}
+		case *metricsql.RollupExpr:
+			c := walk(t.Expr)
+			if t.At != nil {
+				walk(t.At)
+			}
+			return c
+		case *metricsql.FuncExpr:
+			c := union(t.Args)
+			reads, makes := labelFuncLabels(t)
+			if len(reads) > 0 && len(t.Args) > 0 {
+				check(reads, walk(t.Args[0]))
+			}
+			for _, m := range makes {
+				c[m] = true
+			}
+			return c
+		case *metricsql.AggrFuncExpr:
+			c := union(t.Args)
+			check(t.Modifier.Args, c)
+			if strings.ToLower(t.Name) == "count_values" && len(t.Args) > 0 {
+				if se, ok := t.Args[0].(*metricsql.StringExpr); ok {
+					c[se.S] = true
+				}
+			}
+			return c
+		case *metricsql.BinaryOpExpr:
+			c := union([]metricsql.Expr{t.Left, t.Right})
+			check(t.GroupModifier.Args, c)
+			check(t.JoinModifier.Args, c)
+			return c
+		}
+		return map[string]bool{}
+	}
+	walk(e)
 	for _, w := range wrong {
 		l.r.add(Fail, q.File, q.Where, "label-spelling", "VictoriaMetrics keeps a label's dots: %s", w)
 	}

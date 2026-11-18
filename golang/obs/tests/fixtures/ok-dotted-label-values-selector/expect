@@ -1,0 +1,4 @@
+# label_values(metric{matcher}, label): the selector's matchers and commas do not make a bogus label (review 120).
+mode: both
+exit: 0
+contains: obs query

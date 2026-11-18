@@ -206,48 +206,7 @@ func (mc *metricChecker) walk(e metricsql.Expr) labelScope {
 // labelFunc judges the labels a label function READS (they must exist on its input) and adds the
 // labels it MAKES to the scope of its result only.
 func (mc *metricChecker) labelFunc(fe *metricsql.FuncExpr, sc *labelScope) {
-	str := func(i int) (string, bool) {
-		if i < len(fe.Args) {
-			if se, ok := fe.Args[i].(*metricsql.StringExpr); ok {
-				return se.S, true
-			}
-		}
-		return "", false
-	}
-	var reads, makes []string
-	pick := func(idx ...int) []string {
-		var out []string
-		for _, i := range idx {
-			if s, ok := str(i); ok {
-				out = append(out, s)
-			}
-		}
-		return out
-	}
-	switch strings.ToLower(fe.Name) {
-	case "label_replace":
-		makes, reads = pick(1), pick(3)
-	case "label_join":
-		makes = pick(1)
-		for i := 3; i < len(fe.Args); i++ {
-			reads = append(reads, pick(i)...)
-		}
-	case "label_set":
-		for i := 1; i < len(fe.Args); i += 2 {
-			makes = append(makes, pick(i)...)
-		}
-	case "label_copy", "label_move":
-		for i := 1; i+1 < len(fe.Args); i += 2 {
-			reads = append(reads, pick(i)...)
-			makes = append(makes, pick(i+1)...)
-		}
-	case "label_map", "label_match", "label_mismatch", "label_transform":
-		reads = pick(1)
-	case "label_uppercase", "label_lowercase", "label_del", "label_keep":
-		for i := 1; i < len(fe.Args); i++ {
-			reads = append(reads, pick(i)...)
-		}
-	}
+	reads, makes := labelFuncLabels(fe)
 	// What the input carries is the scope of the series argument only: labels made by an inner
 	// label function count, labels made by this one (or by a sibling elsewhere) do not.
 	var input labelScope
@@ -634,18 +593,9 @@ func contractVariables(r *Report, d *files.Dashboard, c *contract.Contract) {
 		if v.Type != "query" {
 			continue
 		}
-		m := labelValuesRe.FindStringSubmatch(v.Query)
-		if m == nil {
+		metric, label, ok := parseLabelValues(v.Query)
+		if !ok {
 			continue
-		}
-		metric, label := "", strings.Trim(strings.TrimSpace(m[2]), "\"")
-		if label == "" {
-			label = strings.Trim(strings.TrimSpace(m[1]), "\"")
-		} else {
-			metric = strings.TrimSpace(m[1])
-			if i := strings.IndexAny(metric, "{"); i >= 0 {
-				metric = strings.TrimSpace(metric[:i])
-			}
 		}
 		allowed := c.AllLabels()
 		where := fmt.Sprintf("variable $%s", v.Name)
@@ -672,4 +622,45 @@ func contractVariables(r *Report, d *files.Dashboard, c *contract.Contract) {
 		}
 		r.add(Fail, d.File, where, "contract-undeclared-label", msg, label, target, labelHint(label, allowed))
 	}
+}
+
+// labelFuncLabels names the labels a label function READS from its series argument and the labels it MAKES
+// (its string arguments), for the static contract check and the live spelling check alike.
+func labelFuncLabels(fe *metricsql.FuncExpr) (reads, makes []string) {
+	pick := func(idx ...int) []string {
+		var out []string
+		for _, i := range idx {
+			if i < len(fe.Args) {
+				if se, ok := fe.Args[i].(*metricsql.StringExpr); ok {
+					out = append(out, se.S)
+				}
+			}
+		}
+		return out
+	}
+	switch strings.ToLower(fe.Name) {
+	case "label_replace":
+		makes, reads = pick(1), pick(3)
+	case "label_join":
+		makes = pick(1)
+		for i := 3; i < len(fe.Args); i++ {
+			reads = append(reads, pick(i)...)
+		}
+	case "label_set":
+		for i := 1; i < len(fe.Args); i += 2 {
+			makes = append(makes, pick(i)...)
+		}
+	case "label_copy", "label_move":
+		for i := 1; i+1 < len(fe.Args); i += 2 {
+			reads = append(reads, pick(i)...)
+			makes = append(makes, pick(i+1)...)
+		}
+	case "label_map", "label_match", "label_mismatch", "label_transform":
+		reads = pick(1)
+	case "label_uppercase", "label_lowercase", "label_del", "label_keep":
+		for i := 1; i < len(fe.Args); i++ {
+			reads = append(reads, pick(i)...)
+		}
+	}
+	return reads, makes
 }
