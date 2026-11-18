@@ -797,10 +797,10 @@ slower than its limit, or a hot baseline function has no matching samples. The l
 `ERROR` naming the function and suggesting `--update` after inspecting an intentional removal.
 For a function or span row the change is `now share / baseline share − 1`.
 
-- **limit = max(tolerance, 3 × noise)**, noise = sqrt(1/n*base + 1/n_now). \_FROM SOURCE: the concept does not say
+- **limit = max(tolerance, 3 × noise)**, noise = `sqrt(1/n_base + 1/n_now)`. _FROM SOURCE: the concept does not say
   what n counts; obs uses the **row's own** sample count (own samples of the function, samples inside
   the span) in the baseline (median) and in this run, so small rows get wider limits. For the total-CPU row
-  n is the total sample count of each run.*
+  n is the total sample count of each run._
 - **Tolerances:** 5 % for a function and a span, 15 % for total OS CPU per request, 30 % for every row of
   a baseline made with `--profiler dotnet-trace`.
 - **Total CPU per request fails only on a quiet runner.** Quiet = during the load window the pinned cores

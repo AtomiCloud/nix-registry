@@ -112,13 +112,13 @@ run query --live --dir "$work/assumed/observability" --base "$base" --event-rule
 cp -R "$fx/alerts/features" "$work/rec"
 chmod -R u+w "$work/rec"
 for d in "$work/rec/alerts"/*; do
-  case "$(basename "$d")" in record-rule | recorded) ;; *) rm -rf "$d" ;; esac
+  case "$(basename "$d")" in record-rule | recorded) ;; *) rm -rf "${d:?}" ;; esac
 done
 run query --live --dir "$work/rec" --base "$base"
 [ "$rc" -eq 0 ] && grep -q 'alerts/recorded/critical.yaml rule recorded query A: \[recording-rule\] reads recording rule fixture_recorded: checked by obs alerts' "$work/out.txt" &&
   ok "recording-rule read: exit 0 and a named note (file, rule, recording rule)" || bad "recording-rule read: exit $rc: $(cat "$work/out.txt")"
 # Red: without the recording rule the metric is just missing from the seed, and --live fails no-rows naming it.
-rm -rf "$work/rec/alerts/record-rule"
+rm -rf "${work:?}/rec/alerts/record-rule"
 run query --live --dir "$work/rec" --base "$base"
 [ "$rc" -eq 1 ] && grep -q '\[no-rows\].*fixture_recorded' "$work/out.txt" && ! grep -q 'recording-rule' "$work/out.txt" &&
   ok "recording-rule read: a metric no rule records still fails no-rows" || bad "unrecorded metric live: exit $rc: $(cat "$work/out.txt")"
