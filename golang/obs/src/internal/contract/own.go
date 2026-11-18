@@ -62,23 +62,60 @@ func (c *Contract) KeepNames() []string {
 var platformUnits = []string{"", "_seconds", "_bytes", "_ratio", "_milliseconds"}
 
 // platformStored is every stored name a platform metric may have. The kind and unit of a platform
-// metric are not in the contract, so this is a SUPERSET, not a prediction: for each unit in
-// platformUnits (a key ending in _duration: only seconds and milliseconds), added unless the key
-// already ends in it, the plain name, _total and the histogram parts _bucket, _sum and _count. A name kept that nobody sends costs nothing, a name
-// dropped loses data. Keep-list, name lookup and the clash check all read this one list.
+// metric are not in the contract, so this is a SUPERSET, not a prediction: for each base name (below)
+// and each unit in platformUnits (a key ending in _duration: only seconds and milliseconds), added
+// unless the name already ends in it, the plain name, _total and the histogram parts _bucket, _sum
+// and _count. A name kept that nobody sends costs nothing, a name dropped loses data. Keep-list,
+// name lookup and the clash check all read this one list.
+//
+// The base names are the key as written (dots to _), the key split into tokens the way
+// VictoriaMetrics splits it (a double _ collapses; / - : and space split too), and each of those with
+// a total or ratio token that is not last taken out of the middle: VictoriaMetrics moves that token
+// to the end (jobs.total.done, a counter, is stored jobs_done_total).
 func platformStored(key string) []string {
-	base := StoredBase(key)
-	units := platformUnits
-	if strings.HasSuffix(base, "_duration") {
-		units = []string{"", "_seconds", "_milliseconds"} // a duration is in time, never bytes or a ratio
+	var out []string
+	seen := map[string]bool{}
+	for _, base := range platformBases(key) {
+		units := platformUnits
+		if strings.HasSuffix(base, "_duration") {
+			units = []string{"", "_seconds", "_milliseconds"} // a duration is in time, never bytes or a ratio
+		}
+		for _, unit := range units {
+			b := base
+			if unit != "" && !strings.HasSuffix(b, unit) {
+				b += unit
+			}
+			for _, s := range []string{b, b + "_total", b + "_bucket", b + "_count", b + "_sum"} {
+				if !seen[s] {
+					seen[s] = true
+					out = append(out, s)
+				}
+			}
+		}
+	}
+	return out
+}
+
+// platformBases are the base names platformStored builds on (see there); the key as written comes first.
+func platformBases(key string) []string {
+	toks := strings.FieldsFunc(key, func(r rune) bool { return strings.ContainsRune("/_.-: ", r) })
+	bases := []string{StoredBase(key), strings.Join(toks, "_")}
+	for _, word := range []string{"total", "ratio"} {
+		for i, t := range toks {
+			if t == word && i < len(toks)-1 {
+				rest := append(append([]string(nil), toks[:i]...), toks[i+1:]...)
+				bases = append(bases, strings.Join(rest, "_"))
+				break
+			}
+		}
 	}
 	var out []string
-	for _, unit := range units {
-		b := base
-		if unit != "" && !strings.HasSuffix(b, unit) {
-			b += unit
+	seen := map[string]bool{}
+	for _, b := range bases {
+		if b != "" && !seen[b] {
+			seen[b] = true
+			out = append(out, b)
 		}
-		out = append(out, b, b+"_total", b+"_bucket", b+"_count", b+"_sum")
 	}
 	return out
 }

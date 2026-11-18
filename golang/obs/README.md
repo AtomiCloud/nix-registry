@@ -354,6 +354,14 @@ metrics:
   entries: an own metric is named by its own service (its `service:` and the generated code), so it needs no `used_by`.
 - An enum type used only by `source:` entries may list the empty string (a pod with no priority class
   has an empty label); a type an own metric uses may not.
+- **Enum values and generated names.** A value may hold any characters (`<none>`, `it's`, `100%`, `über`): the
+  wire value is always the text as written, and only the member name made from it is cleaned. Every
+  character that cannot be in an identifier is a word break (`<none>` becomes `None`, `(n/a)` `NA`), a value
+  with no letter or digit at all is `Value`, and a member that would start with a digit gets a `V` (Dart,
+  .NET) or follows the type name (Go). Dart identifiers are ASCII only, so a letter outside ASCII is a break
+  there. Two values that make one name in a language (`none` and `<none>`) are **refused by `obs gen`**, naming
+  both values and the contract `file:line` of the type; rename one. Bun quotes every value, so it never collides.
+  Only values of types an own metric, log or span uses are generated; a `source:`-only type makes no code.
 
 **Several contracts in one repository.** `obs check` and `obs query` read **every** `observability/contract.yaml`
 below the Git root, not only `--dir`'s: a dashboard in `apps/hub/observability` may read a metric that

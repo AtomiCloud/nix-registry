@@ -208,10 +208,12 @@ type Contract struct {
 	// File is the path the contract was read from.
 	File string `yaml:"-"`
 
-	TypeOrder   []string `yaml:"-"`
-	MetricOrder []string `yaml:"-"`
-	LogOrder    []string `yaml:"-"`
-	SpanOrder   []string `yaml:"-"`
+	TypeOrder []string `yaml:"-"`
+	// TypeLine is each type's line in the contract file (absent for a type built in code).
+	TypeLine    map[string]int `yaml:"-"`
+	MetricOrder []string       `yaml:"-"`
+	LogOrder    []string       `yaml:"-"`
+	SpanOrder   []string       `yaml:"-"`
 }
 
 // Load reads and parses a contract file. It does not validate: call Validate.
@@ -290,6 +292,10 @@ func (c *Contract) fillOrder(root *yaml.Node) {
 		switch key {
 		case "types":
 			c.TypeOrder = keys(val)
+			c.TypeLine = map[string]int{}
+			for j := 0; j+1 < len(val.Content); j += 2 {
+				c.TypeLine[val.Content[j].Value] = val.Content[j].Line
+			}
 		case "metrics":
 			c.MetricOrder = keys(val)
 			for j := 0; j+1 < len(val.Content); j += 2 {

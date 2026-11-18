@@ -66,7 +66,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 			others = append(others, oc)
 		}
 		for _, i := range contract.Clashes(append([]*contract.Contract{c}, others...)) {
-			fmt.Fprintf(stdout, "FAIL %s %s\n", c.File, i)
+			fmt.Fprintf(stdout, "FAIL %s %s\n", c.Rel(), i)
 			otherFails++
 		}
 	}
@@ -132,7 +132,7 @@ func printMetrics(c *contract.Contract, pods int, stdout io.Writer) int64 {
 // printWarnings prints the contract's warnings (a source: entry that does not say who uses it); they do not fail the check.
 func printWarnings(c *contract.Contract, stdout io.Writer) {
 	for _, w := range c.Warnings() {
-		fmt.Fprintf(stdout, "WARN %s %s\n", c.File, w)
+		fmt.Fprintf(stdout, "WARN %s %s\n", c.Rel(), w)
 	}
 }
 

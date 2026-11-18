@@ -3,6 +3,7 @@ package gen
 import (
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Words splits a contract name (checkout.charges, user_id, ChargeFailed, a-b) into lowercase words.
@@ -36,9 +37,22 @@ func Words(s string) []string {
 func Pascal(s string) string {
 	var b strings.Builder
 	for _, w := range Words(s) {
-		b.WriteString(strings.ToUpper(w[:1]) + w[1:])
+		r, n := utf8.DecodeRuneInString(w)
+		b.WriteString(strings.ToUpper(string(r)) + w[n:])
 	}
 	return b.String()
+}
+
+// Clean turns every character that cannot be in an identifier into a word break (it's -> it_s,
+// <none> -> _none_), so a value such as <none> becomes the words of a safe identifier. The wire value
+// is never changed: only the identifier made from it is.
+func Clean(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '.' || r == '_' || r == '-' || r == ' ' || r == '/' {
+			return r
+		}
+		return '_'
+	}, s)
 }
 
 // Camel makes camelCase: user_id -> userId.
@@ -47,7 +61,8 @@ func Camel(s string) string {
 	if p == "" {
 		return p
 	}
-	return strings.ToLower(p[:1]) + p[1:]
+	r, n := utf8.DecodeRuneInString(p)
+	return strings.ToLower(string(r)) + p[n:]
 }
 
 // Snake makes snake_case: checkout.charges -> checkout_charges.

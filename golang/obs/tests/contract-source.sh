@@ -178,7 +178,7 @@ metrics:
     kind: gauge
 YAML
 run check --dir "$work/w1/observability"
-expect 0 "WARN $work/w1/observability/contract.yaml metrics.kube_node_info: [used-by-missing]" 'obs check: ok'
+expect 0 "WARN observability/contract.yaml metrics.kube_node_info: [used-by-missing]" 'obs check: ok'
 echo "PASS contract-source: a source entry with no used_by is a warning (exit 0) that names the entry"
 
 # ---- several contracts in one repository ---------------------------------------------------

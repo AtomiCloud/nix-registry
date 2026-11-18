@@ -123,3 +123,52 @@ func TestCheckReadsEveryContract(t *testing.T) {
 		t.Fatalf("clash rc %d\n%s", rc, out)
 	}
 }
+
+// A warning from ANOTHER contract of the repository names that contract relative to the Git root: no
+// absolute or temp path may be in any line of the output, so the message reads the same on every machine.
+func TestCheckOtherContractWarningLineHasNoAbsolutePath(t *testing.T) {
+	box := "service: box\ntypes:\n  lane: { kind: enum, values: [a, b] }\nmetrics:\n  box.jobs:\n    kind: counter\n    budget: 2\n    labels: { lane: lane }\n"
+	root := repo(t, map[string]string{
+		"apps/box/observability/contract.yaml":     box,
+		"apps/cluster/observability/contract.yaml": checkClusterDoc,
+	})
+	rc, out := runChk("--dir", filepath.Join(root, "apps/box/observability"))
+	if rc != 0 {
+		t.Fatalf("rc %d\n%s", rc, out)
+	}
+	warn := ""
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(l, "WARN ") && strings.Contains(l, "[used-by-missing]") {
+			warn = l
+		}
+	}
+	if !strings.HasPrefix(warn, "WARN apps/cluster/observability/contract.yaml metrics.kube_pod_container_status_running: [used-by-missing] apps/cluster/observability/contract.yaml:") {
+		t.Fatalf("the other contract's warning line is not relative to the Git root: %q\n%s", warn, out)
+	}
+	noAbs(t, root, out)
+}
+
+// The same for a metric clash: the FAIL line names the contract relative to the Git root.
+func TestCheckClashLineHasNoAbsolutePath(t *testing.T) {
+	box := "service: box\ntypes:\n  lane: { kind: enum, values: [a, b] }\nmetrics:\n  kube_pod_status_phase:\n    kind: gauge\n    across_pods: max\n    budget: 2\n    labels: { lane: lane }\n"
+	root := repo(t, map[string]string{
+		"apps/box/observability/contract.yaml":     box,
+		"apps/cluster/observability/contract.yaml": checkClusterDoc,
+	})
+	rc, out := runChk("--dir", filepath.Join(root, "apps/box/observability"))
+	if rc != 1 || !strings.Contains(out, "[metric-clash]") {
+		t.Fatalf("rc %d\n%s", rc, out)
+	}
+	noAbs(t, root, out)
+}
+
+// noAbs fails when a WARN or FAIL line holds the repository's absolute (temp) path.
+func noAbs(t *testing.T, root, out string) {
+	t.Helper()
+	for _, l := range strings.Split(out, "\n") {
+		l = strings.TrimSpace(l)
+		if (strings.HasPrefix(l, "WARN ") || strings.HasPrefix(l, "FAIL ")) && (strings.Contains(l, root) || strings.Contains(l, os.TempDir())) {
+			t.Errorf("absolute or temp path in a diagnostic line: %q", l)
+		}
+	}
+}

@@ -96,3 +96,41 @@ func TestStoredNamesEqualVictoriaMetricsConversion(t *testing.T) {
 	}
 	t.Log(fmt.Sprintf("%d (name, unit, kind) combinations equal VictoriaMetrics' conversion", checked))
 }
+
+// MEASURED platform parity: a platform metric's kind and unit are not in the contract, so the keep
+// list holds a superset (platformStored). Every name VictoriaMetrics' own converter stores for a
+// platform metric, whatever its kind (counter, gauge, histogram) and its OTLP unit (s, ms, By, 1),
+// must be in that superset, or the collector would drop data the service sends. Names include ones
+// that already hold a unit word (io.bytes.sent with By: VictoriaMetrics adds no second _bytes) and
+// ones that hold the token it moves (total, ratio) in the middle.
+func TestPlatformKeepCoversEveryVictoriaMetricsName(t *testing.T) {
+	names := []string{
+		"http.server.request.duration", "http.server.duration", "http.client.request.duration",
+		"io.bytes.sent", "io.bytes.received", "process.cpu.utilization", "process.runtime.memory",
+		"process.cpu.time", "http.server.active_requests", "db.client.connection.count",
+		"gc.seconds.pause", "cpu.milliseconds.used", "queue.ratio.depth", "jobs.total.done", "a_b", "a.b",
+	}
+	units := []string{"s", "ms", "By", "1"}
+	checked, missed := 0, 0
+	for _, name := range names {
+		keep := platformStored(name)
+		for _, unit := range units {
+			if strings.HasSuffix(name, ".duration") && (unit == "By" || unit == "1") {
+				continue // by design a duration key is in time: seconds or milliseconds only (platformStored)
+			}
+			for _, kind := range []string{MetricCounter, MetricGauge, MetricHistogram} {
+				for _, stored := range storedByVM(t, name, unit, kind) {
+					checked++
+					if !in(keep, stored) {
+						missed++
+						t.Errorf("%s %q unit %q: VictoriaMetrics stores %q, which the platform keep list %v lacks", kind, name, unit, stored, keep)
+					}
+				}
+			}
+		}
+	}
+	if checked < 150 {
+		t.Fatalf("only %d stored names checked", checked)
+	}
+	t.Logf("%d VictoriaMetrics-stored names checked against the platform keep superset, %d missed", checked, missed)
+}

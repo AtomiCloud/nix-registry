@@ -434,6 +434,10 @@ func (c *Contract) at(line int) string {
 	return fmt.Sprintf("%s:%d", c.Rel(), line)
 }
 
+// TypeAt is "file:line" of type n in the contract (the file relative to the Git root), for a message that
+// names where a type is declared.
+func (c *Contract) TypeAt(n string) string { return c.at(c.TypeLine[n]) }
+
 // followsProblem says why label l of m can not follow its target ("" when it can).
 func (c *Contract) followsProblem(m Metric, l string) string {
 	seen := map[string]bool{l: true}
@@ -556,3 +560,6 @@ func vmMetricName(name, unit string, counter bool) string {
 	}
 	return strings.Join(toks, "_")
 }
+
+// At is "file:line" (the file relative to the Git root), or just the file when the line is 0.
+func (c *Contract) At(line int) string { return c.at(line) }

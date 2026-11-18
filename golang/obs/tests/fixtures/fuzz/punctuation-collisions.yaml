@@ -1,0 +1,12 @@
+# '<none>' and none make the same identifier, and so do '(a)' and a: every language must refuse naming both
+# values, or keep them apart, and compile.
+service: fuzz
+types:
+  t: { kind: enum, values: [none, '<none>', a, '(a)', 'a!'] }
+metrics:
+  one: { kind: counter, budget: 1000, labels: { kind: t } }
+generate:
+  - { lang: go, out: gen/go }
+  - { lang: dotnet, out: gen/dotnet, namespace: Fuzz.Signals }
+  - { lang: dart, out: gen/dart, package: fuzz_signals }
+  - { lang: bun, out: gen/bun }
