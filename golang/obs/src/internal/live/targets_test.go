@@ -53,10 +53,27 @@ func TestUnsetHeaderVariableIsAnErrorNamingFileLineKeyAndVariable(t *testing.T) 
 	if err == nil {
 		t.Fatal("an unset variable must be an error")
 	}
-	for _, want := range []string{"obs.yaml:", "targets.prod.headers.Authorization", "OBS_PROD_TOKEN", "not set"} {
+	for _, want := range []string{"obs.yaml:", "targets.prod.headers.Authorization", "not set"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q lacks %q", err, want)
 		}
+	}
+	if strings.Contains(err.Error(), "OBS_PROD_TOKEN") {
+		t.Errorf("the error names the header only, never the supplied value: %v", err)
+	}
+}
+
+func TestUnsetVariableNeverPrintsASuppliedValueThatPassesTheHeuristic(t *testing.T) {
+	// A secret that is not shaped like any known token still passes for a variable name. When no such
+	// variable is set the error must name the header and not the value.
+	const secret = "hunter2secretvalue"
+	specs, err := ParseTargets(node(t, "prod:\n  metrics: https://vm\n  headers:\n    Authorization: "+secret+"\n"), "obs.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Resolve("prod", specs, nil, func(string) string { return "" }, "obs.yaml")
+	if err == nil || strings.Contains(err.Error(), secret) || !strings.Contains(err.Error(), "targets.prod.headers.Authorization") || !strings.Contains(err.Error(), "not set") {
+		t.Fatalf("%v", err)
 	}
 }
 

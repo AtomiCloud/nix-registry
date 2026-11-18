@@ -3,6 +3,7 @@ package live
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -66,17 +67,17 @@ func baseURL(base string) (*url.URL, error) {
 func checkHop(method string, base, hop *url.URL) error {
 	switch {
 	case hop.Scheme != base.Scheme || hop.Host != base.Host:
-		return fmt.Errorf("read-only guard: refused redirect to %s://%s (obs live never leaves the target's own host)", hop.Scheme, hop.Host)
+		return fmt.Errorf("redirect refused: it leaves the target's host (to %s); obs live never follows one", hop.Host)
 	case hop.User != nil:
-		return fmt.Errorf("read-only guard: refused redirect carrying credentials")
+		return fmt.Errorf("redirect refused: it carries credentials")
 	}
 	prefix := strings.TrimRight(base.Path, "/")
 	if !strings.HasPrefix(hop.Path, prefix+"/") {
-		return fmt.Errorf("read-only guard: refused redirect to %s %s (outside %s)", method, hop.Path, base.Host+prefix)
+		return fmt.Errorf("redirect refused: it leaves the target's path prefix")
 	}
 	rel := strings.TrimPrefix(hop.Path, prefix)
 	if err := ReadOnly(method, rel); err != nil {
-		return fmt.Errorf("read-only guard: refused redirect to %s %s: %v", method, hop.Path, err)
+		return fmt.Errorf("redirect refused: the guard does not allow a %s there", method)
 	}
 	return nil
 }
@@ -139,12 +140,18 @@ func (c *Client) Get(ctx context.Context, base, path string, q url.Values) ([]by
 	hc := *c.http() // a copy: the guard below is set for this request whatever client the caller gave
 	hc.CheckRedirect = func(r *http.Request, via []*http.Request) error {
 		if len(via) >= 5 {
-			return fmt.Errorf("read-only guard: stopped after 5 redirects")
+			return fmt.Errorf("redirect refused: more than 5 redirects")
 		}
 		return checkHop(r.Method, bu, r.URL)
 	}
 	resp, err := hc.Do(req)
 	if err != nil {
+		// net/http wraps the error with the URL it was fetching: after a redirect that is the
+		// Location the store sent (a host, a path, a query that may carry a token). Say only what failed.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
 		return nil, fmt.Errorf("GET %s%s: %v", base, path, err)
 	}
 	defer resp.Body.Close()

@@ -82,6 +82,12 @@ func TestReadOnlyGuardRefusesEverythingThatIsNotAQuery(t *testing.T) {
 		{"GET", "/api/prometheus/grafana/api/v1/rules", true},
 		{"DELETE", "/api/v1/series", false},
 		{"PUT", "/api/search", false},
+		{"PUT", "/api/v1/query", false}, // a method that is neither GET nor POST on a query path
+		{"PUT", "/select/logsql/query", false},
+		{"PATCH", "/api/v1/query_range", false},
+		{"DELETE", "/api/v1/query", false},
+		{"HEAD", "/api/v1/query", false},
+		{"OPTIONS", "/api/v1/query", false},
 		{"PATCH", "/api/dashboards/uid/abc", false},
 		{"POST", "/api/dashboards/db", false},
 		{"POST", "/api/annotations", false},
@@ -151,13 +157,16 @@ func TestRedirectToAnotherHostIsRefusedAndNothingIsForwarded(t *testing.T) {
 	}))
 	defer b.Close()
 	a := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, b.URL+"/api/v1/query", http.StatusFound)
+		http.Redirect(w, r, b.URL+"/api/v1/query?token=sekrit-location-token", http.StatusFound)
 	}))
 	defer a.Close()
 	c := &Client{Headers: map[string]string{"X-Scope-OrgID": "acme"}}
 	err := c.GetJSON(context.Background(), a.URL, "/api/v1/query", nil, &struct{}{})
-	if err == nil || !strings.Contains(err.Error(), "redirect") {
+	if err == nil || !strings.Contains(err.Error(), "redirect refused") {
 		t.Fatalf("a redirect to another host must be refused: %v", err)
+	}
+	if strings.Contains(err.Error(), "sekrit-location-token") || strings.Contains(err.Error(), "token=") {
+		t.Fatalf("the refusal names the host at most, never the Location's query: %v", err)
 	}
 	if got := other.all(); len(got) != 0 {
 		t.Fatalf("the other host must receive nothing (headers would travel with it): %v", got)
@@ -176,8 +185,11 @@ func TestRedirectToAWritePathOnTheSameHostIsRefused(t *testing.T) {
 	}))
 	defer srv.Close()
 	err := (&Client{}).GetJSON(context.Background(), srv.URL, "/api/v1/query", nil, &struct{}{})
-	if err == nil || !strings.Contains(err.Error(), "redirect") || !strings.Contains(err.Error(), "delete_series") {
-		t.Fatalf("a redirect to a path the guard refuses must be refused, naming the path: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "redirect refused") {
+		t.Fatalf("a redirect to a path the guard refuses must be refused: %v", err)
+	}
+	if strings.Contains(err.Error(), "delete_series") || strings.Contains(err.Error(), "match") {
+		t.Fatalf("the refusal must not print the redirect's path or query: %v", err)
 	}
 	for _, r := range rec.all() {
 		if strings.Contains(r, "delete_series") {
@@ -245,6 +257,10 @@ func TestBaseURLWithCredentialsQueryOrFragmentIsRefusedBeforeTheNetwork(t *testi
 		}
 		if strings.Contains(err.Error(), "hunter2secret") {
 			t.Errorf("%s: the error echoes the secret: %v", name, err)
+		}
+		// the request-time check itself (not only the redirect-hop check that sees the same User)
+		if (name == "credentials" || name == "user") && !strings.Contains(err.Error(), "user name or password") {
+			t.Errorf("%s: want the base URL check's own refusal: %v", name, err)
 		}
 	}
 	if len(rec.all()) != 0 {

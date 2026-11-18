@@ -79,7 +79,11 @@ run query --static --dir "$d"
 expect 0 "a file with targets: still loads for obs query" "versions match"
 unset OBS_LIVE_TEST_TOKEN
 run live usage --dir "$d" --target prod
-expect 2 "an unset header variable names file, key and variable" "obs.yaml:" "targets.prod.headers.Authorization" "OBS_LIVE_TEST_TOKEN" "not set"
+expect 2 "an unset header variable names file, line and header, never the variable name" "obs.yaml:" "targets.prod.headers.Authorization" "not set"
+if grep -qF OBS_LIVE_TEST_TOKEN "$work/out"; then
+  echo "FAIL live: the unset-variable error printed the supplied value"
+  exit 1
+fi
 run live usage --dir "$d" --target stage
 expect 2 "an unknown target lists the known ones" '"stage"' "dead, prod"
 run live usage --dir "$d" --target dead
@@ -91,7 +95,7 @@ expect 2 "incidents on an unreachable store is an input error" "127.0.0.1:1"
 run live look --dir "$d" --target dead
 expect 0 "look never fails, even when Grafana is down" "exits 0 on purpose" "127.0.0.1:1"
 run live look --dir "$d" --target prod
-expect 0 "look never fails on an unset header variable" "OBS_LIVE_TEST_TOKEN"
+expect 0 "look never fails on an unset header variable" "not set"
 run live look --target
 expect 0 "look never fails on a usage error" "usage error"
 

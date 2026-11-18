@@ -202,7 +202,7 @@ func Resolve(name string, specs map[string]Spec, sandbox map[string]string, gete
 		}
 		v := getenv(sp.Headers[h])
 		if v == "" {
-			return nil, fail(sp.Line, "targets.%s.headers.%s: environment variable %s is not set", name, h, sp.Headers[h])
+			return nil, fail(sp.Line, "targets.%s.headers.%s: environment variable not set (the header's value is read from the environment; the variable name is not repeated here)", name, h)
 		}
 		t.Headers[h] = v
 	}
