@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -152,12 +153,7 @@ func (c *Client) Get(ctx context.Context, base, path string, q url.Values) ([]by
 		if errors.As(err, &ue) {
 			err = ue.Err
 		}
-		// A Location net/http cannot parse is quoted whole in its own error ("failed to parse
-		// Location header %q"), inner error included: print none of it.
-		if strings.Contains(err.Error(), "Location header") {
-			err = errors.New("redirect refused: the store sent a Location obs cannot parse")
-		}
-		return nil, fmt.Errorf("GET %s%s: %v", base, path, err)
+		return nil, fmt.Errorf("GET %s%s: %v", base, path, safeDoError(err))
 	}
 	defer resp.Body.Close()
 	b, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
@@ -172,4 +168,25 @@ func (c *Client) Get(ctx context.Context, base, path string, q url.Values) ([]by
 		return nil, fmt.Errorf("GET %s%s: HTTP %d: %s", base, path, resp.StatusCode, body)
 	}
 	return b, nil
+}
+
+// safeDoError is what obs prints for an error of http.Client.Do (url.Error already unwrapped).
+// It is an allowlist: obs's own redirect refusals and network or timeout errors (they name an
+// address at most) are printed as they are; anything else may quote what the store sent (net/http
+// quotes an unparsable Location whole, textproto quotes a malformed header line whole, a Location
+// may carry a token), so it is replaced by a fixed text that prints nothing of the response.
+func safeDoError(err error) error {
+	msg := err.Error()
+	var netErr net.Error
+	switch {
+	case strings.HasPrefix(msg, "redirect refused"):
+		return err
+	case strings.Contains(msg, "Location header"):
+		return errors.New("redirect refused: the store sent a Location obs cannot parse")
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return err
+	case errors.As(err, &netErr) && !strings.Contains(msg, "malformed"):
+		return err
+	}
+	return errors.New("the store sent a response obs cannot read (malformed HTTP); nothing of it is printed")
 }

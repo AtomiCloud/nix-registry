@@ -2,6 +2,7 @@ package live
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -308,5 +309,34 @@ func TestMalformedRedirectLocationIsNeverPrinted(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "sekrit-malformed-token") || strings.Contains(err.Error(), "token=") || strings.Contains(err.Error(), "%zz") {
 		t.Fatalf("the refusal must not print the Location value: %v", err)
+	}
+}
+
+// A response whose header block net/http cannot parse is quoted line by line in Go's own error
+// (textproto "malformed MIME header line: ..."): obs prints none of it.
+func TestMalformedResponseHeaderIsNeverPrinted(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			buf := make([]byte, 4096)
+			conn.Read(buf)
+			conn.Write([]byte("HTTP/1.1 302 Found\r\nLocation: http://x/api/v1/query?token=sekrit-header-token\x01\r\nContent-Length: 0\r\n\r\n"))
+			conn.Close()
+		}
+	}()
+	err = (&Client{}).GetJSON(context.Background(), "http://"+ln.Addr().String(), "/api/v1/query", nil, &struct{}{})
+	if err == nil {
+		t.Fatal("a malformed response must fail")
+	}
+	if strings.Contains(err.Error(), "sekrit-header-token") || strings.Contains(err.Error(), "token=") || strings.Contains(err.Error(), "Location http") {
+		t.Fatalf("the error must not print the malformed header line: %v", err)
 	}
 }
