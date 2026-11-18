@@ -507,14 +507,27 @@ func TestSafeDoErrorLabels(t *testing.T) {
 // Grafana, any string the store sent): obs prints a fixed text instead.
 func TestJSONDecodeErrorsPrintNothingOfTheAnswer(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(`{"at": "sekrit-decode-value"}`))
+		w.Write([]byte(`{"status": sekrit-decode-value}`))
 	}))
 	defer srv.Close()
+	c := &Client{}
 	var out struct {
-		At int `json:"at"`
+		Status string `json:"status"`
 	}
-	err := (&Client{}).GetJSON(context.Background(), srv.URL, "/api/v1/query", nil, &out)
-	if err == nil || !strings.Contains(err.Error(), "not the JSON expected") || strings.Contains(err.Error(), "sekrit-decode-value") {
-		t.Fatalf("a decode error must print a fixed text only: %v", err)
+	errs := map[string]error{
+		"GetJSON": c.GetJSON(context.Background(), srv.URL, "/api/v1/query", nil, &out),
+	}
+	_, errs["Instant"] = c.Instant(context.Background(), srv.URL, "up", time.Unix(0, 0))
+	_, errs["TempoRange"] = c.TempoRange(context.Background(), srv.URL, "{} | rate()", time.Unix(0, 0), time.Unix(600, 0), time.Minute)
+	for name, err := range errs {
+		if err == nil {
+			t.Errorf("%s: a malformed answer must fail", name)
+			continue
+		}
+		for _, bad := range []string{"invalid character", "sekrit", "looking for"} {
+			if strings.Contains(err.Error(), bad) {
+				t.Errorf("%s: a decode error must print a fixed text only, got %q", name, err.Error())
+			}
+		}
 	}
 }

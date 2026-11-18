@@ -229,12 +229,12 @@ func safeDoError(err error) error {
 }
 
 // storeText is how obs prints text the store wrote itself (a non-2xx body, a query API error):
-// it is the main diagnostic, so it is kept, but every value obs sent in a header (and each long
+// it is the main diagnostic, so it is kept, but every value obs sent in a header (4+ chars, and each long
 // word of it, for "Bearer <token>") is replaced by ***, since auth proxies echo the credential
 // they refused, and control characters (a terminal escape) become spaces. At most 200 runes.
 func (c *Client) storeText(s string) string {
 	for _, v := range c.Headers {
-		if v == "" {
+		if len(v) < 4 { // a short value (a tenant id "1") would garble the text; it is no secret
 			continue
 		}
 		s = strings.ReplaceAll(s, v, "***")
