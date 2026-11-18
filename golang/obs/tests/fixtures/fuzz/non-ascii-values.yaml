@@ -1,0 +1,12 @@
+# Enum values with letters outside ASCII (a Dart identifier is ASCII only; Go and C# take any letter): each
+# language must refuse, or make a safe identifier and compile. The wire value is kept as written.
+service: fuzz
+types:
+  t: { kind: enum, values: ['über', 'naïve', '日本', ok] }
+metrics:
+  one: { kind: counter, budget: 1000, labels: { kind: t } }
+generate:
+  - { lang: go, out: gen/go }
+  - { lang: dotnet, out: gen/dotnet, namespace: Fuzz.Signals }
+  - { lang: dart, out: gen/dart, package: fuzz_signals }
+  - { lang: bun, out: gen/bun }

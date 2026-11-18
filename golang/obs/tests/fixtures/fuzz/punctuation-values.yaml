@@ -1,0 +1,13 @@
+# Enum values with characters that are not in an identifier ('<none>' is what a scraped label says for "no value").
+# Each language must refuse, or make a safe identifier and compile. Quoting keeps the wire value exactly as written.
+service: fuzz
+types:
+  t: { kind: enum, values: ['<none>', '<unknown>', '(n/a)', "it's", '100%', 'a b', 'x:y', 'über', 'ok'] }
+metrics:
+  one: { kind: counter, budget: 1000, labels: { kind: t } }
+spans: { s: { attributes: { kind: t } } }
+generate:
+  - { lang: go, out: gen/go }
+  - { lang: dotnet, out: gen/dotnet, namespace: Fuzz.Signals }
+  - { lang: dart, out: gen/dart, package: fuzz_signals }
+  - { lang: bun, out: gen/bun }

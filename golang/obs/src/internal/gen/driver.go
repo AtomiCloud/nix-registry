@@ -59,9 +59,13 @@ func Plan(c *contract.Contract, obsDir string, langs []string) ([]Output, error)
 	if err != nil {
 		return nil, err
 	}
+	// A source: entry is somebody else's metric: the generators and the aggregation see the contract
+	// without it, and only the keep-list names it.
+	own := c.Own()
 	outs = append(outs,
 		Output{Path: path.Join(rel, EventsFile), Content: ev},
-		Output{Path: path.Join(rel, AggregationFile), Content: aggregation.Generate(c, Header(c, "# "))},
+		Output{Path: path.Join(rel, AggregationFile), Content: aggregation.Generate(own, Header(c, "# "))},
+		Output{Path: path.Join(rel, KeepFile), Content: Keep(c)},
 	)
 	want := map[string]bool{}
 	for _, l := range langs {
@@ -75,7 +79,7 @@ func Plan(c *contract.Contract, obsDir string, langs []string) ([]Output, error)
 		if err := checkOut(root, git, t.Lang, t.Out); err != nil {
 			return nil, err
 		}
-		fs, err := Generate(t.Lang, c, Options{Package: t.Package, Namespace: t.Module, Interfaces: t.Interfaces})
+		fs, err := Generate(t.Lang, own, Options{Package: t.Package, Namespace: t.Module, Interfaces: t.Interfaces})
 		if err != nil {
 			return nil, err
 		}

@@ -181,6 +181,17 @@ func strList(a []string) string {
 	return "[]string{" + strings.Join(q, ", ") + "}"
 }
 
+// memberWords is the words of an enum value as an identifier suffix: every character that is not in an
+// identifier is a word break (<none> -> None), so the value only ever changes the identifier, never the
+// wire value. The type name is in front, so a leading digit is fine; a value with no letter or digit at
+// all is Value. Two values that make one identifier are refused by decl, naming both.
+func memberWords(v string) string {
+	if p := gen.Pascal(gen.Clean(v)); p != "" {
+		return p
+	}
+	return "Value"
+}
+
 func (w *writer) typeDecl(n string, t contract.Type) {
 	id := gen.Pascal(n)
 	w.decl(id, "type "+n)
@@ -192,8 +203,8 @@ func (w *writer) typeDecl(n string, t contract.Type) {
 		w.f("// Valid is false for the zero value %s{}: a value only this package can make is set.\nfunc (e %s) Valid() bool { return e.v != \"\" }\n\n", id, id)
 		w.f("var (\n")
 		for _, v := range t.Values {
-			vid := id + gen.Pascal(v)
-			w.decl(vid, "value "+v+" of "+n)
+			vid := id + memberWords(v)
+			w.decl(vid, fmt.Sprintf("value %q of type %s (%s)", v, n, w.c.TypeAt(n)))
 			w.f("\t%s = %s{%q}\n", vid, id, v)
 		}
 		w.f(")\n")

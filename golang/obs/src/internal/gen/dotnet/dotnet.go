@@ -116,7 +116,7 @@ func (g *emitter) declare(id, what string) error {
 }
 
 // members makes the identifiers of names (enum values, labels, ...) and fails on a clash.
-func members(path string, names []string, reserved map[string]bool, self string) ([]string, error) {
+func members(path, at string, names []string, reserved map[string]bool, self string) ([]string, error) {
 	seen := map[string]string{}
 	out := make([]string, 0, len(names))
 	for _, n := range names {
@@ -125,7 +125,7 @@ func members(path string, names []string, reserved map[string]bool, self string)
 			m += "_"
 		}
 		if prev, dup := seen[m]; dup {
-			return nil, fmt.Errorf("%s: %q and %q both make the C# member %q; rename one", path, prev, n, m)
+			return nil, fmt.Errorf("%s: %q and %q both make the C# member %q; rename one (%s)", path, prev, n, m, at)
 		}
 		seen[m] = n
 		out = append(out, m)
@@ -154,7 +154,7 @@ func (g *emitter) plan() error {
 				return err
 			}
 			g.typeRef[n] = id
-			if g.enumVals[n], err = members(from, t.Values, reservedMember, id); err != nil {
+			if g.enumVals[n], err = members(from, c.TypeAt(n), t.Values, reservedMember, id); err != nil {
 				return err
 			}
 		case contract.KindInt, contract.KindTime:
@@ -176,7 +176,7 @@ func (g *emitter) plan() error {
 		if err := g.declare(ident(m)+"Labels", p); err != nil {
 			return err
 		}
-		ps, err := members(p+".labels", c.Metrics[m].LabelOrder, reservedMember, ident(m)+"Labels")
+		ps, err := members(p+".labels", c.At(c.Metrics[m].Line), c.Metrics[m].LabelOrder, reservedMember, ident(m)+"Labels")
 		if err != nil {
 			return err
 		}
@@ -187,7 +187,7 @@ func (g *emitter) plan() error {
 		if err := g.declare(ident(s)+"Attributes", p); err != nil {
 			return err
 		}
-		ps, err := members(p+".attributes", c.Spans[s].AttrOrder, reservedMember, ident(s)+"Attributes")
+		ps, err := members(p+".attributes", c.Rel(), c.Spans[s].AttrOrder, reservedMember, ident(s)+"Attributes")
 		if err != nil {
 			return err
 		}
@@ -199,7 +199,7 @@ func (g *emitter) plan() error {
 		path, self string
 		names      []string
 	}{{"metrics", "Names", c.MetricOrder}, {"spans", "Spans", c.SpanOrder}, {"logs", "Events", c.LogOrder}} {
-		ms, err := members(set.path, set.names, reservedMember, set.self)
+		ms, err := members(set.path, c.Rel(), set.names, reservedMember, set.self)
 		if err != nil {
 			return err
 		}

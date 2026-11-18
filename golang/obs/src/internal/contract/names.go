@@ -61,8 +61,6 @@ type StoredMetric struct {
 	Labels   map[string]bool // the label names it may carry, in their stored spelling (contract labels + platform labels)
 }
 
-var platformSuffixes = []string{"", "_total", "_seconds", "_seconds_bucket", "_seconds_sum", "_seconds_count", "_bytes", "_bytes_bucket", "_bytes_sum", "_bytes_count", "_bucket", "_sum", "_count"}
-
 // Lookup resolves a stored series name (as a query writes it) to the contract metric behind it.
 func (c *Contract) Lookup(stored string) (StoredMetric, bool) {
 	for _, n := range c.MetricOrder {
@@ -74,9 +72,8 @@ func (c *Contract) Lookup(stored string) (StoredMetric, bool) {
 		}
 	}
 	for _, k := range c.platformKeys() {
-		base := StoredBase(k)
-		for _, suf := range platformSuffixes {
-			if stored == base+suf {
+		for _, name := range platformStored(k) {
+			if stored == name {
 				ls := map[string]bool{}
 				for l := range PlatformLabelSet() {
 					ls[l] = true
@@ -108,7 +105,8 @@ func (c *Contract) metricLabels(m Metric) map[string]bool {
 	for _, l := range m.LabelOrder {
 		ls[l] = true
 	}
-	if m.PerPod {
+	if m.PerPod || m.IsSource() {
+		// a source: metric is stored as scraped, with the pod keys it carries (it is in no aggregation)
 		for _, k := range c.EffectivePodKeys() {
 			ls[k] = true
 		}

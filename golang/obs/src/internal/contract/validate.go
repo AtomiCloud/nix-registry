@@ -48,6 +48,10 @@ func (c *Contract) Validate() []Issue {
 		add("interval", "interval", "interval %q: want a duration such as 30s", c.Interval)
 	}
 
+	// A type only source: metrics use may list an empty value: a scraped label really is empty
+	// (a pod with no priority class). An own type may not, it becomes a name in generated code.
+	sourceOnly := c.sourceOnlyTypes()
+
 	// ---- types
 	for _, n := range c.TypeOrder {
 		t := c.Types[n]
@@ -62,7 +66,7 @@ func (c *Contract) Validate() []Issue {
 			}
 			seen := map[string]bool{}
 			for _, v := range t.Values {
-				if v == "" {
+				if v == "" && !sourceOnly[n] {
 					add(p, "enum-value", "enum %q has an empty value", n)
 				}
 				if seen[v] {
@@ -87,10 +91,22 @@ func (c *Contract) Validate() []Issue {
 			}
 		case KindFree:
 			// allowed on log fields and span attributes only; use sites are checked below
+		case KindEstimate:
+			// allowed on source: metrics only; use sites are checked below
+			switch {
+			case t.Min == nil || t.Max == nil || t.ChurnPerDay == nil:
+				add(p, "estimate-bounds", "estimate %q needs min, max and churn_per_day", n)
+			case *t.Min < 0 || *t.Min > *t.Max:
+				add(p, "estimate-bounds", "estimate %q: min %d must be 0 or more and not above max %d", n, *t.Min, *t.Max)
+			case *t.Max < 1:
+				add(p, "estimate-bounds", "estimate %q: max %d must be at least 1", n, *t.Max)
+			case *t.ChurnPerDay < 0:
+				add(p, "estimate-bounds", "estimate %q: churn_per_day %d must be 0 or more", n, *t.ChurnPerDay)
+			}
 		case "":
-			add(p, "type-kind", "type %q has no kind (enum, int, time, date or free)", n)
+			add(p, "type-kind", "type %q has no kind (enum, int, time, date, free or estimate)", n)
 		default:
-			add(p, "type-kind", "type %q: unknown kind %q (enum, int, time, date or free)", n, t.Kind)
+			add(p, "type-kind", "type %q: unknown kind %q (enum, int, time, date, free or estimate)", n, t.Kind)
 		}
 	}
 
@@ -135,7 +151,7 @@ func (c *Contract) Validate() []Issue {
 		default:
 			add(p, "metric-kind", "metric %q: unknown kind %q (counter, histogram or gauge)", n, m.Kind)
 		}
-		if m.Kind == MetricGauge {
+		if m.Kind == MetricGauge && !m.IsSource() {
 			switch {
 			case m.AcrossPod == "" && !m.PerPod:
 				add(p, "gauge-pods", "gauge %q has neither across_pods (sum, avg, max, last) nor per_pod: true", n)
@@ -156,14 +172,35 @@ func (c *Contract) Validate() []Issue {
 		if m.Buckets < 0 || (m.Buckets != 0 && m.Kind != MetricHistogram) {
 			add(p, "buckets", "metric %q: buckets is a histogram setting (bucket count with +Inf)", n)
 		}
+		seenUser := map[string]bool{}
+		for _, u := range m.UsedBy {
+			if strings.TrimSpace(u) == "" {
+				add(p+".used_by", "used-by", "metric %q has an empty used_by entry: say who reads it (box/alert/pod-crashloop)", n)
+			} else if seenUser[u] {
+				add(p+".used_by", "used-by", "metric %q lists %q twice in used_by", n, u)
+			}
+			seenUser[u] = true
+		}
 		for _, l := range m.LabelOrder {
 			lp := p + ".labels." + l
 			if !nameRe.MatchString(l) {
 				add(lp, "label-name", "label name %q: use lowercase letters, digits, _ and .", l)
 			}
+			if target, follows := m.Follows[l]; follows {
+				if !m.IsSource() {
+					add(lp, "follows-not-source", "%s: metric %q label %q follows %q: follows is only for a source: metric (somebody else's labels); an own metric label is a bounded type of its own", c.at(m.LabelLine[l]), n, l, target)
+				}
+				if msg := c.followsProblem(m, l); msg != "" {
+					add(lp, "follows", "%s: metric %q label %q: %s", c.at(m.LabelLine[l]), n, l, msg)
+				}
+				continue
+			}
 			t, ok := resolve(lp, l, m.Labels[l])
 			if !ok {
 				continue
+			}
+			if t.Kind == KindEstimate && !m.IsSource() {
+				add(lp, "estimate-not-source", "%s: metric %q label %q has type %q = estimate: an estimate is a range somebody else decides, so it is allowed only on a metric with source: (our own labels are bounded types: enum, int, time, date)", c.at(m.LabelLine[l]), n, l, m.Labels[l])
 			}
 			if t.Kind == KindFree {
 				add(lp, "free-metric-label", "metric %q label %q has type %q = free: a free value as a metric label makes unbounded series; use enum, int or time", n, l, m.Labels[l])
@@ -209,6 +246,8 @@ func (c *Contract) Validate() []Issue {
 			switch t.Kind {
 			case KindFree:
 				add(lp, "free-stream-label", "log %q stream label %q has type %q = free: a stream field must be bounded (one stream per value)", k, l, e.StreamLabels[l])
+			case KindEstimate:
+				add(lp, "estimate-not-source", "%s: log %q stream label %q has type %q = estimate: an estimate is allowed only on a metric with source:", c.File, k, l, e.StreamLabels[l])
 			case KindDate:
 				add(lp, "date-stream-label", "log %q stream label %q has type %q = date: a calendar date is never a VictoriaLogs stream field", k, l, e.StreamLabels[l])
 			}
@@ -231,7 +270,9 @@ func (c *Contract) Validate() []Issue {
 			if a == "" {
 				add(ap, "attr-name", "span %q has an empty attribute name", n)
 			}
-			resolve(ap, a, s.Attributes[a])
+			if t, ok := resolve(ap, a, s.Attributes[a]); ok && t.Kind == KindEstimate {
+				add(ap, "estimate-not-source", "%s: span %q attribute %q has type %q = estimate: an estimate is allowed only on a metric with source:", c.File, n, a, s.Attributes[a])
+			}
 		}
 	}
 
@@ -285,6 +326,9 @@ func (c *Contract) WorstCase(name string) (int64, bool) {
 	w := int64(1)
 	ok := true
 	for _, l := range m.LabelOrder {
+		if _, follows := m.Follows[l]; follows {
+			continue // adds no series: it changes together with the label it follows
+		}
 		t, has := c.Types[m.Labels[l]]
 		if !has || t.Kind == KindFree || t.Size() <= 0 {
 			ok = false
@@ -292,14 +336,138 @@ func (c *Contract) WorstCase(name string) (int64, bool) {
 		}
 		w = satMul(w, int64(t.Size()))
 	}
-	if m.Kind == MetricHistogram {
-		b := m.Buckets
-		if b == 0 {
-			b = DefaultBuckets
-		}
-		w = satMul(w, satAdd(int64(b), 2))
+	return satMul(w, histogramFactor(m)), ok
+}
+
+// histogramFactor is buckets + _sum + _count for a histogram (14 for the default 12), else 1.
+func histogramFactor(m Metric) int64 {
+	if m.Kind != MetricHistogram {
+		return 1
 	}
-	return w, ok
+	b := m.Buckets
+	if b == 0 {
+		b = DefaultBuckets
+	}
+	return satAdd(int64(b), 2)
+}
+
+// ChurnPerDay is the approximate number of NEW series a day a source metric starts: for each
+// estimate label, its churn_per_day times the series each value carries (the other labels' sizes,
+// times the histogram parts). Check prints it; it is not part of the budget, which is the series
+// stored at once (the largest the estimates reach), as the concept's budget is. Zero for a metric
+// with no churning estimate.
+func (c *Contract) ChurnPerDay(name string) int64 {
+	m, found := c.Metrics[name]
+	if !found {
+		return 0
+	}
+	total := int64(0)
+	for _, l := range m.LabelOrder {
+		if _, follows := m.Follows[l]; follows {
+			continue
+		}
+		t, has := c.Types[m.Labels[l]]
+		if !has || t.Kind != KindEstimate || t.ChurnPerDay == nil || *t.ChurnPerDay <= 0 {
+			continue
+		}
+		per := histogramFactor(m)
+		for _, o := range m.LabelOrder {
+			if _, f := m.Follows[o]; f || o == l {
+				continue
+			}
+			if ot, ok := c.Types[m.Labels[o]]; ok && ot.Size() > 0 {
+				per = satMul(per, int64(ot.Size()))
+			}
+		}
+		total = satAdd(total, satMul(per, int64(*t.ChurnPerDay)))
+	}
+	return total
+}
+
+// ownTypeUse is the types some metric without source:, a log stream label or a span attribute uses.
+func (c *Contract) ownTypeUse() map[string]bool {
+	use := map[string]bool{}
+	for _, m := range c.Metrics {
+		if m.IsSource() {
+			continue
+		}
+		for _, t := range m.Labels {
+			use[t] = true
+		}
+	}
+	for _, s := range c.Spans {
+		for _, t := range s.Attributes {
+			use[t] = true
+		}
+	}
+	for _, e := range c.Logs {
+		for _, t := range e.StreamLabels {
+			use[t] = true
+		}
+	}
+	return use
+}
+
+// sourceOnlyTypes is the types a source: metric uses and nothing of ours does (no own metric, log
+// stream label or span attribute). obs gen makes no type for them, so only these may list an empty value.
+func (c *Contract) sourceOnlyTypes() map[string]bool {
+	own := c.ownTypeUse()
+	out := map[string]bool{}
+	for _, m := range c.Metrics {
+		if !m.IsSource() {
+			continue
+		}
+		for _, t := range m.Labels {
+			if t != "" && !own[t] {
+				out[t] = true
+			}
+		}
+	}
+	return out
+}
+
+// at is "file:line", or just the file when the line is unknown. The file is relative to the Git root.
+func (c *Contract) at(line int) string {
+	if line <= 0 {
+		return c.Rel()
+	}
+	return fmt.Sprintf("%s:%d", c.Rel(), line)
+}
+
+// TypeAt is "file:line" of type n in the contract (the file relative to the Git root), for a message that
+// names where a type is declared.
+func (c *Contract) TypeAt(n string) string { return c.at(c.TypeLine[n]) }
+
+// followsProblem says why label l of m can not follow its target ("" when it can).
+func (c *Contract) followsProblem(m Metric, l string) string {
+	seen := map[string]bool{l: true}
+	cur := l
+	for {
+		next, follows := m.Follows[cur]
+		if !follows {
+			return ""
+		}
+		if _, has := m.Labels[next]; !has {
+			return fmt.Sprintf("follows %q, which is not a label of this metric", next)
+		}
+		if seen[next] {
+			return fmt.Sprintf("follows %q: a cycle (labels that follow each other add no series for anyone)", next)
+		}
+		seen[next] = true
+		cur = next
+	}
+}
+
+// Warnings are the contract problems that do not fail a check: a source: entry that does not say who uses it.
+func (c *Contract) Warnings() []Issue {
+	var out []Issue
+	for _, n := range c.MetricOrder {
+		m := c.Metrics[n]
+		if m.IsSource() && len(m.UsedBy) == 0 {
+			out = append(out, Issue{"metrics." + n, "used-by-missing", fmt.Sprintf("%s: source metric %q does not say who uses it (used_by: [box/alert/<name>, box/dash/<name>])", c.at(m.Line), n)})
+		}
+	}
+	return out
 }
 
 // satAdd adds and saturates at MaxWorst, so b+2 can not wrap before it is multiplied.
@@ -338,29 +506,60 @@ func (c *Contract) StreamCount(landscapes int) int64 {
 // StoredBase is the name VictoriaMetrics stores for a metric before the kind suffix: dots become _.
 func StoredBase(name string) string { return strings.ReplaceAll(name, ".", "_") }
 
-// StoredNames returns the series names a metric is stored under (concept 11.2): counters get
-// _total, a unit adds its suffix, histograms store _bucket, _sum and _count.
+// StoredNames returns the series names a metric is stored under (concept 11.2) when production
+// stores OTLP metrics through vminsert with -opentelemetry.convertMetricNamesToPrometheus (names
+// only; label names keep their dots; NOT -opentelemetry.usePrometheusNaming, which also rewrites
+// label names). The name is VictoriaMetrics v1.156.0's own conversion, mirrored from
+// lib/protoparser/opentelemetry/stream/sanitize.go: the name is split into tokens at / _ . - : and
+// space (empty tokens are dropped, so a double underscore collapses), the unit word is appended
+// unless it already is a token anywhere in the name, a counter's "total" token is moved to the end
+// (or appended), and a histogram stores _bucket, _sum and _count. TestStoredNamesEqualVictoriaMetricsConversion
+// feeds OTLP through VictoriaMetrics' own converter and asserts equality for every kind and unit.
 func StoredNames(name string, m Metric) []string {
-	base := StoredBase(name)
-	switch m.Unit {
-	case "":
-	case "s", "seconds":
-		if !strings.HasSuffix(base, "_seconds") {
-			base += "_seconds"
+	if m.IsSource() {
+		// A source name is the stored name already (it was scraped, not converted from OTel): a counter
+		// keeps the name it has, a histogram has its three parts.
+		base := StoredBase(name)
+		if m.Kind == MetricHistogram {
+			return []string{base + "_bucket", base + "_sum", base + "_count"}
 		}
-	case "By", "bytes":
-		if !strings.HasSuffix(base, "_bytes") {
-			base += "_bytes"
-		}
+		return []string{base}
 	}
-	switch m.Kind {
-	case MetricCounter:
-		if strings.HasSuffix(base, "_total") {
-			return []string{base}
-		}
-		return []string{base + "_total"}
-	case MetricHistogram:
+	base := vmMetricName(name, m.Unit, m.Kind == MetricCounter)
+	if m.Kind == MetricHistogram {
 		return []string{base + "_bucket", base + "_sum", base + "_count"}
 	}
 	return []string{base}
 }
+
+// vmMetricName is sanitizePrometheusMetricName of VictoriaMetrics for the units a contract allows
+// (none, s or seconds, By or bytes; the same words as the OTel unit names it maps them to).
+func vmMetricName(name, unit string, counter bool) string {
+	var toks []string
+	for _, t := range strings.FieldsFunc(name, func(r rune) bool { return strings.ContainsRune("/_.-: ", r) }) {
+		toks = append(toks, t)
+	}
+	word := ""
+	switch unit {
+	case "s", "seconds":
+		word = "seconds"
+	case "By", "bytes":
+		word = "bytes"
+	}
+	if word != "" && !in(toks, word) {
+		toks = append(toks, word)
+	}
+	if counter {
+		for i, t := range toks {
+			if t == "total" {
+				toks = append(toks[:i], toks[i+1:]...)
+				break
+			}
+		}
+		toks = append(toks, "total")
+	}
+	return strings.Join(toks, "_")
+}
+
+// At is "file:line" (the file relative to the Git root), or just the file when the line is 0.
+func (c *Contract) At(line int) string { return c.at(line) }

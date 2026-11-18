@@ -26,6 +26,9 @@ const (
 	KindTime = "time" // time bucket: hour_of_day (0..23) or weekday (0..6)
 	KindDate = "date" // calendar date; a metric label only, with window_days
 	KindFree = "free" // any value; log fields and span attributes only
+	// KindEstimate is a size range somebody else decides (pods in a cluster): min, max and churn_per_day.
+	// Allowed only on a source: metric; check counts its max.
+	KindEstimate = "estimate"
 )
 
 // Metric kinds (concept section 4).
@@ -65,6 +68,8 @@ type Type struct {
 	Max        *int     `yaml:"max,omitempty"`         // int
 	Unit       string   `yaml:"unit,omitempty"`        // time
 	WindowDays int      `yaml:"window_days,omitempty"` // date
+	// ChurnPerDay is the estimate's new values per day (a pod that is replaced is a new value).
+	ChurnPerDay *int `yaml:"churn_per_day,omitempty"` // estimate
 }
 
 // Size is the number of values the type can take (0 for free).
@@ -89,22 +94,73 @@ func (t Type) Size() int {
 		return 24
 	case KindDate:
 		return t.WindowDays
+	case KindEstimate:
+		if t.Max == nil || *t.Max < 0 {
+			return 0
+		}
+		return *t.Max
 	}
 	return 0
 }
 
 // Metric is one metric of the contract.
 type Metric struct {
-	Kind      string            `yaml:"kind"`
-	Unit      string            `yaml:"unit,omitempty"`    // seconds, bytes: the stored name suffix
-	Budget    int               `yaml:"budget,omitempty"`  // max stored series per landscape
-	Buckets   int               `yaml:"buckets,omitempty"` // histogram: buckets with +Inf (default 12)
-	Labels    map[string]string `yaml:"labels,omitempty"`  // label name -> type name
-	AcrossPod string            `yaml:"across_pods,omitempty"`
-	PerPod    bool              `yaml:"per_pod,omitempty"`
+	// Source names who makes the metric when it is not ours (kube-state-metrics, cadvisor).
+	// obs gen makes no types for it; its name is already the stored name.
+	Source string `yaml:"source,omitempty"`
+	// UsedBy says who reads the metric (box/alert/pod-crashloop, box/dash/kube-state-metrics).
+	UsedBy    []string `yaml:"used_by,omitempty"`
+	Kind      string   `yaml:"kind"`
+	Unit      string   `yaml:"unit,omitempty"`    // seconds, bytes: the stored name suffix
+	Budget    int      `yaml:"budget,omitempty"`  // max stored series per landscape
+	Buckets   int      `yaml:"buckets,omitempty"` // histogram: buckets with +Inf (default 12)
+	AcrossPod string   `yaml:"across_pods,omitempty"`
+	PerPod    bool     `yaml:"per_pod,omitempty"`
+	// RawLabels is the labels: block as written: a type name, or { follows: <label> }.
+	RawLabels map[string]LabelSpec `yaml:"labels,omitempty"`
+	// Labels is label name -> type name (empty for a label that follows another); filled from RawLabels.
+	Labels map[string]string `yaml:"-"`
+	// Follows is label name -> the label it follows: it adds no series of its own.
+	Follows map[string]string `yaml:"-"`
 	// LabelOrder keeps the labels in file order, so generated code is stable.
 	LabelOrder []string `yaml:"-"`
+	// Line is the metric's line in the contract file, LabelLine each label's (0 when built in code).
+	Line      int            `yaml:"-"`
+	LabelLine map[string]int `yaml:"-"`
 }
+
+// LabelSpec is one entry of a metric's labels: block: a type name, or { follows: <label> } for a
+// label that always changes together with another label of the same metric (a pod's uid follows
+// the pod) and so adds no series.
+type LabelSpec struct {
+	Type    string
+	Follows string
+}
+
+// UnmarshalYAML reads `pod: pod` and `uid: { follows: pod }`.
+func (l *LabelSpec) UnmarshalYAML(n *yaml.Node) error {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		l.Type = n.Value
+		return nil
+	case yaml.MappingNode:
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			k, v := n.Content[i], n.Content[i+1]
+			if k.Value != "follows" {
+				return fmt.Errorf("line %d: field %s not found in a label (a label is a type name or { follows: <label> })", k.Line, k.Value)
+			}
+			l.Follows = v.Value
+		}
+		if l.Follows == "" {
+			return fmt.Errorf("line %d: a label map needs follows: <label>", n.Line)
+		}
+		return nil
+	}
+	return fmt.Errorf("line %d: a label is a type name or { follows: <label> }", n.Line)
+}
+
+// IsSource is true for an entry somebody else makes.
+func (m Metric) IsSource() bool { return m.Source != "" }
 
 // Event is one log event: a name and the level it fixes. Fields are free-form (concept 6).
 type Event struct {
@@ -152,10 +208,12 @@ type Contract struct {
 	// File is the path the contract was read from.
 	File string `yaml:"-"`
 
-	TypeOrder   []string `yaml:"-"`
-	MetricOrder []string `yaml:"-"`
-	LogOrder    []string `yaml:"-"`
-	SpanOrder   []string `yaml:"-"`
+	TypeOrder []string `yaml:"-"`
+	// TypeLine is each type's line in the contract file (absent for a type built in code).
+	TypeLine    map[string]int `yaml:"-"`
+	MetricOrder []string       `yaml:"-"`
+	LogOrder    []string       `yaml:"-"`
+	SpanOrder   []string       `yaml:"-"`
 }
 
 // Load reads and parses a contract file. It does not validate: call Validate.
@@ -181,6 +239,7 @@ func Parse(name string, b []byte) (*Contract, error) {
 	if err := yaml.Unmarshal(b, &root); err == nil {
 		c.fillOrder(&root)
 	}
+	c.normaliseLabels()
 	c.fillMissingOrder()
 	c.addIntrinsicFree()
 	return c, nil
@@ -233,12 +292,18 @@ func (c *Contract) fillOrder(root *yaml.Node) {
 		switch key {
 		case "types":
 			c.TypeOrder = keys(val)
+			c.TypeLine = map[string]int{}
+			for j := 0; j+1 < len(val.Content); j += 2 {
+				c.TypeLine[val.Content[j].Value] = val.Content[j].Line
+			}
 		case "metrics":
 			c.MetricOrder = keys(val)
 			for j := 0; j+1 < len(val.Content); j += 2 {
 				name := val.Content[j].Value
 				mt := c.Metrics[name]
 				mt.LabelOrder = subKeys(val.Content[j+1], "labels")
+				mt.Line = val.Content[j].Line
+				mt.LabelLine = subKeyLines(val.Content[j+1], "labels")
 				c.Metrics[name] = mt
 			}
 		case "logs":
@@ -262,6 +327,45 @@ func keys(n *yaml.Node) []string {
 	}
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		out = append(out, n.Content[i].Value)
+	}
+	return out
+}
+
+// normaliseLabels fills Labels and Follows from the labels: block as written.
+func (c *Contract) normaliseLabels() {
+	for n, m := range c.Metrics {
+		if len(m.RawLabels) == 0 {
+			continue
+		}
+		m.Labels = map[string]string{}
+		for l, spec := range m.RawLabels {
+			if spec.Follows != "" {
+				if m.Follows == nil {
+					m.Follows = map[string]string{}
+				}
+				m.Follows[l] = spec.Follows
+				m.Labels[l] = ""
+				continue
+			}
+			m.Labels[l] = spec.Type
+		}
+		c.Metrics[n] = m
+	}
+}
+
+func subKeyLines(n *yaml.Node, key string) map[string]int {
+	out := map[string]int{}
+	if n.Kind != yaml.MappingNode {
+		return out
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value != key || n.Content[i+1].Kind != yaml.MappingNode {
+			continue
+		}
+		m := n.Content[i+1]
+		for j := 0; j+1 < len(m.Content); j += 2 {
+			out[m.Content[j].Value] = m.Content[j].Line
+		}
 	}
 	return out
 }
