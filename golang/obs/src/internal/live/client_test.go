@@ -596,3 +596,17 @@ func TestStoreTextVmauthListEscapedQuote(t *testing.T) {
 		t.Fatalf("an escaped quote inside a token must not end it: %q", got)
 	}
 }
+
+// A large store answer is not redacted (the work grows with it) nor printed: a fixed text with
+// its size. Below the limit the excerpt is kept.
+func TestStoreTextLargeAnswerIsNotPrinted(t *testing.T) {
+	c := &Client{Headers: map[string]string{"X-Api-Key": "a"}}
+	big := strings.Repeat("<p>a secret-ish page</p>", 1000)
+	got := c.storeText(big)
+	if !strings.Contains(got, "obs prints none of it") || strings.Contains(got, "page") {
+		t.Fatalf("a large answer must give the fixed text: %q", got)
+	}
+	if got := (&Client{}).storeText("rate limited"); got != "rate limited" {
+		t.Fatalf("a short answer keeps its excerpt: %q", got)
+	}
+}

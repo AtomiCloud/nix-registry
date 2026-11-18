@@ -234,7 +234,15 @@ func safeDoError(err error) error {
 // it is the main diagnostic, so it is kept, but every value obs sent in a header (4+ chars, and each long
 // word of it, for "Bearer <token>") is replaced by ***, since auth proxies echo the credential
 // they refused, and control characters (a terminal escape) become spaces. At most 200 runes.
+// maxStoreText is the largest store text storeText redacts and prints (an excerpt of it).
+const maxStoreText = 8 << 10
+
 func (c *Client) storeText(s string) string {
+	if len(s) > maxStoreText {
+		// Redaction work grows with the text, and only 200 runes are shown: a large answer (an HTML
+		// error page) is not printed at all.
+		return fmt.Sprintf("(the store's answer is %d bytes; obs prints none of it)", len(s))
+	}
 	s = hideAuthTokenEcho(s) // first, on the original text: a short secret may also occur in the marker
 	s = hideSpans(s, c.secretForms())
 	s = strings.Map(func(r rune) rune {
@@ -257,6 +265,7 @@ func (c *Client) storeText(s string) string {
 // "1" on X-Scope-OrgID would garble the text and is no secret).
 func (c *Client) secretForms() []string {
 	var out []string
+	seen := map[string]bool{}
 	for name, v := range c.Headers {
 		if v == "" || (len(v) < 4 && !credentialHeader(name)) {
 			continue
@@ -269,7 +278,12 @@ func (c *Client) secretForms() []string {
 		}
 		for _, p := range parts {
 			q := strconv.Quote(p)
-			out = append(out, p, q[1:len(q)-1])
+			for _, form := range []string{p, q[1 : len(q)-1]} {
+				if !seen[form] {
+					seen[form] = true
+					out = append(out, form)
+				}
+			}
 		}
 	}
 	return out
