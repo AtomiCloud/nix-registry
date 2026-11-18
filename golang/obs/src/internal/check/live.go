@@ -505,16 +505,18 @@ func (l *liveRun) spelling(q *files.Query) bool {
 			c := union(t.Args)
 			check(t.Modifier.Args, c)
 			name := strings.ToLower(t.Name)
-			// The output keeps only the labels the aggregation keeps: by() keeps its list, without() drops
-			// its list, and a reducing aggregation with no modifier keeps none. A query-made label that the
-			// aggregation removes is gone from the output, so an outer reader of it reads nothing.
-			switch strings.ToLower(t.Modifier.Op) {
-			case "by":
-				c = keepOnly(c, t.Modifier.Args)
-			case "without":
-				c = dropAll(c, t.Modifier.Args)
-			default:
-				if reducingAggregations[name] {
+			// A REDUCING aggregation keeps only the labels it names: by() its list, without() all but its
+			// list, none with no modifier. A query-made label it removes is gone from the output, so an outer
+			// reader of it reads nothing. A SELECTOR aggregation (topk, bottomk, limitk, any, outliersk,
+			// topk_*, zscore ...) returns the input series whole, so by()/without() change nothing there; an
+			// aggregation not in the reducing list is treated that way (the lenient side).
+			if reducingAggregations[name] {
+				switch strings.ToLower(t.Modifier.Op) {
+				case "by":
+					c = keepOnly(c, t.Modifier.Args)
+				case "without":
+					c = dropAll(c, t.Modifier.Args)
+				default:
 					c = map[string]bool{}
 				}
 			}
@@ -528,9 +530,11 @@ func (l *liveRun) spelling(q *files.Query) bool {
 			c := union([]metricsql.Expr{t.Left, t.Right})
 			check(t.GroupModifier.Args, c)
 			check(t.JoinModifier.Args, c)
-			// One-to-one matching with on() keeps only the on() labels, with ignoring() drops them; a
-			// group_left/group_right match keeps the many side's labels whole.
-			if t.JoinModifier.Op == "" {
+			// Arithmetic (and bool comparison) one-to-one matching with on() keeps only the on() labels, with
+			// ignoring() drops them. A group_left/group_right match keeps the many side's labels whole, and
+			// the set operators (and, or, unless) and default/if/ifnot keep the series' labels whole whatever
+			// on()/ignoring() says (measured on the embedded engine).
+			if t.JoinModifier.Op == "" && matchResetsLabels(t) {
 				switch strings.ToLower(t.GroupModifier.Op) {
 				case "on":
 					c = keepOnly(c, t.GroupModifier.Args)
@@ -549,11 +553,25 @@ func (l *liveRun) spelling(q *files.Query) bool {
 	return len(wrong) > 0
 }
 
-// reducingAggregations are the aggregations that, without by()/without(), return one series with no labels.
+// matchResetsLabels reports whether a one-to-one match of this operator reduces the result labels to the
+// on() list (or drops the ignoring() list): arithmetic and bool comparison do; the set operators,
+// default/if/ifnot and the filtering comparisons keep the labels whole.
+func matchResetsLabels(t *metricsql.BinaryOpExpr) bool {
+	switch t.Op {
+	case "+", "-", "*", "/", "%", "^", "atan2":
+		return true
+	case "==", "!=", ">", "<", ">=", "<=":
+		return t.Bool
+	}
+	return false
+}
+
+// reducingAggregations are the aggregations whose output carries only the labels by()/without() leave
+// (one series with none when there is no modifier).
 var reducingAggregations = map[string]bool{
 	"sum": true, "avg": true, "min": true, "max": true, "count": true, "group": true, "stddev": true, "stdvar": true,
 	"quantile": true, "median": true, "sum2": true, "geomean": true, "mad": true, "distinct": true, "mode": true,
-	"count_values": true,
+	"count_values": true, "histogram": true,
 }
 
 // keepOnly is the labels of set that are in keep; dropAll is the labels of set that are not in drop.

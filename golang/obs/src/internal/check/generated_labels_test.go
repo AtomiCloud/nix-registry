@@ -162,3 +162,46 @@ func TestLiveAggregationsResetTheGeneratedLabelScope(t *testing.T) {
 		}
 	}
 }
+
+// Result-label rules of the real engine (measured on the embedded VictoriaMetrics, review 120 kendra):
+// selector aggregations (topk, bottomk, limitk, any, outliersk, ...) return the input series whole, whatever
+// by()/without() says; the set operators and/or/unless and default/if/ifnot keep the series' labels whole,
+// whatever on()/ignoring() says; only the reducing aggregations and arithmetic (and bool comparison)
+// matching reset the labels. A query-made label that survives is still in scope.
+func TestLiveSelectorAggregationsAndSetOperatorsKeepTheLabelScope(t *testing.T) {
+	const made = `label_set(checkout_charges_total, "payment_provider", "review")`
+	const one = `label_set(checkout_charges_total{outcome="error"}, "payment_provider", "review")`
+	kept := []string{
+		`sum by (payment_provider) (topk by (outcome) (2, ` + made + `))`,
+		`sum by (payment_provider) (topk without (payment_provider) (2, ` + made + `))`,
+		`sum by (payment_provider) (bottomk by (outcome) (2, ` + made + `))`,
+		`sum by (payment_provider) (limitk by (outcome) (2, ` + made + `))`,
+		`sum by (payment_provider) (topk_avg by (outcome) (2, ` + made + `))`,
+		`sum by (payment_provider) (any by (outcome) (` + made + `))`,
+		`sum by (payment_provider) (outliersk by (outcome) (1, ` + made + `))`,
+		`sum by (payment_provider) (` + made + ` and on (outcome) checkout_charges_total)`,
+		`sum by (payment_provider) (` + made + ` and ignoring (payment_provider) checkout_charges_total)`,
+		`sum by (payment_provider) (` + made + ` or on (outcome) checkout_charges_total)`,
+		`sum by (payment_provider) (` + made + ` unless on (outcome) checkout_charges_total{outcome="not_present"})`,
+		`sum by (payment_provider) (` + one + ` default on (outcome) checkout_charges_total)`,
+		`sum by (payment_provider) (` + one + ` if on (outcome) checkout_charges_total)`,
+	}
+	for _, expr := range kept {
+		if r := dottedLive(t, expr); r.Failures() != 0 {
+			t.Errorf("the engine keeps the made label here, so the check must not reject it: %s: %+v", expr, r.Findings)
+		}
+	}
+	// ... and the reducing forms still reset it (same names, measured: quantile/median/distinct/mode/mad by() output only by())
+	for _, expr := range []string{
+		`sum by (payment_provider) (quantile by (outcome) (0.5, ` + made + `))`,
+		`sum by (payment_provider) (median by (outcome) (` + made + `))`,
+		`sum by (payment_provider) (distinct by (outcome) (` + made + `))`,
+		`sum by (payment_provider) (mode by (outcome) (` + made + `))`,
+		`sum by (payment_provider) (` + one + ` + on (outcome) ` + one + `)`,
+		`sum by (payment_provider) (` + one + ` > bool on (outcome) ` + one + `)`,
+	} {
+		if r := dottedLive(t, expr); r.Failures() != 2 {
+			t.Errorf("the engine drops the made label here, so the outer grouping must fail: %s: %+v", expr, r.Findings)
+		}
+	}
+}
