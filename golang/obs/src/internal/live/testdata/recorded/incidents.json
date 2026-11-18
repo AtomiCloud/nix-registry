@@ -1,0 +1,55 @@
+{
+  "scenario": "incidents",
+  "now_unix": 1795033018,
+  "sandbox": "obs look --keep on tests/fixtures/live-recorded, sandbox livesrec, port base 24000, obs dev built from origin/obs-regroup-look 3f87272",
+  "exchanges": [
+    {
+      "method": "GET",
+      "path": "/api/annotations",
+      "query": "from=1794424618000\u0026limit=10000\u0026to=1795033018000\u0026type=alert",
+      "status": 200,
+      "json": [
+        {
+          "id": 15,
+          "alertId": 3,
+          "alertName": "Payment errors sustained",
+          "dashboardUID": "",
+          "newState": "Pending",
+          "prevState": "Normal",
+          "created": 1795032993357,
+          "updated": 1795032993357,
+          "time": 1795032990000,
+          "timeEnd": 1795032990000,
+          "text": "Payment errors sustained {alertname=Payment errors sustained, grafana_folder=obs sandbox livesrec} - A=0.806667, C=1.000000",
+          "tags": ["alertname:Payment errors sustained", "grafana_folder:obs sandbox livesrec"],
+          "data": {
+            "values": {
+              "A": 0.8066666666666666,
+              "C": 1
+            }
+          }
+        },
+        {
+          "id": 14,
+          "alertId": 1,
+          "alertName": "Payment errors",
+          "dashboardUID": "",
+          "newState": "Alerting",
+          "prevState": "Normal",
+          "created": 1795032990049,
+          "updated": 1795032990049,
+          "time": 1795032990000,
+          "timeEnd": 1795032990000,
+          "text": "Payment errors {alertname=Payment errors, grafana_folder=obs sandbox livesrec} - A=2.033333, C=1.000000",
+          "tags": ["alertname:Payment errors", "grafana_folder:obs sandbox livesrec"],
+          "data": {
+            "values": {
+              "A": 2.033333333333333,
+              "C": 1
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

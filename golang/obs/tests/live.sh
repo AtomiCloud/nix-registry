@@ -109,6 +109,36 @@ if grep -qF 'abc.def.ghi' "$work/out"; then
 fi
 echo "PASS live: the refusal does not print the value"
 
+# a token that is shaped like an environment variable name is refused and never printed (the token is built
+# here so that no literal in this file looks like a credential)
+tok="gl""sa_$(printf 'Ab1%.0s' 1 2 3 4 5 6 7 8 9 10)"
+fresh tokenname "targets:
+  prod:
+    metrics: https://vm.prod.example
+    headers:
+      Authorization: $tok"
+run live usage --dir "$work/tokenname/observability" --target prod
+expect 2 "a token shaped like a variable name is refused, naming the key" "targets.prod.headers.Authorization" "access token"
+if grep -qF "$tok" "$work/out"; then
+  echo "FAIL live: the refusal printed the token"
+  exit 1
+fi
+echo "PASS live: a token shaped like a variable name is not printed"
+
+# a store URL with credentials, a query string or a fragment is refused, naming the key, not the URL
+for bad in "https://admin:hunter2secret@vm.prod.example" "https://vm.prod.example/?token=hunter2secret" "https://vm.prod.example/#hunter2secret"; do
+  fresh badurl "targets:
+  prod:
+    metrics: $bad"
+  run live usage --dir "$work/badurl/observability" --target prod
+  expect 2 "a store URL with credentials, a query or a fragment is refused" "targets.prod.metrics"
+  if grep -qF 'hunter2secret' "$work/out"; then
+    echo "FAIL live: the refusal printed the URL"
+    exit 1
+  fi
+done
+echo "PASS live: a refused URL is not printed"
+
 # an unknown key under a target names its dotted path
 fresh badkey 'targets:
   prod:

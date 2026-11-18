@@ -1,0 +1,360 @@
+{
+  "scenario": "usage",
+  "now_unix": 1795033018,
+  "sandbox": "obs look --keep on tests/fixtures/live-recorded, sandbox livesrec, port base 24000, obs dev built from origin/obs-regroup-look 3f87272",
+  "exchanges": [
+    {
+      "method": "GET",
+      "path": "/api/metrics/query_range",
+      "query": "end=1795033018\u0026q=%7B+resource.durian.cloud.service+%3D+%22checkout%22+%7D+%7C+rate%28%29\u0026start=1795032718\u0026step=60s",
+      "status": 200,
+      "json": {
+        "series": [
+          {
+            "labels": [
+              {
+                "key": "__name__",
+                "value": {
+                  "stringValue": "rate"
+                }
+              }
+            ],
+            "samples": [
+              {
+                "timestampMs": "1795032660000",
+                "value": 0.43333333333333335
+              },
+              {
+                "timestampMs": "1795032720000",
+                "value": 2.5
+              },
+              {
+                "timestampMs": "1795032780000",
+                "value": 2.5666666666666664
+              },
+              {
+                "timestampMs": "1795032840000",
+                "value": 2.966666666666667
+              },
+              {
+                "timestampMs": "1795032900000",
+                "value": 6.366666666666666
+              },
+              {
+                "timestampMs": "1795032960000",
+                "value": 6.6
+              }
+            ],
+            "exemplars": [
+              {
+                "labels": [
+                  {
+                    "key": "trace:id",
+                    "value": {
+                      "stringValue": "2e84170cd84ec23ae30866a06b113ce"
+                    }
+                  },
+                  {
+                    "key": "resource.durian.cloud.service",
+                    "value": {
+                      "stringValue": "checkout"
+                    }
+                  }
+                ],
+                "value": 0.43333333333333335,
+                "timestampMs": "1795032660000"
+              },
+              {
+                "labels": [
+                  {
+                    "key": "trace:id",
+                    "value": {
+                      "stringValue": "20796f9a9a34545477fddfb81bdd1c3a"
+                    }
+                  },
+                  {
+                    "key": "resource.durian.cloud.service",
+                    "value": {
+                      "stringValue": "checkout"
+                    }
+                  }
+                ],
+                "value": 0.43333333333333335,
+                "timestampMs": "1795032660000"
+              },
+              {
+                "labels": [
+                  {
+                    "key": "trace:id",
+                    "value": {
+                      "stringValue": "7cf52b4688a5d08c5a254a41fcc324a"
+                    }
+                  },
+                  {
+                    "key": "resource.durian.cloud.service",
+                    "value": {
+                      "stringValue": "checkout"
+                    }
+                  }
+                ],
+                "value": 2.5,
+                "timestampMs": "1795032720000"
+              },
+              {
+                "labels": [
+                  {
+                    "key": "trace:id",
+                    "value": {
+                      "stringValue": "ba9a68231d218d383f0812600cbd1b6"
+                    }
+                  },
+                  {
+                    "key": "resource.durian.cloud.service",
+                    "value": {
+                      "stringValue": "checkout"
+                    }
+                  }
+                ],
+                "value": 2.5,
+                "timestampMs": "1795032720000"
+              },
+              {
+                "labels": [
+                  {
+                    "key": "trace:id",
+                    "value": {
+                      "stringValue": "45272a56c77912551cbe079ba1a5395"
+                    }
+                  },
+                  {
+                    "key": "resource.durian.cloud.service",
+                    "value": {
+                      "stringValue": "checkout"
+                    }
+                  }
+                ],
+                "value": 2.5666666666666664,
+                "timestampMs": "1795032780000"
+              },
+              {
+                "labels": [
+                  {
+                    "key": "trace:id",
+                    "value": {
+                      "stringValue": "86f535ee3d8c00db87adc67800fccee"
+                    }
+                  },
+                  {
+                    "key": "resource.durian.cloud.service",
+                    "value": {
+                      "stringValue": "checkout"
+                    }
+                  }
+                ],
+                "value": 2.5666666666666664,
+                "timestampMs": "1795032780000"
+              },
+              {
+                "labels": [
+                  {
+                    "key": "trace:id",
+                    "value": {
+                      "stringValue": "3190157d7221af2d64779520826628e"
+                    }
+                  },
+                  {
+                    "key": "resource.durian.cloud.service",
+                    "value": {
+                      "stringValue": "checkout"
+                    }
+                  }
+                ],
+                "value": 2.966666666666667,
+                "timestampMs": "1795032840000"
+              },
+              {
+                "labels": [
+                  {
+                    "key": "trace:id",
+                    "value": {
+                      "stringValue": "3c216c6bfdf7ccb14ba5d0f511793a6"
+                    }
+                  },
+                  {
+                    "key": "resource.durian.cloud.service",
+                    "value": {
+                      "stringValue": "checkout"
+                    }
+                  }
+                ],
+                "value": 2.966666666666667,
+                "timestampMs": "1795032840000"
+              },
+              {
+                "labels": [
+                  {
+                    "key": "trace:id",
+                    "value": {
+                      "stringValue": "39303a7200826c971fe7ab20112c8b"
+                    }
+                  },
+                  {
+                    "key": "resource.durian.cloud.service",
+                    "value": {
+                      "stringValue": "checkout"
+                    }
+                  }
+                ],
+                "value": 6.366666666666666,
+                "timestampMs": "1795032900000"
+              },
+              {
+                "labels": [
+                  {
+                    "key": "trace:id",
+                    "value": {
+                      "stringValue": "399d4f5060c2d3e14ee702c86710dc"
+                    }
+                  },
+                  {
+                    "key": "resource.durian.cloud.service",
+                    "value": {
+                      "stringValue": "checkout"
+                    }
+                  }
+                ],
+                "value": 6.366666666666666,
+                "timestampMs": "1795032900000"
+              },
+              {
+                "labels": [
+                  {
+                    "key": "resource.durian.cloud.service",
+                    "value": {
+                      "stringValue": "checkout"
+                    }
+                  },
+                  {
+                    "key": "trace:id",
+                    "value": {
+                      "stringValue": "149cc191e96967e0da53e616d3d597a"
+                    }
+                  }
+                ],
+                "value": 6.6,
+                "timestampMs": "1795032960000"
+              },
+              {
+                "labels": [
+                  {
+                    "key": "trace:id",
+                    "value": {
+                      "stringValue": "39088834bd9864adcc92c2e12f1dd1b"
+                    }
+                  },
+                  {
+                    "key": "resource.durian.cloud.service",
+                    "value": {
+                      "stringValue": "checkout"
+                    }
+                  }
+                ],
+                "value": 6.6,
+                "timestampMs": "1795032960000"
+              }
+            ]
+          }
+        ],
+        "metrics": {
+          "inspectedBytes": "43838",
+          "completedJobs": 1,
+          "totalJobs": 1
+        },
+        "step": "60000000000"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/query",
+      "query": "query=sum+by+%28%22durian.cloud.landscape%22%29+%28count_over_time%28%7B__name__%3D%22checkout_requests_total%22%2C%22durian.cloud.service%22%3D%22checkout%22%7D%5B300s%5D%29%29\u0026time=1795033018",
+      "status": 200,
+      "json": {
+        "status": "success",
+        "data": {
+          "resultType": "vector",
+          "result": [
+            {
+              "metric": {
+                "durian.cloud.landscape": "fixture"
+              },
+              "value": [1795033018, "38"]
+            }
+          ]
+        },
+        "stats": {
+          "seriesFetched": "2",
+          "executionTimeMsec": 0
+        }
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/series",
+      "query": "end=1795033018\u0026match%5B%5D=%7B__name__%3D~%22.%2B%22%2C%22durian.cloud.service%22%3D%22checkout%22%7D\u0026start=1795032718",
+      "status": 200,
+      "json": {
+        "status": "success",
+        "data": [
+          {
+            "__name__": "checkout_requests_total",
+            "durian.cloud.landscape": "fixture",
+            "durian.cloud.module": "api",
+            "durian.cloud.platform": "payments",
+            "durian.cloud.service": "checkout",
+            "outcome": "error"
+          },
+          {
+            "__name__": "checkout_requests_total",
+            "durian.cloud.landscape": "fixture",
+            "durian.cloud.module": "api",
+            "durian.cloud.platform": "payments",
+            "durian.cloud.service": "checkout",
+            "outcome": "ok"
+          }
+        ]
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/select/logsql/stats_query",
+      "query": "query=_time%3A300s+%22durian.cloud.service%22%3A%3D%22checkout%22+%7C+stats+count%28%29+as+lines%2C+sum_len%28_msg%29+as+msg_bytes%2C+count_uniq%28_stream_id%29+as+streams\u0026time=1795033018",
+      "status": 200,
+      "json": {
+        "status": "success",
+        "data": {
+          "resultType": "vector",
+          "result": [
+            {
+              "metric": {
+                "__name__": "lines"
+              },
+              "value": [1795033018, "299"]
+            },
+            {
+              "metric": {
+                "__name__": "msg_bytes"
+              },
+              "value": [1795033018, "4485"]
+            },
+            {
+              "metric": {
+                "__name__": "streams"
+              },
+              "value": [1795033018, "1"]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

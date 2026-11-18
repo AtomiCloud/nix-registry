@@ -27,7 +27,8 @@ const liveUsage = `usage:
 
 --target is local, dev, stage, prod, or any name under targets: in <dir>/obs.yaml (local needs no entry:
 it uses the running sandbox, else the sandbox addresses). obs live only reads: GET and POST to the
-stores' query endpoints, never a write. Exit: usage 1 when a metric is over budget; shape, incidents
+stores' query endpoints, never a write. Exit: usage 1 when a metric is over budget (series or
+points/min), an undeclared metric is found or a label check of assert fails; shape, incidents
 and look exit 0 (the LLM judges; look never fails); 2 on a usage or input error.
 `
 
