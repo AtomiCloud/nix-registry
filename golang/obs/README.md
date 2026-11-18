@@ -64,7 +64,7 @@ Not tested items are collected in [Not tested](#not-tested), at the end of this 
 
 ```text
 obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
-obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names] [--vl-settings victorialogs-settings.yaml]
+obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names] [--vl-settings victorialogs-settings.yaml] [--tempo-config tempo.yaml]
 obs alerts [--dir observability] [--seed seed.yaml] [--base unix] [--out results.json] [--vl-settings victorialogs-settings.yaml] [--tempo-config tempo.yaml]
             [--workers n] [--steps steps.json] [--recorded recorded.json]
 obs assert --series FILE [--dir observability] [--pods n] [--unknown warn|fail|ignore]
@@ -320,10 +320,16 @@ evaluators embedded in this obs:
   `victorialogs`, `tempo`, `grafana`, `dashboard_schema`) fails with exit 1:
   `FAIL <obs.yaml> versions.victorialogs: obs.yaml wants v1.53.0, this obs embeds v1.54.0 (LogsQL of VictoriaLogs)`.
   `v1.54.0` and `1.54.0` are the same release.
-- `alloy` and `pyroscope` have no embedded evaluator: a different version is a `note` and exit 0.
-  `obs sandbox up` still refuses a Pyroscope image whose digest obs does not know.
+- `pyroscope` has no embedded evaluator, but obs runs it as a sandbox image, and the sandbox refuses a
+  version whose image digest `pins.json` does not record. So a Pyroscope version with no known image
+  fails the same way (exit 1, `FAIL <obs.yaml> versions.pyroscope: obs.yaml wants 2.5.0, this obs embeds
+  2.4.3 (sandbox image of Pyroscope: no known image digest, known: 2.4.3)`), in `obs check`, `obs query`
+  and `obs alerts` alike. `alloy` has no evaluator and no image: a different version is a `note` and exit 0.
+- An empty section (`versions:` or `thresholds:` with every child commented out) names nothing: it
+  counts as absent, not as an error.
 - An unknown key, a wrong type or a bad value is an input error (exit 2) that names the file, the
-  line and the key: `obs.yaml:15: unknown key thresholds.logs.max_query_lenn`.
+  line and the key: `obs.yaml:15: unknown key thresholds.logs.max_query_lenn`. A tolerance that is not
+  a finite number (`.nan`, `.inf`) is one too.
 - **No `obs.yaml`**: `obs check` prints a note and the embedded versions and exits 0, so repos that
   have no file keep working. `obs query` and `obs alerts` print nothing new.
 
@@ -333,7 +339,8 @@ embedded in this obs; thresholds applied: logs, ...`, when the file exists.
 
 **Order of precedence** (for each key): the defaults built into obs, then `obs.yaml`, then
 `--vl-settings` / `<dir>/victorialogs-settings.yaml` (VictoriaLogs) or `--tempo-config` (Tempo).
-`--vl-settings` and `--tempo-config` keep working and override `obs.yaml` key by key; a key the file
+`--vl-settings` (`obs query --live`, `obs alerts`) and `--tempo-config` (`obs query --live`, `obs alerts`)
+keep working and override `obs.yaml` key by key; a key the file
 does not name keeps the `obs.yaml` value. For profiles, a per-service override in
 `e2e/profile-limits.yaml` beats `obs.yaml`, which beats the built-in 5 / 5 / 15 / 30 %;
 `obs profile compare` reads `observability/obs.yaml` when it exists (`--obs-yaml` names another).
@@ -343,7 +350,22 @@ Grafana, VictoriaMetrics, VictoriaLogs, Tempo and Pyroscope (and print them). A 
 recorded image digest for (`src/internal/pins/pins.json`: the pin, plus an optional `also` list of
 `{version, digest}`) is refused: `obs sandbox up` exits 2 with `<obs.yaml>: versions.pyroscope: 2.4.2
 has no known image digest for grafana/pyroscope (known: 2.4.3)`; `obs look` prints the same and, as
-always, exits 0. Nothing is guessed. `obs sandbox down` and `status` never read the file.
+always, exits 0. Nothing is guessed. An `also` entry counts only with a valid image digest
+(`sha256:` and 64 lower-case hex characters); an absent or malformed digest is refused by name, with the
+reason, the same way. `obs sandbox down` and `status` never read the file.
+
+**Where the thresholds apply.**
+
+- `thresholds.metrics.max_points_per_series` caps the points one series may hold in a query. A window that
+  needs more (`(end - start) / step + 1` points) is a `FAIL` line naming the key and the numbers (exit 1 in
+  `obs query --live`; in `obs alerts` the rule's line says why it errored, or the run stops with the same text);
+  it is never a VictoriaMetrics panic.
+- `thresholds.traces` shapes every Tempo metrics query obs runs: alert rules (`obs alerts`) and TraceQL
+  metrics panels in dashboards (`obs query --live`). A panel is validated and run as Tempo's query-frontend
+  does, with the seed's end as "now": the end is pulled in by `query_end_cutoff`, a window longer than
+  `metrics_max_duration` or finer than `metrics_max_intervals` is an error that names the limit. With
+  Tempo's defaults (30s, 24h, 10000) a `{} | rate()` panel over `now-5m` to `now` is green; with
+  `metrics_max_duration: 1s` it is red. Trace searches and trace ID lookups do not go through these limits.
 
 ## `obs gen`
 
@@ -1814,7 +1836,8 @@ source) where its section says so.
 
 **obs.yaml**
 
-- `obs sandbox up` with an image named by `obs.yaml` other than the pins: no container runtime ran it. Only the refusal of an unknown version and the choice of tags are tested (the stack itself is unchanged and is covered by the existing sandbox tests with a fake runtime). `pins.json` records no extra (`also`) image yet, so today the only runnable versions are the pins.
+- `obs sandbox up` with an image named by `obs.yaml` other than the pins: no container runtime ran it. Only the refusal of an unknown version (including an `also` entry with an absent or malformed digest), the choice of tags and the refusal to start over a container that runs another image (tested directly, with a fake runtime) are tested. `pins.json` records no extra (`also`) image yet, so today the only runnable versions are the pins.
+- Trace panels run under `thresholds.traces` with the seed's end as the query-frontend's "now"; that choice is ours, not measured against a real Grafana panel refresh. A per-tenant `max_metrics_duration` override is not modelled.
 - `dashboard_schema: 42` was read from the Grafana v13.3.0 source (`DashboardMigrator.ts`, `schemaversion/v42.go`), not measured against a running Grafana; `obs check` does not read the `schemaVersion` of the repo's dashboards.
 - `thresholds.metrics.max_points_per_series` against a real VictoriaMetrics `-search.maxPointsPerTimeseries` (obs's default is the embedded engine's own 1,000,000, not the server's 30,000); `obs profile compare` reading `thresholds.profiles` is unit-tested, not run end to end; a Helm chart's values are not read, so the repo must keep `obs.yaml` equal to the chart by hand.
 

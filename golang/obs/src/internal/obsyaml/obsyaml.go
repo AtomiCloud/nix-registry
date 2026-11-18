@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -155,6 +156,9 @@ func Parse(path string, b []byte) (*File, error) {
 		return nil, fail(0, "want exactly one YAML document")
 	}
 	root := doc.Content[0]
+	if isNull(root) { // only ~ or null: names nothing, like an empty file
+		return f, nil
+	}
 	if root.Kind != yaml.MappingNode {
 		return nil, fail(root.Line, "want a mapping with the keys versions and thresholds")
 	}
@@ -207,6 +211,9 @@ func Parse(path string, b []byte) (*File, error) {
 	} {
 		if p.val == nil {
 			continue
+		}
+		if math.IsNaN(*p.val) || math.IsInf(*p.val, 0) {
+			return nil, fail(keyLine(root, p.key), "%s: %s is not a finite number (want a fraction between 0 and 10; 0.10 means 10 %%)", p.key, keyValue(root, p.key))
 		}
 		if *p.val <= 0 || *p.val > 10 {
 			return nil, fail(keyLine(root, p.key), "%s: %v is not a fraction between 0 and 10 (0.10 means 10 %%)", p.key, *p.val)
@@ -294,6 +301,9 @@ func (f *File) resolveTraces(t *tracesRaw, root *yaml.Node, fail func(int, strin
 
 // checkKeys fails on the first key that is not in schema, naming its dotted path and line.
 func checkKeys(n *yaml.Node, sch map[string]any, prefix string, fail func(int, string, ...any) error) error {
+	if isNull(n) {
+		return nil // a section with every child commented out is empty: absent
+	}
 	if n.Kind != yaml.MappingNode {
 		return fail(n.Line, "%s: want a mapping", strings.TrimSuffix(prefix, "."))
 	}
@@ -317,6 +327,30 @@ func checkKeys(n *yaml.Node, sch map[string]any, prefix string, fail func(int, s
 		}
 	}
 	return nil
+}
+
+// isNull tells an empty YAML value (nothing after the colon, ~ or null).
+func isNull(n *yaml.Node) bool { return n.Kind == yaml.ScalarNode && n.Tag == "!!null" }
+
+// keyValue is the text written after a dotted key (".nan"), or "".
+func keyValue(root *yaml.Node, dotted string) string {
+	n := root
+	for _, part := range strings.Split(dotted, ".") {
+		if n == nil || n.Kind != yaml.MappingNode {
+			return ""
+		}
+		var next *yaml.Node
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			if n.Content[i].Value == part {
+				next = n.Content[i+1]
+			}
+		}
+		n = next
+	}
+	if n == nil {
+		return ""
+	}
+	return n.Value
 }
 
 // keyLine is the line of a dotted key, or 0.
@@ -477,7 +511,13 @@ func (m Mismatch) String() string {
 
 // Mismatches lists every evaluator version obs.yaml names that this obs does not embed.
 // Alloy and Pyroscope have no embedded evaluator; Notes covers them.
-func (f *File) Mismatches() []Mismatch {
+func (f *File) Mismatches() []Mismatch { return f.MismatchesWith(pins.All()) }
+
+// MismatchesWith is Mismatches against a given pins table (a test seam). Besides the
+// four evaluators it fails a Pyroscope version that has no known image: obs runs Pyroscope
+// only as a sandbox image, and the sandbox refuses a version whose digest pins.json does
+// not record, so naming one is a failure here as well, not a note.
+func (f *File) MismatchesWith(known map[string]pins.Pin) []Mismatch {
 	if f == nil {
 		return nil
 	}
@@ -501,24 +541,33 @@ func (f *File) Mismatches() []Mismatch {
 			out = append(out, Mismatch{Key: e.Key, Want: w, Embedded: e.Embedded, Role: e.Role + " of " + e.Product})
 		}
 	}
+	if w := f.Versions.Pyroscope; w != "" {
+		py := known["Pyroscope"]
+		have := false
+		var names []string
+		for _, im := range py.Images() {
+			names = append(names, im.Version)
+			have = have || pins.SameVersion(im.Version, w)
+		}
+		if !have {
+			out = append(out, Mismatch{Key: "versions.pyroscope", Want: w, Embedded: py.Version,
+				Role: "sandbox image of Pyroscope: no known image digest, known: " + strings.Join(names, ", ")})
+		}
+	}
 	return out
 }
 
-// Notes are the differences that do not fail a check: Alloy and Pyroscope versions other
-// than the pins (obs embeds no evaluator for them).
+// Notes are the differences that do not fail a check: an Alloy version other than the pin
+// (obs embeds no evaluator for it and runs no Alloy image). A Pyroscope version with no
+// known image is a mismatch, not a note.
 func (f *File) Notes() []string {
 	if f == nil {
 		return nil
 	}
 	p := pins.All()
 	var out []string
-	for _, r := range []struct{ key, want, pin string }{
-		{"versions.alloy", f.Versions.Alloy, "Alloy"},
-		{"versions.pyroscope", f.Versions.Pyroscope, "Pyroscope"},
-	} {
-		if r.want != "" && !pins.SameVersion(r.want, p[r.pin].Version) {
-			out = append(out, fmt.Sprintf("%s: obs.yaml names %s, the pin of this obs is %s (no evaluator is embedded for it; `obs sandbox up` runs it only if its image digest is in pins.json)", r.key, r.want, p[r.pin].Version))
-		}
+	if w := f.Versions.Alloy; w != "" && !pins.SameVersion(w, p["Alloy"].Version) {
+		out = append(out, fmt.Sprintf("versions.alloy: obs.yaml names %s, the pin of this obs is %s (no evaluator is embedded for it and obs runs no Alloy image)", w, p["Alloy"].Version))
 	}
 	return out
 }

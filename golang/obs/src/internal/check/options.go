@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/AtomiCloud/obs/internal/contract"
+	"github.com/AtomiCloud/obs/internal/engines/tempo"
 	"github.com/AtomiCloud/obs/internal/obsyaml"
 )
 
@@ -16,6 +17,13 @@ type Options struct {
 	VLSettings string // default <Dir>/victorialogs-settings.yaml, else pinned VL defaults
 	Base       int64  // unix seconds of the seed's start (0 = aligned, ending in the past)
 	Names      bool   // print the names each query reads
+	// TempoConfig is a Tempo config file (--tempo-config) whose query_frontend settings
+	// override obs.yaml thresholds.traces for trace panels.
+	TempoConfig string
+	// TempoFrontend is the resolved query-frontend setting trace panels run under: Tempo's
+	// defaults, then obs.yaml thresholds.traces, then TempoConfig. Live fills it; nil means
+	// Tempo's defaults.
+	TempoFrontend *tempo.Frontend
 	// Obs is <Dir>/obs.yaml (nil when absent): its thresholds sit under --vl-settings.
 	Obs *obsyaml.File
 	// EventRule says when a LogsQL alert must name a contract event:

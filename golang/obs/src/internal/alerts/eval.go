@@ -37,6 +37,10 @@ type AlertRun struct {
 	Reused      string       `json:"reused,omitempty"`
 	Transitions []Transition `json:"transitions,omitempty"`
 	Steps       []StepRecord `json:"steps,omitempty"`
+
+	// FirstError is the first evaluation error of a tick that ended in Error (a limit, a
+	// refused window), so a FAIL line says why and not only how many ticks.
+	FirstError string `json:"first_error,omitempty"`
 }
 
 // ---------- query data, cached per (ds, expr, range, run, interval) ----------
@@ -210,6 +214,14 @@ func evalRuleRun(eng Engines, cache *queryCache, cr *cRule, run Run, keepSteps b
 		}
 		if errs {
 			ar.ErrorSteps++
+			if ar.FirstError == "" {
+				for _, x := range res {
+					if x.err != "" {
+						ar.FirstError = x.err
+						break
+					}
+				}
+			}
 		}
 		if keepSteps {
 			rec := StepRecord{T: t.UnixMilli(), E: map[string]string{}, V: map[string]jf{}, States: map[string]string{}}
@@ -539,6 +551,9 @@ func describe(ar AlertRun) string {
 	}
 	if ar.ErrorSteps > 0 {
 		s += fmt.Sprintf(", Error %d", ar.ErrorSteps)
+		if ar.FirstError != "" {
+			s += " (first error: " + ar.FirstError + ")"
+		}
 	}
 	if ar.Reused != "" {
 		s += " (" + ar.Reused + ")"

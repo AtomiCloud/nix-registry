@@ -87,3 +87,45 @@ func TestEveryEngineImageHasADigest(t *testing.T) {
 		}
 	}
 }
+
+func TestValidDigest(t *testing.T) {
+	good := "sha256:" + strings.Repeat("0123456789abcdef", 4)
+	if !ValidDigest(good) {
+		t.Fatalf("%s must be valid", good)
+	}
+	for _, bad := range []string{
+		"", "sha256:", "sha256:abc", "sha1:" + strings.Repeat("a", 40),
+		"sha256:" + strings.Repeat("A", 64), "sha256:" + strings.Repeat("g", 64),
+		"sha256:" + strings.Repeat("a", 63), "sha256:" + strings.Repeat("a", 65),
+		" " + good, good + "\n", strings.TrimPrefix(good, "sha256:"),
+	} {
+		if ValidDigest(bad) {
+			t.Errorf("%q must be invalid", bad)
+		}
+	}
+}
+
+// Every image a pin lists, the pin itself and Also alike, needs a valid digest to count as known.
+func TestImagesKeepsOnlyEntriesWithAValidDigest(t *testing.T) {
+	good := "sha256:" + strings.Repeat("a", 64)
+	p := Pin{Version: "2.4.3", Digest: good, Also: []Image{
+		{Version: "2.4.2", Digest: good},
+		{Version: "2.4.1"},                           // absent digest
+		{Version: "2.4.0", Digest: "sha256:abc"},     // malformed digest
+		{Version: "2.3.9", Digest: "latest"},         // not a digest at all
+		{Version: "2.3.8", Digest: " " + good + " "}, // padded
+	}}
+	var got []string
+	for _, im := range p.Images() {
+		got = append(got, im.Version)
+	}
+	if strings.Join(got, ",") != "2.4.3,2.4.2" {
+		t.Fatalf("known images: %v", got)
+	}
+	if n := len((Pin{Version: "2.4.3"}).Images()); n != 0 {
+		t.Fatalf("a pin without a digest is not known: %d", n)
+	}
+	if n := len(p.Listed()); n != 6 {
+		t.Fatalf("Listed keeps every entry, valid or not: %d", n)
+	}
+}

@@ -146,7 +146,29 @@ func (e *Engine) SamplesInstant(q string, at time.Time) ([]*seed.Series, error) 
 	return e.execSamples(q, at, at, 5*time.Minute, true)
 }
 
+// LimitKey is the obs.yaml key that sets the points one series may hold.
+const LimitKey = "thresholds.metrics.max_points_per_series"
+
+// checkPoints refuses a window that needs more points per series than the limit.
+// VictoriaMetrics panics ("BUG: too many points") on such a window instead of returning
+// an error, so the count is taken here, before Exec, the way the server counts it:
+// (end - start) / step + 1.
+func (e *Engine) checkPoints(start, end time.Time, step time.Duration) error {
+	if step.Milliseconds() <= 0 || end.Before(start) {
+		return nil // Exec reports a bad window itself
+	}
+	need := (end.UnixMilli()-start.UnixMilli())/step.Milliseconds() + 1
+	if limit := e.pointsLimit(); need > int64(limit) {
+		return fmt.Errorf("the query needs %d points per series (%s to %s at step %s), above the limit of %d; raise %s in obs.yaml or ask for a shorter window or a larger step",
+			need, start.UTC().Format(time.RFC3339), end.UTC().Format(time.RFC3339), step, limit, LimitKey)
+	}
+	return nil
+}
+
 func (e *Engine) execSamples(q string, start, end time.Time, step time.Duration, instant bool) ([]*seed.Series, error) {
+	if err := e.checkPoints(start, end, step); err != nil {
+		return nil, err
+	}
 	ec := &vmpromql.EvalConfig{
 		Context:            context.Background(),
 		Start:              start.UnixMilli(),

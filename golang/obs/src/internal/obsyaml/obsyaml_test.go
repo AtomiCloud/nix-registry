@@ -73,13 +73,13 @@ func TestEachMismatchedVersionIsOneMismatchNamingKeyWantedAndEmbedded(t *testing
 	}
 }
 
-func TestAlloyAndPyroscopeDifferencesAreNotesNotFailures(t *testing.T) {
-	f := mustParse(t, "versions:\n  alloy: v1.22.0\n  pyroscope: 2.5.0\n")
+func TestAlloyDifferenceIsANoteNotAFailure(t *testing.T) {
+	f := mustParse(t, "versions:\n  alloy: v1.22.0\n")
 	if len(f.Mismatches()) != 0 {
-		t.Fatalf("alloy and pyroscope have no embedded evaluator: %v", f.Mismatches())
+		t.Fatalf("alloy has no embedded evaluator: %v", f.Mismatches())
 	}
 	n := strings.Join(f.Notes(), "\n")
-	for _, want := range []string{"versions.alloy", "v1.22.0", "v1.21.3", "versions.pyroscope", "2.5.0", "2.4.3"} {
+	for _, want := range []string{"versions.alloy", "v1.22.0", "v1.21.3"} {
 		if !strings.Contains(n, want) {
 			t.Errorf("notes lack %q: %s", want, n)
 		}
@@ -273,6 +273,98 @@ func TestEveryPinnedEngineAndReferenceIsListed(t *testing.T) {
 	for _, e := range Embedded() {
 		if e.Embedded == "" {
 			t.Errorf("%s has no embedded version", e.Role)
+		}
+	}
+}
+
+// Round 2: a Pyroscope version with no known image digest fails the check (the sandbox
+// would refuse it, so the check says so instead of a note).
+func TestPyroscopeVersionWithNoKnownImageIsAMismatch(t *testing.T) {
+	f := mustParse(t, "versions:\n  pyroscope: 2.5.0\n")
+	ms := f.Mismatches()
+	if len(ms) != 1 || ms[0].Key != "versions.pyroscope" || ms[0].Want != "2.5.0" || ms[0].Embedded != "2.4.3" {
+		t.Fatalf("pyroscope 2.5.0: %+v", ms)
+	}
+	if !strings.Contains(ms[0].String(), "no known image digest") {
+		t.Errorf("the line must say why: %s", ms[0])
+	}
+	for _, n := range f.Notes() {
+		if strings.Contains(n, "versions.pyroscope") {
+			t.Errorf("the failure is not also a note: %s", n)
+		}
+	}
+	// The pin itself (any spelling) is fine.
+	if ms := mustParse(t, "versions:\n  pyroscope: v2.4.3\n").Mismatches(); len(ms) != 0 {
+		t.Fatalf("pyroscope v2.4.3: %v", ms)
+	}
+	// An image pins.json lists with a valid digest is known and not a mismatch.
+	known := pins.All()
+	p := known["Pyroscope"]
+	p.Also = []pins.Image{{Version: "2.4.2", Digest: "sha256:" + strings.Repeat("b", 64)}}
+	known["Pyroscope"] = p
+	if ms := mustParse(t, "versions:\n  pyroscope: 2.4.2\n").MismatchesWith(known); len(ms) != 0 {
+		t.Fatalf("a listed image: %v", ms)
+	}
+	// An Also entry without a valid digest is not known.
+	p.Also = []pins.Image{{Version: "2.4.2"}}
+	known["Pyroscope"] = p
+	if ms := mustParse(t, "versions:\n  pyroscope: 2.4.2\n").MismatchesWith(known); len(ms) != 1 {
+		t.Fatalf("an image without a digest must not be known: %v", ms)
+	}
+	// Alloy stays a note: obs runs no Alloy image.
+	g := mustParse(t, "versions:\n  alloy: v1.22.0\n")
+	if len(g.Mismatches()) != 0 || len(g.Notes()) != 1 {
+		t.Fatalf("alloy: %v %v", g.Mismatches(), g.Notes())
+	}
+}
+
+// Round 2: a section whose children are all commented out is a null value: absent, not an error.
+func TestEmptySectionCountsAsAbsent(t *testing.T) {
+	for _, doc := range []string{
+		"versions:\n  # grafana: 13.3.0\n",
+		"thresholds:\n  # logs:\n",
+		"versions:\nthresholds:\n",
+		"versions: ~\nthresholds: null\n",
+		"thresholds:\n  logs:\n    # max_query_len: 16KiB\n  metrics:\n  traces:\n  profiles:\n",
+		"~\n",
+		"null\n",
+		"versions: {}\nthresholds: {}\n",
+	} {
+		f, err := Parse("observability/obs.yaml", []byte(doc))
+		if err != nil {
+			t.Errorf("%q: %v", doc, err)
+			continue
+		}
+		if f.Logs != nil || f.Frontend != nil || f.MaxPoints != 0 || len(f.Mismatches()) != 0 || len(f.Applied()) != 0 {
+			t.Errorf("%q must name nothing: %+v", doc, f)
+		}
+	}
+	// A real mistake next to an empty section is still named.
+	if _, err := Parse("observability/obs.yaml", []byte("versions:\nthresholds:\n  logs:\n    nope: 1\n")); err == nil || !strings.Contains(err.Error(), "unknown key thresholds.logs.nope") {
+		t.Fatalf("got %v", err)
+	}
+	// An empty leaf is absent as well; a list or scalar where a section belongs is not.
+	if _, err := Parse("observability/obs.yaml", []byte("versions:\n  tempo:\n")); err != nil {
+		t.Errorf("empty leaf: %v", err)
+	}
+	if _, err := Parse("observability/obs.yaml", []byte("thresholds:\n  - a\n")); err == nil {
+		t.Error("a list where thresholds belongs must fail")
+	}
+}
+
+// Round 2: a tolerance of .nan compares false against every bound, so it is rejected by name.
+func TestNonFiniteToleranceIsRejected(t *testing.T) {
+	for _, v := range []string{".nan", ".NaN", ".inf", "-.inf", "+.inf"} {
+		doc := "thresholds:\n  profiles:\n    tolerance_function: " + v + "\n"
+		_, err := Parse("observability/obs.yaml", []byte(doc))
+		if err == nil {
+			t.Errorf("%s accepted", v)
+			continue
+		}
+		for _, want := range []string{"observability/obs.yaml:3:", "thresholds.profiles.tolerance_function", "finite"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: error lacks %q: %v", v, want, err)
+			}
 		}
 	}
 }

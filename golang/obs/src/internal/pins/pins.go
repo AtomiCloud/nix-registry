@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 )
 
@@ -28,14 +29,34 @@ type Image struct {
 	Digest  string `json:"digest"`
 }
 
-// Images lists every image version of a pinned component whose digest is known:
-// the pin itself first, then Also. Empty when the component has no pin or no digest.
-func (p Pin) Images() []Image {
+// digestRe is a container image digest as registries print it.
+var digestRe = regexp.MustCompile(`^sha256:[0-9a-f]{64}$`)
+
+// ValidDigest tells whether d is sha256:<64 lower-case hex>. Nothing else (an empty
+// string, another hash, upper case, padding) names an image.
+func ValidDigest(d string) bool { return digestRe.MatchString(d) }
+
+// Listed lists every image version pins.json records for the component, the pin first,
+// then Also, whether or not its digest is usable. Use Images for the images obs may run.
+func (p Pin) Listed() []Image {
 	var out []Image
-	if p.Version != "" && p.Digest != "" {
+	if p.Version != "" {
 		out = append(out, Image{Version: p.Version, Digest: p.Digest})
 	}
 	return append(out, p.Also...)
+}
+
+// Images lists every image version of a pinned component whose digest is known: the pin
+// itself first, then Also, each only with a valid sha256 digest. Empty when the component
+// has no pin or no valid digest.
+func (p Pin) Images() []Image {
+	var out []Image
+	for _, im := range p.Listed() {
+		if ValidDigest(im.Digest) {
+			out = append(out, im)
+		}
+	}
+	return out
 }
 
 // SameVersion tells whether two version spellings name one release ("v1.156.0" and

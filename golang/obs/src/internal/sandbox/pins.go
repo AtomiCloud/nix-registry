@@ -101,6 +101,13 @@ func Resolve(want map[string]string, known map[string]pins.Pin) ([]Component, er
 			}
 		}
 		if !found {
+			// The registry's own spelling is listed, but without a usable digest: say so.
+			for _, im := range known[pinName[c.Name]].Listed() {
+				if pins.SameVersion(im.Version, w) {
+					return nil, fmt.Errorf("versions.%s: %s is listed in internal/pins/pins.json for %s with a missing or malformed image digest %q (want sha256:<64 lower-case hex>); no known image digest, so obs does not run it",
+						obsKey[c.Name], w, c.Image, im.Digest)
+				}
+			}
 			return nil, fmt.Errorf("versions.%s: %s has no known image digest for %s (known: %s); add its tag and digest to internal/pins/pins.json before obs runs it",
 				obsKey[c.Name], w, c.Image, strings.Join(have, ", "))
 		}

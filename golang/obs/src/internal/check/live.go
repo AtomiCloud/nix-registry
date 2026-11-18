@@ -69,6 +69,19 @@ func Live(set *files.Set, o Options) (*Report, error) {
 	var m metricsEngine
 	var l logsEngine
 	var settingsNote string
+	// Trace panels run under the resolved Tempo query-frontend: Tempo's defaults, then
+	// obs.yaml thresholds.traces, then --tempo-config. Resolved only when a trace query
+	// will run, so a bad --tempo-config is not an error for a repo without trace panels.
+	for _, q := range set.Queries {
+		if q.Problem == "" && q.Kind == files.Traces {
+			fe, err := o.Obs.TempoFrontend(o.TempoConfig)
+			if err != nil {
+				return nil, err
+			}
+			o.TempoFrontend = fe
+			break
+		}
+	}
 	if needVM {
 		e, err := vm.New(ds)
 		if err != nil {
@@ -103,6 +116,10 @@ func runLive(set *files.Set, o Options, ds *seed.Dataset, m metricsEngine, l log
 	r := newReport()
 	lv := &liveRun{r: r, o: o, ds: ds, end: ds.End, vm: m, vl: l}
 	lv.tempo = tempo.NewTempoEngine(ds.Traces)
+	lv.frontend = tempo.DefaultFrontend
+	if o.TempoFrontend != nil {
+		lv.frontend = *o.TempoFrontend
+	}
 	lv.logFields = logFieldSet(ds)
 	lv.metricNames = toSet(ds.MetricNames())
 	lv.labelNames = labelNameSet(ds)
@@ -132,6 +149,8 @@ type liveRun struct {
 	metricNames map[string]bool
 	labelNames  map[string]bool
 	tempo       *tempo.TempoEngine
+	// frontend is the Tempo query-frontend setting trace panels are validated and run under.
+	frontend tempo.Frontend
 }
 
 func toSet(a []string) map[string]bool {

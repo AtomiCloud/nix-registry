@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AtomiCloud/obs/internal/pins"
 )
@@ -102,28 +103,93 @@ func TestResolveRefusesAPinWithoutADigest(t *testing.T) {
 	}
 }
 
-// A refusal starts nothing: Up with resolved components runs only what Resolve returned,
-// and checkExisting compares running containers with that stack, not with the pins.
-func TestUpChecksRunningContainersAgainstTheResolvedStack(t *testing.T) {
+// A refusal starts nothing: checkExisting compares the running containers with the stack
+// Resolve returned (not with the pins) and is the first thing Up does after listing them.
+// It is tested directly, so the test never starts a container, never waits on a port and
+// never meets a service on the machine that runs it.
+func TestCheckExistingComparesRunningContainersWithTheResolvedStack(t *testing.T) {
 	got, err := Resolve(map[string]string{"pyroscope": "2.4.2"}, knownWithOlderPyroscope())
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 2.4.2 runs and 2.4.2 is wanted: no refusal. The pin (2.4.3) is not what is wanted.
-	fr := &fakeRunner{ps: "obs-sandbox-demo-pyroscope|grafana/pyroscope:2.4.2|running\n"}
-	_, err = Up(context.Background(), Config{Project: "demo", Dir: project(t), Runner: fr, Components: got})
-	if err != nil && strings.Contains(err.Error(), "image tags differ from the pins") {
+	cfg := &Config{Project: "demo", Components: got}
+	name := containerName("demo", Component{Name: "pyroscope"})
+	// 2.4.2 runs and 2.4.2 is wanted: accepted. The pin (2.4.3) is not what is wanted.
+	if err := checkExisting(cfg, map[string]existing{name: {Image: "grafana/pyroscope:2.4.2", State: "running"}}); err != nil {
 		t.Fatalf("a running image that matches the resolved stack was refused: %v", err)
 	}
-	// 2.4.3 runs but 2.4.2 is wanted: refused, nothing but ps ran.
-	fr = &fakeRunner{ps: "obs-sandbox-demo-pyroscope|grafana/pyroscope:2.4.3|running\n"}
-	_, err = Up(context.Background(), Config{Project: "demo", Dir: project(t), Runner: fr, Components: got})
+	// docker.io/ in front is how podman reports the same image.
+	if err := checkExisting(cfg, map[string]existing{name: {Image: "docker.io/grafana/pyroscope:2.4.2", State: "exited"}}); err != nil {
+		t.Fatalf("docker.io/ spelling was refused: %v", err)
+	}
+	// 2.4.3 runs but 2.4.2 is wanted: refused, naming the container, the running image and the wanted tag.
+	err = checkExisting(cfg, map[string]existing{name: {Image: "grafana/pyroscope:2.4.3", State: "running"}})
+	if err == nil {
+		t.Fatal("2.4.3 running while 2.4.2 is wanted was accepted")
+	}
+	for _, want := range []string{"refusing", name, "grafana/pyroscope:2.4.3", "grafana/pyroscope:2.4.2", "obs sandbox down"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal lacks %q: %v", want, err)
+		}
+	}
+	// No container yet: nothing to refuse.
+	if err := checkExisting(cfg, nil); err != nil {
+		t.Fatalf("an empty sandbox: %v", err)
+	}
+}
+
+// Up reaches checkExisting before it runs anything but `ps`: the refusal starts nothing.
+// The Runner is a fake and the whole test is bounded, so nothing can wait on a
+// service of the machine running the test.
+func TestUpRefusesBeforeStartingAnything(t *testing.T) {
+	got, err := Resolve(map[string]string{"pyroscope": "2.4.2"}, knownWithOlderPyroscope())
+	if err != nil {
+		t.Fatal(err)
+	}
+	fr := &fakeRunner{ps: "obs-sandbox-demo-pyroscope|grafana/pyroscope:2.4.3|running\n"}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	started := time.Now()
+	_, err = Up(ctx, Config{Project: "demo", Dir: project(t), Runner: fr, Components: got})
 	if err == nil || !strings.Contains(err.Error(), "refusing") || !strings.Contains(err.Error(), "2.4.2") {
 		t.Fatalf("want a refusal naming the wanted tag, got %v", err)
 	}
-	for _, c := range fr.calls {
-		if c[0] != "ps" {
-			t.Errorf("a command ran after the refusal: %v", c)
+	if time.Since(started) > 10*time.Second {
+		t.Errorf("a refusal waited %s: it must return before any start-up wait", time.Since(started))
+	}
+	if len(fr.calls) != 1 || fr.calls[0][0] != "ps" {
+		t.Errorf("only ps may run before the refusal: %v", fr.calls)
+	}
+}
+
+// An Also entry counts only with a valid sha256 digest: absent or malformed is refused by
+// name, with the reason, never run.
+func TestResolveRefusesAnAlsoImageWithoutAValidDigest(t *testing.T) {
+	for name, digest := range map[string]string{
+		"absent":     "",
+		"short":      "sha256:abc",
+		"no prefix":  strings.Repeat("a", 64),
+		"upper case": "sha256:" + strings.Repeat("A", 64),
+		"other hash": "sha1:" + strings.Repeat("a", 40),
+		"padded":     " sha256:" + strings.Repeat("a", 64),
+	} {
+		k := pins.All()
+		p := k["Pyroscope"]
+		p.Also = []pins.Image{{Version: "2.4.2", Digest: digest}}
+		k["Pyroscope"] = p
+		_, err := Resolve(map[string]string{"pyroscope": "2.4.2"}, k)
+		if err == nil {
+			t.Errorf("%s: an image with digest %q was accepted", name, digest)
+			continue
 		}
+		for _, want := range []string{"versions.pyroscope", "2.4.2", "digest", "sha256:"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("%s: error lacks %q: %v", name, want, err)
+			}
+		}
+	}
+	// The same entry with a valid digest runs.
+	if _, err := Resolve(map[string]string{"pyroscope": "2.4.2"}, knownWithOlderPyroscope()); err != nil {
+		t.Fatalf("valid digest: %v", err)
 	}
 }
