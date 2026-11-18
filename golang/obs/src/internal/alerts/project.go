@@ -58,7 +58,7 @@ type Project struct {
 	Gap             time.Duration
 }
 
-func loadProject(dir, seedPath string) (*Project, error) {
+func loadProject(dir, seedPath string, allowEmptyExpect bool) (*Project, error) {
 	set, err := files.Load(dir)
 	if err != nil {
 		return nil, err
@@ -76,7 +76,11 @@ func loadProject(dir, seedPath string) (*Project, error) {
 	if err != nil {
 		return nil, err
 	}
-	incs, err := seed.LoadIncidents(sd, dir)
+	load := seed.LoadIncidents
+	if allowEmptyExpect {
+		load = seed.LoadIncidentsForTest
+	}
+	incs, err := load(sd, dir)
 	if err != nil {
 		return nil, err
 	}

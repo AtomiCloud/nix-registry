@@ -213,6 +213,7 @@ bash "$here/links.sh" "$OBS" "${OUT:-}"
 bash "$here/engines.sh" "$OBS" && ok "engines --check-chart (tests/engines.sh)" || bad "engines --check-chart (tests/engines.sh)"
 bash "$here/obsyaml.sh" "$OBS" && ok "obs.yaml versions and thresholds (tests/obsyaml.sh)" || bad "obs.yaml versions and thresholds (tests/obsyaml.sh)"
 bash "$here/contract-source.sh" "$OBS" && ok "source: contract entries, estimate labels, keep-list (tests/contract-source.sh)" || bad "source: contract entries, estimate labels, keep-list (tests/contract-source.sh)"
+bash "$here/check-test.sh" "$OBS" && ok "obs check (limits, versions, queries), obs test (live queries, alerts, links, incidents), old commands byte-identical (tests/check-test.sh, tests/compat.sh)" || bad "obs check / obs test (tests/check-test.sh)"
 echo "obs tests: $pass passed, $fail failed"
 bash "$here/alerts.sh" "$OBS"
 [ "$fail" -eq 0 ]

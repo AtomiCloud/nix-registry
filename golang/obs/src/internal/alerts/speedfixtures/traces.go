@@ -130,7 +130,7 @@ func TraceIncidents(n int) map[string]string {
 				quiet = append(quiet, id)
 			}
 		}
-		out[d.name] = fmt.Sprintf("%sexpect:\n  fire: [%s]\n  quiet: [%s]\n  fire_within: %s\n  resolve_within: 20m\n", d.head, strings.Join(fire, ", "), strings.Join(quiet, ", "), d.within)
+		out[d.name] = fmt.Sprintf("%sexpect:\n  fire: [%s]\n  quiet: [%s]\n  fire_within: %s\n  resolve_within: 20m\n", d.head, strings.Join(fire, ", "), strings.Join(quiet, ", "), d.within) + d.marker(fire)
 	}
 	return out
 }

@@ -1,0 +1,5 @@
+args: query --static --dir ok-contract-traceql/observability --seed shared-seed.yaml --base 1700000000
+exit: 0
+--- stdout
+obs query --static: ok: 1 queries (1 traces), 0 failures, 0 warnings
+--- stderr

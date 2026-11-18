@@ -1,0 +1,5 @@
+{
+  service: fixture,
+  types: { outcome: { kind: enum, values: [ok, error] } },
+  metrics: { fixture.requests: { kind: counter, budget: 2, labels: { outcome: outcome } } },
+}

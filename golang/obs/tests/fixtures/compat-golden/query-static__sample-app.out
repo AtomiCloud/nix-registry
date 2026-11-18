@@ -1,0 +1,7 @@
+args: query --static --dir sample-app/observability --seed shared-seed.yaml --base 1700000000
+exit: 0
+--- stdout
+obs query: sample-app/observability/obs.yaml: versions match the evaluators embedded in this obs; thresholds applied: logs, metrics, traces, profiles
+note alerts/crash-logs/warning.yaml rule crash-logs-warning query A: [event-rule] event rule skipped: no contract.yaml
+obs query --static: ok: 6 queries (3 logs, 3 metrics), 0 failures, 0 warnings
+--- stderr

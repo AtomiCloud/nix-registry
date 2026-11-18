@@ -1,0 +1,5 @@
+args: links --dir links/good --base 1700000000
+exit: 0
+--- stdout
+obs links: trace-to-logs=2 metric-to-traces=2 span-to-profile=2 failures=0
+--- stderr

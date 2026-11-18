@@ -19,7 +19,7 @@ import (
 // Recording samples are returned too, so the sandbox can store the same inputs.
 // The caller serializes this with other embedded VM evaluations, as Check does.
 func ReplayDataset(dir, seedPath string, ds *seed.Dataset, window ...Run) ([]AlertRun, []*seed.Series, error) {
-	p, err := loadProject(dir, seedPath)
+	p, err := loadProject(dir, seedPath, false)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -22,7 +22,7 @@ func Static(set *files.Set, o Options) *Report {
 	for _, p := range set.Problems {
 		r.add(Fail, p.File, "", "file", "%s", p.Msg)
 	}
-	if set.Alerts == 0 && len(set.Dashboards) == 0 && len(set.Problems) == 0 {
+	if !o.AllowEmpty && set.Alerts == 0 && len(set.Dashboards) == 0 && len(set.Problems) == 0 {
 		r.add(Fail, o.Dir, "", "empty", "no alerts/**/*.yaml and no dashboards/**/*.json found")
 	}
 	c, problems := loadContract(&o)
