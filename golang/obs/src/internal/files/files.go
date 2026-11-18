@@ -27,6 +27,8 @@ type Query struct {
 	Expr    string
 	// Alerts: the rule's relative time range in seconds ("from" of relativeTimeRange).
 	RangeSecs int64
+	// ToSecs is the "to" of relativeTimeRange: the window ends this many seconds before the evaluation.
+	ToSecs int64
 	QueryType string // the model's queryType (stats, instant, range ...)
 	// Dashboards.
 	Dash          *Dashboard
@@ -136,7 +138,7 @@ type alertDoc struct {
 		Interval string      `yaml:"interval"`
 		Rules    []alertRule `yaml:"rules"`
 	} `yaml:"spec"`
-	// Keys of Primordial's flat authoring form: refused with a pointer to the CR.
+	// Keys of a platform's flat authoring form: refused with a pointer to the CR.
 	Title      string `yaml:"title"`
 	Datasource string `yaml:"datasource"`
 	Expr       string `yaml:"expr"`
@@ -228,7 +230,7 @@ func (s *Set) readAlert(rel string, b []byte) {
 				expr, _ = q.Model["query"].(string)
 			}
 			qu := Query{
-				File: rel, IsAlert: true, Expr: expr, RangeSecs: q.RelativeTimeRange.From,
+				File: rel, IsAlert: true, Expr: expr, RangeSecs: q.RelativeTimeRange.From, ToSecs: q.RelativeTimeRange.To,
 				QueryType: qt, DSType: dsType, DSUID: dsUID,
 				Model: q.Model,
 				Where: fmt.Sprintf("rule %s query %s", id, q.RefID),

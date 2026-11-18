@@ -65,7 +65,7 @@ func TestVariantsDiffer(t *testing.T) {
 }
 
 func TestNoRealNames(t *testing.T) {
-	for _, bad := range []string{realLandscape, "charlotte", "primordial"} {
+	for _, bad := range realLandscapes {
 		if strings.Contains(strings.ToLower(Seed("4h")), bad) {
 			t.Errorf("seed names %q", bad)
 		}
@@ -126,9 +126,14 @@ func TestTraceSetsLoadAndPassStaticChecks(t *testing.T) {
 // (Built from two halves so this file does not contain the word.)
 var realLandscape = "pi" + "chu"
 
+// realLandscapes is every banned name: the three real landscapes. Each is built from two halves so this
+// file stays the only place that spells them, and the scan below skips none of the others.
+var realLandscapes = []string{realLandscape, "prim" + "ordial", "char" + "lotte"}
+
 // TestNoRealLandscapeAnywhere scans every fixture, every Go test and the README, not only the
 // speed-fixture seed.
 func TestNoRealLandscapeAnywhere(t *testing.T) {
+	const readmePath = "../../../../README.md"         // golang/obs/README.md, from src/internal/alerts/speedfixtures
 	roots := []string{"../../..", "../../../../tests"} // the source root and the tests folder beside it
 	var scanned int
 	for _, root := range roots {
@@ -154,8 +159,17 @@ func TestNoRealLandscapeAnywhere(t *testing.T) {
 				return nil
 			}
 			scanned++
-			if strings.Contains(strings.ToLower(string(b)), realLandscape) {
-				t.Errorf("%s names the real landscape %q: use a made-up one such as fixture-dev", p, realLandscape)
+			if filepath.Base(p) == "speedfixtures_test.go" && strings.Contains(filepath.ToSlash(p), "/alerts/speedfixtures/") {
+				return nil // the banned-name list itself: the one allowed mention
+			}
+			low := strings.ToLower(string(b))
+			for _, bad := range realLandscapes {
+				if strings.Contains(low, bad) {
+					t.Errorf("%s names the real landscape %q: use a made-up one such as fixture-dev", p, bad)
+				}
+			}
+			if strings.Contains(strings.ToLower(filepath.ToSlash(p)), "charlotte") || strings.Contains(strings.ToLower(filepath.ToSlash(p)), "primordial") {
+				t.Errorf("%s: the path names a real landscape", p)
 			}
 			return nil
 		})
@@ -163,7 +177,18 @@ func TestNoRealLandscapeAnywhere(t *testing.T) {
 	if scanned == 0 {
 		t.Fatal("scanned no files")
 	}
-	if b, err := os.ReadFile("../../../../README.md"); err == nil && strings.Contains(strings.ToLower(string(b)), realLandscape) {
-		t.Errorf("README.md names the real landscape %q", realLandscape)
+	// golang/obs/README.md (the nix build copies it beside the tests folder). The tests folder is there, so the
+	// README must be too: a missing README is a failure, never a silent skip.
+	if _, err := os.Stat("../../../../tests"); err != nil {
+		return // a build from src/ alone has no tests/ folder and no README beside it
+	}
+	b, err := os.ReadFile(readmePath)
+	if err != nil {
+		t.Fatalf("cannot read golang/obs/README.md at %s: %v (the scan would silently skip it)", readmePath, err)
+	}
+	for _, bad := range realLandscapes {
+		if strings.Contains(strings.ToLower(string(b)), bad) {
+			t.Errorf("%s names the real landscape %q", readmePath, bad)
+		}
 	}
 }

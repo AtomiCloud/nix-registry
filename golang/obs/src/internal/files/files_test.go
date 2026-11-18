@@ -36,7 +36,7 @@ spec:
 
 func TestAlertCR(t *testing.T) {
 	dir := t.TempDir()
-	write(t, dir, "alerts/a/critical.yaml", strings.NewReplacer("DSTYPE", "{}", "DS", "primordial-metrics").Replace(cr))
+	write(t, dir, "alerts/a/critical.yaml", strings.NewReplacer("DSTYPE", "{}", "DS", "fixture-metrics").Replace(cr))
 	write(t, dir, "alerts/b/warning.yaml", strings.NewReplacer("DSTYPE", "{ type: loki }", "DS", "x").Replace(cr))
 	write(t, dir, "alerts/c/warning.yaml", cr+"---\nkind: Other\n")
 	write(t, dir, "alerts/d/warning.yaml", "title: t\ndatasource: logs\nexpr: up\n")
@@ -122,8 +122,8 @@ func TestClassify(t *testing.T) {
 		{"prometheus", "x", Metrics, false},
 		{"victoriametrics-logs-datasource", "x", Logs, false},
 		{"loki", "x", Loki, false},
-		{"", "primordial-logs", Logs, false},
-		{"", "primordial-metrics", Metrics, false},
+		{"", "fixture-logs", Logs, false},
+		{"", "fixture-metrics", Metrics, false},
 		{"", "mimir", Metrics, false},
 		{"", "loki", Loki, false},
 		{"", "tempo", Traces, false},

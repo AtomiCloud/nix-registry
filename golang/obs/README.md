@@ -12,25 +12,25 @@ linked module ship in `share/licenses/obs`. Design: `concepts/observability.md` 
 
 ## Available commands
 
-| Command                                     | What it does                                                                                                                                  |
-| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `obs gen`                                   | Writes bounded types, event constants, `contract/events.json` and the aggregation file for bun, go, dotnet and dart from the contract.        |
-| `obs gen --check`                           | Regenerates into a temp folder and diffs; fails on a hand edit or a stale generate.                                                           |
-| `obs check`                                 | Checks the contract rules, worst-case metric series, budgets and log stream count.                                                            |
-| `obs query --static`                        | Parses every MetricsQL, LogsQL and TraceQL query in the alerts and dashboards with the real parsers and applies the rules below.              |
-| `obs query --live`                          | Loads the seed into the embedded VictoriaMetrics, VictoriaLogs and Tempo and runs every alert and dashboard query; each must return rows.     |
-| `obs alerts`                                | Evaluates every alert at every minute of the seed and each incident; must fire inside incident windows and stay quiet outside them.           |
-| `obs links`                                 | Checks trace → logs, metric → traces and backend span → profile links on the seed.                                                            |
-| `obs assert`                                | Checks real metric series counts, labels and values from an e2e series export against the contract.                                           |
-| `obs profile summarize\|baseline\|compare`  | Summarizes CPU profiles, builds a median baseline and compares function and span shares against it.                                           |
-| `obs store move <store>`                    | Runs the single → scaled store move steps in order, none skipped, with `--dry-run` and `--rollback`.                                          |
-| `obs sandbox up`                            | Starts, stops or inspects (`down`, `status`) the local stack for people; no check needs it.                                                   |
-| `obs look`                                  | Sets up the sandbox with the changed dashboards and prints the screenshot review prompt for the calling agent; never fails CI.                |
-| `obs scrape`                                | Scrapes an app's own metrics into the sandbox.                                                                                                |
-| `obs symbols put\|decode`                   | The symbol store: stores debug symbol files by build id and decodes a stack trace with them.                                                  |
-| `obs size`                                  | The sizing command: traffic cores, memory, series and storage per day for a given load.                                                       |
-| `obs engines --check-chart <dir>`           | Compares the engine versions in a Helm chart folder with the pins; exit 1 on any drift. See [obs engines](#obs-engines---check-chart).        |
-| `obs version`                               | The obs version and every engine pin.                                                                                                         |
+| Command                                    | What it does                                                                                                                              |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `obs gen`                                  | Writes bounded types, event constants, `contract/events.json` and the aggregation file for bun, go, dotnet and dart from the contract.    |
+| `obs gen --check`                          | Regenerates into a temp folder and diffs; fails on a hand edit or a stale generate.                                                       |
+| `obs check`                                | Checks the contract rules, worst-case metric series, budgets and log stream count.                                                        |
+| `obs query --static`                       | Parses every MetricsQL, LogsQL and TraceQL query in the alerts and dashboards with the real parsers and applies the rules below.          |
+| `obs query --live`                         | Loads the seed into the embedded VictoriaMetrics, VictoriaLogs and Tempo and runs every alert and dashboard query; each must return rows. |
+| `obs alerts`                               | Evaluates every alert at every minute of the seed and each incident; must fire inside incident windows and stay quiet outside them.       |
+| `obs links`                                | Checks trace → logs, metric → traces and backend span → profile links on the seed.                                                        |
+| `obs assert`                               | Checks real metric series counts, labels and values from an e2e series export against the contract.                                       |
+| `obs profile summarize\|baseline\|compare` | Summarizes CPU profiles, builds a median baseline and compares function and span shares against it.                                       |
+| `obs store move <store>`                   | Runs the single → scaled store move steps in order, none skipped, with `--dry-run` and `--rollback`.                                      |
+| `obs sandbox up`                           | Starts, stops or inspects (`down`, `status`) the local stack for people; no check needs it.                                               |
+| `obs look`                                 | Sets up the sandbox with the changed dashboards and prints the screenshot review prompt for the calling agent; never fails CI.            |
+| `obs scrape`                               | Scrapes an app's own metrics into the sandbox.                                                                                            |
+| `obs symbols put\|decode`                  | The symbol store: stores debug symbol files by build id and decodes a stack trace with them.                                              |
+| `obs size`                                 | The sizing command: traffic cores, memory, series and storage per day for a given load.                                                   |
+| `obs engines --check-chart <dir>`          | Compares the engine versions in a Helm chart folder with the pins; exit 1 on any drift. See [obs engines](#obs-engines---check-chart).    |
+| `obs version`                              | The obs version and every engine pin.                                                                                                     |
 
 Not tested items are collected in [Not tested](#not-tested), at the end of this file.
 
@@ -93,7 +93,7 @@ the file, the rule or panel, the rule id in `[brackets]` and the offending name 
 `--dir` (default `observability`) holds:
 
 - **`alerts/<slug>/<severity>.yaml`**: one `GrafanaAlertRuleGroup` CR per file (the golden
-  shape in the Primordial observability standard, `alerts.md`). obs reads each rule's `data[]`:
+  shape in the platform's observability standard, `alerts.md`). obs reads each rule's `data[]`:
   `datasourceUid`, `relativeTimeRange.from`, `model.expr`, `model.queryType`, and
   `model.datasource.type` when present. Grafana expression nodes (`datasourceUid: __expr__`)
   are not queries and are skipped. A flat authoring file (`title/datasource/expr`) is refused
@@ -105,25 +105,40 @@ the file, the rule or panel, the rule id in `[brackets]` and the offending name 
 
 **Which datasource speaks what.** The plugin type decides (`prometheus`,
 `victoriametrics-metrics-datasource` = MetricsQL; `victoriametrics-logs-datasource` = LogsQL;
-`loki` = refused; `tempo` = skipped). Without a type the datasource uid decides by name:
+`loki` = refused; `tempo` = TraceQL, parsed and run by obs: see the `traceql-*` and `tempo-alert-*` rules below). Without a type the datasource uid decides by name:
 `loki` anywhere in it is Loki, `logs` is LogsQL, `prom`, `mimir`, `metrics` or `victoriametrics`
 is MetricsQL. A uid that is none of these fails and says to set `model.datasource.type`.
 A panel datasource chosen by a variable (`${ds}`) takes the type from that datasource variable.
 
 ## `obs query --static`: the rules
 
-| Rule id                          | Kind | What                                                                                                                                                                                                                                           |
-| -------------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `metricsql-syntax`               | fail | The query does not parse with VictoriaMetrics' `metricsql` (v0.87.6, from VictoriaMetrics v1.156.0).                                                                                                                                           |
-| `metricsql-unsupported-function` | fail | A function VictoriaMetrics does not implement (Prometheus-only, e.g. `double_exponential_smoothing`).                                                                                                                                          |
-| `rollup-no-window`               | warn | A rollup function on a selector with no `[window]` (the window then comes from the query step).                                                                                                                                                |
-| `logsql-syntax`                  | fail | The query does not parse with VictoriaLogs v1.54.0 `lib/logstorage`.                                                                                                                                                                           |
-| `logsql-alert-needs-stats`       | fail | A LogsQL **alert** query has no `stats` pipe. This is VictoriaLogs' own rule for `/select/logsql/stats_query`, which the Grafana datasource calls: the last `stats` pipe must exist, and a trailing `\| filter` threshold after it is allowed. |
-| `logsql-namespace-wide`          | warn | A `stats` query with no field or stream filter besides `_time` (concept §6.4).                                                                                                                                                                 |
-| `loki-datasource`                | fail | A dashboard or alert query on a Loki-type datasource: logs are LogsQL.                                                                                                                                                                         |
-| `datasource`                     | fail | The datasource is not one obs knows.                                                                                                                                                                                                           |
-| `logsql-alert-needs-event`       | fail | A LogsQL alert has no filter on `"durian.cloud/event"`. Runs only when `contract.yaml` exists (below).                                                                                                                                         |
-| `file`                           | fail | A file that is not what it claims: not YAML/JSON, not a `GrafanaAlertRuleGroup`, several documents.                                                                                                                                            |
+| Rule id                            | Kind | What                                                                                                                                                                                                                                           |
+| ---------------------------------- | ---- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `metricsql-syntax`                 | fail | The query does not parse with VictoriaMetrics' `metricsql` (v0.87.6, from VictoriaMetrics v1.156.0).                                                                                                                                           |
+| `metricsql-unsupported-function`   | fail | A function VictoriaMetrics does not implement (Prometheus-only, e.g. `double_exponential_smoothing`).                                                                                                                                          |
+| `rollup-no-window`                 | warn | A rollup function on a selector with no `[window]` (the window then comes from the query step).                                                                                                                                                |
+| `logsql-syntax`                    | fail | The query does not parse with VictoriaLogs v1.54.0 `lib/logstorage`.                                                                                                                                                                           |
+| `logsql-alert-needs-stats`         | fail | A LogsQL **alert** query has no `stats` pipe. This is VictoriaLogs' own rule for `/select/logsql/stats_query`, which the Grafana datasource calls: the last `stats` pipe must exist, and a trailing `\| filter` threshold after it is allowed. |
+| `logsql-namespace-wide`            | warn | A `stats` query with no field or stream filter besides `_time` (concept §6.4).                                                                                                                                                                 |
+| `loki-datasource`                  | fail | A dashboard or alert query on a Loki-type datasource: logs are LogsQL.                                                                                                                                                                         |
+| `datasource`                       | fail | The datasource is not one obs knows.                                                                                                                                                                                                           |
+| `logsql-alert-needs-event`         | fail | A LogsQL alert has no filter on `"durian.cloud/event"`. Runs only when `contract.yaml` exists (below).                                                                                                                                         |
+| `file`                             | fail | A file that is not what it claims: not YAML/JSON, not a `GrafanaAlertRuleGroup`, several documents.                                                                                                                                            |
+| `traceql-syntax`                   | fail | A TraceQL query does not parse with Tempo 3.1.1.                                                                                                                                                                                               |
+| `traceql-attribute`                | fail | A TraceQL span or resource attribute is not in `contract.yaml` (runs when the contract exists).                                                                                                                                                |
+| `traceql-query-type`               | fail | A dashboard trace target has a query type obs cannot tell (not a TraceQL query or a trace ID lookup).                                                                                                                                          |
+| `trace-id`                         | fail | A trace ID lookup is not a valid trace ID.                                                                                                                                                                                                     |
+| `tempo-alert-datasource`           | fail | A trace alert query is on Jaeger or Zipkin: alerts read traces only through the Tempo datasource.                                                                                                                                              |
+| `tempo-alert-search`               | fail | A Tempo alert query is a search, not a TraceQL metrics query (`rate()` and the like).                                                                                                                                                          |
+| `tempo-alert-*`                    | fail | Other Tempo alert refusals: `-query-type`, `-query`, `-range-exemplars`, `-step` (see TraceQL alert rules).                                                                                                                                    |
+| `contract-undeclared-metric`       | fail | A query reads a metric `contract.yaml` does not declare.                                                                                                                                                                                       |
+| `contract-undeclared-label`        | fail | A query uses a label that is not a label of the metric in the contract.                                                                                                                                                                        |
+| `contract-pod-label`               | fail | A business metric is grouped or filtered by a pod label (concept §4.1).                                                                                                                                                                        |
+| `contract-bad-enum-value`          | fail | A label filter uses a value outside the contract's enum for that label.                                                                                                                                                                        |
+| `contract-undeclared-stream-field` | fail | A LogsQL stream tag is not a stream field in the contract.                                                                                                                                                                                     |
+| `contract-undeclared-event`        | fail | A log alert names an event (or event prefix) that is not in the contract.                                                                                                                                                                      |
+| `contract-event-regexp-no-match`   | fail | A log alert's event regular expression matches no contract event.                                                                                                                                                                              |
+| `contract-event-filter-form`       | fail | A log alert's event filter has a form obs cannot check against the events.                                                                                                                                                                     |
 
 Dashboard variables are filled before parsing, as Grafana's Prometheus backend does:
 `$__interval`, `$__interval_ms`, `$__rate_interval`, `$__rate_interval_ms`, `$__range`,
@@ -132,10 +147,11 @@ current value (else a placeholder). `--names` prints, for every query, the metri
 log fields it reads (filters, stream tags `_stream:<tag>`, and the fields the pipes need).
 
 **The event rule (decided 16 Nov 2026).** The concept (§11.1) says a log alert must name a contract
-event. Contract events arrive with obs 0.2. So: when `<dir>/contract.yaml` is absent, a log alert
+event. obs 0.2.0 checks contract events. So: when `<dir>/contract.yaml` is absent, a log alert
 gets parse, `stats` and live-rows checks only, and obs prints one note per log alert, `event
 rule skipped: no contract.yaml`. When it is present, the alert must filter on the event field
-(`logsql-alert-needs-event`); that the event name is in the contract is checked from obs 0.2.
+(`logsql-alert-needs-event`), and every event it names (exact, prefix, regular expression, `in(...)`, negated) must be in the contract (`contract-undeclared-event`, `contract-event-regexp-no-match`, `contract-event-filter-form`).
+A filter on any other (free-form) field is _assumed true_: obs drops it and prints `assumed true (free-form fields): <filter>`, in `--static`, `--live` and `obs alerts` alike.
 `--event-rule on|off` forces it either way (`auto` is the default).
 
 ## `obs query --live`
@@ -154,7 +170,18 @@ rule skipped: no contract.yaml`. When it is present, the alert must filter on th
      and `end` from the rule's `relativeTimeRange`, the query parsed at `end`, `_time:[start, end)`
      added, the last `stats` pipe's `by (...)` fields as labels. A trailing `| filter` threshold is
      dropped, as above. A `stats count()` with no `by` always answers one row, 0 when nothing matched;
-     that counts as no rows.
+     that counts as no rows. When the event rule applies (`contract.yaml` exists), a filter on a
+     free-form field (`user_tier:=gold`) is _assumed true_, as in `--static` and `obs alerts`: it is
+     dropped from the query that runs, with the note `assumed true (free-form fields): <filter>`, so
+     the seed does not have to hold the field. Planted check: `tests/run.sh` runs a copy of
+     `fixtures/good` whose alert adds `user_tier:=gold` (green in `--static` and `--live`; red
+     with `--event-rule off`), and `TestLiveDropsAssumedFilters` covers the same.
+   - **Alert over a recording rule:** a query that reads the output of a recording rule
+     (`record: { metric: ... }`) cannot run on the seed, because the output exists only after
+     `obs alerts` evaluates the rule. `--live` does not run it and does not fail it; it prints
+     `reads recording rule <name>: checked by obs alerts` naming the file and rule. A metric that no rule
+     records and the seed lacks still fails `[no-rows]`. Covered by `TestLiveNamesRecordingRuleReads`
+     and the `recording-rule read` lines of `tests/run.sh`.
    - **Dashboard panel:** a range query (metrics) or a stats or log query (LogsQL) over the dashboard's
      `time` range, ending at the seed's end, once with every template variable at all its values and
      once per single value (up to 8 per variable). `label_values(metric, label)` values come from the
@@ -194,7 +221,7 @@ logs: # which log event each metric event writes
     }
 ```
 
-`incidents:` and `traces:` are accepted and ignored until the release that uses them.
+`incidents:` names files in `incidents/` that `obs alerts` plays (see `obs alerts`). `traces:` defines the seed's traces (see `obs links`); they drive `obs query --live` (Tempo) and `obs links`.
 
 Seed data is made to look like stored data (concept §11.2). Metrics: counters get `_total`, seconds
 histograms `_seconds_bucket`/`_sum`/`_count` with `le`, dots become `_`. Logs, as VictoriaLogs stores an OTLP
@@ -338,12 +365,12 @@ an app can make its own carrier in Go (exported constructors) and Dart (`extends
    is recovered and counted as a last resort).
 3. A lint rule in the template's CI (documented here, NOT TESTED; the lint config lives in the templates).
 
-| Language | Hole the compiler leaves | Run-time guard (tested) | Lint rule (NOT TESTED) |
-| -------- | ------------------------ | ----------------------- | ---------------------- |
-| Go | `obs.New(Event\|Counter\|...)` from app code; zero enum, unset number | `Register`ed tables; empty/unset refused | `forbidigo` (below) |
-| Bun | hand-written `{name, level}`; widened object with an extra key; `as` cast; a foreign table | tables registered by `signals.ts`; any other table poisons | no `as <generated type>`; no event object literal |
-| .NET | `default` bounded number, `null!` enum | `Port.Install` tables; both refused | Roslyn analyzer for `default(Int<...>)` |
-| Dart | app class `extends` a library base; non-const `Shard(n)` | `DurianSignalPort.install` tables | no `extends` of library bases; no non-const `Shard(...)` |
+| Language | Hole the compiler leaves                                                                   | Run-time guard (tested)                                    | Lint rule (NOT TESTED)                                   |
+| -------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------- | -------------------------------------------------------- |
+| Go       | `obs.New(Event\|Counter\|...)` from app code; zero enum, unset number                      | `Register`ed tables; empty/unset refused                   | `forbidigo` (below)                                      |
+| Bun      | hand-written `{name, level}`; widened object with an extra key; `as` cast; a foreign table | tables registered by `signals.ts`; any other table poisons | no `as <generated type>`; no event object literal        |
+| .NET     | `default` bounded number, `null!` enum                                                     | `Port.Install` tables; both refused                        | Roslyn analyzer for `default(Int<...>)`                  |
+| Dart     | app class `extends` a library base; non-const `Shard(n)`                                   | `DurianSignalPort.install` tables                          | no `extends` of library bases; no non-const `Shard(...)` |
 
 Lint rule text per language (to copy into the templates):
 
@@ -365,6 +392,7 @@ Lint rule text per language (to copy into the templates):
 
   Assigning to a generated exported variable stays a `forbidigo`/`gocritic` rule as in concept §3.4, and
   `depguard` denies `unsafe` in app packages (an unsafe-made enum value is refused at run time anyway).
+
 - **Dart**: one analyzer-plugin rule (`analysis_server_plugin`): in a file whose first line is not
   `// Code generated by obs gen. DO NOT EDIT.`, flag `extends`, `implements` or `with` of any
   `package:diene_interfaces` type named `Event` or `DurianSignal*`, and any call of
@@ -385,12 +413,12 @@ With no `.git`, `out:` may not use `..` or a symlink that leads out of the proje
 Each `generate:` target accepts optional `interfaces:` to override its dependency import. Every name
 in the last column is assumed, not in the goal; the interfaces nodes reconcile them:
 
-| Language | Default `interfaces` | In the goal | Assumed, not in goal |
-| -------- | -------------------- | ----------- | -------------------- |
-| Go | `github.com/ProtoDurian/diene.go-interfaces/obs` | module `ProtoDurian/diene.go-interfaces`; `obs.Add`, `obs.Int[Spec]`, `obs.NewInt`, `obs.AtTime` with an error return; `obs.Error(ctx, Event[Error], ...)` | the `/obs` package path; `IntSpec` `Name/Min/Max/Unit` (int64); `Int.Valid`; `Level` and the six markers; `NewEvent/NewCounter/NewHistogram/NewGauge/NewSpan`; `DurianSignal*` carriers and info rows (`Labels`, `Values`, `Ranges`); `Field`; `Record/Set/Warn/Info`; one-shot `Register` returning an error (a second one poisons the port), `DurianSignalTables`, `Dropped` |
-| Bun | `@atomicloud/diene.interfaces` | `counter(name, labels)`; `log.error(ev, fields?, err?)`; `bounded(spec, n): Result`; `Tracer`/`Span`, `DurianSignalSpanTable` | `register(tables)` (one-shot; a second one or a foreign table poisons the port); `metrics(table)`, `histogram/gauge`, `MetricTable` (with `values`, `ranges`); `logger(eventTable)`, `EventTable`, `Level`; `dropped()`; `tracer(table)`; `Bounded<N>`; a synchronous `{ok, value}` Result (the published Result is promise-based) |
-| .NET | `AtomiCloud.Diene.Interfaces` | `Port.Add(Names.X, new XLabels(...))`; `Int<Spec>.Of(n)` returning a `Result` (package `AtomiCloud.Diene.Result`: struct `Result<T, E>`, `Ok/Err`, `IsSuccess`); `Log.Error(Event<ErrorLevel>, ...)`; internal carrier constructors | namespace `AtomiCloud.Diene.Result` and `Value/Error`; `IDurianSignal*` interfaces, `Valid/Wire`; `AtTime`; `DurianSignalDate`; label attribute and info rows; `Port.Record/Set/Install/Dropped`; info row `Values`/`Ranges`; `Log.Warn` |
-| Dart | `diene_interfaces` | `checkoutCharges.add(XLabels(...))`; `error(Event<ErrorLevel>, ...)`; enums; extension types; `shardSpec.of(n)` returning a `Result`; `entries` getter | barrel `diene_interfaces.dart`; `DurianSignalWire/Labels/Metric`, carrier bases and constructors; `DurianSignalBoundSpec` and `atTime`; sealed level markers; `DurianSignalPort` (one-shot `install` returning a Result, a second one poisons the port, `add/record/set/dropped`); generated `installSignals()`; `warn/info`; info rows (`labels` Type, `values`, `ranges`); local `Result/DurianSignalOk/DurianSignalErr` in place of `diene_result` |
+| Language | Default `interfaces`                             | In the goal                                                                                                                                                                                                                         | Assumed, not in goal                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| -------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Go       | `github.com/ProtoDurian/diene.go-interfaces/obs` | module `ProtoDurian/diene.go-interfaces`; `obs.Add`, `obs.Int[Spec]`, `obs.NewInt`, `obs.AtTime` with an error return; `obs.Error(ctx, Event[Error], ...)`                                                                          | the `/obs` package path; `IntSpec` `Name/Min/Max/Unit` (int64); `Int.Valid`; `Level` and the six markers; `NewEvent/NewCounter/NewHistogram/NewGauge/NewSpan`; `DurianSignal*` carriers and info rows (`Labels`, `Values`, `Ranges`); `Field`; `Record/Set/Warn/Info`; one-shot `Register` returning an error (a second one poisons the port), `DurianSignalTables`, `Dropped`                                                                        |
+| Bun      | `@atomicloud/diene.interfaces`                   | `counter(name, labels)`; `log.error(ev, fields?, err?)`; `bounded(spec, n): Result`; `Tracer`/`Span`, `DurianSignalSpanTable`                                                                                                       | `register(tables)` (one-shot; a second one or a foreign table poisons the port); `metrics(table)`, `histogram/gauge`, `MetricTable` (with `values`, `ranges`); `logger(eventTable)`, `EventTable`, `Level`; `dropped()`; `tracer(table)`; `Bounded<N>`; a synchronous `{ok, value}` Result (the published Result is promise-based)                                                                                                                    |
+| .NET     | `AtomiCloud.Diene.Interfaces`                    | `Port.Add(Names.X, new XLabels(...))`; `Int<Spec>.Of(n)` returning a `Result` (package `AtomiCloud.Diene.Result`: struct `Result<T, E>`, `Ok/Err`, `IsSuccess`); `Log.Error(Event<ErrorLevel>, ...)`; internal carrier constructors | namespace `AtomiCloud.Diene.Result` and `Value/Error`; `IDurianSignal*` interfaces, `Valid/Wire`; `AtTime`; `DurianSignalDate`; label attribute and info rows; `Port.Record/Set/Install/Dropped`; info row `Values`/`Ranges`; `Log.Warn`                                                                                                                                                                                                              |
+| Dart     | `diene_interfaces`                               | `checkoutCharges.add(XLabels(...))`; `error(Event<ErrorLevel>, ...)`; enums; extension types; `shardSpec.of(n)` returning a `Result`; `entries` getter                                                                              | barrel `diene_interfaces.dart`; `DurianSignalWire/Labels/Metric`, carrier bases and constructors; `DurianSignalBoundSpec` and `atTime`; sealed level markers; `DurianSignalPort` (one-shot `install` returning a Result, a second one poisons the port, `add/record/set/dropped`); generated `installSignals()`; `warn/info`; info rows (`labels` Type, `values`, `ranges`); local `Result/DurianSignalOk/DurianSignalErr` in place of `diene_result` |
 
 The compile fixtures model Result locally and do not validate integration with the separately published
 result libraries. .NET name constructors require the real library to grant friend access to the
@@ -421,13 +449,13 @@ obs sandbox status [--dir observability] [--project name]
 `$OBS_CONTAINER_RUNTIME` chooses) and loads them: the repo's dashboards into Grafana, the seed into
 VictoriaMetrics and VictoriaLogs. No check depends on it; it is for looking at the data.
 
-| Container    | Image                                      | Host port (default)   |
-| ------------ | ------------------------------------------ | --------------------- |
-| Grafana      | `grafana/grafana:13.3.0` + VictoriaLogs datasource 0.34.0 | 3000     |
-| VictoriaMetrics | `victoriametrics/victoria-metrics:v1.156.0` | 8428               |
-| VictoriaLogs | `victoriametrics/victoria-logs:v1.54.0`    | 9428                  |
-| Tempo        | `grafana/tempo:3.1.1`                      | 3200                  |
-| Pyroscope    | `grafana/pyroscope:2.4.3`                  | 4040                  |
+| Container       | Image                                                     | Host port (default) |
+| --------------- | --------------------------------------------------------- | ------------------- |
+| Grafana         | `grafana/grafana:13.3.0` + VictoriaLogs datasource 0.34.0 | 3000                |
+| VictoriaMetrics | `victoriametrics/victoria-metrics:v1.156.0`               | 8428                |
+| VictoriaLogs    | `victoriametrics/victoria-logs:v1.54.0`                   | 9428                |
+| Tempo           | `grafana/tempo:3.1.1`                                     | 3200                |
+| Pyroscope       | `grafana/pyroscope:2.4.3`                                 | 4040                |
 
 - **Pins.** The tags are the concept §1 versions, written into the binary (`obs version` prints them);
   nothing reads them from the environment. `up` refuses, before it changes anything, when a container of
@@ -452,10 +480,10 @@ VictoriaMetrics and VictoriaLogs. No check depends on it; it is for looking at t
 - **Ports** are bound to `127.0.0.1` only. `--port-base 18300` moves Grafana to 18300 and the others to
   18301 to 18304 when the defaults are taken.
 - **Data.** The seed's time line ends now, so a "last hours" view has data. Grafana is open to an anonymous
-  viewer (admin/admin for the API). The datasource uids are the ones the dashboards name (`primordial-metrics`
+  viewer (admin/admin for the API). The datasource uids are the ones the dashboards name (`fixture-metrics`
   and so on); a kind no dashboard names gets `obs-metrics`, `obs-logs`, `obs-traces`, `obs-profiles`.
   A second `up` reuses the running stack, loads the dashboards again and keeps the seed (`--reseed` loads it
-  again). Traces are not seeded yet: the seed file's `traces` are read by a later command.
+  again). The seed's `traces` are not loaded into the sandbox's Tempo (they are used by `obs query --live` and `obs links`).
 - `up` needs the network the first time (image pulls; Grafana downloads the datasource plugin).
 
 ## `obs look`: dashboard screenshots, reviewed by the calling agent
@@ -477,7 +505,7 @@ obs look [--base origin/main] [--all] [--file dashboards/x.json] [--checklist do
    when the sandbox has it); the others take the dashboard's own current value, the first option, the first
    value on the seed, or All), the viewport and the path to save the screenshot, plus one URL per panel.
    Panels whose datasources are all Tempo or Pyroscope are listed as "expected empty in the sandbox; mark C1 n/a"
-   (the seed has no traces or profiles yet), so the reviewer does not fail the No-data item for them;
+   (the sandbox loads no traces or profiles), so the reviewer does not fail the No-data item for them;
 4. prints the items of the visual checklist (the bullets under the "Visual checklist" heading of the
    `--checklist` file) and the layout of the one pull request comment the agent writes: the images and a
    verdict (pass, fail, unclear) with one line of evidence per item.
@@ -505,14 +533,14 @@ scrape.
 
 ## Engines and pins
 
-| Signal   | Engine or reference                                         | Version                          |
-| -------- | ----------------------------------------------------------- | -------------------------------- |
-| metrics  | VictoriaMetrics (`metricsql`, storage and evaluator)        | v1.156.0                         |
-| logs     | VictoriaLogs `lib/logstorage`                               | v1.54.0, tag commit `6433dae5`   |
-| traces   | Tempo (TraceQL parser, evaluator and frontend rules)        | 3.1.1, tag commit `9db7df79d2af` |
-| alerts   | Grafana (alert math and state machine, ported)              | 13.3.0, tag commit `752e3462`    |
-| profiles | Pyroscope (reference: sandbox and parity only, not linked)  | 2.4.3                            |
-| logs UI  | VictoriaLogs Grafana datasource (reference, parity only)    | v0.34.0                          |
+| Signal   | Engine or reference                                        | Version                          |
+| -------- | ---------------------------------------------------------- | -------------------------------- |
+| metrics  | VictoriaMetrics (`metricsql`, storage and evaluator)       | v1.156.0                         |
+| logs     | VictoriaLogs `lib/logstorage`                              | v1.54.0, tag commit `6433dae5`   |
+| traces   | Tempo (TraceQL parser, evaluator and frontend rules)       | 3.1.1, tag commit `9db7df79d2af` |
+| alerts   | Grafana (alert math and state machine, ported)             | 13.3.0, tag commit `752e3462`    |
+| profiles | Pyroscope (reference: sandbox and parity only, not linked) | 2.4.3                            |
+| logs UI  | VictoriaLogs Grafana datasource (reference, parity only)   | v0.34.0                          |
 
 The first four are engines linked into the binary; the last two are references only.
 `obs version` prints every pin, with `engine` or `reference` in front of it, and
@@ -581,7 +609,6 @@ tempo wrapper `tempo.tempo.image.tag`) is a wrapper, not an unresolved image: th
 the one checked.
 The nested `image` of an own path is own at any depth (`vmselect.image.image.tag`), so a wrapper is
 skipped only because its child is itself checked.
-
 
 Exit 0 when every version and digest found equals its pin. Exit 1 on any failure, one line each
 naming file, line, key, the chart value and the pin: `values.yaml:18 tempo.tempo.tag: chart
@@ -770,7 +797,7 @@ slower than its limit, or a hot baseline function has no matching samples. The l
 `ERROR` naming the function and suggesting `--update` after inspecting an intentional removal.
 For a function or span row the change is `now share / baseline share − 1`.
 
-- **limit = max(tolerance, 3 × noise)**, noise = sqrt(1/n_base + 1/n_now). _FROM SOURCE: the concept does not say
+- **limit = max(tolerance, 3 × noise)**, noise = `sqrt(1/n_base + 1/n_now)`. _FROM SOURCE: the concept does not say
   what n counts; obs uses the **row's own** sample count (own samples of the function, samples inside
   the span) in the baseline (median) and in this run, so small rows get wider limits. For the total-CPU row
   n is the total sample count of each run._
@@ -824,8 +851,8 @@ not touched. obs builds with `golang/obs/go.nix`: Go 1.27.4 from the narrow `nix
   (with planted drift), query rules, file readers, seed shape, variable filling and `obs` end to end on
   temp projects.
 - `tests/run.sh` runs the built binary in the sandbox (`nix flake check` runs it as `obs-tests`, `nix build .#obs-tests`):
-  - green: `tests/fixtures/good` (a checkout service, with `contract.yaml`) and `tests/fixtures/charlotte`
-    (Primordial's `crash-logs` and `pod-crashloop` alerts, copied and written as CRs, and a dashboard);
+  - green: `tests/fixtures/good` (a checkout service, with `contract.yaml`) and `tests/fixtures/sample-app`
+    (a made-up platform's `crash-logs` and `pod-crashloop` alerts, copied and written as CRs, and a dashboard);
   - red, each naming file + rule or panel + the bad token: `bad-logsql-syntax`, `bad-metricsql-syntax`,
     `bad-logsql-no-stats`, `bad-prom-only-function`, `bad-loki-datasource`, `bad-flat-alert`,
     `bad-event-missing`, `bad-no-rows` (a metric the seed does not hold), `bad-drifted-field`
@@ -928,11 +955,22 @@ in the message) that production would not. Lower the worker count to avoid it, f
 lets VictoriaLogs use its own parallelism for that query. Do not raise the limits in
 `--vl-settings` to hide a timing refusal: obs would then accept a query production refuses.
 
-MEASURED: regression tests cover state transitions, numeric light/full parity,
+MEASURED offline: regression tests cover state transitions, numeric light/full parity,
 event-filter refusals, recording outputs, cache invalidation and planted wrong
-thresholds. NOT TESTED: parity against the live Grafana scheduler and datasource
-in this release, notification/persistence behavior, and VictoriaLogs runtime
-timeout/concurrency limits. TraceQL rules: see the next section. The Grafana AGPL licence ships in `share/licenses/obs/grafana/LICENSE`.
+thresholds.
+
+MEASURED against real Grafana 13.3.0 and the real stores in the parity job (the green run
+https://github.com/AtomiCloud/nix-registry/actions/runs/44102413229, `TestParityAlertEval`, `TestParityAlertHistory`):
+27 per-minute alert condition states and values of metric and LogsQL rules equal Grafana's
+`/api/v1/eval`; 4 live Grafana scheduler transitions (including pending and
+`keep_firing_for`) equal obs; 10 live Grafana recording-rule points equal obs at 1e-11
+relative. `TestParityGrafanaLogs` and `TestParityHistoricMetrics` passed in the same run
+(LogsQL and MetricsQL alert minutes through Grafana's datasource).
+
+NOT TESTED: parity of trace alert rules against real Grafana and Tempo (the parity job has no
+trace rule), notification and persistence behaviour, how the Grafana UI interpolates a
+query exactly, and VictoriaLogs runtime timeout and concurrency limits on other hardware.
+TraceQL rules: see the next section. The Grafana AGPL licence ships in `share/licenses/obs/grafana/LICENSE`.
 
 ### TraceQL alert rules
 
@@ -1000,6 +1038,7 @@ preinstalls it (`pkg/setting/setting_plugins.go:43`); the paired plugin release 
   steps since the Unix epoch, so a range trace rule reuses a baseline result
   (`OBS_VERIFY_SKIP`, incident skipping) only when the run offset is a whole number of
   steps, and its cached result is keyed by the base's position inside each step.
+
 - **Frames** (`pkg/tempo/traceql/metrics.go:16-142`): every Tempo series is a
   time + value frame, so Grafana's expression engine reads it as a **series**
   (`pkg/expr/converter.go:69-118`): reduce it before a threshold, as for range metric
@@ -1053,15 +1092,23 @@ validation, alignment and `--tempo-config` parsing), `internal/alerts` (`traces_
 the `(t-60s, t]` bucket, the run gap covers two 30m steps, whole-step reuse and cache keys),
 `internal/check`, `internal/seed`; speed in the table below. FROM SOURCE: everything in
 the list above. NOT TESTED: trace alert results against real Grafana and Tempo (the
-parity job has no trace rule yet; adding one is cheap: start the parity Grafana with
+parity job, run https://github.com/AtomiCloud/nix-registry/actions/runs/44102413229, has no trace rule yet; adding one is cheap: start the parity Grafana with
 `GF_FEATURE_TOGGLES_ENABLE=tempoAlerting`, provision a Tempo datasource, push the alert
 seed's traces with the parity Tempo test's `loadTempo`, and add one Tempo rule to
 `TestParityAlertEval`, which already compares per-minute states and values with
 `/api/v1/eval`); Tempo's `max_response_series` and per-tenant `max_metrics_duration`
 overrides (not modelled); whether provisioned Tempo rules evaluate without the
 `tempoAlerting` toggle; a Helm chart's values file for `--tempo-config` (obs reads the
-rendered Tempo config only); exemplar frames themselves (refused, never produced); `obs query
---live` for trace alert queries (unchanged: not run).
+rendered Tempo config only); exemplar frames themselves (refused, never produced).
+MEASURED: `obs query --live` runs every Tempo alert query, as the alert evaluator sends it
+(instant or range, whole seconds, the end cutoff, against the end of the seed's time line):
+`internal/check/livetrace_test.go` (a `{} | rate()` instant rule, an exemplar-free range
+rule and a filtered rule on seeded spans stay green; planted: a filter that matches no span,
+a seed with no span, a `by()` on an attribute the seed lacks, a window inside the end cutoff,
+a search instead of a metrics query, TraceQL that does not parse; each fails naming file, rule
+and query) and `tests/links.sh` (a Tempo alert in the `links` fixture; planted: no-rows and
+`span.drifted`). A query kind obs cannot run live (a Jaeger or Zipkin trace alert, a Loki
+alert) is a FAIL (`live-unsupported-query`), never counted and skipped.
 
 ## Nightly parity
 
@@ -1116,6 +1163,9 @@ TraceQL searches, two range-metric queries and six link checks), and M5 `0257d0b
 and two span CPU shares). These are MEASURED local results. Alerts and TraceQL
 are integrated in this branch, and so is `obs profile`: the parity workflow runs the profile step
 (span to profile compare against Pyroscope) because the command exists.
+The same comparisons passed in CI on the integration branch: every step of the parity workflow was green in
+https://github.com/AtomiCloud/nix-registry/actions/runs/44102413229 (the counts per test are in
+[obs alerts](#obs-alerts) and [obs links](#obs-links)).
 
 VictoriaLogs referee settings found on that run: a recent, disjoint time line per
 fixture; `-retentionPeriod=10y`; explicit insert `/internal/force_flush` before
@@ -1187,14 +1237,14 @@ The §11.1.1 table was measured in spike 7 with Loki as the log engine. This is 
 table with the VictoriaLogs engine, after the profiling fixes below. MEASURED: 3 runs per
 cell, median time, largest peak; peak memory in GiB (`ru_maxrss` KiB / 1048576).
 
-| Alerts | 4 h seed | 24 h seed | Peak memory 4 h / 24 h |
-|---|---|---|---|
-| 1 | 0.35 s | 1.30 s | 0.23 / 0.46 GiB |
-| 20 | 1.25 s | 5.91 s | 0.55 / 0.85 GiB |
-| 200 | 7.17 s | 42.92 s | 0.63 / 1.97 GiB |
-| 1,000 | 9.24 s | 53.46 s | 0.69 / 1.97 GiB |
-| 1 TraceQL (`t1`) | 0.66 s | 3.54 s | 0.37 / 1.71 GiB |
-| 20 TraceQL (`t20`) | 6.09 s | 42.38 s | 1.08 / 2.02 GiB |
+| Alerts             | 4 h seed | 24 h seed | Peak memory 4 h / 24 h |
+| ------------------ | -------- | --------- | ---------------------- |
+| 1                  | 0.35 s   | 1.30 s    | 0.23 / 0.46 GiB        |
+| 20                 | 1.25 s   | 5.91 s    | 0.55 / 0.85 GiB        |
+| 200                | 7.17 s   | 42.92 s   | 0.63 / 1.97 GiB        |
+| 1,000              | 9.24 s   | 53.46 s   | 0.69 / 1.97 GiB        |
+| 1 TraceQL (`t1`)   | 0.66 s   | 3.54 s    | 0.37 / 1.71 GiB        |
+| 20 TraceQL (`t20`) | 6.09 s   | 42.38 s   | 1.08 / 2.02 GiB        |
 
 The TraceQL rows (MEASURED 17 Nov 2026, 11:17-11:20 UTC, same box and method, load
 average 12-13, `go test -tags speedbench -run TestTraceSpeedTable`) use the trace-only sets
@@ -1212,11 +1262,11 @@ Before the fixes (same runner, 1 run per cell, `obs-alerts` evaluator at aa2085a
 runner then labelled the same KiB / 1048576 numbers "GB"):
 
 | Alerts | 4 h seed | 24 h seed | Peak memory 4 h / 24 h |
-|---|---|---|---|
-| 1 | 3.55 s | 15.78 s | 2.03 / 7.85 GiB |
-| 20 | 3.92 s | 18.55 s | 2.16 / 8.70 GiB |
-| 200 | 11.86 s | 65.46 s | 2.21 / 8.17 GiB |
-| 1,000 | 15.06 s | 68.75 s | 2.14 / 8.21 GiB |
+| ------ | -------- | --------- | ---------------------- |
+| 1      | 3.55 s   | 15.78 s   | 2.03 / 7.85 GiB        |
+| 20     | 3.92 s   | 18.55 s   | 2.16 / 8.70 GiB        |
+| 200    | 11.86 s  | 65.46 s   | 2.21 / 8.17 GiB        |
+| 1,000  | 15.06 s  | 68.75 s   | 2.14 / 8.21 GiB        |
 
 Loki numbers (spike 7, same table, as quoted there in GB) for comparison: 1 alert
 0.23 / 1.10 s, 0.19 / 0.78 GB; 20 alerts 1.05 / 5.45 s, 0.76 / 4.0 GB; 200 alerts
@@ -1393,12 +1443,12 @@ reported state and re-run (it resumes) or roll back explicitly. There is no skip
   workload directly. A single must run exactly one replica, so its restored count never depends on
   them. It undoes only obs's own change; other fields stay as they are.
 
-| Store | Change obs makes to existing objects |
-|---|---|
-| Tempo | single: `spec.replicas` N to 0 and every template role `true` to `false`, in one patch, after the drain; compactor (if separate): replicas N to 0 |
-| Pyroscope | single: `-target=all` to `-target=metastore` (same spelling) and every template role to `false`; replicas, claims, raft id and all else untouched |
-| VictoriaLogs, VictoriaMetrics | each router: the one `-storageNode` flag gains the derived endpoints (same spelling, existing endpoints kept in order) |
-| VictoriaMetrics, `copies: 2` | vminsert also gains `-replicationFactor=2`; vmselect gains `-dedup.minScrapeInterval=1ms` (VictoriaMetrics v1.156.0 docs: required on vmselect when replication is enabled); every listed existing vmstorage gains `-dedup.minScrapeInterval=1ms` at the front of its args (concept 10.5) |
+| Store                         | Change obs makes to existing objects                                                                                                                                                                                                                                                      |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tempo                         | single: `spec.replicas` N to 0 and every template role `true` to `false`, in one patch, after the drain; compactor (if separate): replicas N to 0                                                                                                                                         |
+| Pyroscope                     | single: `-target=all` to `-target=metastore` (same spelling) and every template role to `false`; replicas, claims, raft id and all else untouched                                                                                                                                         |
+| VictoriaLogs, VictoriaMetrics | each router: the one `-storageNode` flag gains the derived endpoints (same spelling, existing endpoints kept in order)                                                                                                                                                                    |
+| VictoriaMetrics, `copies: 2`  | vminsert also gains `-replicationFactor=2`; vmselect gains `-dedup.minScrapeInterval=1ms` (VictoriaMetrics v1.156.0 docs: required on vmselect when replication is enabled); every listed existing vmstorage gains `-dedup.minScrapeInterval=1ms` at the front of its args (concept 10.5) |
 
 Role labels change only on pods a workload's controller owns by uid (StatefulSet pods, or
 Deployment pods whose ReplicaSet the Deployment owns), one JSON patch per pod by name with `test`
@@ -1499,11 +1549,11 @@ is refused.
 ```yaml
 context: fixture-only
 namespace: observability-fixture
-scaled_manifest: vm-scaled.yaml   # new vmstorage StatefulSet + its headless Service
+scaled_manifest: vm-scaled.yaml # new vmstorage StatefulSet + its headless Service
 scaled: [statefulset/vmstorage-b]
 routers:
-  - {workload: deployment/vminsert, role: insert, port: 8400}
-  - {workload: deployment/vmselect, role: select, port: 8401}
+  - { workload: deployment/vminsert, role: insert, port: 8400 }
+  - { workload: deployment/vmselect, role: select, port: 8401 }
 # copies: 2                       # VictoriaMetrics two copies (concept 10.5)
 # storage_workloads: [statefulset/vmstorage]   # with copies 2: existing vmstorage gains dedup
 metrics_url: http://vminsert.fixture.invalid:8480/metrics
@@ -1622,7 +1672,10 @@ non-intrinsic attribute, including those in `select` and metrics grouping. A
 adapter leaves name enforcement off. Live checks reject missing attributes even
 in `select(...)` or `by(...)` when the query otherwise returns rows. Trace alert
 queries get the same parse and name checks plus the Tempo alert checks of
-[TraceQL alert rules](#traceql-alert-rules).
+[TraceQL alert rules](#traceql-alert-rules), and `--live` runs them on the embedded Tempo
+(an instant or range metrics query over `[end-from, end-to]`, no-rows and run errors reported
+like a metric or log alert query). An alert query of a kind obs cannot run live fails with
+`live-unsupported-query`.
 
 **FROM SOURCE:** Grafana v13.3.0's
 [TraceQL editor documentation](https://github.com/grafana/grafana/blob/v13.3.0/docs/sources/shared/datasources/tempo-editor-traceql.md#query-by-traceid)
@@ -1697,7 +1750,11 @@ future alert evaluator. **MEASURED offline:** structural operators, typed
 comparisons, metrics counts/rates/quantiles, both dashboard query modes and all
 three links. `tests/links.sh` plants syntax, attribute, log-link, trace-link and
 profile-label failures; every failure names the file, query/route/series and bad
-attribute or value. Real-store parity remains **NOT TESTED** here.
+attribute or value. **MEASURED against real Tempo, VictoriaLogs and Pyroscope** in the parity job
+(green run https://github.com/AtomiCloud/nix-registry/actions/runs/44102413229): `TestParityTraceQL` (7 TraceQL searches and 2 range-metric queries across
+6 seeded traces equal real Tempo), `TestParityLinks` (the link queries equal real VictoriaLogs and
+Tempo: trace-to-logs 2, metric-to-traces 2, span-to-profile 2) and `TestParityProfiles`
+(12 function self/inclusive shares and 2 span CPU shares equal real Pyroscope).
 
 ## Not tested
 
@@ -1720,7 +1777,6 @@ source) where its section says so.
 - Variable filling for LogsQL panels against the Grafana VictoriaLogs datasource: it reuses the Prometheus macros, and this exact query and time range through a real Grafana/VictoriaLogs UI is not run (the parity job is the referee) ([obs query --live](#obs-query---live)).
 - Seeded log rows against a real VictoriaLogs fed through Alloy: the field names are FROM SOURCE.
 - Annotation queries are not checked.
-- Real-store parity of the TraceQL, links and profile-label checks ([obs links](#obs-links)).
 - Trace-ID routing: a trace ID typed in a TraceQL panel is routed by obs as the last core Tempo datasource did; parity with the separately shipped Tempo plugin is untested ([obs links](#obs-links)).
 
 **Generated code**
@@ -1731,9 +1787,9 @@ source) where its section says so.
 
 **Alerts**
 
-- Parity against the live Grafana scheduler and datasource, and notification and persistence behaviour ([obs alerts](#obs-alerts)).
+- Notification and persistence behaviour, and exact UI interpolation of a query ([obs alerts](#obs-alerts)). Parity of metric and LogsQL alert evaluations and of the scheduler's transitions against real Grafana is MEASURED, not listed here: parity run https://github.com/AtomiCloud/nix-registry/actions/runs/44102413229 (`TestParityAlertEval`, `TestParityAlertHistory`).
 - VictoriaLogs runtime timeout and concurrency equivalence on different hardware (this includes the timing refusal on a very slow runner described under `obs alerts`).
-- Trace alert results against real Grafana and Tempo: the parity job has no trace rule yet. Also not modelled or run: Tempo's `max_response_series` and per-tenant `max_metrics_duration` overrides; whether provisioned Tempo rules evaluate without the Grafana `tempoAlerting` toggle; math joining two un-reduced instant series (the frame time differs from obs's evaluation minute); a Helm chart's values file for `--tempo-config` (obs reads the rendered Tempo config only); `obs query --live` for trace alert queries (not run); exemplar frames themselves (refused by obs, never produced); the proposal to evaluate each trace rule once per run on per-minute buckets ([TraceQL alert rules](#traceql-alert-rules)).
+- Trace alert results against real Grafana and Tempo: the parity job (run https://github.com/AtomiCloud/nix-registry/actions/runs/44102413229) has no trace rule yet. Also not modelled or run: Tempo's `max_response_series` and per-tenant `max_metrics_duration` overrides; whether provisioned Tempo rules evaluate without the Grafana `tempoAlerting` toggle; math joining two un-reduced instant series (the frame time differs from obs's evaluation minute); a Helm chart's values file for `--tempo-config` (obs reads the rendered Tempo config only); exemplar frames themselves (refused by obs, never produced); the proposal to evaluate each trace rule once per run on per-minute buckets ([TraceQL alert rules](#traceql-alert-rules)).
 - The §11.1.1 speed table was measured on a shared, loaded box, not a quiet one; the cache-hit rows were not re-measured, and the "what would close the time gap" proposal is untried ([speed](#obs-alerts-speed-concept-1111-re-measured-with-victorialogs)).
 
 **Evidence and stores**

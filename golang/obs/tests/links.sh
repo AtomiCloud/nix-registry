@@ -52,6 +52,24 @@ has 'panel 7'
 has 'attribute span.drifted'
 cp "$work/traces.json" "$dir/dashboards/traces.json"
 
+# A Tempo alert query runs in --live (it is not counted and skipped): a baseline that runs, a filter
+# that matches no seeded span, and a by() on an attribute the seed lacks.
+cp "$dir/alerts/trace-rate/warning.yaml" "$work/trace-rate.yaml"
+sed 's/span.provider = "stripe"/span.provider = "nobody"/' "$work/trace-rate.yaml" >"$dir/alerts/trace-rate/warning.yaml"
+changed "$work/trace-rate.yaml" "$dir/alerts/trace-rate/warning.yaml"
+red "$obs" query --live --dir "$dir"
+has 'alerts/trace-rate/warning.yaml'
+has 'rule trace-rate-warning query A'
+has '[no-rows]'
+has 'span.provider = "nobody"'
+sed 's/| rate()/| rate() by (span.drifted)/' "$work/trace-rate.yaml" >"$dir/alerts/trace-rate/warning.yaml"
+changed "$work/trace-rate.yaml" "$dir/alerts/trace-rate/warning.yaml"
+red "$obs" query --live --dir "$dir"
+has 'alerts/trace-rate/warning.yaml'
+has 'rule trace-rate-warning query A'
+has 'attribute span.drifted'
+cp "$work/trace-rate.yaml" "$dir/alerts/trace-rate/warning.yaml"
+
 cp "$dir/seed.yaml" "$work/seed.yaml"
 sed 's/event: charged, from: {/event: charged, from: { where: { provider: missing },/' "$work/seed.yaml" >"$dir/seed.yaml"
 changed "$work/seed.yaml" "$dir/seed.yaml"
@@ -78,4 +96,4 @@ has 'seed.yaml'
 has 'POST /charge'
 has '[span-to-profile]'
 has 'k8s.pod.name'
-echo 'TraceQL/links: 3 baselines green; 5 planted failures red'
+echo 'TraceQL/links: 3 baselines green (one with a Tempo alert run live); 7 planted failures red'

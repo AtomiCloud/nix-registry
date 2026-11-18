@@ -21,7 +21,7 @@ func (k Kind) String() string {
 }
 
 // Classify tells the kind of a datasource from its plugin type, else from its uid
-// (a platform pins its datasource uids: primordial-metrics, primordial-logs, mimir ...).
+// (a platform pins its datasource uids: fixture-metrics, fixture-logs, mimir ...).
 // An error names what could not be told.
 func Classify(dsType, dsUID string) (Kind, error) {
 	t := strings.ToLower(dsType)

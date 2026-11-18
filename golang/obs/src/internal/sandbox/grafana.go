@@ -26,7 +26,7 @@ type Datasource struct {
 }
 
 // Datasources lists the datasources to create: every concrete uid the repo's dashboards
-// name (a platform pins its uids: primordial-metrics ...), and one default per kind
+// name (a platform pins its uids: fixture-metrics ...), and one default per kind
 // (obs-metrics, obs-logs, obs-traces, obs-profiles) when no dashboard names one.
 func Datasources(set *files.Set, project string) []Datasource {
 	type kind struct{ name, typ, comp string }

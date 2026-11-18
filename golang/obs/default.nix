@@ -28,6 +28,8 @@ let
     # the tests folder next to the source root, where ../../../tests resolves from internal/<pkg>.
     preCheck = ''
       cp -r --no-preserve=mode ${./tests} ../tests
+      # TestNoRealLandscapeAnywhere also scans golang/obs/README.md (beside the tests folder).
+      cp --no-preserve=mode ${./README.md} ../README.md
     '';
     postInstall = ''
       # Third-party notices: every LICENSE/NOTICE/COPYING/PATENTS file of the vendored modules,
