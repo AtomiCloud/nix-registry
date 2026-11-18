@@ -527,19 +527,43 @@ func (l *liveRun) spelling(q *files.Query) bool {
 			}
 			return c
 		case *metricsql.BinaryOpExpr:
-			c := union([]metricsql.Expr{t.Left, t.Right})
-			check(t.GroupModifier.Args, c)
-			check(t.JoinModifier.Args, c)
-			// Arithmetic (and bool comparison) one-to-one matching with on() keeps only the on() labels, with
-			// ignoring() drops them. A group_left/group_right match keeps the many side's labels whole, and
-			// the set operators (and, or, unless) and default/if/ifnot keep the series' labels whole whatever
-			// on()/ignoring() says (measured on the embedded engine).
-			if t.JoinModifier.Op == "" && matchResetsLabels(t) {
-				switch strings.ToLower(t.GroupModifier.Op) {
-				case "on":
-					c = keepOnly(c, t.GroupModifier.Args)
-				case "ignoring":
-					c = dropAll(c, t.GroupModifier.Args)
+			cl, cr := walk(t.Left), walk(t.Right)
+			both := map[string]bool{}
+			for k := range cl {
+				both[k] = true
+			}
+			for k := range cr {
+				both[k] = true
+			}
+			check(t.GroupModifier.Args, both)
+			check(t.JoinModifier.Args, both)
+			// The result carries the labels of one side (measured on the embedded engine): the left side's for a
+			// one-to-one match and for group_left, the right side's for group_right; group_left/group_right
+			// add only the labels they list, taken from the other side. A query-made label on the other side
+			// that is not listed is dropped. or and default also return the right side's series.
+			var c map[string]bool
+			switch strings.ToLower(t.JoinModifier.Op) {
+			case "group_left":
+				c = withListed(cl, cr, t.JoinModifier.Args)
+			case "group_right":
+				c = withListed(cr, cl, t.JoinModifier.Args)
+			default:
+				c = dropAll(cl, nil)
+				if op := strings.ToLower(t.Op); op == "or" || op == "default" {
+					for k := range cr {
+						c[k] = true
+					}
+				}
+				// Arithmetic (and bool comparison) one-to-one matching with on() keeps only the on() labels,
+				// with ignoring() drops them; the set operators, default/if/ifnot and the filtering
+				// comparisons keep the labels whole whatever on()/ignoring() says.
+				if matchResetsLabels(t) {
+					switch strings.ToLower(t.GroupModifier.Op) {
+					case "on":
+						c = keepOnly(c, t.GroupModifier.Args)
+					case "ignoring":
+						c = dropAll(c, t.GroupModifier.Args)
+					}
 				}
 			}
 			return c
@@ -572,6 +596,17 @@ var reducingAggregations = map[string]bool{
 	"sum": true, "avg": true, "min": true, "max": true, "count": true, "group": true, "stddev": true, "stdvar": true,
 	"quantile": true, "median": true, "sum2": true, "geomean": true, "mad": true, "distinct": true, "mode": true,
 	"count_values": true, "histogram": true,
+}
+
+// withListed is the labels of the kept side plus the listed labels the other side has.
+func withListed(kept, other map[string]bool, listed []string) map[string]bool {
+	out := dropAll(kept, nil)
+	for _, k := range listed {
+		if other[k] {
+			out[k] = true
+		}
+	}
+	return out
 }
 
 // keepOnly is the labels of set that are in keep; dropAll is the labels of set that are not in drop.
