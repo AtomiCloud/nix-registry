@@ -803,8 +803,9 @@ obs sandbox status [--dir observability] [--project name]
 
 `up` starts five containers (docker, or podman when docker is not there; `--runtime` or
 `$OBS_CONTAINER_RUNTIME` chooses) and loads them: the repo's dashboards into Grafana, the seed into
-VictoriaMetrics and VictoriaLogs, seed `traces:` into Tempo, and small synthetic CPU
-profiles into Pyroscope. No check depends on it; it is for looking at the data.
+VictoriaMetrics and VictoriaLogs. This legacy command keeps its 0.4 ports, container
+configuration, loaders and output. `obs look` additionally seeds Tempo and Pyroscope
+(below). No check depends on a sandbox; it is for looking at the data.
 
 | Container       | Image                                                     | Host port (default) |
 | --------------- | --------------------------------------------------------- | ------------------- |
@@ -835,13 +836,14 @@ profiles into Pyroscope. No check depends on it; it is for looking at the data.
   `-storage.maxDailySeries`/`-maxHourlySeries` have no value in §10.4, Pyroscope's retention and raft names
   are for the cluster, S3 backends and resource requests do not exist on a laptop).
 - **Ports** are bound to `127.0.0.1` only. `--port-base 18300` moves Grafana to 18300 and the others to
-  18301 to 18304 when the defaults are taken. Tempo's OTLP/HTTP receiver is 4318
-  by default, or base+5 (18305 in this example).
+  18301 to 18304 when the defaults are taken. `obs look` additionally publishes
+  Tempo's OTLP/HTTP receiver at 4318 by default, or base+5 (18305 here). Reserve six
+  consecutive ports for look: a second sandbox at base+5 would clash with that receiver.
 - **Data.** The seed's time line ends now, so a "last hours" view has data. Grafana is open to an anonymous
   viewer (admin/admin for the API). The datasource uids are the ones the dashboards name (`fixture-metrics`
   and so on); a kind no dashboard names gets `obs-metrics`, `obs-logs`, `obs-traces`, `obs-profiles`.
   A second `up` reuses the running stack, loads the dashboards again and keeps the seed (`--reseed` loads it
-  again). Tempo receives OTLP/HTTP JSON with the seed's original trace/span IDs, attributes,
+  again). With `obs look`, Tempo receives OTLP/HTTP JSON with the seed's original trace/span IDs, attributes,
   status and parent links; the log-to-trace IDs stay the same. Pyroscope receives three
   deterministic CPU pprofs per service/span name across the seed window: stacks are
   `main -> obs.seed.work -> <span name>`, with 10/20/30 ms CPU samples and `span_name`
@@ -898,9 +900,11 @@ future data. A snapshot that cannot hold the condition through the pending durat
 called out as a finding. The calling agent screenshots during the listed window and
 checks Grafana's actual state; `obs look` does not wait for pending timers.
 
-Historical state-change annotations explicitly say `replay (computed by obs)`. They
-come from the existing `obs alerts` evaluator/state machine on the exact sandbox dataset,
-including its recording samples. They are not Grafana's own historical state. Incident
+Historical state-change annotations explicitly say `replay (computed by obs)` and name
+the incident scenario. Each incident is evaluated independently by the existing `obs alerts`
+state machine, even when incident windows overlap; a simultaneous change cannot erase another
+scenario's firing history. The stores hold the composed timeline and its recording samples;
+the native-state forecast uses that actual composed snapshot. Replay is not Grafana's own historical state. Incident
 marker text labels declared expectations separately. Grafana's historic `/api/v1/eval`
 can also inspect the real condition at an incident time.
 
@@ -909,6 +913,10 @@ the prompt asks that agent to stop it after review. `--keep` instead asks the ag
 leave it running for a person; the prompt includes the exact cleanup command. `sandbox
 up|down|status` remain available. When reusing a baseline-only seed from `sandbox up`,
 `look` asks for `sandbox down` first, so baseline and incident logs cannot be mixed.
+An older stack without the published Tempo receiver gets the same recreate-first
+diagnostic. A repeated default look on an expired live snapshot recreates only that
+project's labelled containers, volumes and network and says it did so; it never prunes
+or touches another project. Explicit `--seed-base` historical snapshots remain reusable.
 
 **Always exit 0**: a failed setup (no runtime, a pin mismatch, git cannot find the base), a bad flag and
 `--help` print what failed (or the usage) and `ok: false` in JSON, and never fail the CI job that calls it.

@@ -383,3 +383,18 @@ func TestSeededPanelsIncidentsAndKeepPrompt(t *testing.T) {
 		}
 	}
 }
+
+func TestLiveRulePromptHasScreenshotTimesAndNormalControl(t *testing.T) {
+	dir, cl := project(t)
+	info := *testInfo
+	at := time.Date(2026, 11, 18, 20, 0, 0, 0, time.UTC)
+	info.LiveIncident = "spike"
+	info.Incidents = []sandbox.IncidentInfo{{Name: "spike", From: info.From, To: info.To, Fire: []string{"pending"}, Quiet: []string{"control"}}}
+	info.LiveRules = []sandbox.NativeRuleWindow{{UID: "pending", Expected: "Firing", ProvisionedAt: at.UnixMilli(), For: "1m0s", Interval: "10s", FiringAt: at.Add(70 * time.Second).UnixMilli(), HoldUntil: at.Add(5 * time.Minute).UnixMilli(), Supported: true}, {UID: "control", Expected: "Normal", ProvisionedAt: at.UnixMilli(), For: "0s", Interval: "10s", Supported: true}}
+	p := Setup(context.Background(), Options{Dir: dir, Checklist: cl, Files: []string{"dashboards/overview.json"}}, fakeUp(&info, nil))
+	for _, want := range []string{"live rule pending: provisioned 2026-11-18T20:00:00Z", "expected Firing by 2026-11-18T20:01:10Z", "hold Firing until 2026-11-18T20:05:00Z", "live rule control: expected Normal"} {
+		if !strings.Contains(p.Prompt, want) {
+			t.Errorf("live prompt lacks %q", want)
+		}
+	}
+}

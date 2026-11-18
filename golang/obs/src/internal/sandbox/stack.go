@@ -233,6 +233,28 @@ storage:
     backend: local
     wal:
       path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks
+live_store:
+  max_block_duration: 5m
+`
+
+const lookTempoConfig = `server:
+  http_listen_port: 3200
+distributor:
+  max_attribute_bytes: 16384
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
       ingestion_time_range_slack: 720h
     local:
       path: /var/tempo/blocks
@@ -271,7 +293,7 @@ func (c *Config) createArgs(k Component) []string {
 	a = append(a, c.labelArgs(k.Name)...)
 	a = append(a, "--network", Prefix(c.Project),
 		"-p", fmt.Sprintf("127.0.0.1:%d:%d", hostPort(c.PortBase, k), k.Port))
-	if k.Name == "tempo" {
+	if k.Name == "tempo" && c.ApplyIncidents {
 		a = append(a, "-p", fmt.Sprintf("127.0.0.1:%d:4318", hostPort(c.PortBase, otlpComponent)))
 	}
 	for _, v := range c.volumes(k) {
@@ -283,10 +305,12 @@ func (c *Config) createArgs(k Component) []string {
 			"GF_SECURITY_ADMIN_USER=admin", "GF_SECURITY_ADMIN_PASSWORD=admin",
 			"GF_AUTH_ANONYMOUS_ENABLED=true", "GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer",
 			"GF_ANALYTICS_REPORTING_ENABLED=false", "GF_ANALYTICS_CHECK_FOR_UPDATES=false",
-			"GF_FEATURE_TOGGLES_ENABLE=tempoAlerting",
 			"GF_INSTALL_PLUGINS=" + PluginID + " " + PluginVersion,
 		} {
 			a = append(a, "-e", e)
+		}
+		if c.ApplyIncidents {
+			a = append(a, "-e", "GF_FEATURE_TOGGLES_ENABLE=tempoAlerting")
 		}
 	}
 	a = append(a, k.Ref())
@@ -333,6 +357,20 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 	if err := cfg.checkRelabel(ctx, have); err != nil {
 		return nil, err
 	}
+	recreated := false
+	if cfg.ApplyIncidents {
+		if err := cfg.checkLookReceiver(ctx, have); err != nil {
+			return nil, err
+		}
+		previous := readState(cfg)
+		if previous != nil && previous.From != 0 && (cfg.Reseed || (cfg.LiveIncident && cfg.SeedBase == 0 && liveSnapshotExpired(previous, cfg.Now()))) {
+			if err := Down(ctx, cfg); err != nil {
+				return nil, fmt.Errorf("refreshing look snapshot: %w", err)
+			}
+			have = map[string]existing{}
+			recreated = true
+		}
+	}
 	created := false
 	if _, err := cfg.Runner.Run(ctx, "network", "inspect", Prefix(cfg.Project)); err != nil {
 		if _, err := cfg.Runner.Run(ctx, "network", "create", "--label", LabelKey+"="+cfg.Project, Prefix(cfg.Project)); err != nil {
@@ -371,7 +409,11 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 			return nil, err
 		}
 		if k.Name == "tempo" {
-			if err := copyIn(ctx, cfg.Runner, name, "/etc/tempo.yaml", tempoConfig); err != nil {
+			config := tempoConfig
+			if cfg.ApplyIncidents {
+				config = lookTempoConfig
+			}
+			if err := copyIn(ctx, cfg.Runner, name, "/etc/tempo.yaml", config); err != nil {
 				return nil, err
 			}
 		}
@@ -494,6 +536,9 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 		}
 	}
 	writeState(cfg, info)
+	if recreated {
+		fmt.Fprintf(cfg.Out, "recreated the old look stack for project %s (only resources labelled %s=%s)\n", cfg.Project, LabelKey, cfg.Project)
+	}
 	return info, nil
 }
 
@@ -536,7 +581,9 @@ func loadSeed(ctx context.Context, cfg *Config, info *Info) error {
 	if err != nil {
 		return err
 	}
-	clipDataset(ds, to)
+	if cfg.ApplyIncidents {
+		clipDataset(ds, to)
+	}
 	if cfg.ApplyIncidents && len(set.Rules) > 0 {
 		runs, recorded, err := alerts.ReplayDataset(cfg.Dir, p, ds)
 		if err != nil {
@@ -545,19 +592,24 @@ func loadSeed(ctx context.Context, cfg *Config, info *Info) error {
 		for j, sr := range recorded {
 			ds.Series[fmt.Sprintf("obs-look-recording/%d", j)] = sr
 		}
-		for _, run := range runs {
-			if len(run.Steps) > 0 {
-				var instances []string
-				for instance := range run.Steps[0].States {
-					instances = append(instances, instance)
-				}
-				sort.Strings(instances)
-				for _, instance := range instances {
-					info.Replay = append(info.Replay, ReplayTransition{Alert: run.Alert, At: run.Steps[0].T, To: run.Steps[0].States[instance]})
-				}
+		if len(incidents) < 2 {
+			name := "baseline"
+			if len(incidents) == 1 {
+				name = incidents[0].Name
 			}
-			for _, tr := range run.Transitions {
-				info.Replay = append(info.Replay, ReplayTransition{Alert: run.Alert, At: tr.T, From: tr.From, To: tr.To})
+			info.Replay = append(info.Replay, replayTransitions(name, runs)...)
+		} else {
+			for _, inc := range incidents {
+				isolated, err := seed.BuildIncident(sd, from, &inc)
+				if err != nil {
+					return err
+				}
+				clipDataset(isolated, to)
+				replay, _, err := alerts.ReplayDataset(cfg.Dir, p, isolated)
+				if err != nil {
+					return fmt.Errorf("incident %s replay: %w", inc.Name, err)
+				}
+				info.Replay = append(info.Replay, replayTransitions(inc.Name, replay)...)
 			}
 		}
 	}
@@ -569,13 +621,15 @@ func loadSeed(ctx context.Context, cfg *Config, info *Info) error {
 	if err := LoadSeed(ctx, cfg.HTTP, info.URLs["vm"], info.URLs["vl"], ds); err != nil {
 		return err
 	}
-	if err := LoadTraces(ctx, cfg.HTTP, cfg.HostURL(otlpComponent), ds); err != nil {
-		return fmt.Errorf("loading traces: %w", err)
+	if cfg.ApplyIncidents {
+		if err := LoadTraces(ctx, cfg.HTTP, cfg.HostURL(otlpComponent), ds); err != nil {
+			return fmt.Errorf("loading traces: %w", err)
+		}
+		if err := LoadProfiles(ctx, cfg.HTTP, info.URLs["pyroscope"], sd, ds); err != nil {
+			return fmt.Errorf("loading profiles: %w", err)
+		}
+		info.TracesSeeded, info.ProfilesSeeded = len(ds.Traces) > 0, true
 	}
-	if err := LoadProfiles(ctx, cfg.HTTP, info.URLs["pyroscope"], sd, ds); err != nil {
-		return fmt.Errorf("loading profiles: %w", err)
-	}
-	info.TracesSeeded, info.ProfilesSeeded = len(ds.Traces) > 0, true
 	info.IncidentSeed = cfg.ApplyIncidents
 	info.From, info.To = from.UnixMilli(), to.UnixMilli()
 	cfg.dataset = ds

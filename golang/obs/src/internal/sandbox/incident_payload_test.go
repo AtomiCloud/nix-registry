@@ -1,11 +1,13 @@
 package sandbox
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"github.com/AtomiCloud/obs/internal/seed"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -80,6 +82,86 @@ func TestLookSeedContainsIncidentData(t *testing.T) {
 		if raw["annotations"] == nil {
 			t.Error("dashboard has no annotation query; region cannot show")
 		}
+	}
+	markers := 0
+	for _, a := range s.annotations {
+		tags, _ := a["tags"].([]any)
+		for _, tag := range tags {
+			if tag == "obs-incident" {
+				markers++
+				if a["dashboardUID"] != "look-payments" || int64(a["time"].(float64)) != info.From+int64(3*time.Minute/time.Millisecond) || int64(a["timeEnd"].(float64)) != info.From+int64(8*time.Minute/time.Millisecond) {
+					t.Errorf("wrong applied marker: %v", a)
+				}
+			}
+		}
+	}
+	if markers != 1 {
+		t.Errorf("got %d incident markers, want one per dashboard", markers)
+	}
+	if len(s.groups) != 1 {
+		t.Fatalf("got %d rule-group PUTs, want 1", len(s.groups))
+	}
+	uids := map[string]bool{}
+	for _, raw := range s.groups[0]["rules"].([]any) {
+		uids[raw.(map[string]any)["uid"].(string)] = true
+	}
+	for _, uid := range []string{"payment-errors", "payment-safety", "payment-pending"} {
+		if !uids[uid] {
+			t.Errorf("rule-group missing %s", uid)
+		}
+	}
+	before, after := -1.0, -1.0
+	dec := json.NewDecoder(strings.NewReader(s.vmBody))
+	for {
+		var line vmLine
+		if err := dec.Decode(&line); err == io.EOF {
+			break
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		if line.Metric["__name__"] != "checkout_requests_total" || line.Metric["outcome"] != "error" {
+			continue
+		}
+		for j, ts := range line.Timestamps {
+			if ts < info.From+int64(3*time.Minute/time.Millisecond) {
+				before = line.Values[j]
+			}
+			if ts > info.From+int64(8*time.Minute/time.Millisecond) {
+				after = line.Values[j]
+			}
+		}
+	}
+	if before != 0 || after < 500 || after > 700 {
+		t.Errorf("incident counter upload before=%g after=%g, want 0 then ~600", before, after)
+	}
+	foundError := false
+	for _, payload := range s.traces {
+		for _, rr := range payload["resourceSpans"].([]any) {
+			for _, scope := range rr.(map[string]any)["scopeSpans"].([]any) {
+				for _, raw := range scope.(map[string]any)["spans"].([]any) {
+					sp := raw.(map[string]any)
+					ns, _ := strconv.ParseInt(sp["startTimeUnixNano"].(string), 10, 64)
+					code := sp["status"].(map[string]any)["code"].(float64)
+					if code == 2 && ns >= (info.From+int64(3*time.Minute/time.Millisecond))*1_000_000 && ns < (info.From+int64(8*time.Minute/time.Millisecond))*1_000_000 {
+						foundError = true
+					}
+				}
+			}
+		}
+	}
+	if !foundError {
+		t.Error("no ERROR OTLP span uploaded inside the incident window")
+	}
+}
+
+func TestReplayAnnotationIsExplicitlyComputed(t *testing.T) {
+	var got []byte
+	hc := &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) { got, _ = io.ReadAll(r.Body); return reply(`{}`), nil })}
+	if err := AnnotateReplay(context.Background(), hc, "http://grafana", []string{"board"}, []ReplayTransition{{Alert: "errors", At: 1000, From: "Normal", To: "Alerting"}}); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(got, []byte("replay (computed by obs)")) || !bytes.Contains(got, []byte(`"dashboardUID":"board"`)) {
+		t.Errorf("unlabelled replay payload %s", got)
 	}
 }
 

@@ -27,10 +27,11 @@ type IncidentInfo struct {
 // ReplayTransition is a historical state change computed by obs's existing
 // Grafana state-machine port. It is never presented as native Grafana history.
 type ReplayTransition struct {
-	Alert string `json:"alert"`
-	At    int64  `json:"at_ms"`
-	From  string `json:"from"`
-	To    string `json:"to"`
+	Incident string `json:"incident,omitempty"`
+	Alert    string `json:"alert"`
+	At       int64  `json:"at_ms"`
+	From     string `json:"from"`
+	To       string `json:"to"`
 }
 
 func AnnotateReplay(ctx context.Context, hc *http.Client, grafana string, uids []string, replay []ReplayTransition) error {
@@ -46,6 +47,9 @@ func AnnotateReplay(ctx context.Context, hc *http.Client, grafana string, uids [
 	for _, uid := range uids {
 		for _, tr := range replay {
 			text := "replay (computed by obs): " + html.EscapeString(tr.Alert) + ": " + html.EscapeString(tr.From) + " -> " + html.EscapeString(tr.To)
+			if tr.Incident != "" {
+				text += " [incident " + html.EscapeString(tr.Incident) + "]"
+			}
 			code, b, err := send(ctx, hc, http.MethodPost, grafana+"/api/annotations", map[string]any{"dashboardUID": uid, "time": tr.At, "text": text, "tags": []string{"obs-alert-replay", tr.Alert}})
 			if err != nil {
 				return err

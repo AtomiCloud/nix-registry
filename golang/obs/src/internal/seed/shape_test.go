@@ -151,7 +151,32 @@ func TestShapePartsAndNoise(t *testing.T) {
 	}
 }
 
+func TestShapeLevelBounds(t *testing.T) {
+	s := load(t, shapedDoc)
+	r := newShapeRun(s, time.Date(2026, 11, 12, 0, 0, 0, 0, time.UTC))
+	r.gaps = nil
+	r.settings.Level.Max = 100
+	r.settings.Spikes.Size = 20
+	r.spikes = []shapeWindow{{time.Second, 2 * time.Second}}
+	if got := r.rate(1); got != 100 {
+		t.Errorf("spike crossed max: %g", got)
+	}
+	r.spikes = nil
+	r.settings.Level.Min = 30
+	r.settings.Cycle.DailyAmplitude = 1
+	r.settings.Noise = 0
+	r.settings.Trend.ChangePerDay = 0
+	if got := r.rate(8 * 3600); got != 30 {
+		t.Errorf("daily trough crossed min: %g", got)
+	}
+	r.settings.Trend.ChangePerDay = 10
+	if got := r.rate(86400 + 20*3600); got != 100 {
+		t.Errorf("trend crossed max: %g", got)
+	}
+}
+
 func TestShapeValidationLocation(t *testing.T) {
+	lines := map[string]int{"level": 6, "noise": 11, "peak_hour": 8, "length": 10}
 	for name, bad := range map[string]string{
 		"level":     strings.Replace(shapedDoc, "min: 2", "min: 50", 1),
 		"noise":     strings.Replace(shapedDoc, "noise: 0.15", "noise: -1", 1),
@@ -163,7 +188,7 @@ func TestShapeValidationLocation(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err := Load(f)
-		if err == nil || !strings.Contains(err.Error(), f+":") || !strings.Contains(err.Error(), name) {
+		if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("%s:%d:", f, lines[name])) || !strings.Contains(err.Error(), name) {
 			t.Errorf("%s: expected file:line and field, got %v", name, err)
 		}
 	}
