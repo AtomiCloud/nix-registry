@@ -1831,6 +1831,10 @@ source) where its section says so.
 
 **Commands and builds**
 
+- **Live label-spelling check on MetricsQL result labels.** `obs query --live` models which query-made labels
+  survive a query (aggregations, binary operations, `group_left`/`group_right`, scalar sides, set operators) for the
+  forms checked against the embedded engine in `src/internal/check/engine_controls_test.go`; other forms may be
+  judged leniently (a wrong spelling then passes), never the other way round by design.
 - `obs engines --check-chart` wired into a consumer's CI: the real chart's location in the chart registry is not specified, so the command is tested only on fixture charts ([obs engines --check-chart](#obs-engines---check-chart)). Chart pins in the nightly parity job are in the same position.
 - `obs engines --check-chart` does not check a component whose image the values never set (it uses the chart default), and reads only the image paths listed under its section.
 - `obs engines --check-chart` reads `Chart.yaml` and `values.yaml` only: an engine image set in a template or in another values file is not read, and a digest is compared with the recorded image digest, not resolved against a registry.

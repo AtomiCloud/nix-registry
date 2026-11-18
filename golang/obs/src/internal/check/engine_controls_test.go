@@ -166,6 +166,20 @@ func TestLiveBinaryScopeAgreesWithTheEngine(t *testing.T) {
 		{"or_made_left", made + ` or on (outcome) ` + plain},
 		{"and_made_right", plain + ` and on (outcome) ` + made},
 		{"and_made_left", made + ` and on (outcome) ` + plain},
+		// a scalar-like side leaves the other side's labels whole (the engine's scalar fast path)
+		{"scalar_left", "2 * " + made},
+		{"scalar_right", made + " * 2"},
+		{"scalar_expr", "(2 - 1) * " + made},
+		{"scalar_fn", "scalar(2) * " + made},
+		{"vector_fn", "vector(2) * " + made},
+		{"reducer_no_labels_left", "sum(" + plain + ") * " + made},
+		{"scalar_with_on", made + " * on () group_left () vector(2)"},
+		// group_left / group_right set each listed label from the other side: a listed label it lacks is removed
+		{"group_left_listed_missing_rhs", made + " / on (outcome) group_left (payment_provider) " + plain},
+		{"group_right_listed_missing_lhs", plain + " / on (outcome) group_right (payment_provider) " + made},
+		{"group_left_listed_present_rhs", plain + " / on (outcome) group_left (payment_provider) " + made},
+		{"comparison_on_resets", made + " >= bool on (outcome) " + plain},
+		{"comparison_ignoring_resets", made + " >= ignoring (payment_provider) " + plain},
 		{"unless_made_left", made + ` unless on (outcome) checkout_charges_total{outcome="x"}`},
 	}
 	keeps := map[string]bool{}
@@ -192,5 +206,83 @@ func TestLiveBinaryScopeAgreesWithTheEngine(t *testing.T) {
 			t.Errorf("%s: the engine drops payment_provider, so alert and panel must fail: %+v", tc.name, r.Findings)
 		}
 		t.Logf("%s: engine keeps=%v failures=%d", tc.name, keeps[tc.name], r.Failures())
+	}
+}
+func TestIndependentBinaryEngineReview(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "seed.yaml")
+	if err := os.WriteFile(p, []byte(dottedSeed), 0600); err != nil {
+		t.Fatal(err)
+	}
+	sd, err := seed.Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ds, err := seed.Build(sd, time.Now().UTC().Truncate(time.Minute).Add(-sd.Duration()-10*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := vm.New(ds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const plain = `checkout_charges_total{outcome="error"}`
+	const made = `label_set(checkout_charges_total{outcome="error"}, "payment_provider", "review")`
+	cases := []struct {
+		name, inner string
+		want        bool
+	}{
+		{"spot_one_to_one_rhs", plain + ` / on(outcome) ` + made, false},
+		{"spot_group_right_listed", made + ` / on(outcome) group_right(payment_provider) ` + plain, true},
+		{"spot_and_left", made + ` and on(outcome) ` + plain, true},
+		{"scalar_left_literal", `2 * ` + made, true},
+		{"scalar_left_expression", `(2-1) * ` + made, true},
+		{"scalar_left_function", `scalar(2) * ` + made, true},
+		{"vector_empty_left", `vector(2) * ` + made, true},
+		{"group_left_listed_missing_rhs", made + ` / on(outcome) group_left(payment_provider) ` + plain, false},
+		{"group_right_listed_missing_lhs", plain + ` / on(outcome) group_right(payment_provider) ` + made, false},
+		{"or_unmatched_rhs", `checkout_charges_total{outcome="absent"} or ` + made, true},
+	}
+	for _, tc := range cases {
+		expr := `sum by(payment_provider) (` + tc.inner + `)`
+		rows, err := e.Instant(expr, ds.End)
+		if err != nil || len(rows) == 0 {
+			t.Errorf("%s engine rows=%+v err=%v", tc.name, rows, err)
+			continue
+		}
+		found := false
+		for _, r := range rows {
+			for _, l := range r.Labels {
+				if l.Name == "payment_provider" && l.Value == "review" {
+					found = true
+				}
+			}
+		}
+		if found != tc.want {
+			t.Errorf("%s engine keeps=%v want=%v", tc.name, found, tc.want)
+		}
+		t.Logf("%s engine keeps=%v rows=%+v expr=%s", tc.name, found, rows, expr)
+	}
+	e.Close()
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			expr := `sum by(payment_provider) (` + tc.inner + `)`
+			r := dottedLive(t, expr)
+			t.Logf("expr=%s failures=%d findings=%+v", expr, r.Failures(), r.Findings)
+			if tc.want {
+				if r.Failures() != 0 {
+					t.Errorf("valid engine-kept label falsely rejected")
+				}
+				return
+			}
+			count := 0
+			for _, f := range r.Findings {
+				if f.Rule == "label-spelling" && strings.Contains(f.Msg, `write "payment.provider"`) {
+					count++
+				}
+			}
+			if count != 2 {
+				t.Errorf("dropped-label false green: want alert and panel naming payment.provider, got %d", count)
+			}
+		})
 	}
 }

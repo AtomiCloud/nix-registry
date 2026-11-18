@@ -537,16 +537,29 @@ func (l *liveRun) spelling(q *files.Query) bool {
 			}
 			check(t.GroupModifier.Args, both)
 			check(t.JoinModifier.Args, both)
-			// The result carries the labels of one side (measured on the embedded engine): the left side's for a
-			// one-to-one match and for group_left, the right side's for group_right; group_left/group_right
-			// add only the labels they list, taken from the other side. A query-made label on the other side
+			// The result follows VictoriaMetrics' adjustBinaryOpTags. With no on()/ignoring() and no group
+			// modifier, a scalar-like side (a number, scalar(), vector(2), a label-less single series) leaves
+			// the other side's labels whole. Otherwise the result carries the labels of one side: the left
+			// side's for a one-to-one match and for group_left, the right side's for group_right; group_left
+			// / group_right then set each listed label from the other side (a listed label the other side
+			// lacks is removed), except labels in on(), which stay. A query-made label on the other side
 			// that is not listed is dropped. or and default also return the right side's series.
 			var c map[string]bool
-			switch strings.ToLower(t.JoinModifier.Op) {
-			case "group_left":
-				c = withListed(cl, cr, t.JoinModifier.Args)
-			case "group_right":
-				c = withListed(cr, cl, t.JoinModifier.Args)
+			skip := map[string]bool{}
+			if strings.EqualFold(t.GroupModifier.Op, "on") {
+				for _, k := range t.GroupModifier.Args {
+					skip[k] = true
+				}
+			}
+			switch {
+			case t.GroupModifier.Op == "" && t.JoinModifier.Op == "" && bareOperator(t.Op) && labelFree(t.Left):
+				c = dropAll(cr, nil)
+			case t.GroupModifier.Op == "" && t.JoinModifier.Op == "" && bareOperator(t.Op) && labelFree(t.Right):
+				c = dropAll(cl, nil)
+			case strings.EqualFold(t.JoinModifier.Op, "group_left"):
+				c = withListed(cl, cr, t.JoinModifier.Args, skip, l.labelNames)
+			case strings.EqualFold(t.JoinModifier.Op, "group_right"):
+				c = withListed(cr, cl, t.JoinModifier.Args, skip, l.labelNames)
 			default:
 				c = dropAll(cl, nil)
 				if op := strings.ToLower(t.Op); op == "or" || op == "default" {
@@ -554,9 +567,9 @@ func (l *liveRun) spelling(q *files.Query) bool {
 						c[k] = true
 					}
 				}
-				// Arithmetic (and bool comparison) one-to-one matching with on() keeps only the on() labels,
-				// with ignoring() drops them; the set operators, default/if/ifnot and the filtering
-				// comparisons keep the labels whole whatever on()/ignoring() says.
+				// Arithmetic and comparison one-to-one matching with on() keeps only the on() labels, with
+				// ignoring() drops them; the set operators and default/if/ifnot keep the labels whole whatever
+				// on()/ignoring() says.
 				if matchResetsLabels(t) {
 					switch strings.ToLower(t.GroupModifier.Op) {
 					case "on":
@@ -578,14 +591,40 @@ func (l *liveRun) spelling(q *files.Query) bool {
 }
 
 // matchResetsLabels reports whether a one-to-one match of this operator reduces the result labels to the
-// on() list (or drops the ignoring() list): arithmetic and bool comparison do; the set operators,
-// default/if/ifnot and the filtering comparisons keep the labels whole.
+// on() list (or drops the ignoring() list): arithmetic and comparison go through adjustBinaryOpTags and do;
+// the set operators and default/if/ifnot have their own functions and keep the labels whole.
 func matchResetsLabels(t *metricsql.BinaryOpExpr) bool {
 	switch t.Op {
-	case "+", "-", "*", "/", "%", "^", "atan2":
+	case "+", "-", "*", "/", "%", "^", "atan2", "==", "!=", ">", "<", ">=", "<=":
 		return true
-	case "==", "!=", ">", "<", ">=", "<=":
-		return t.Bool
+	}
+	return false
+}
+
+// bareOperator is an operator that goes through the scalar fast path of adjustBinaryOpTags (arithmetic and
+// comparison), not the set operators or default/if/ifnot.
+func bareOperator(op string) bool { return matchResetsLabels(&metricsql.BinaryOpExpr{Op: op}) }
+
+// labelFree reports whether the expression is statically a single series with no labels, which the engine
+// treats as a scalar in a binary operation (isScalar): numbers, durations, scalar() and the time functions,
+// vector() of such, parentheses and arithmetic of such, and a reducing aggregation with no labels left.
+func labelFree(e metricsql.Expr) bool {
+	switch t := e.(type) {
+	case *metricsql.NumberExpr, *metricsql.DurationExpr:
+		return true
+	case *metricsql.BinaryOpExpr:
+		return labelFree(t.Left) && labelFree(t.Right)
+	case *metricsql.FuncExpr:
+		switch strings.ToLower(t.Name) {
+		case "now", "pi", "scalar", "start", "end", "step", "time", "timezone_offset":
+			return true
+		case "vector", "":
+			return len(t.Args) == 1 && labelFree(t.Args[0])
+		}
+	case *metricsql.AggrFuncExpr:
+		name := strings.ToLower(t.Name)
+		return reducingAggregations[name] && name != "count_values" && strings.EqualFold(t.Modifier.Op, "by") && len(t.Modifier.Args) == 0 ||
+			reducingAggregations[name] && name != "count_values" && t.Modifier.Op == ""
 	}
 	return false
 }
@@ -598,12 +637,19 @@ var reducingAggregations = map[string]bool{
 	"count_values": true, "histogram": true,
 }
 
-// withListed is the labels of the kept side plus the listed labels the other side has.
-func withListed(kept, other map[string]bool, listed []string) map[string]bool {
+// withListed is the labels of the kept side with each listed label set from the other side, as group_left /
+// group_right do: a listed label the other side has is present; one it lacks is removed (the other side's
+// empty value replaces it), except labels in on() (skip), which stay. A listed name that is a stored label of the
+// seed is taken as present (the other side's stored value is copied; only made labels are tracked here).
+func withListed(kept, other map[string]bool, listed []string, skip, stored map[string]bool) map[string]bool {
 	out := dropAll(kept, nil)
 	for _, k := range listed {
-		if other[k] {
+		switch {
+		case skip[k]:
+		case other[k] || stored[k]:
 			out[k] = true
+		default:
+			delete(out, k)
 		}
 	}
 	return out
