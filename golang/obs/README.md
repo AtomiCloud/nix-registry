@@ -2158,6 +2158,10 @@ Tempo: trace-to-logs 2, metric-to-traces 2, span-to-profile 2) and `TestParityPr
 
 ## Not tested
 
+- Cross-architecture byte equality of histogram `_sum` floats: arm64's fused multiply-add already made
+  these differ from amd64 in 0.4. The original full byte goldens run on amd64; the portable legacy
+  goldens pin counter, log and histogram bucket/count bytes on every architecture.
+
 Everything in this tool that no test, measurement or real run has proven, in one place. Each
 item says what is missing; the section it came from has the detail. Everything not listed here
 is MEASURED (a test or a run in this repository) or FROM SOURCE (read in the pinned upstream

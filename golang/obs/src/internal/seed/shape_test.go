@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +23,13 @@ func datasetHash(t *testing.T, ds *Dataset) string {
 }
 
 func TestLegacyShapeGolden(t *testing.T) {
+	// These original full byte hashes were measured on amd64 before the change.
+	// Go's pre-existing arm64 fused multiply-add math makes histogram _sum floats
+	// differ from amd64 (already true in 0.4). The portable golden below still
+	// pins counters, logs and histogram bucket/count bytes on every architecture.
+	if runtime.GOARCH != "amd64" {
+		t.Skip("full histogram _sum byte golden is amd64-specific: pre-existing arm64 fused multiply-add rounding differs; portable legacy bytes are checked separately")
+	}
 	want := map[string]string{"flat": "a68c095990e0d7e094ee0f0f833e9a15abe5b807e3065d1e94961d829ab601cb", "daily_wave": "bdd2ae689698682b98066ec7e5a31eb0237c77914e4e5d61525cb878c260926b"}
 	for _, shape := range []string{"flat", "daily_wave"} {
 		s := load(t, strings.Replace(doc, "requests: 5/s", "requests: 5/s, shape: "+shape, 1))
@@ -32,6 +40,29 @@ func TestLegacyShapeGolden(t *testing.T) {
 		t.Logf("%s sha256=%s", shape, datasetHash(t, ds))
 		if got := datasetHash(t, ds); got != want[shape] {
 			t.Errorf("legacy %s bytes changed: %s", shape, got)
+		}
+	}
+}
+
+func TestLegacyPortableGolden(t *testing.T) {
+	// Captured from untouched 70b4358 sources, not from the new generator. Keep
+	// every byte except the architecture-sensitive floating histogram sums.
+	want := map[string]string{"flat": "32d7c48e185b32b442ead72424023af44363aeb7e89f75c74899430261b01e2f", "daily_wave": "14a10794cf351f75370f3dd8f71b48ae5473503a0c373c1d3c09f447e5ce91b0"}
+	for _, shape := range []string{"flat", "daily_wave"} {
+		s := load(t, strings.Replace(doc, "requests: 5/s", "requests: 5/s, shape: "+shape, 1))
+		ds, err := Build(s, time.Unix(1_700_000_000, 0).UTC())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for key, sr := range ds.Series {
+			for _, label := range sr.Labels {
+				if label.Name == "__name__" && strings.HasSuffix(label.Value, "_sum") {
+					delete(ds.Series, key)
+				}
+			}
+		}
+		if got := datasetHash(t, ds); got != want[shape] {
+			t.Errorf("legacy %s portable bytes changed: %s", shape, got)
 		}
 	}
 }
