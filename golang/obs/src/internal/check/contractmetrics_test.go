@@ -245,3 +245,50 @@ func TestDottedLabelsAreTheStoredSpelling(t *testing.T) {
 	wantRed(t, "", `sum by ("k8s.pod.name") (rate(checkout_charges_total[5m]))`, "contract-pod-label", "k8s.pod.name")
 	wantRed(t, "", `sum by (k8s_pod_name) (rate(checkout_charges_total[5m]))`, "contract-pod-label", "k8s_pod_name")
 }
+
+// A platform metric's expanded stored names (unit word, total-before-unit) are selectable by regex
+// exactly as they are by name: the regex candidates are the names Lookup accepts.
+func TestRegexPlatformNameMatchesExact(t *testing.T) {
+	const platformContract = `
+service: checkout
+metrics:
+  checkout.charges:
+    kind: counter
+    budget: 20
+platform_metrics:
+  system.cpu.frequency: []
+  requests_total: []
+`
+	run := func(q string) []string {
+		t.Helper()
+		c, err := contract.Parse("c.yaml", []byte(platformContract))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if is := c.Validate(); len(is) > 0 {
+			t.Fatal(is)
+		}
+		e, err := metricsql.Parse(q)
+		if err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+		r := newReport()
+		contractMetrics(r, &files.Query{File: "f", Where: "w", Expr: ""}, e, c)
+		var out []string
+		for _, f := range r.Findings {
+			out = append(out, "["+f.Rule+"] "+f.Msg)
+		}
+		return out
+	}
+	for _, name := range []string{"system_cpu_frequency_hertz", "requests_seconds_total", "system_cpu_frequency"} {
+		if got := run(name); len(got) > 0 {
+			t.Errorf("exact %s: %v", name, got)
+		}
+		if got := run(`{__name__=~"` + name + `"}`); len(got) > 0 {
+			t.Errorf("regex %s: %v (exact passes, regex must too)", name, got)
+		}
+	}
+	if got := strings.Join(run(`{__name__=~"system_cpu_frequency_hertzz"}`), " "); !strings.Contains(got, "contract-undeclared-metric") {
+		t.Errorf("a name nobody stores must still be refused, got %q", got)
+	}
+}
