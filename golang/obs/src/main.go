@@ -22,13 +22,13 @@ var version = "dev"
 const usage = `obs: the observability check tool
 
 usage:
-  obs query --static [--dir observability] [--names] [--event-rule auto|on|off]
+  obs query --static [--dir observability] [--names] [--event-rule auto|on|off] [--contracts auto|none]
   obs query --live   [--dir observability] [--seed seed.yaml] [--base unix] [--names] [--vl-settings victorialogs-settings.yaml] [--tempo-config tempo.yaml]
   obs alerts [--dir observability] [--seed seed.yaml] [--base unix] [--out results.json] [--vl-settings victorialogs-settings.yaml] [--tempo-config tempo.yaml]
               [--workers n] [--steps steps.json] [--recorded recorded.json]
   obs assert --series FILE [--dir observability] [--pods n] [--unknown warn|fail|ignore]
   obs profile summarize|baseline|compare   (obs profile help)
-  obs check [--dir observability] [--pods n] [--landscapes n]   (also: the evaluator versions this obs embeds, against <dir>/obs.yaml)
+  obs check [--dir observability] [--pods n] [--landscapes n] [--contracts auto|none]   (also: the evaluator versions this obs embeds, against <dir>/obs.yaml)
   obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
   obs sandbox up [--dir observability] [--seed seed.yaml] [--project name] [--port-base n] [--runtime docker|podman] [--reseed]
   obs sandbox down|status [--dir observability] [--project name] [--runtime docker|podman]
@@ -145,7 +145,12 @@ func runQuery(args []string, stdout, stderr io.Writer) int {
 	base := fs.Int64("base", 0, "unix seconds of the seed's start (default: ends in the past)")
 	names := fs.Bool("names", false, "print the names each query reads")
 	eventRule := fs.String("event-rule", "auto", "a LogsQL alert must name a contract event: auto (only when <dir>/contract.yaml exists), on, off")
+	contracts := fs.String("contracts", "auto", "which contracts to read: auto (this folder's and every other observability/contract.yaml of the repository) or none (this folder's only)")
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *contracts != "auto" && *contracts != "none" {
+		fmt.Fprintf(stderr, "obs query: --contracts %q: want auto or none\n", *contracts)
 		return 2
 	}
 	if *static == *live {
@@ -165,7 +170,7 @@ func runQuery(args []string, stdout, stderr io.Writer) int {
 	if rc := gateObsYaml(of, "obs query", stdout); rc != 0 {
 		return rc
 	}
-	o := check.Options{Dir: *dir, SeedPath: *seedPath, VLSettings: *vlSettings, TempoConfig: *tempoConfig, Base: *base, Names: *names, EventRule: *eventRule, Obs: of, Out: stdout}
+	o := check.Options{Dir: *dir, SeedPath: *seedPath, VLSettings: *vlSettings, TempoConfig: *tempoConfig, Base: *base, Names: *names, EventRule: *eventRule, Obs: of, Out: stdout, NoOtherContracts: *contracts == "none"}
 	set, err := files.Load(*dir)
 	if err != nil {
 		fmt.Fprintf(stderr, "obs query: %v\n", err)

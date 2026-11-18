@@ -30,6 +30,39 @@ func loadContract(o *Options) (c *contract.Contract, problems []string) {
 		}
 		return nil, problems
 	}
+	if o.NoOtherContracts {
+		o.Contract = c
+		return c, nil
+	}
+	// The repository's other contracts: a box dashboard reads the cluster contract's metrics.
+	var others []*contract.Contract
+	found, derr := contract.Discover(o.Dir)
+	if derr != nil {
+		problems = append(problems, derr.Error())
+	}
+	for _, p := range found {
+		oc, err := contract.Load(p)
+		if err != nil {
+			problems = append(problems, strings.ReplaceAll(err.Error(), p, contract.RelPath(p)))
+			continue
+		}
+		if is := oc.Validate(); len(is) > 0 {
+			for _, i := range is {
+				problems = append(problems, oc.Rel()+": "+i.String())
+			}
+			continue
+		}
+		others = append(others, oc)
+	}
+	for _, i := range contract.Clashes(append([]*contract.Contract{c}, others...)) {
+		problems = append(problems, i.String())
+	}
+	if len(problems) > 0 {
+		return nil, problems
+	}
+	if len(others) > 0 {
+		c = contract.Merge(c, others)
+	}
 	o.Contract = c
 	return c, nil
 }

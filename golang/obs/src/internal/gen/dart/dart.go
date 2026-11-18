@@ -104,10 +104,11 @@ var reserved = map[string]bool{
 	"values": true, "index": true, "name": true, "wire": true, "entries": true,
 }
 
-// clean turns every character that cannot be in an identifier into a word break (it's -> it_s).
+// clean turns every character that cannot be in a Dart identifier into a word break (it's -> it_s,
+// <none> -> _none_). A Dart identifier is ASCII only, so a letter outside ASCII is a break too.
 func clean(s string) string {
 	return strings.Map(func(r rune) rune {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '.' || r == '_' || r == '-' || r == ' ' || r == '/' {
+		if r < unicode.MaxASCII && (unicode.IsLetter(r) || unicode.IsDigit(r)) || r == '.' || r == '_' || r == '-' || r == ' ' || r == '/' {
 			return r
 		}
 		return '_'
@@ -151,7 +152,7 @@ func (g *emitter) declare(id, what string) error {
 }
 
 // members makes member identifiers (enum values, label fields) and fails on a clash.
-func members(path string, names []string) ([]string, error) {
+func members(path, at string, names []string) ([]string, error) {
 	seen := map[string]string{}
 	out := make([]string, 0, len(names))
 	for _, n := range names {
@@ -160,7 +161,7 @@ func members(path string, names []string) ([]string, error) {
 			m += "_"
 		}
 		if prev, dup := seen[m]; dup {
-			return nil, fmt.Errorf("%s: %q and %q both make the Dart member %q; rename one", path, prev, n, m)
+			return nil, fmt.Errorf("%s: %q and %q both make the Dart member %q; rename one (%s)", path, prev, n, m, at)
 		}
 		seen[m] = n
 		out = append(out, m)
@@ -186,7 +187,7 @@ func (g *emitter) plan() error {
 				return err
 			}
 			g.typeRef[n] = pascal(n)
-			vals, err := members(from, t.Values)
+			vals, err := members(from, c.TypeAt(n), t.Values)
 			if err != nil {
 				return err
 			}
@@ -220,7 +221,7 @@ func (g *emitter) plan() error {
 				return err
 			}
 		}
-		ps, err := members(p+".labels", c.Metrics[m].LabelOrder)
+		ps, err := members(p+".labels", c.At(c.Metrics[m].Line), c.Metrics[m].LabelOrder)
 		if err != nil {
 			return err
 		}
@@ -233,7 +234,7 @@ func (g *emitter) plan() error {
 				return err
 			}
 		}
-		ps, err := members(p+".attributes", c.Spans[s].AttrOrder)
+		ps, err := members(p+".attributes", c.Rel(), c.Spans[s].AttrOrder)
 		if err != nil {
 			return err
 		}

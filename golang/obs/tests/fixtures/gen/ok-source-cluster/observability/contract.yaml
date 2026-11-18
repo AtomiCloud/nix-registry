@@ -1,0 +1,349 @@
+# Cluster metrics the platform reads but does not make. Every entry has `source:`, so `obs gen` skips it.
+# Copied from the platform draft with made-up consumer names; ranges are estimates.
+# Changed from the draft: kube_pod_info labels created_by_kind, host_network and priority_class follow pod (as drafted they
+# multiplied to 3300 series against a budget of 110) and the types they used are gone.
+service: cluster-monitoring
+types:
+  pod: { kind: estimate, min: 28, max: 110, churn_per_day: 25 }
+  job_name: { kind: estimate, min: 0, max: 30, churn_per_day: 25 }
+  deployment: { kind: estimate, min: 20, max: 60, churn_per_day: 1 }
+  statefulset: { kind: estimate, min: 4, max: 20, churn_per_day: 0 }
+  daemonset: { kind: estimate, min: 1, max: 10, churn_per_day: 0 }
+  persistentvolumeclaim: { kind: estimate, min: 3, max: 20, churn_per_day: 0 }
+  node: { kind: estimate, min: 1, max: 2, churn_per_day: 0 }
+  pod_phase: { kind: enum, values: [Pending, Running, Succeeded, Failed, Unknown] }
+  pvc_phase: { kind: enum, values: [Pending, Bound, Lost] }
+  node_condition: { kind: enum, values: [Ready, MemoryPressure, DiskPressure, PIDPressure] }
+  condition_status: { kind: enum, values: ['true', 'false', 'unknown'] }
+  node_resource: { kind: enum, values: [cpu, memory, pods, ephemeral_storage, hugepages_2Mi] }
+  container_resource: { kind: enum, values: [cpu, memory] }
+  pod_reason: { kind: enum, values: [Evicted] }
+  cpu: { kind: enum, values: [total] }
+metrics:
+  # kube-state-metrics: workloads
+  kube_deployment_spec_replicas:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 60
+    used_by: [hub/alert/deployment-unavailable]
+    labels:
+      deployment: deployment
+      namespace: { follows: deployment }
+  kube_deployment_status_replicas:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 60
+    used_by: [hub/dash/kube-state-metrics]
+    labels:
+      deployment: deployment
+      namespace: { follows: deployment }
+  kube_deployment_status_replicas_available:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 60
+    used_by: [hub/alert/deployment-unavailable]
+    labels:
+      deployment: deployment
+      namespace: { follows: deployment }
+  kube_deployment_status_replicas_unavailable:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 60
+    used_by: [hub/alert/deployment-unavailable, hub/dash/kube-state-metrics]
+    labels:
+      deployment: deployment
+      namespace: { follows: deployment }
+  kube_deployment_status_replicas_updated:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 60
+    used_by: [hub/dash/kube-state-metrics]
+    labels:
+      deployment: deployment
+      namespace: { follows: deployment }
+  kube_statefulset_replicas:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 20
+    used_by: [hub/alert/statefulset-unavailable]
+    labels:
+      statefulset: statefulset
+      namespace: { follows: statefulset }
+  kube_statefulset_status_replicas:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 20
+    used_by: [hub/dash/kube-state-metrics]
+    labels:
+      statefulset: statefulset
+      namespace: { follows: statefulset }
+  kube_statefulset_status_replicas_ready:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 20
+    used_by: [hub/alert/statefulset-unavailable, hub/dash/kube-state-metrics]
+    labels:
+      statefulset: statefulset
+      namespace: { follows: statefulset }
+  kube_daemonset_status_desired_number_scheduled:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 10
+    used_by: [hub/alert/daemonset-unavailable]
+    labels:
+      daemonset: daemonset
+      namespace: { follows: daemonset }
+  kube_daemonset_status_number_available:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 10
+    used_by: [hub/alert/daemonset-unavailable]
+    labels:
+      daemonset: daemonset
+      namespace: { follows: daemonset }
+  kube_job_status_active:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 30
+    used_by: [hub/dash/kube-state-metrics]
+    labels:
+      job_name: job_name
+      namespace: { follows: job_name }
+  kube_job_status_succeeded:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 30
+    used_by: [hub/dash/kube-state-metrics]
+    labels:
+      job_name: job_name
+      namespace: { follows: job_name }
+  kube_job_status_failed:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 30
+    used_by: [hub/alert/job-failed, hub/dash/kube-state-metrics]
+    labels:
+      job_name: job_name
+      namespace: { follows: job_name }
+  kube_job_status_completion_time:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 30
+    used_by: [hub/dash/kube-state-metrics]
+    labels:
+      job_name: job_name
+      namespace: { follows: job_name }
+  # kube-state-metrics: pods and containers
+  kube_pod_info:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 110
+    used_by: [hub/dash/kube-state-metrics]
+    labels:
+      pod: pod
+      uid: { follows: pod }
+      namespace: { follows: pod }
+      node: { follows: pod }
+      pod_ip: { follows: pod }
+      host_ip: { follows: node }
+      created_by_kind: { follows: pod }
+      created_by_name: { follows: pod }
+      host_network: { follows: pod }
+      priority_class: { follows: pod }
+  kube_pod_status_phase:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 550
+    used_by: [hub/alert/pod-not-ready, hub/dash/kube-state-metrics]
+    labels:
+      pod: pod
+      uid: { follows: pod }
+      namespace: { follows: pod }
+      phase: pod_phase
+  kube_pod_status_reason:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 110
+    used_by: [hub/dash/kube-state-metrics]
+    labels:
+      pod: pod
+      uid: { follows: pod }
+      namespace: { follows: pod }
+      reason: pod_reason
+  kube_pod_container_status_restarts_total:
+    source: kube-state-metrics
+    kind: counter
+    budget: 130
+    used_by:
+      [
+        hub/alert/pod-crashloop,
+        hub/dash/kube-state-metrics,
+        hub/dash/store-vm,
+        hub/dash/store-logs,
+        hub/dash/store-traces,
+        hub/dash/store-gateway,
+      ]
+    labels:
+      pod: pod
+      uid: { follows: pod }
+      namespace: { follows: pod }
+      container: { follows: pod }
+  kube_pod_container_status_running:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 130
+    used_by: [hub/dash/kube-state-metrics]
+    labels:
+      pod: pod
+      uid: { follows: pod }
+      namespace: { follows: pod }
+      container: { follows: pod }
+  kube_pod_container_status_waiting:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 130
+    used_by: [hub/dash/kube-state-metrics]
+    labels:
+      pod: pod
+      uid: { follows: pod }
+      namespace: { follows: pod }
+      container: { follows: pod }
+  kube_pod_container_status_terminated:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 130
+    used_by: [hub/dash/kube-state-metrics]
+    labels:
+      pod: pod
+      uid: { follows: pod }
+      namespace: { follows: pod }
+      container: { follows: pod }
+  kube_pod_container_resource_requests:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 260
+    used_by: [hub/dash/kube-state-metrics]
+    labels:
+      pod: pod
+      uid: { follows: pod }
+      namespace: { follows: pod }
+      node: { follows: pod }
+      container: { follows: pod }
+      resource: container_resource
+      unit: { follows: resource }
+  kube_pod_container_resource_limits:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 260
+    used_by:
+      [
+        hub/dash/kube-state-metrics,
+        hub/dash/store-vm,
+        hub/dash/store-logs,
+        hub/dash/store-traces,
+        hub/dash/store-gateway,
+      ]
+    labels:
+      pod: pod
+      uid: { follows: pod }
+      namespace: { follows: pod }
+      node: { follows: pod }
+      container: { follows: pod }
+      resource: container_resource
+      unit: { follows: resource }
+  # kube-state-metrics: nodes and volumes
+  kube_node_info:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 2
+    used_by: [hub/dash/kube-state-metrics]
+    labels:
+      node: node
+      container_runtime_version: { follows: node }
+      kernel_version: { follows: node }
+      kubelet_version: { follows: node }
+      kubeproxy_version: { follows: node }
+      os_image: { follows: node }
+      internal_ip: { follows: node }
+      pod_cidr: { follows: node }
+      provider_id: { follows: node }
+      system_uuid: { follows: node }
+  kube_node_spec_unschedulable:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 2
+    used_by: [hub/dash/kube-state-metrics]
+    labels:
+      node: node
+  kube_node_status_condition:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 24
+    used_by: [hub/dash/kube-state-metrics]
+    labels:
+      node: node
+      condition: node_condition
+      status: condition_status
+  kube_node_status_capacity:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 10
+    used_by: [hub/dash/kube-state-metrics]
+    labels:
+      node: node
+      resource: node_resource
+      unit: { follows: resource }
+  kube_node_status_allocatable:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 10
+    used_by: [hub/dash/kube-state-metrics]
+    labels:
+      node: node
+      resource: node_resource
+      unit: { follows: resource }
+  kube_persistentvolumeclaim_status_phase:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 60
+    used_by: [hub/dash/kube-state-metrics]
+    labels:
+      persistentvolumeclaim: persistentvolumeclaim
+      namespace: { follows: persistentvolumeclaim }
+      phase: pvc_phase
+  kube_persistentvolumeclaim_resource_requests_storage_bytes:
+    source: kube-state-metrics
+    kind: gauge
+    budget: 20
+    used_by: [hub/dash/kube-state-metrics]
+    labels:
+      persistentvolumeclaim: persistentvolumeclaim
+      namespace: { follows: persistentvolumeclaim }
+  # kubelet (cadvisor endpoint)
+  container_cpu_usage_seconds_total:
+    source: cadvisor
+    kind: counter
+    budget: 130
+    used_by: [hub/dash/store-vm, hub/dash/store-logs, hub/dash/store-traces, hub/dash/store-gateway]
+    labels:
+      pod: pod
+      namespace: { follows: pod }
+      node: { follows: pod }
+      container: { follows: pod }
+      image: { follows: container }
+      id: { follows: container }
+      name: { follows: container }
+      cpu: cpu
+  container_memory_working_set_bytes:
+    source: cadvisor
+    kind: gauge
+    budget: 130
+    used_by: [hub/dash/store-vm, hub/dash/store-logs, hub/dash/store-traces, hub/dash/store-gateway]
+    labels:
+      pod: pod
+      namespace: { follows: pod }
+      node: { follows: pod }
+      container: { follows: pod }
+      image: { follows: container }
+      id: { follows: container }
+      name: { follows: container }
