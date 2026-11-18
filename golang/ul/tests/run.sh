@@ -65,15 +65,15 @@ expect_exit 0 "clean: all json" "$UL" all --root "$clean"
 if jq -e '.schema == "ul/v1" and (.words | length) == 9 and (.namespaces | length) == 3 and (.problems | length) == 0' >/dev/null <<<"$out"; then
   ok "clean: ul/v1 shape"
 else bad "clean: ul/v1 shape: $out"; fi
-jq -e '[.words[] | select(.id == "durian.cloud/engineering/standards/OOP#OCP")][0] | .breadcrumb == ["durian.cloud","engineering","standards","OOP"] and .replacedBy == null and (.mentions | length) == 1' >/dev/null <<<"$out" && ok "clean: OCP fields" || bad "clean: OCP fields"
+jq -e '[.words[] | select(.id == "example.org/cooking/kitchen#Frying pan")][0] | .breadcrumb == ["example.org","cooking","kitchen"] and .replacedBy == null and (.mentions | length) == 1' >/dev/null <<<"$out" && ok "clean: Frying pan fields" || bad "clean: Frying pan fields"
 expect_exit 0 "clean: all md" "$UL" all --root "$clean" --format md
-grep -q '^durian.cloud > shop > billing > pay$' <<<"$out" && ok "clean: breadcrumb line" || bad "clean: breadcrumb line"
-expect_exit 0 "clean: lookup by alias" "$UL" lookup "open-close principle" --root "$clean" --format json
-[ "$(jq -r '.matches[0].word' <<<"$out")" = OCP ] && ok "clean: lookup finds OCP" || bad "clean: lookup: $out"
-expect_exit 1 "clean: lookup not found" "$UL" lookup Plugn --root "$clean"
-grep -q 'near: Plugin' <<<"$err" && ok "clean: near matches" || bad "clean: near matches: $err"
-expect_exit 0 "clean: lookup --from ranks the closest namespace" "$UL" lookup plugin --root "$clean" --from plugins/pay/x.go --format json
-[ "$(jq -r '.matches[0].namespace' <<<"$out")" = durian.cloud/engineering/standards/OOP ] && ok "clean: --from order" || bad "clean: --from order: $out"
+grep -q '^example.org > cooking > pastry > bread$' <<<"$out" && ok "clean: breadcrumb line" || bad "clean: breadcrumb line"
+expect_exit 0 "clean: lookup by alias" "$UL" lookup "flat pan" --root "$clean" --format json
+[ "$(jq -r '.matches[0].word' <<<"$out")" = "Frying pan" ] && ok "clean: lookup finds Frying pan" || bad "clean: lookup: $out"
+expect_exit 1 "clean: lookup not found" "$UL" lookup Ovn --root "$clean"
+grep -q 'near: Oven' <<<"$err" && ok "clean: near matches" || bad "clean: near matches: $err"
+expect_exit 0 "clean: lookup --from ranks the closest namespace" "$UL" lookup oven --root "$clean" --from "$clean/docs/domain/pastry/x.go" --format json
+[ "$(jq -r '.matches[0].namespace' <<<"$out")" = example.org/cooking/pastry ] && ok "clean: --from order" || bad "clean: --from order: $out"
 
 # --- every planted failure is red with its code, and only its code -----------------------
 for d in "$SRC"/testdata/bad/*/; do
@@ -93,7 +93,7 @@ FY_SESSION_ID=x UL_SESSION=x "$UL" all --root "$clean" >"$work/all.json" && ok "
 if grep -qE '"(session|layer|overrides)"' "$work/all.json"; then bad "ul/v1 output has session, layer or overrides"; else ok "ul/v1 output has no session, layer or overrides"; fi
 
 # --- gen drift detection -----------------------------------------------------------------
-md="$clean/docs/standard/oop/UL.md"
+md="$clean/docs/standard/kitchen/UL.md"
 echo "drift" >>"$md"
 expect_exit 1 "gen --check detects drift" "$UL" gen --check --root "$clean"
 grep -q 'UL301' <<<"$out" && ok "gen --check names UL301" || bad "gen --check output: $out"
@@ -103,7 +103,7 @@ expect_exit 0 "gen --check is green again" "$UL" gen --check --root "$clean"
 rm "$md"
 expect_exit 1 "gen --check: a missing UL.md is drift" "$UL" gen --check --root "$clean"
 expect_exit 0 "gen writes it back" "$UL" gen --root "$clean"
-cmp -s "$md" "$SRC/testdata/clean/docs/standard/oop/UL.md" && ok "gen output equals the committed golden UL.md" || bad "gen output differs from the golden UL.md"
+cmp -s "$md" "$SRC/testdata/clean/docs/standard/kitchen/UL.md" && ok "gen output equals the committed golden UL.md" || bad "gen output differs from the golden UL.md"
 
 # --- speed: 1,000 words in 100 files, every command under the ceiling ---------------------
 fast="$work/fast"
