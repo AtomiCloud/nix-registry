@@ -15,7 +15,7 @@ spec:
       data:
         - refId: A
           relativeTimeRange: { from: 600, to: 0 }
-          datasourceUid: primordial-metrics
+          datasourceUid: fixture-metrics
           model:
             expr: 'sum by ("k8s.pod.name") (rate(checkout_charges_total{outcome="error"}[5m])) > 0.01'
             instant: true

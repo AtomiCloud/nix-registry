@@ -1,5 +1,5 @@
 title: Crash logs (panic / fatal)
 datasource: logs
-expr: '_time:10m {cluster="primordial"} ~`(?i)(panic:|fatal error:)` | stats by (service) count() hits'
+expr: '_time:10m {cluster="fixture-cluster"} ~`(?i)(panic:|fatal error:)` | stats by (service) count() hits'
 for: 5m
 summary: 'A service logged a panic.'

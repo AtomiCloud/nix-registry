@@ -15,7 +15,7 @@ spec:
       data:
         - refId: A
           relativeTimeRange: { from: 300, to: 0 }
-          datasourceUid: primordial-logs
+          datasourceUid: fixture-logs
           model:
             expr: '_time:5m {durian.cloud.service="checkout"} "durian.cloud/event":"checkout.charge.failed" | stats by (payment.provider) count() failed | filter failed:>100'
             queryType: stats

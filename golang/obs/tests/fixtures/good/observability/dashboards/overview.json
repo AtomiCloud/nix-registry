@@ -21,7 +21,7 @@
       "type": "timeseries",
       "title": "Charges by outcome",
       "interval": "1m",
-      "datasource": { "type": "prometheus", "uid": "primordial-metrics" },
+      "datasource": { "type": "prometheus", "uid": "fixture-metrics" },
       "targets": [
         {
           "refId": "A",
@@ -50,7 +50,7 @@
           "id": 4,
           "type": "logs",
           "title": "Failed charges",
-          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "primordial-logs" },
+          "datasource": { "type": "victoriametrics-logs-datasource", "uid": "fixture-logs" },
           "targets": [
             {
               "refId": "A",
