@@ -29,6 +29,7 @@ type Options struct {
 	SeedPath  string   // default <Dir>/seed.yaml (only used to fill query variables)
 	Base      string   // git ref the changed dashboards are measured against
 	All       bool     // every dashboard, not only the changed ones
+	Keep      bool     // ask the calling agent to leave the sandbox running after review
 	Files     []string // explicit dashboard files (relative to Dir); skips git
 	Checklist string   // the visual checklist markdown
 	Out       string   // where the screenshots go (as printed in the prompt)
@@ -89,6 +90,7 @@ type Plan struct {
 	Checklist     []string      `json:"checklist"`
 	Dashboards    []Dashboard   `json:"dashboards"`
 	Prompt        string        `json:"prompt"`
+	Keep          bool          `json:"keep,omitempty"`
 }
 
 // Setup does the work. It never fails the process: a failure is Plan.OK=false and Plan.Error.
@@ -107,6 +109,7 @@ func Setup(ctx context.Context, o Options, up func(context.Context) (*sandbox.In
 		o.Git = gitRun
 	}
 	p := &Plan{Base: o.Base, Viewport: Viewport{o.Width, o.Height}, Project: o.Project, Runtime: o.Runtime, ChecklistFile: o.Checklist, Checklist: []string{}, Dashboards: []Dashboard{}}
+	p.Keep = o.Keep
 	defer func() { p.Prompt = render(p) }()
 
 	items, err := ReadChecklist(o.Checklist)
@@ -293,6 +296,31 @@ func buildDashboard(o Options, info *sandbox.Info, ds *seed.Dataset, rel string)
 		}
 	}
 	walk(raw.Panels)
+	if id := info.AlertStatePanels[uid]; id > 0 {
+		d.Panels = append(d.Panels, Panel{ID: id, Title: "Sandbox alert state (Grafana live)", Type: "alertlist",
+			URL:  info.Grafana + path + "?" + q(fmt.Sprintf("viewPanel=panel-%d", id), "kiosk"),
+			Shot: filepath.ToSlash(filepath.Join(o.Out, fmt.Sprintf("%s-panel-%d.png", base, id)))})
+	}
+	for j := range d.Panels {
+		switch d.Panels[j].ExpectedEmpty {
+		case "traces":
+			if info.TracesSeeded {
+				d.Panels[j].ExpectedEmpty = ""
+			}
+		case "profiles":
+			if info.ProfilesSeeded {
+				d.Panels[j].ExpectedEmpty = ""
+			}
+		case "traces and profiles":
+			if info.TracesSeeded && info.ProfilesSeeded {
+				d.Panels[j].ExpectedEmpty = ""
+			} else if info.TracesSeeded {
+				d.Panels[j].ExpectedEmpty = "profiles"
+			} else if info.ProfilesSeeded {
+				d.Panels[j].ExpectedEmpty = "traces"
+			}
+		}
+	}
 	sort.SliceStable(d.Panels, func(i, j int) bool { return d.Panels[i].ID < d.Panels[j].ID })
 	return d, nil
 }

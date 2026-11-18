@@ -75,7 +75,7 @@ obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
 obs sandbox up [--dir observability] [--seed seed.yaml] [--project name] [--port-base n] [--runtime docker|podman] [--reseed]
 obs sandbox down|status [--dir observability] [--project name] [--runtime docker|podman]
 obs scrape --target <url> [--label name=value] [--interval 15s] [--once] [--job name] [--vm-url url] [--dir observability] [--project name]
-obs look   [--base origin/main] [--all] [--json] [--file dashboards/x.json] [--checklist file.md] [--out obs-look] [--width 1600] [--height 1000]
+obs look   [--base origin/main] [--all] [--json] [--keep] [--seed-base unix] [--file dashboards/x.json] [--checklist file.md] [--out obs-look] [--width 1600] [--height 1000]
          [--dir observability] [--seed seed.yaml] [--project name] [--port-base n] [--runtime docker|podman] [--reseed]
 obs links [--dir observability] [--seed seed.yaml] [--base unix]
 obs version
@@ -223,6 +223,37 @@ logs: # which log event each metric event writes
 ```
 
 `incidents:` names files in `incidents/` that `obs alerts` plays (see `obs alerts`). `traces:` defines the seed's traces (see `obs links`); they drive `obs query --live` (Tempo) and `obs links`.
+
+### Seed shape: level, trend, cycle, spikes, gaps and noise
+
+`traffic.settings` opts into the same five parts that `obs live shape` describes.
+The old `shape: flat` and `shape: daily_wave` keep their byte-identical datasets.
+With settings, `level.typical` is the request rate; `traffic.requests` remains required
+for compatibility. These example numbers match the live-shape comparison example:
+
+```yaml
+length: 168h
+random_seed: 42
+traffic:
+  requests: 40/s
+  settings:
+    level: {min: 2, typical: 40, max: 310} # requests/second before each series' share
+    trend: {change_per_day: 0.03} # +3% of typical per day, linear
+    cycle: {daily_amplitude: 0.25, peak_hour: 20, weekend_factor: 0.6}
+    spikes: {count: 4, size: 6} # four one-minute spikes, at least 6 times typical
+    gaps: {count: 2, length: 11m} # two gaps, 11 minutes in total
+    noise: 0.15 # independent uniform +/-15% of typical each second
+```
+
+The daily cycle peaks at 20:00 UTC; the optional weekend factor makes Saturdays and
+Sundays 40% lower. Trend and cycle are applied before noise and spikes; the result is
+clamped to min/max. Gaps omit metric samples and requests (including their logs and
+traces). Incident changes apply after the traffic shape, so they can exceed its bounds.
+Spike/gap positions and noise are deterministic from `random_seed`; they do not use the
+host's random generator. Validation names `seed.yaml:line` and the bad setting.
+The example is illustrative: use smaller rates or series shares for CI, especially
+when generating a week of logs/traces. A gap can overlap a spike; no traffic is emitted
+inside a gap.
 
 ### Label spelling per store (concept §2.1)
 
@@ -773,7 +804,9 @@ obs sandbox status [--dir observability] [--project name]
 
 `up` starts five containers (docker, or podman when docker is not there; `--runtime` or
 `$OBS_CONTAINER_RUNTIME` chooses) and loads them: the repo's dashboards into Grafana, the seed into
-VictoriaMetrics and VictoriaLogs. No check depends on it; it is for looking at the data.
+VictoriaMetrics and VictoriaLogs. This legacy command keeps its 0.4 ports, container
+configuration, loaders and output. `obs look` additionally seeds Tempo and Pyroscope
+(below). No check depends on a sandbox; it is for looking at the data.
 
 | Container       | Image                                                     | Host port (default) |
 | --------------- | --------------------------------------------------------- | ------------------- |
@@ -804,19 +837,26 @@ VictoriaMetrics and VictoriaLogs. No check depends on it; it is for looking at t
   `-storage.maxDailySeries`/`-maxHourlySeries` have no value in §10.4, Pyroscope's retention and raft names
   are for the cluster, S3 backends and resource requests do not exist on a laptop).
 - **Ports** are bound to `127.0.0.1` only. `--port-base 18300` moves Grafana to 18300 and the others to
-  18301 to 18304 when the defaults are taken.
+  18301 to 18304 when the defaults are taken. `obs look` additionally publishes
+  Tempo's OTLP/HTTP receiver at 4318 by default, or base+5 (18305 here). Reserve six
+  consecutive ports for look: a second sandbox at base+5 would clash with that receiver.
 - **Data.** The seed's time line ends now, so a "last hours" view has data. Grafana is open to an anonymous
   viewer (admin/admin for the API). The datasource uids are the ones the dashboards name (`fixture-metrics`
   and so on); a kind no dashboard names gets `obs-metrics`, `obs-logs`, `obs-traces`, `obs-profiles`.
   A second `up` reuses the running stack, loads the dashboards again and keeps the seed (`--reseed` loads it
-  again). The seed's `traces` are not loaded into the sandbox's Tempo (they are used by `obs query --live` and `obs links`).
+  again). With `obs look`, Tempo receives OTLP/HTTP JSON with the seed's original trace/span IDs, attributes,
+  status and parent links; the log-to-trace IDs stay the same. Pyroscope receives three
+  deterministic CPU pprofs per service/span name across the seed window: stacks are
+  `main -> obs.seed.work -> <span name>`, with 10/20/30 ms CPU samples and `span_name`
+  labels. Without traces the synthetic span is `obs.seed.work`. These are illustrative
+  profiles, not measured application performance. A partial-success span rejection fails setup.
 - `up` needs the network the first time (image pulls; Grafana downloads the datasource plugin).
 
 ## `obs look`: dashboard screenshots, reviewed by the calling agent
 
 ```text
 obs look [--base origin/main] [--all] [--file dashboards/x.json] [--checklist docs/standards/grafana-dashboards/index.md]
-         [--out obs-look] [--width 1600] [--height 1000] [--json] [sandbox flags]
+         [--out obs-look] [--width 1600] [--height 1000] [--json] [--keep] [--seed-base unix] [sandbox flags]
 ```
 
 `obs look` is the setup and a prompt; it calls no LLM, reads no key, spends nothing and posts nothing
@@ -830,14 +870,54 @@ obs look [--base origin/main] [--all] [--file dashboards/x.json] [--checklist do
    filled: a datasource variable is resolved against the sandbox's datasources first (a saved uid is kept only
    when the sandbox has it); the others take the dashboard's own current value, the first option, the first
    value on the seed, or All), the viewport and the path to save the screenshot, plus one URL per panel.
-   Panels whose datasources are all Tempo or Pyroscope are listed as "expected empty in the sandbox; mark C1 n/a"
-   (the sandbox loads no traces or profiles), so the reviewer does not fail the No-data item for them;
+   Panels are marked "expected empty" only when their signal has no loaded seed;
 4. prints the items of the visual checklist (the bullets under the "Visual checklist" heading of the
    `--checklist` file) and the layout of the one pull request comment the agent writes: the images and a
    verdict (pass, fail, unclear) with one line of evidence per item.
 
 The agent opens each URL in a browser, takes the screenshots, judges them and posts the comment. `--json`
 prints the same content (`ok`, `error`, `warnings`, `sandbox`, `dashboards`, `checklist`, `prompt`).
+
+`look` applies every named incident's changes using the same generator as `obs alerts`,
+on the displayed seed timeline. Overlapping incidents compose in definition order.
+It provisions the original alert queries, intervals, pending/recovery durations and
+NoData/Error handling into a sandbox-only Grafana folder, and adds a region annotation
+for each incident on each dashboard. The built-in annotation query is enabled, and a
+`Sandbox alert state (Grafana live)` panel shows native Firing, Pending and Normal state
+from Grafana, including inactive rules. The prompt names the marker and expected states
+per dashboard.
+
+By default the latest incident window covers now and opened at least `for:` plus two
+evaluation intervals earlier. Only the seed prefix through now is loaded; future samples
+and log rows are removed, and spans crossing now are shortened. `--seed-base <unix
+seconds>` instead keeps an explicit historical timeline; `--base` remains the git ref
+used to find changed dashboards. A seed with no incidents has no expected incident Firing.
+
+Grafana starts pending timers when its scheduler begins evaluating, so the prompt lists
+each live rule's provision time, expected Firing time (`provisioned + for + interval`),
+and the predicted window before the fixed snapshot ages out. The prediction uses the
+same existing evaluator/state machine, projecting at most ten minutes without pushing
+future data. A snapshot that cannot hold the condition through the pending duration is
+called out as a finding. The calling agent screenshots during the listed window and
+checks Grafana's actual state; `obs look` does not wait for pending timers.
+
+Historical state-change annotations explicitly say `replay (computed by obs)` and name
+the incident scenario. Each incident is evaluated independently by the existing `obs alerts`
+state machine, even when incident windows overlap; a simultaneous change cannot erase another
+scenario's firing history. The stores hold the composed timeline and its recording samples;
+the native-state forecast uses that actual composed snapshot. Replay is not Grafana's own historical state. Incident
+marker text labels declared expectations separately. Grafana's historic `/api/v1/eval`
+can also inspect the real condition at an incident time.
+
+The stack stays up for the calling agent's browser after the command exits. By default
+the prompt asks that agent to stop it after review. `--keep` instead asks the agent to
+leave it running for a person; the prompt includes the exact cleanup command. `sandbox
+up|down|status` remain available. When reusing a baseline-only seed from `sandbox up`,
+`look` asks for `sandbox down` first, so baseline and incident logs cannot be mixed.
+Stacks started by `sandbox up` or an older obs, without the published Tempo receiver, get a recreate-first
+diagnostic. A repeated default look on an expired live snapshot recreates only that
+project's labelled containers, volumes and network and says it did so; it never prunes
+or touches another project. Explicit `--seed-base` historical snapshots remain reusable.
 
 **Always exit 0**: a failed setup (no runtime, a pin mismatch, git cannot find the base), a bad flag and
 `--help` print what failed (or the usage) and `ok: false` in JSON, and never fail the CI job that calls it.
@@ -2212,6 +2292,10 @@ Tempo: trace-to-logs 2, metric-to-traces 2, span-to-profile 2) and `TestParityPr
 
 ## Not tested
 
+- Cross-architecture byte equality of histogram `_sum` floats: arm64's fused multiply-add already made
+  these differ from amd64 in 0.4. The original full byte goldens run on amd64; the portable legacy
+  goldens pin counter, log and histogram bucket/count bytes on every architecture.
+
 Everything in this tool that no test, measurement or real run has proven, in one place. Each
 item says what is missing; the section it came from has the detail. Everything not listed here
 is MEASURED (a test or a run in this repository) or FROM SOURCE (read in the pinned upstream
@@ -2231,7 +2315,8 @@ source) where its section says so.
 - `obs engines --check-chart` wired into a consumer's CI: the real chart's location in the chart registry is not specified, so the command is tested only on fixture charts ([obs engines --check-chart](#obs-engines---check-chart)). Chart pins in the nightly parity job are in the same position.
 - `obs engines --check-chart` does not check a component whose image the values never set (it uses the chart default), and reads only the image paths listed under its section.
 - `obs engines --check-chart` reads `Chart.yaml` and `values.yaml` only: an engine image set in a template or in another values file is not read, and a digest is compared with the recorded image digest, not resolved against a registry.
-- `obs sandbox up` on aarch64 and macOS, and with podman (the box that ran it has docker only); Tempo and Pyroscope take no data from the seed yet ([`obs sandbox`](#obs-sandbox-the-local-stack-for-people)).
+- `obs sandbox up` on aarch64 and macOS, and with podman (the box that ran it has docker only) ([`obs sandbox`](#obs-sandbox-the-local-stack-for-people)).
+- Actual screenshots of the sandbox's incident markers, alert state and trace/profile panels: the calling LLM must capture and judge them; obs only prepares the stack and prompt.
 - `obs look` with a pull request on GitHub: the agent posts the comment; obs only prints the prompt ([`obs look`](#obs-look-dashboard-screenshots-reviewed-by-the-calling-agent)).
 - aarch64 and macOS builds run in CI; only x86_64 Linux was run by hand.
 

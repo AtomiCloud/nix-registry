@@ -33,7 +33,7 @@ usage:
   obs sandbox up [--dir observability] [--seed seed.yaml] [--project name] [--port-base n] [--runtime docker|podman] [--reseed]
   obs sandbox down|status [--dir observability] [--project name] [--runtime docker|podman]
   obs scrape --target <url> [--label name=value] [--interval 15s] [--once] [--job name] [--vm-url url] [--dir observability] [--project name]
-  obs look   [--base origin/main] [--all] [--json] [--file dashboards/x.json] [--checklist file.md] [--out obs-look] [--width 1600] [--height 1000]
+  obs look   [--base origin/main] [--all] [--json] [--keep] [--seed-base unix] [--file dashboards/x.json] [--checklist file.md] [--out obs-look] [--width 1600] [--height 1000]
            [--dir observability] [--seed seed.yaml] [--project name] [--port-base n] [--runtime docker|podman] [--reseed]
   obs links [--dir observability] [--seed seed.yaml] [--base unix]
   obs live usage|shape|incidents|look --target local|dev|stage|prod   (read-only; obs live help)
