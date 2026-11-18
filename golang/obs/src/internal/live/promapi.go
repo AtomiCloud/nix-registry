@@ -58,13 +58,13 @@ func parseSample(p []any) (Sample, bool) {
 	return Sample{T: int64(ts), V: v}, true
 }
 
-func decodeProm(b []byte, ctx string) (*promResp, error) {
+func (c *Client) decodeProm(b []byte, ctx string) (*promResp, error) {
 	var r promResp
 	if err := json.Unmarshal(b, &r); err != nil {
-		return nil, fmt.Errorf("%s: not a query API answer: %v", ctx, err)
+		return nil, fmt.Errorf("%s: not a query API answer (obs prints no part of it)", ctx)
 	}
 	if r.Status != "success" {
-		return nil, fmt.Errorf("%s: the store answered status %q: %s %s", ctx, r.Status, r.ErrorType, r.Error)
+		return nil, fmt.Errorf("%s: the store answered status %q: %s %s", ctx, c.storeText(r.Status), c.storeText(r.ErrorType), c.storeText(r.Error))
 	}
 	return &r, nil
 }
@@ -76,7 +76,7 @@ func (c *Client) Instant(ctx context.Context, base, q string, at time.Time) ([]V
 	if err != nil {
 		return nil, err
 	}
-	r, err := decodeProm(b, "query "+q)
+	r, err := c.decodeProm(b, "query "+q)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +97,7 @@ func (c *Client) Range(ctx context.Context, base, q string, start, end time.Time
 	if err != nil {
 		return nil, err
 	}
-	r, err := decodeProm(b, "query_range "+q)
+	r, err := c.decodeProm(b, "query_range "+q)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +122,7 @@ func (c *Client) InstantAt(ctx context.Context, base, path, q string, at time.Ti
 	if err != nil {
 		return nil, err
 	}
-	r, err := decodeProm(b, "query "+q)
+	r, err := c.decodeProm(b, "query "+q)
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +150,7 @@ func (c *Client) TempoRange(ctx context.Context, base, q string, start, end time
 		} `json:"series"`
 	}
 	if err := json.Unmarshal(b, &r); err != nil {
-		return nil, fmt.Errorf("tempo metrics query %s: not the answer expected: %v", q, err)
+		return nil, fmt.Errorf("tempo metrics query %s: not the answer expected (obs prints no part of it)", q)
 	}
 	var out []float64
 	for _, s := range r.Series {

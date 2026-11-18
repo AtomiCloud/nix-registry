@@ -71,17 +71,17 @@ func baseURL(base string) (*url.URL, error) {
 func checkHop(method string, base, hop *url.URL) error {
 	switch {
 	case hop.Scheme != base.Scheme || hop.Host != base.Host:
-		return fmt.Errorf("redirect refused: it leaves the target's host; obs live never follows one")
+		return &redirectRefused{"it leaves the target's host; obs live never follows one"}
 	case hop.User != nil:
-		return fmt.Errorf("redirect refused: it carries credentials")
+		return &redirectRefused{"it carries credentials"}
 	}
 	prefix := strings.TrimRight(base.Path, "/")
 	if !strings.HasPrefix(hop.Path, prefix+"/") {
-		return fmt.Errorf("redirect refused: it leaves the target's path prefix")
+		return &redirectRefused{"it leaves the target's path prefix"}
 	}
 	rel := strings.TrimPrefix(hop.Path, prefix)
 	if err := ReadOnly(method, rel); err != nil {
-		return fmt.Errorf("redirect refused: the guard does not allow a %s there", method)
+		return &redirectRefused{"the guard does not allow a " + method + " there"}
 	}
 	return nil
 }
@@ -108,7 +108,7 @@ func (c *Client) GetJSON(ctx context.Context, base, path string, q url.Values, o
 		return err
 	}
 	if err := json.Unmarshal(b, out); err != nil {
-		return fmt.Errorf("GET %s%s: not the JSON expected: %v", base, path, err)
+		return fmt.Errorf("GET %s%s: not the JSON expected (obs prints no part of the answer)", base, path)
 	}
 	return nil
 }
@@ -144,7 +144,7 @@ func (c *Client) Get(ctx context.Context, base, path string, q url.Values) ([]by
 	hc := *c.http() // a copy: the guard below is set for this request whatever client the caller gave
 	hc.CheckRedirect = func(r *http.Request, via []*http.Request) error {
 		if len(via) >= 5 {
-			return fmt.Errorf("redirect refused: more than 5 redirects")
+			return &redirectRefused{"more than 5 redirects"}
 		}
 		return checkHop(r.Method, bu, r.URL)
 	}
@@ -161,26 +161,33 @@ func (c *Client) Get(ctx context.Context, base, path string, q url.Values) ([]by
 	defer resp.Body.Close()
 	b, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
 	if err != nil {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, fmt.Errorf("GET %s%s: reading the response: the store closed the connection mid-response", base, path)
+		}
 		return nil, fmt.Errorf("GET %s%s: reading the response: %v", base, path, safeDoError(err))
 	}
 	if resp.StatusCode/100 != 2 {
-		body := strings.TrimSpace(string(b))
-		if len(body) > 200 {
-			body = body[:200] + "..."
-		}
+		body := c.storeText(string(b))
 		return nil, fmt.Errorf("GET %s%s: HTTP %d: %s", base, path, resp.StatusCode, body)
 	}
 	return b, nil
 }
 
+// redirectRefused is the guard's refusal of a hop; its reasons are fixed texts written in checkHop,
+// never a URL or anything else the store sent.
+type redirectRefused struct{ reason string }
+
+func (e *redirectRefused) Error() string { return "redirect refused: " + e.reason }
+
 // safeDoError is what obs prints for an error of http.Client.Do or of reading a response body
 // (url.Error already unwrapped). obs never prints Go's or the store's own error text: net/http
 // quotes an unparsable Location whole, textproto quotes a malformed header or trailer line whole,
 // a deadline error can carry the transport error before it, a certificate error names the
-// certificate's hosts. Each recognised failure gets a fixed text written here; obs's own redirect
-// refusals (fixed texts in checkHop) pass; anything else is one fixed text.
+// certificate's hosts. Typed causes are checked first, each with a fixed text written here; the
+// one text match (net/http's untyped Location parse error) comes last; anything else is one
+// neutral fixed text.
 func safeDoError(err error) error {
-	msg := err.Error()
+	var refused *redirectRefused
 	var unknownCA x509.UnknownAuthorityError
 	var hostErr x509.HostnameError
 	var invalidErr x509.CertificateInvalidError
@@ -189,10 +196,8 @@ func safeDoError(err error) error {
 	var dnsErr *net.DNSError
 	var netErr net.Error
 	switch {
-	case strings.HasPrefix(msg, "redirect refused: "):
-		return err
-	case strings.Contains(msg, "Location header"):
-		return errors.New("redirect refused: the store sent a Location obs cannot parse")
+	case errors.As(err, &refused):
+		return refused
 	case errors.Is(err, context.Canceled):
 		return errors.New("the request was cancelled")
 	case errors.Is(err, context.DeadlineExceeded), errors.As(err, &netErr) && netErr.Timeout():
@@ -205,16 +210,49 @@ func safeDoError(err error) error {
 		return errors.New("TLS: the store's certificate is invalid (expired, not yet valid, or not for a server)")
 	case errors.As(err, &certErr):
 		return errors.New("TLS: the store's certificate could not be verified")
-	case strings.Contains(msg, "server gave HTTP response to HTTPS client"), errors.As(err, &recordErr):
+	case errors.Is(err, http.ErrSchemeMismatch):
 		return errors.New("the target URL is https but the store answered plain HTTP")
+	case errors.As(err, &recordErr):
+		return errors.New("TLS: the store's answer is not TLS (a plain-HTTP port or a broken TLS endpoint)")
 	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
-		return errors.New("the store closed the connection before it answered")
+		return errors.New("the connection ended early")
 	case errors.As(err, &dnsErr):
-		return errors.New("the target's host name does not resolve (DNS)")
+		return errors.New("the target's host name could not be resolved (DNS)")
 	case errors.Is(err, syscall.ECONNREFUSED):
 		return errors.New("connection refused: nothing listens at the target address")
 	case errors.Is(err, syscall.ECONNRESET):
 		return errors.New("the store reset the connection")
+	case strings.Contains(err.Error(), "failed to parse Location header"):
+		return &redirectRefused{"the store sent a Location obs cannot parse"}
 	}
-	return errors.New("the store sent a response obs cannot read; nothing of it is printed")
+	return errors.New("the request failed (obs prints no part of the underlying error)")
+}
+
+// storeText is how obs prints text the store wrote itself (a non-2xx body, a query API error):
+// it is the main diagnostic, so it is kept, but every value obs sent in a header (and each long
+// word of it, for "Bearer <token>") is replaced by ***, since auth proxies echo the credential
+// they refused, and control characters (a terminal escape) become spaces. At most 200 runes.
+func (c *Client) storeText(s string) string {
+	for _, v := range c.Headers {
+		if v == "" {
+			continue
+		}
+		s = strings.ReplaceAll(s, v, "***")
+		for _, w := range strings.Fields(v) {
+			if len(w) >= 8 {
+				s = strings.ReplaceAll(s, w, "***")
+			}
+		}
+	}
+	s = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
+			return ' '
+		}
+		return r
+	}, s)
+	s = strings.TrimSpace(s)
+	if rs := []rune(s); len(rs) > 200 {
+		s = string(rs[:200]) + "..."
+	}
+	return s
 }

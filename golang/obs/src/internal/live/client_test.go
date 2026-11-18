@@ -2,12 +2,18 @@ package live
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -368,7 +374,7 @@ func TestUsefulTransportErrorsStayReadable(t *testing.T) {
 	cases := []struct{ name, base, want string }{
 		{"unknown CA", tlsSrv.URL, "authority this machine does not trust"},
 		{"https to a plain-HTTP port", strings.Replace(plain.URL, "http://", "https://", 1), "answered plain HTTP"},
-		{"connection closed", "http://" + ln.Addr().String(), "closed the connection"},
+		{"connection closed", "http://" + ln.Addr().String(), "connection ended early"},
 	}
 	for _, c := range cases {
 		err := (&Client{}).GetJSON(context.Background(), c.base, "/api/v1/query", nil, &struct{}{})
@@ -435,5 +441,80 @@ func TestTransportErrorsAreFixedTexts(t *testing.T) {
 	err = (&Client{}).GetJSON(context.Background(), "http://"+addr, "/api/v1/query", nil, &struct{}{})
 	if err == nil || !strings.HasSuffix(err.Error(), ": connection refused: nothing listens at the target address") {
 		t.Errorf("connection refused must print the fixed text: %v", err)
+	}
+}
+
+// A non-2xx body is printed (it is the store's own diagnostic) but cleaned: a gateway that echoes
+// the credential it refused must not make obs print it, and a terminal escape must not reach the
+// terminal. The query API's own error fields get the same cleaning.
+func TestStoreTextHidesSentHeaderValuesAndControlBytes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/query" && r.URL.Query().Get("query") == "up" {
+			w.Write([]byte(`{"status":"error","errorType":"bad_data","error":"rejected Bearer sekrit-api-token-123\u001b[2J"}`))
+			return
+		}
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte("bad token: " + r.Header.Get("Authorization") + "\x1b[2J for tenant " + r.Header.Get("X-Scope-OrgID")))
+	}))
+	defer srv.Close()
+	c := &Client{Headers: map[string]string{"Authorization": "Bearer sekrit-api-token-123", "X-Scope-OrgID": "tenant-sekrit-42"}}
+	_, err := c.Get(context.Background(), srv.URL, "/api/v1/labels", nil)
+	if err == nil || !strings.Contains(err.Error(), "HTTP 401: bad token:") {
+		t.Fatalf("the store's own error text is still the diagnostic: %v", err)
+	}
+	for _, bad := range []string{"sekrit-api-token-123", "tenant-sekrit-42", "\x1b"} {
+		if strings.Contains(err.Error(), bad) {
+			t.Fatalf("the body must not print %q: %q", bad, err.Error())
+		}
+	}
+	_, err = c.Instant(context.Background(), srv.URL, "up", time.Unix(0, 0))
+	if err == nil || strings.Contains(err.Error(), "sekrit-api-token-123") || strings.Contains(err.Error(), "\x1b") {
+		t.Fatalf("the query API error must be cleaned too: %q", err)
+	}
+}
+
+// Every fixed text names its own cause (pins the labels: swapping one turns this red).
+func TestSafeDoErrorLabels(t *testing.T) {
+	cases := []struct {
+		err  error
+		want string
+	}{
+		{context.Canceled, "the request was cancelled"},
+		{fmt.Errorf("x: %w", context.DeadlineExceeded), "the request timed out"},
+		{x509.UnknownAuthorityError{}, "authority this machine does not trust"},
+		{x509.HostnameError{Certificate: &x509.Certificate{}, Host: "store.example"}, "not valid for the target's host name"},
+		{x509.CertificateInvalidError{Cert: &x509.Certificate{}, Reason: x509.Expired}, "certificate is invalid"},
+		{&tls.CertificateVerificationError{Err: errors.New("other")}, "could not be verified"},
+		{tls.RecordHeaderError{Msg: "first record does not look like a TLS handshake"}, "answer is not TLS"},
+		{fmt.Errorf("x: %w", http.ErrSchemeMismatch), "answered plain HTTP"},
+		{fmt.Errorf("Get: %w: transport said sekrit-before", context.DeadlineExceeded), "the request timed out"},
+		{&redirectRefused{"more than 5 redirects"}, "redirect refused: more than 5 redirects"},
+		{errors.New("redirect refused: forged by the store"), "the request failed"},
+		{io.ErrUnexpectedEOF, "connection ended early"},
+		{&net.DNSError{Err: "no such host", Name: "store.invalid", IsNotFound: true}, "could not be resolved (DNS)"},
+		{fmt.Errorf("dial: %w", syscall.ECONNREFUSED), "connection refused"},
+		{fmt.Errorf("read: %w", syscall.ECONNRESET), "reset the connection"},
+		{errors.New("something the store said"), "the request failed (obs prints no part of the underlying error)"},
+	}
+	for _, c := range cases {
+		if got := safeDoError(c.err).Error(); !strings.Contains(got, c.want) {
+			t.Errorf("%T %v: got %q, want it to contain %q", c.err, c.err, got, c.want)
+		}
+	}
+}
+
+// Go's JSON decode errors quote the value they could not decode (an out-of-range time from
+// Grafana, any string the store sent): obs prints a fixed text instead.
+func TestJSONDecodeErrorsPrintNothingOfTheAnswer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"at": "sekrit-decode-value"}`))
+	}))
+	defer srv.Close()
+	var out struct {
+		At int `json:"at"`
+	}
+	err := (&Client{}).GetJSON(context.Background(), srv.URL, "/api/v1/query", nil, &out)
+	if err == nil || !strings.Contains(err.Error(), "not the JSON expected") || strings.Contains(err.Error(), "sekrit-decode-value") {
+		t.Fatalf("a decode error must print a fixed text only: %v", err)
 	}
 }
