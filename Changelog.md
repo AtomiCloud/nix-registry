@@ -1,3 +1,24 @@
+## [6.4.0](https://github.com/AtomiCloud/nix-registry/compare/v6.3.0...v6.4.0) (2026-11-18)
+
+
+### ⬆️ Packages Updated ⬆️
+
+* **obs:** aggregations reset the live label scope ([b364e90](https://github.com/AtomiCloud/nix-registry/commit/b364e902b89ff67b55f20bb808738785073b8c3a))
+* **obs:** binary ops keep one side's query-made labels ([8f79a84](https://github.com/AtomiCloud/nix-registry/commit/8f79a84363b2974762ac6bc0afda68b942273c44))
+* **obs:** copy Primordial's vminsert relabel config exactly ([cc531e0](https://github.com/AtomiCloud/nix-registry/commit/cc531e0891e1975a5c85e0be8ff2bcc8b4645100))
+* **obs:** correct the README's live label and Tempo cutoff wording ([323ad3b](https://github.com/AtomiCloud/nix-registry/commit/323ad3b9c52a4d6fdf00a4d48eb289a682ea3ca8))
+* **obs:** follow the engine's result-label rules in live ([de0a0ec](https://github.com/AtomiCloud/nix-registry/commit/de0a0ec8635a0bf4f40a8dcc5207713acffb7d97))
+* **obs:** judge label spelling in pod keys, variables, runs ([d0d14e0](https://github.com/AtomiCloud/nix-registry/commit/d0d14e06777370a05a66467ef4c99c07e77136b3))
+* **obs:** keep dots in VictoriaMetrics label names ([4783f33](https://github.com/AtomiCloud/nix-registry/commit/4783f337286a1e9bc18727f10a42dc67b9dd1a4f))
+* **obs:** mirror the labelmap in the sandbox, exact TraceQL names ([41736c5](https://github.com/AtomiCloud/nix-registry/commit/41736c50a375c89b1cab848648dae3aff8befb9a))
+* **obs:** no real landscape names in the new fixtures and README ([79ee4e9](https://github.com/AtomiCloud/nix-registry/commit/79ee4e96066bba971a201a7afd934b580be64f93))
+* **obs:** obs 0.3.0, note trace panels run under Tempo limits ([679c829](https://github.com/AtomiCloud/nix-registry/commit/679c829cacda42258eb54a877b78eca7c9d92b2e))
+* **obs:** obs.yaml round 2, limits and image checks ([d456604](https://github.com/AtomiCloud/nix-registry/commit/d456604b70f1d217b54743399f22fc3ee942676b))
+* **obs:** obs.yaml versions and thresholds, evaluator check ([3480d71](https://github.com/AtomiCloud/nix-registry/commit/3480d71917efdbd8a906546bbd1c48ddc4dc041d))
+* **obs:** query-made labels and label_values parsing ([30592d3](https://github.com/AtomiCloud/nix-registry/commit/30592d34a892f82dead18798e73afe954fe19031))
+* **obs:** report a wrong label spelling once in live ([d5d06aa](https://github.com/AtomiCloud/nix-registry/commit/d5d06aa33f0846ac03ea7627410847abca52a23b))
+* **obs:** scalar sides and group_left/right follow the engine ([ce7b043](https://github.com/AtomiCloud/nix-registry/commit/ce7b0431ac1ed560f6afa23318fb7d54629b11ab))
+
 ## [6.3.0](https://github.com/AtomiCloud/nix-registry/compare/v6.2.0...v6.3.0) (2026-11-18)
 
 
