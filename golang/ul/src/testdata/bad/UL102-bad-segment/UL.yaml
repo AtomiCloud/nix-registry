@@ -1,0 +1,5 @@
+namespace: example.org/area/de mo
+premise: A demo area
+language:
+  Alpha:
+    desc: The first word.

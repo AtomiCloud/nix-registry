@@ -67,6 +67,8 @@ REGISTRY_PACKAGES=(
   chart-checks-tests
   problemgen
   problemgen-tests
+  ul
+  ul-tests
   obs
   obs-tests
   obs-source
