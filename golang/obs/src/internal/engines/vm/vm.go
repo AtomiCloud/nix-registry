@@ -23,7 +23,18 @@ import (
 )
 
 // Engine is one in-process VictoriaMetrics.
-type Engine struct{ dir string }
+type Engine struct {
+	dir string
+	// maxPoints is the points one series may hold (0: DefaultMaxPointsPerSeries).
+	maxPoints int
+}
+
+// DefaultMaxPointsPerSeries is the points per series a query may produce unless SetMaxPoints
+// says otherwise (obs.yaml thresholds.metrics.max_points_per_series).
+const DefaultMaxPointsPerSeries = 1_000_000
+
+// SetMaxPoints sets the points per series a query may produce; n <= 0 restores the default.
+func (e *Engine) SetMaxPoints(n int) { e.maxPoints = n }
 
 // Series is one query result series.
 type Series struct {
@@ -141,7 +152,7 @@ func (e *Engine) execSamples(q string, start, end time.Time, step time.Duration,
 		Start:              start.UnixMilli(),
 		End:                end.UnixMilli(),
 		Step:               step.Milliseconds(),
-		MaxPointsPerSeries: 1_000_000,
+		MaxPointsPerSeries: e.pointsLimit(),
 		MayCache:           false,
 		RoundDigits:        100,
 	}
@@ -197,4 +208,11 @@ func (e *Engine) Append(series []*seed.Series) error {
 	}
 	vmstorage.DebugFlush()
 	return checkDropped()
+}
+
+func (e *Engine) pointsLimit() int {
+	if e.maxPoints > 0 {
+		return e.maxPoints
+	}
+	return DefaultMaxPointsPerSeries
 }

@@ -171,6 +171,7 @@ bash "$here/store-symbols-sizing.sh" "$OBS" && ok "store/symbols/size fixtures" 
 
 bash "$here/links.sh" "$OBS" "${OUT:-}"
 bash "$here/engines.sh" "$OBS" && ok "engines --check-chart (tests/engines.sh)" || bad "engines --check-chart (tests/engines.sh)"
+bash "$here/obsyaml.sh" "$OBS" && ok "obs.yaml versions and thresholds (tests/obsyaml.sh)" || bad "obs.yaml versions and thresholds (tests/obsyaml.sh)"
 echo "obs tests: $pass passed, $fail failed"
 bash "$here/alerts.sh" "$OBS"
 [ "$fail" -eq 0 ]

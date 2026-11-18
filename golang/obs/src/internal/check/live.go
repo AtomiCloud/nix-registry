@@ -75,10 +75,11 @@ func Live(set *files.Set, o Options) (*Report, error) {
 			return nil, err
 		}
 		defer e.Close()
+		e.SetMaxPoints(o.Obs.MetricsMaxPoints())
 		m = e
 	}
 	if needVL {
-		limits, note, err := vl.LoadLimits(o.Dir, o.VLSettings)
+		limits, note, err := o.Obs.VLLimits(o.Dir, o.VLSettings)
 		if err != nil {
 			return nil, err
 		}

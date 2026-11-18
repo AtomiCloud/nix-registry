@@ -60,7 +60,7 @@ func runLook(args []string, stdout, stderr io.Writer) (code int) {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 	up := func(ctx context.Context) (*sandbox.Info, error) {
-		cfg, err := f.config(stderr)
+		cfg, err := f.upConfig(stderr)
 		if err != nil {
 			return nil, err
 		}

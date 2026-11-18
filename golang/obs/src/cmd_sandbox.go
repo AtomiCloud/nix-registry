@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 
+	"github.com/AtomiCloud/obs/internal/obsyaml"
 	"github.com/AtomiCloud/obs/internal/sandbox"
 )
 
@@ -46,6 +47,35 @@ func (f *sandboxFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&f.runtime, "runtime", "", "container runtime: docker or podman (default $OBS_CONTAINER_RUNTIME, else docker, else podman)")
 	fs.IntVar(&f.portBase, "port-base", 0, "host port of Grafana; VictoriaMetrics, VictoriaLogs, Tempo and Pyroscope follow at +1..+4 (default: their own ports, 3000 8428 9428 3200 4040)")
 	fs.BoolVar(&f.reseed, "reseed", false, "load the seed again into a sandbox that already has it")
+}
+
+// upConfig is config for a run that starts the stack: the images are the ones obs.yaml
+// names (<dir>/obs.yaml), else the pins. A bad obs.yaml or a version with no known image
+// digest is an error that names the key. down and status never read obs.yaml, so a broken
+// file cannot stop a tear-down.
+func (f *sandboxFlags) upConfig(out io.Writer) (sandbox.Config, error) {
+	// obs.yaml first: a bad file or an unpinned version is refused before any runtime is looked for.
+	of, err := obsyaml.Load(f.dir)
+	if err != nil {
+		return sandbox.Config{}, err
+	}
+	comps, err := sandboxComponents(of)
+	if err != nil {
+		return sandbox.Config{}, err
+	}
+	cfg, err := f.config(out)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.Components = comps
+	if of != nil {
+		fmt.Fprintf(out, "images from %s:", of.Path)
+		for _, c := range cfg.Components {
+			fmt.Fprintf(out, " %s", c.Ref())
+		}
+		fmt.Fprintln(out)
+	}
+	return cfg, nil
 }
 
 func (f *sandboxFlags) config(out io.Writer) (sandbox.Config, error) {
@@ -94,7 +124,13 @@ func runSandbox(args []string, stdout, stderr io.Writer) int {
 		printInfo(stdout, info)
 		return 0
 	}
-	cfg, err := f.config(stdout)
+	var cfg sandbox.Config
+	var err error
+	if sub == "down" {
+		cfg, err = f.config(stdout)
+	} else {
+		cfg, err = f.upConfig(stdout)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "obs sandbox %s: %v\n", sub, err)
 		return 2

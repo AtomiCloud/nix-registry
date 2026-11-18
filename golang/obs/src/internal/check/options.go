@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/AtomiCloud/obs/internal/contract"
+	"github.com/AtomiCloud/obs/internal/obsyaml"
 )
 
 // Options of `obs query`.
@@ -15,6 +16,8 @@ type Options struct {
 	VLSettings string // default <Dir>/victorialogs-settings.yaml, else pinned VL defaults
 	Base       int64  // unix seconds of the seed's start (0 = aligned, ending in the past)
 	Names      bool   // print the names each query reads
+	// Obs is <Dir>/obs.yaml (nil when absent): its thresholds sit under --vl-settings.
+	Obs *obsyaml.File
 	// EventRule says when a LogsQL alert must name a contract event:
 	// "auto" (only when <Dir>/contract.yaml exists; the decided default), "on", "off".
 	EventRule string

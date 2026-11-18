@@ -28,7 +28,7 @@ usage:
               [--workers n] [--steps steps.json] [--recorded recorded.json]
   obs assert --series FILE [--dir observability] [--pods n] [--unknown warn|fail|ignore]
   obs profile summarize|baseline|compare   (obs profile help)
-  obs check [--dir observability] [--pods n] [--landscapes n]
+  obs check [--dir observability] [--pods n] [--landscapes n]   (also: the evaluator versions this obs embeds, against <dir>/obs.yaml)
   obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
   obs sandbox up [--dir observability] [--seed seed.yaml] [--project name] [--port-base n] [--runtime docker|podman] [--reseed]
   obs sandbox down|status [--dir observability] [--project name] [--runtime docker|podman]
@@ -157,7 +157,14 @@ func runQuery(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "obs query: --event-rule %q: want auto, on or off\n", *eventRule)
 		return 2
 	}
-	o := check.Options{Dir: *dir, SeedPath: *seedPath, VLSettings: *vlSettings, Base: *base, Names: *names, EventRule: *eventRule, Out: stdout}
+	of, ok := loadObsYaml(*dir, "obs query", stderr)
+	if !ok {
+		return 2
+	}
+	if rc := gateObsYaml(of, "obs query", stdout); rc != 0 {
+		return rc
+	}
+	o := check.Options{Dir: *dir, SeedPath: *seedPath, VLSettings: *vlSettings, Base: *base, Names: *names, EventRule: *eventRule, Obs: of, Out: stdout}
 	set, err := files.Load(*dir)
 	if err != nil {
 		fmt.Fprintf(stderr, "obs query: %v\n", err)
