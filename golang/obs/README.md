@@ -576,7 +576,7 @@ kept and quoted (`{"payment.provider"="stripe"}`, `by ("payment.provider")`); th
 `contract-undeclared-label` and the finding names the dotted spelling (a pod key in either spelling is
 `contract-pod-label`). Other log fields are free-form (§6): not judged.
 
-## Migrating from 0.2
+## Migrating from 0.2 to 0.3
 
 obs 0.2 stored seeded VictoriaMetrics labels with dots turned into underscores and accepted both spellings in
 checks. Concept §2.1 says VictoriaMetrics keeps the dots and a query quotes them, so obs now follows the concept.
@@ -597,6 +597,10 @@ the message:
 - **Alert templates** (annotations, labels) must use `{{ index $labels "durian.cloud.service" }}`: the dotted path
   `$labels.durian.cloud.service` is a template error and the underscore form renders empty. (From review of the Grafana
   template rules; obs does not render templates.)
+- **Trace panels now run under Tempo's query limits, even with no `obs.yaml`.** `obs query --live` applies
+  Tempo 3.1.1's defaults (30 s end cutoff, 24 h maximum duration, 10000 intervals) or the `thresholds.traces`
+  values in `obs.yaml`. A TraceQL metrics panel wider than 24 h, or ending inside the last 30 s, now fails as it
+  would in Grafana against real Tempo; raise the limit in `obs.yaml` to match the deployed Tempo.
 - **An old sandbox must be recreated.** A sandbox made before this release has a VictoriaMetrics without the
   relabel config; `obs sandbox up` refuses it, naming `-relabelConfig`. Run `obs sandbox down` and then
   `obs sandbox up`.
