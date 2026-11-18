@@ -1,0 +1,9 @@
+Plugin  (durian.cloud > engineering > standards > OOP)
+  One part added to the core through one seam.
+  See: OCP
+
+  A plugin owns its own types and joins the core with one registration line.
+
+Plugin  (durian.cloud > shop > billing)
+  A payment method that the billing context can take money with.
+  Also called: Payment Plugin

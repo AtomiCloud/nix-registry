@@ -1,3 +1,19 @@
+## [6.2.0](https://github.com/AtomiCloud/nix-registry/compare/v6.1.0...v6.2.0) (2026-11-18)
+
+
+### 🐛 Bug Fixes 🐛
+
+* **ul:** remove the session layer ([bcf0b9e](https://github.com/AtomiCloud/nix-registry/commit/bcf0b9e2f808bd16462e0f558bdb9550779512e7))
+* **ul:** run git in the C locale, resolve relative --from on real path ([8fa6e41](https://github.com/AtomiCloud/nix-registry/commit/8fa6e41ddc31ebc0308a114c1e68a96b215f7d4d))
+* **ul:** settle the ten CodeRabbit findings on the ul PR ([22022f1](https://github.com/AtomiCloud/nix-registry/commit/22022f12f4789bf916f5b807b78ad7cb89951374))
+* **ul:** stop on a refusing git, resolve symlinks, report bad reads ([3867f0d](https://github.com/AtomiCloud/nix-registry/commit/3867f0dbf9b92cf2221c3cae95619e7821e39827))
+* **ul:** test --root through a symlinked cwd, skip untranslated git ([8581a64](https://github.com/AtomiCloud/nix-registry/commit/8581a6405bb22cfbed810bad51400b320e9e5f31))
+
+
+### ✨ New Packages ✨
+
+* **ul:** add the ubiquitous-language tool ([baee23c](https://github.com/AtomiCloud/nix-registry/commit/baee23c9b0fd7b5168840233e8c90538487813dc))
+
 ## [6.1.0](https://github.com/AtomiCloud/nix-registry/compare/v6.0.0...v6.1.0) (2026-11-16)
 
 

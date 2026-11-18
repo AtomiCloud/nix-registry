@@ -1,0 +1,270 @@
+{
+  "schema": "ul/v1",
+  "root": "/ROOT",
+  "namespaces": [
+    {
+      "namespace": "durian.cloud/engineering/standards/OOP",
+      "breadcrumb": [
+        "durian.cloud",
+        "engineering",
+        "standards",
+        "OOP"
+      ],
+      "premise": "When writing code, best practice when using object-oriented programming",
+      "file": "docs/standard/oop/UL.yaml"
+    },
+    {
+      "namespace": "durian.cloud/shop/billing",
+      "breadcrumb": [
+        "durian.cloud",
+        "shop",
+        "billing"
+      ],
+      "premise": "Money owed by a customer, from the first charge to the last receipt",
+      "file": "docs/domain/billing/UL.yaml"
+    },
+    {
+      "namespace": "durian.cloud/shop/billing/pay",
+      "breadcrumb": [
+        "durian.cloud",
+        "shop",
+        "billing",
+        "pay"
+      ],
+      "premise": "The card payment plugin of billing",
+      "file": "plugins/pay/UL.yaml"
+    }
+  ],
+  "words": [
+    {
+      "id": "durian.cloud/engineering/standards/OOP#Facade",
+      "word": "Facade",
+      "namespace": "durian.cloud/engineering/standards/OOP",
+      "breadcrumb": [
+        "durian.cloud",
+        "engineering",
+        "standards",
+        "OOP"
+      ],
+      "aliases": [],
+      "desc": "Old name for the one entry object of a plugin.",
+      "details": "",
+      "avoid": [],
+      "see": [],
+      "mentions": [
+        "durian.cloud/engineering/standards/OOP#Plugin"
+      ],
+      "status": "retired",
+      "replacedBy": "durian.cloud/engineering/standards/OOP#Plugin",
+      "file": "docs/standard/oop/UL.yaml",
+      "line": 22
+    },
+    {
+      "id": "durian.cloud/engineering/standards/OOP#OCP",
+      "word": "OCP",
+      "namespace": "durian.cloud/engineering/standards/OOP",
+      "breadcrumb": [
+        "durian.cloud",
+        "engineering",
+        "standards",
+        "OOP"
+      ],
+      "aliases": [
+        "Open-Close Principle",
+        "Plugin Design"
+      ],
+      "desc": "Add behaviour by adding a plugin, not by editing shared code.",
+      "details": "Code is **open** for extension and **closed** for edits.\n\nAdd a plugin that implements the seam; never rewrite another plugin's line.\n",
+      "avoid": [
+        "extension point"
+      ],
+      "see": [
+        "durian.cloud/engineering/standards/OOP#Plugin",
+        "durian.cloud/engineering/standards/OOP#SRP"
+      ],
+      "mentions": [
+        "durian.cloud/engineering/standards/OOP#Plugin"
+      ],
+      "status": "active",
+      "replacedBy": null,
+      "file": "docs/standard/oop/UL.yaml",
+      "line": 4
+    },
+    {
+      "id": "durian.cloud/engineering/standards/OOP#Plugin",
+      "word": "Plugin",
+      "namespace": "durian.cloud/engineering/standards/OOP",
+      "breadcrumb": [
+        "durian.cloud",
+        "engineering",
+        "standards",
+        "OOP"
+      ],
+      "aliases": [],
+      "desc": "One part added to the core through one seam.",
+      "details": "A plugin owns its own types and joins the core with one registration line.\n",
+      "avoid": [],
+      "see": [
+        "durian.cloud/engineering/standards/OOP#OCP"
+      ],
+      "mentions": [],
+      "status": "active",
+      "replacedBy": null,
+      "file": "docs/standard/oop/UL.yaml",
+      "line": 13
+    },
+    {
+      "id": "durian.cloud/engineering/standards/OOP#SRP",
+      "word": "SRP",
+      "namespace": "durian.cloud/engineering/standards/OOP",
+      "breadcrumb": [
+        "durian.cloud",
+        "engineering",
+        "standards",
+        "OOP"
+      ],
+      "aliases": [
+        "Single Responsibility"
+      ],
+      "desc": "A module has one reason to change.",
+      "details": "Pairs with the Open-Close Principle when a plugin grows.",
+      "avoid": [],
+      "see": [],
+      "mentions": [
+        "durian.cloud/engineering/standards/OOP#OCP",
+        "durian.cloud/engineering/standards/OOP#Plugin"
+      ],
+      "status": "active",
+      "replacedBy": null,
+      "file": "docs/standard/oop/UL.yaml",
+      "line": 18
+    },
+    {
+      "id": "durian.cloud/shop/billing#Charge",
+      "word": "Charge",
+      "namespace": "durian.cloud/shop/billing",
+      "breadcrumb": [
+        "durian.cloud",
+        "shop",
+        "billing"
+      ],
+      "aliases": [],
+      "desc": "One amount added to an invoice.",
+      "details": "",
+      "avoid": [],
+      "see": [
+        "durian.cloud/shop/billing#Invoice"
+      ],
+      "mentions": [
+        "durian.cloud/shop/billing#Invoice"
+      ],
+      "status": "active",
+      "replacedBy": null,
+      "file": "docs/domain/billing/UL.yaml",
+      "line": 12
+    },
+    {
+      "id": "durian.cloud/shop/billing#Invoice",
+      "word": "Invoice",
+      "namespace": "durian.cloud/shop/billing",
+      "breadcrumb": [
+        "durian.cloud",
+        "shop",
+        "billing"
+      ],
+      "aliases": [],
+      "desc": "The bill sent to a customer for a period.",
+      "details": "An invoice lists every Charge of the period.\n\nIt is final once sent.\n",
+      "avoid": [
+        "bill",
+        "statement"
+      ],
+      "see": [
+        "durian.cloud/shop/billing#Charge",
+        "durian.cloud/engineering/standards/OOP#OCP"
+      ],
+      "mentions": [
+        "durian.cloud/shop/billing#Charge"
+      ],
+      "status": "active",
+      "replacedBy": null,
+      "file": "docs/domain/billing/UL.yaml",
+      "line": 4
+    },
+    {
+      "id": "durian.cloud/shop/billing#Plugin",
+      "word": "Plugin",
+      "namespace": "durian.cloud/shop/billing",
+      "breadcrumb": [
+        "durian.cloud",
+        "shop",
+        "billing"
+      ],
+      "aliases": [
+        "Payment Plugin"
+      ],
+      "desc": "A payment method that the billing context can take money with.",
+      "details": "",
+      "avoid": [],
+      "see": [],
+      "mentions": [],
+      "status": "active",
+      "replacedBy": null,
+      "file": "docs/domain/billing/UL.yaml",
+      "line": 15
+    },
+    {
+      "id": "durian.cloud/shop/billing/pay#Receipt",
+      "word": "Receipt",
+      "namespace": "durian.cloud/shop/billing/pay",
+      "breadcrumb": [
+        "durian.cloud",
+        "shop",
+        "billing",
+        "pay"
+      ],
+      "aliases": [],
+      "desc": "Proof that a Charge was paid.",
+      "details": "Issued once; a Plugin never edits it.",
+      "avoid": [],
+      "see": [
+        "durian.cloud/shop/billing#Charge"
+      ],
+      "mentions": [
+        "durian.cloud/engineering/standards/OOP#Plugin",
+        "durian.cloud/shop/billing#Charge",
+        "durian.cloud/shop/billing#Plugin"
+      ],
+      "status": "active",
+      "replacedBy": null,
+      "file": "plugins/pay/UL.yaml",
+      "line": 4
+    },
+    {
+      "id": "durian.cloud/shop/billing/pay#Settle",
+      "word": "Settle",
+      "namespace": "durian.cloud/shop/billing/pay",
+      "breadcrumb": [
+        "durian.cloud",
+        "shop",
+        "billing",
+        "pay"
+      ],
+      "aliases": [],
+      "desc": "Move the money of one Invoice from the card to the shop.",
+      "details": "",
+      "avoid": [],
+      "see": [
+        "durian.cloud/shop/billing#Invoice"
+      ],
+      "mentions": [
+        "durian.cloud/shop/billing#Invoice"
+      ],
+      "status": "active",
+      "replacedBy": null,
+      "file": "plugins/pay/UL.yaml",
+      "line": 8
+    }
+  ],
+  "problems": []
+}
