@@ -587,3 +587,12 @@ func TestStoreTextVmauthListQuotingAndOrder(t *testing.T) {
 		t.Fatalf("a short key matching the marker must not let the list through: %q", got)
 	}
 }
+
+// A token holding an escaped quote and a ] (vmauth's %q writes it as x\"]y) does not end the
+// quoted string, so the next token stays hidden.
+func TestStoreTextVmauthListEscapedQuote(t *testing.T) {
+	got := (&Client{}).storeText(`cannot authorize request with auth tokens ["x\"]y" "zq1"]: forbidden`)
+	if strings.Contains(got, "zq1") || !strings.HasSuffix(got, ": forbidden") {
+		t.Fatalf("an escaped quote inside a token must not end it: %q", got)
+	}
+}
