@@ -116,3 +116,21 @@ func TestLoadIncidentsEmptyDisturbanceNamesFileAndLine(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadIncidentsMergedEmptyDisturbanceIsAnError(t *testing.T) {
+	sd, dir := disturbanceSeed(t, "story: s\nwindow: { start: 5m, duration: 5m }\nchange: [{ metric: events, rate: 1/s }]\nexpect: { quiet: [a] }\n<<: { disturbance: \"\" }\n")
+	_, err := LoadIncidents(sd, dir)
+	want := filepath.Join(dir, "incidents", "blip.yaml") + ":5"
+	if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "disturbance needs a non-empty reason") {
+		t.Fatalf("want an error naming %s, got %v", want, err)
+	}
+}
+
+func TestLoadIncidentsDisturbanceWithFireIsAnError(t *testing.T) {
+	sd, dir := disturbanceSeed(t, "story: s\nwindow: { start: 5m, duration: 5m }\nchange: [{ metric: events, rate: 1/s }]\nexpect: { fire: [a] }\ndisturbance: not quiet only\n")
+	_, err := LoadIncidents(sd, dir)
+	want := filepath.Join(dir, "incidents", "blip.yaml") + ":5"
+	if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "disturbance is only for incidents with no fire expectation") {
+		t.Fatalf("want an error naming %s, got %v", want, err)
+	}
+}

@@ -59,10 +59,11 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 	var c *contract.Contract
 	contractFails := 0 // contract problems printed above (the queries half does not print them twice)
 	contractPath := ""
-	// Skip the limits only for an ABSENT contract. A contract that exists but cannot be read (a symlink loop,
-	// a permission error) stops the run with exit 2, as obs 0.4 did.
+	// Skip the limits only for an ABSENT contract (Lstat: a dangling symlink is an entry, not an absence). A contract
+	// that exists but cannot be read (a symlink loop, a dangling symlink, a permission error) stops the run with exit 2,
+	// as obs 0.4 did.
 	noContract := false
-	if _, serr := os.Stat(filepath.Join(*dir, "contract.yaml")); serr != nil {
+	if _, serr := os.Lstat(filepath.Join(*dir, "contract.yaml")); serr != nil {
 		if !os.IsNotExist(serr) {
 			fmt.Fprintf(stderr, "obs check: %v\n", serr)
 			return 2

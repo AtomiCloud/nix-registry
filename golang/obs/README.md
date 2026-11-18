@@ -498,8 +498,9 @@ obs test: incidents: ok: 3 incidents, 2 caught, 0 uncaught, 1 disturbance(s)
 ```
 
 An incident **without** the marker and with no catching alert stays red (owner pick, agenda A371: every incident is caught by at least one alert; the marker is
-the one way to say an incident is not one). `obs alerts` ignores the field: its output is unchanged. The quiet-only incidents of `tests/fixtures/alerts-speed/n1` and `t1` carry it,
-so `obs test` is green on `n1` and its `incidents` part is green on `t1` (`t1` has traces with no logs and no profile, so its `links` part is red by construction).
+the one way to say an incident is not one). `obs alerts` ignores the field: its output is unchanged. The quiet-only incidents of `tests/fixtures/alerts-speed/n1` and `t1` carry it.
+`n1` is the green `obs test` example. `t1` is an alerts speed fixture (input of the speed benchmark), not an `obs test` example: it has traces with no logs and no profile, so its `links` part is red by construction (its `incidents` part is green).
+The marker is for quiet-only incidents. An incident that lists `expect.fire` and carries `disturbance:` is an error naming file and line (exit 2: "disturbance is only for incidents with no fire expectation"), and the reason is checked after YAML merges (`<<:`), so a merged empty reason is an error too.
 
 **Speed (MEASURED, 18 Nov 2026, x86_64 Linux, a shared box, two runs each, all four parts):** `obs test` takes 0.09 s on `tests/fixtures/test/good`
 (40 min seed, one alert), 1.1 s and 1.3 s on `alerts-speed/n1` with its 4 h seed and 3.3 s and 3.2 s with its 24 h seed
@@ -1816,6 +1817,7 @@ verify mode (both paths, compared), like `OBS_VERIFY_FAST`.
 
 ### Fixture sets (`tests/fixtures/alerts-speed/`)
 
+- Only `n1` is an `obs test` example (green as a whole). `t1` and `t20` are alerts speed fixtures: their `links` part is red by construction (traces without logs or profiles), so do not read them as obs test examples.
 - `n1`, `n20`, `n200`, `n1000`: each has `alerts/` (GrafanaAlertRuleGroup CRs),
   `incidents/` (3 incidents), `contract.yaml`, `seed.4h.yaml` and `seed.24h.yaml`.
   The runner copies one seed to `seed.yaml`.

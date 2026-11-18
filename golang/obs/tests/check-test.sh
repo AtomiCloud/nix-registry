@@ -239,6 +239,12 @@ ln -s contract.yaml "$work/loop/observability/contract.yaml"
 run check --dir "$work/loop/observability"
 verdict "check: a contract.yaml that cannot be read (symlink loop) is exit 2, not 'limits not checked'" expect 2 'obs check:' 'too many levels of symbolic links'
 verdict "check: ... and never the absent-file note" absent 'limits (series per metric, log streams) not checked'
+fresh dangling
+rm "$work/dangling/observability/contract.yaml"
+ln -s missing-target.yaml "$work/dangling/observability/contract.yaml"
+run check --dir "$work/dangling/observability"
+verdict "check: a contract.yaml symlink to a missing target is exit 2, not 'limits not checked'" expect 2 'obs check:' 'contract.yaml: no such file or directory'
+verdict "check: ... and never the absent-file note (dangling symlink)" absent 'limits (series per metric, log streams) not checked'
 fresh empty
 cat >"$work/empty/observability/incidents/empty.yaml" <<'YAML'
 {
@@ -301,5 +307,20 @@ for set in n1 t1; do
   [ "$set" = t1 ] && want=1
   verdict "test: alerts-speed/$set (4 h seed): no [incident-uncaught], its quiet-only incidents are noted as disturbances" expect "$want" 'note: [disturbance] incidents/adyen-declines.yaml adyen-declines:' 'note: [disturbance] incidents/checkout-slow.yaml checkout-slow:' 'obs test: incidents: ok: 3 incidents, 1 caught, 0 uncaught, 2 disturbance(s)' 'obs test: alerts: ok:'
 done
+# a disturbance reason given through a YAML merge is checked like a direct one; a marked incident with fire is an error
+sed -i 's/^  disturbance: "",$/  <<: { disturbance: "" },/' "$work/quietinc/observability/incidents/blip.yaml"
+run test --dir "$work/quietinc/observability" --base "$base"
+verdict "test: an empty disturbance reason through a YAML merge is an error naming file and line" expect 2 'incidents/blip.yaml:6: disturbance needs a non-empty reason'
+cat >"$work/quietinc/observability/incidents/blip.yaml" <<'YAML'
+{
+  story: A trickle with a fire expectation,
+  window: { start: 25m, duration: 5m },
+  change: [{ metric: fixture.requests, where: { outcome: error }, rate: 0.01/s }],
+  expect: { fire: [metric], fire_within: 5m, resolve_within: 5m },
+  disturbance: "this one is not quiet-only",
+}
+YAML
+run test --dir "$work/quietinc/observability" --base "$base"
+verdict "test: a disturbance on an incident with expect.fire is an error naming file and line" expect 2 'incidents/blip.yaml:6: disturbance is only for incidents with no fire expectation'
 echo "obs check/test tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

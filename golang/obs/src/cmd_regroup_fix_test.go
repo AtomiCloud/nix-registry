@@ -352,3 +352,71 @@ func TestTracesExpectedForATraceQLQuery(t *testing.T) {
 		t.Error("a TraceQL query expects traces")
 	}
 }
+
+// ---- fix round 2: a dangling contract symlink, disturbance by merge, disturbance with fire ---------
+
+func TestCheckContractDanglingSymlinkIsExit2(t *testing.T) {
+	dir := fixFolder(t)
+	if err := os.Remove(filepath.Join(dir, "contract.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("missing-target.yaml", filepath.Join(dir, "contract.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	rc, out := fixRun(runCheck, "--dir", dir)
+	if rc != 2 {
+		t.Fatalf("exit %d, want 2 (a dangling contract.yaml symlink is an unreadable contract, not an absent one):\n%s", rc, out)
+	}
+	mustHave(t, out, "obs check:", "contract.yaml: no such file or directory")
+	if strings.Contains(out, "limits not checked") {
+		t.Errorf("a dangling symlink must not be reported as an absent contract:\n%s", out)
+	}
+}
+
+func TestDisturbanceEmptyReasonViaMergeNamesFileAndLine(t *testing.T) {
+	for name, marker := range map[string]string{
+		"inline merge": "  <<: { disturbance: \"\" },\n",
+		"null merge":   "  <<: { disturbance: ~ },\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := fixFolder(t)
+			addQuietIncident(t, dir, marker)
+			rc, out := fixRun(runTest, "--dir", dir, "--base", fixBase)
+			if rc != 2 {
+				t.Fatalf("exit %d, want 2 (a merged empty reason is still an empty reason):\n%s", rc, out)
+			}
+			mustHave(t, out, filepath.Join(dir, "incidents", "blip.yaml")+":6", "disturbance needs a non-empty reason")
+		})
+	}
+}
+
+func TestDisturbanceViaMergeWithReasonIsStillANote(t *testing.T) {
+	dir := fixFolder(t)
+	addQuietIncident(t, dir, "  <<: { disturbance: \"proves the error alert ignores a trickle\" },\n")
+	rc, out := fixRun(runTest, "--dir", dir, "--base", fixBase)
+	if rc != 0 {
+		t.Fatalf("exit %d, want 0:\n%s", rc, out)
+	}
+	mustHave(t, out, "[disturbance] incidents/blip.yaml blip: proves the error alert ignores a trickle")
+}
+
+func TestDisturbanceOnAnIncidentWithFireIsAnError(t *testing.T) {
+	dir := fixFolder(t)
+	fixWrite(t, dir, "incidents/blip.yaml", `{
+  story: A burst with a fire expectation,
+  window: { start: 25m, duration: 5m },
+  change: [{ metric: fixture.requests, where: { outcome: error }, rate: 0.01/s }],
+  expect: { fire: [metric], fire_within: 5m, resolve_within: 5m },
+  disturbance: "this one is not quiet-only",
+}
+`)
+	fixEdit(t, dir, "seed.yaml", "incidents: [spike]", "incidents: [spike, blip]")
+	rc, out := fixRun(runTest, "--dir", dir, "--base", fixBase)
+	if rc != 2 {
+		t.Fatalf("exit %d, want 2:\n%s", rc, out)
+	}
+	mustHave(t, out, filepath.Join(dir, "incidents", "blip.yaml")+":6", "disturbance is only for incidents with no fire expectation")
+	if strings.Contains(out, "[disturbance]") {
+		t.Errorf("an incident with fire expectations must not be counted as a disturbance:\n%s", out)
+	}
+}

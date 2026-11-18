@@ -79,7 +79,7 @@ func loadIncidents(s *Seed, dir string, allowEmptyExpect bool) ([]Incident, erro
 			return nil, fmt.Errorf("%s: %w", path, err)
 		}
 		i.Name = name
-		if err := checkDisturbance(path, b, i.Disturbance); err != nil {
+		if err := checkDisturbance(path, b, i.Expect.Fire); err != nil {
 			return nil, err
 		}
 		start, err := time.ParseDuration(i.Window.Start)
@@ -128,21 +128,49 @@ func loadIncidents(s *Seed, dir string, allowEmptyExpect bool) ([]Incident, erro
 	return out, nil
 }
 
-// checkDisturbance fails when the file has a disturbance key without a reason (an empty, blank or null
-// value), naming file:line. An absent key is fine.
-func checkDisturbance(path string, doc []byte, reason string) error {
-	var root yaml.Node
-	if err := yaml.Unmarshal(doc, &root); err != nil || len(root.Content) == 0 || root.Content[0].Kind != yaml.MappingNode {
+// checkDisturbance validates the DECODED `disturbance` value (after YAML merges `<<:`), so a merged empty
+// reason fails like a direct one. An absent key is fine. A present key needs a non-blank reason, and only a
+// quiet-only incident may carry it (an incident with expect.fire is an error). Errors name file:line of the key
+// (of the `<<` key when the value comes from a merge).
+func checkDisturbance(path string, doc []byte, fire []string) error {
+	var decoded map[string]any
+	if err := yaml.Unmarshal(doc, &decoded); err != nil {
 		return nil // the strict decode above reports the real error
 	}
-	m := root.Content[0]
-	for k := 0; k+1 < len(m.Content); k += 2 {
-		if m.Content[k].Value != "disturbance" {
-			continue
-		}
-		if strings.TrimSpace(reason) == "" {
-			return fmt.Errorf("%s:%d: disturbance needs a non-empty reason (what the incident proves the alerts ignore); remove the key or write the reason", path, m.Content[k].Line)
-		}
+	val, present := decoded["disturbance"]
+	if !present {
+		return nil
+	}
+	line := disturbanceLine(doc)
+	if s, _ := val.(string); strings.TrimSpace(s) == "" {
+		return fmt.Errorf("%s:%d: disturbance needs a non-empty reason (what the incident proves the alerts ignore); remove the key or write the reason", path, line)
+	}
+	if len(fire) > 0 {
+		return fmt.Errorf("%s:%d: disturbance is only for incidents with no fire expectation (expect.fire lists %s); remove the disturbance key, or move the fire expectations to a separate incident", path, line, strings.Join(fire, ", "))
 	}
 	return nil
+}
+
+// disturbanceLine is the line of the top-level `disturbance` key, else of the `<<` merge key that supplies it.
+func disturbanceLine(doc []byte) int {
+	var root yaml.Node
+	if err := yaml.Unmarshal(doc, &root); err != nil || len(root.Content) == 0 || root.Content[0].Kind != yaml.MappingNode {
+		return 1
+	}
+	m := root.Content[0]
+	merge := 0
+	for k := 0; k+1 < len(m.Content); k += 2 {
+		switch m.Content[k].Value {
+		case "disturbance":
+			return m.Content[k].Line
+		case "<<":
+			if merge == 0 {
+				merge = m.Content[k].Line
+			}
+		}
+	}
+	if merge > 0 {
+		return merge
+	}
+	return 1
 }
