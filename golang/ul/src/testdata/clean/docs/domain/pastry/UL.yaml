@@ -1,0 +1,17 @@
+namespace: example.org/cooking/pastry
+premise: Made-up example for tests; a bakery, from the dough to the loaf
+language:
+  Loaf:
+    desc: Bread baked in one piece.
+    details: |
+      A loaf has one Crust all round.
+
+      It is done once it sounds hollow.
+    avoid: [bun, roll]
+    see: [Crust, example.org/cooking/kitchen#Oven]
+  Crust:
+    desc: The hard outside of a loaf.
+    see: [Loaf]
+  Oven:
+    desc: The big oven of the bakery, used for bread only.
+    aliases: [Deck Oven]

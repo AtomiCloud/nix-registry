@@ -1,0 +1,10 @@
+namespace: example.org/cooking/pastry/bread
+premise: Made-up example for tests; the bread recipes of the bakery
+language:
+  Score:
+    desc: A cut that lets the Crust open.
+    details: Made once; an Oven never makes it.
+    see: [Crust]
+  Rise:
+    desc: Let one Loaf grow before it is baked.
+    see: [Loaf]
