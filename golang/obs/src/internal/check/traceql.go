@@ -18,6 +18,12 @@ import (
 // the implementation as well as the contract's span attributes.
 type SpanAttributeNames interface{ HasSpanAttribute(scope, name string) bool }
 
+// dottedSpanAttributes is optional on a SpanAttributeNames: it names the dotted spelling of an
+// attribute written with underscores (Tempo keeps the dots, so the underscore form finds nothing).
+type dottedSpanAttributes interface {
+	DottedSpanAttribute(scope, name string) string
+}
+
 func staticTraces(r *Report, q *files.Query, o Options) {
 	expr := staticFill(q)
 	if q.IsAlert {
@@ -58,7 +64,13 @@ func staticTraceQL(r *Report, q *files.Query, o Options, expr string) *tempo.Que
 	}
 	for _, a := range p.Attributes {
 		if o.SpanAttributes != nil && !o.SpanAttributes.HasSpanAttribute(a.Scope, a.Name) {
-			r.add(Fail, q.File, q.Where, "traceql-attribute", "undeclared attribute %s; query: %s", a, oneLine(expr))
+			hint := ""
+			if d, ok := o.SpanAttributes.(dottedSpanAttributes); ok {
+				if w := d.DottedSpanAttribute(a.Scope, a.Name); w != "" {
+					hint = fmt.Sprintf(" (Tempo keeps the dots: write %q)", w)
+				}
+			}
+			r.add(Fail, q.File, q.Where, "traceql-attribute", "undeclared attribute %s%s; query: %s", a, hint, oneLine(expr))
 		}
 	}
 	return p

@@ -150,6 +150,21 @@ func checkExisting(c *Config, have map[string]existing) error {
 	return nil
 }
 
+// VMRelabelConfig is the sandbox VictoriaMetrics' -relabelConfig, the same labelmap as the real
+// vminsert (concept 2): a scraped sample reaches the store with durian_cloud_* labels (Alloy drops a
+// relabel rule whose target_label has dots) and the labelmap turns them into the stored durian.cloud.*
+// labels. The labeldrop removes the underscore originals, which labelmap keeps, so only the dotted
+// spelling is stored and a query written with the wrong spelling finds nothing, as in production.
+const VMRelabelConfig = `- action: labelmap
+  regex: "durian_cloud_(.+)"
+  replacement: "durian.cloud.$1"
+- action: labeldrop
+  regex: "durian_cloud_.+"
+`
+
+// vmRelabelPath is where VMRelabelConfig is copied into the VictoriaMetrics container.
+const vmRelabelPath = "/etc/vm-relabel.yml"
+
 const tempoConfig = `server:
   http_listen_port: 3200
 distributor:
@@ -216,7 +231,8 @@ func (c *Config) createArgs(k Component) []string {
 		// Concept section 10.4 single-instance settings: 30 d retention, 30 labels per series,
 		// 4 concurrent queries, 60 % of memory for caches.
 		a = append(a, "-retentionPeriod=30d", "-storageDataPath="+k.Data,
-			"-maxLabelsPerTimeseries=30", "-search.maxConcurrentRequests=4", "-memory.allowedPercent=60")
+			"-maxLabelsPerTimeseries=30", "-search.maxConcurrentRequests=4", "-memory.allowedPercent=60",
+			"-relabelConfig="+vmRelabelPath)
 	case "vl":
 		// Concept section 10.4: 30 d retention and the 16 GiB laptop disk cap (oldest days go first),
 		// 4 concurrent queries, queue 10 s and query 30 s (the query bounds), 60 % of memory.
@@ -289,6 +305,11 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 		}
 		if k.Name == "tempo" {
 			if err := copyIn(ctx, cfg.Runner, name, "/etc/tempo.yaml", tempoConfig); err != nil {
+				return nil, err
+			}
+		}
+		if k.Name == "vm" {
+			if err := copyIn(ctx, cfg.Runner, name, vmRelabelPath, VMRelabelConfig); err != nil {
 				return nil, err
 			}
 		}

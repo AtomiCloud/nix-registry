@@ -214,8 +214,14 @@ dashboard or alert written to the standard returns rows on an obs seed and on th
 - **Scraped (non-OTLP) metrics** reach VictoriaMetrics as `durian_cloud_*` (Alloy drops a relabel rule whose
   `target_label` has dots), and a vminsert `-relabelConfig` `labelmap` rule (`regex: durian_cloud_(.*)`,
   `replacement: durian.cloud.$1`) turns them back into `durian.cloud.*`. `obs scrape` takes the underscore input
-  (`--label durian_cloud_landscape=local`); the sandbox's VictoriaMetrics has no labelmap, so scraped samples
-  keep the underscores there (NOT TESTED against the real labelmap).
+  (`--label durian_cloud_landscape=local`), exactly like the real collector. The sandbox's VictoriaMetrics is started
+  with the same labelmap (`-relabelConfig=/etc/vm-relabel.yml`, copied in at `obs sandbox up`), plus a `labeldrop` of the
+  `durian_cloud_*` originals (labelmap alone keeps them), so scraped samples are stored dotted and
+  `{"durian.cloud.service"="checkout"}` returns rows there. A sandbox created by an older obs has no labelmap: run
+  `obs sandbox down` and `up` again. NOT TESTED: the labelmap on the real stack with our Alloy v1.21.3.
+- **TraceQL** names are exact too: Tempo keeps attribute names as sent, so a resource or span attribute the contract
+  spells dotted must be written dotted (`span.payment.provider`). The underscore form fails `traceql-attribute` and
+  names the right spelling.
 
 Seed data is made to look like stored data (concept §11.2). Metrics: counters get `_total`, seconds
 histograms `_seconds_bucket`/`_sum`/`_count` with `le`; dots in a metric NAME become `_`, dots in a LABEL name stay
@@ -524,7 +530,7 @@ It scrapes Prometheus text endpoints (an app's `/metrics`) on an interval and wr
 sandbox's VictoriaMetrics (`/api/v1/import/prometheus`), with `job`, `instance` and the `--label`s on every
 sample, so the app's metrics can be looked at next to the seed. Scraped metrics carry their where-from
 labels as `durian_cloud_*` (concept §2): pass `--label durian_cloud_landscape=local` and so on (a vminsert labelmap turns
-them into `durian.cloud.*` in the real stack; the sandbox has none, see "Label spelling per store"). `--once`
+them into `durian.cloud.*`; the sandbox VictoriaMetrics has the same labelmap, see "Label spelling per store"). `--once`
 scrapes once and exits 1 when it failed; otherwise it runs until Ctrl-C and keeps going after a failed
 scrape.
 

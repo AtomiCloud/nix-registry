@@ -176,19 +176,46 @@ func (c *Contract) HasSpanAttribute(scope, name string) bool {
 // resourceHas: a traced resource carries every platform label of concept section 2, the pod keys
 // included (a trace has its pod name; only business METRICS drop it, concept 4.1).
 func (c *Contract) resourceHas(name string) bool {
-	n := Under(name)
 	for _, l := range PlatformLabels {
-		if Under(l) == n {
+		if l == name {
 			return true
 		}
 	}
 	return PlatformLabelSet()[name] || c.platformHas(name)
 }
 
+// DottedSpanAttribute returns the declared (dotted) spelling a TraceQL attribute name is the underscore
+// form of, or "". Tempo keeps attribute names as sent, dots included (concept 2.1), so the underscore
+// form selects nothing; the checker names the right one.
+func (c *Contract) DottedSpanAttribute(scope, name string) string {
+	if !strings.Contains(name, "_") {
+		return ""
+	}
+	var cands []string
+	if scope == "resource" || scope == "" {
+		cands = append(cands, PlatformLabels...)
+		for _, ls := range c.Platform {
+			cands = append(cands, ls...)
+		}
+	}
+	if scope == "span" || scope == "" {
+		for _, n := range c.SpanOrder {
+			cands = append(cands, c.Spans[n].AttrOrder...)
+		}
+	}
+	best := ""
+	for _, k := range cands {
+		if k != name && strings.Contains(k, ".") && Under(k) == name && (best == "" || k < best) {
+			best = k
+		}
+	}
+	return best
+}
+
 func (c *Contract) spanHas(name string) bool {
 	for _, n := range c.SpanOrder {
 		for _, a := range c.Spans[n].AttrOrder {
-			if a == name || Under(a) == Under(name) {
+			if a == name {
 				return true
 			}
 		}
@@ -199,7 +226,7 @@ func (c *Contract) spanHas(name string) bool {
 func (c *Contract) platformHas(name string) bool {
 	for _, ls := range c.Platform {
 		for _, l := range ls {
-			if Under(l) == Under(name) {
+			if l == name {
 				return true
 			}
 		}

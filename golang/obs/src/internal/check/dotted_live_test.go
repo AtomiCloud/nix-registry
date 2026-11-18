@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/AtomiCloud/obs/internal/contract"
 	"github.com/AtomiCloud/obs/internal/engines/vm"
 	"github.com/AtomiCloud/obs/internal/files"
 	"github.com/AtomiCloud/obs/internal/seed"
@@ -78,6 +79,44 @@ func TestLiveUnderscoreSpellingHasNoRowsAndNamesTheDottedOne(t *testing.T) {
 		}
 		if f.Rule == "no-rows" && !strings.Contains(f.Msg, `stored as "durian.cloud.service"`) {
 			t.Errorf("no-rows must name the dotted spelling: %s", f.Msg)
+		}
+	}
+}
+
+// Tempo keeps attribute names as sent (concept 2.1): a TraceQL attribute the contract spells dotted must be
+// written dotted. The underscore form fails and the finding names the right spelling.
+func TestTraceQLUnderscoreSpellingOfDottedAttributeFails(t *testing.T) {
+	c, err := contract.Parse("c.yaml", []byte(`
+service: checkout
+types: { provider: { kind: enum, values: [stripe, adyen] } }
+spans: { checkout.charge: { attributes: { payment.provider: provider } } }
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := func(expr string) *Report {
+		r := newReport()
+		q := &files.Query{File: "dashboards/traces.json", Where: "panel 7 target A", Kind: files.Traces, Expr: expr}
+		staticTraceQL(r, q, Options{SpanAttributes: c}, expr)
+		return r
+	}
+	for _, expr := range []string{
+		`{span.payment.provider = "stripe"}`,
+		`{resource.durian.cloud.service = "checkout"}`,
+		`{.payment.provider = "stripe"}`,
+	} {
+		if r := run(expr); r.Failures() != 0 {
+			t.Errorf("%s: %+v", expr, r.Findings)
+		}
+	}
+	for expr, want := range map[string]string{
+		`{span.payment_provider = "stripe"}`:           `write "payment.provider"`,
+		`{resource.durian_cloud_service = "checkout"}`: `write "durian.cloud.service"`,
+		`{.payment_provider = "stripe"}`:               `write "payment.provider"`,
+	} {
+		r := run(expr)
+		if r.Failures() != 1 || !strings.Contains(r.Findings[0].Msg, want) || !strings.Contains(r.Findings[0].Msg, "undeclared attribute") {
+			t.Errorf("%s: want one failure naming %s, got %+v", expr, want, r.Findings)
 		}
 	}
 }

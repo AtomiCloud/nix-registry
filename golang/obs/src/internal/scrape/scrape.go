@@ -8,7 +8,7 @@
 // given on the command line. Scraped metrics carry their where-from labels as
 // durian_cloud_* (concept section 2.1), so pass them with --label. A vminsert labelmap (regex
 // durian_cloud_(.*) -> durian.cloud.$1) turns them into the stored dotted labels in the real
-// stack; the sandbox VictoriaMetrics has none, so scraped samples keep the underscores there.
+// stack; the sandbox VictoriaMetrics has the same labelmap (sandbox.VMRelabelConfig).
 package scrape
 
 import (

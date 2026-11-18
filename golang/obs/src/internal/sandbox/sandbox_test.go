@@ -330,6 +330,16 @@ func TestUpStartsLoadsAndRemembersTheSeedWindow(t *testing.T) {
 	if !fr.has("cp") {
 		t.Errorf("tempo config not copied in")
 	}
+	// the VictoriaMetrics container gets the labelmap config it is started with (-relabelConfig)
+	vmCopied := false
+	for _, c := range fr.calls {
+		if len(c) == 3 && c[0] == "cp" && c[2] == "obs-sandbox-demo-vm:/etc/vm-relabel.yml" {
+			vmCopied = true
+		}
+	}
+	if !vmCopied {
+		t.Errorf("the vm relabel config is not copied into the vm container: %v", fr.calls)
+	}
 	for _, c := range fr.calls {
 		if strings.Contains(strings.Join(c, " "), "prune") {
 			t.Errorf("prune: %v", c)
@@ -464,7 +474,7 @@ func TestCreateArgsCarryTheSingleInstanceSettings(t *testing.T) {
 	cfg := Config{Project: "demo"}
 	cfg.defaults()
 	want := map[string][]string{
-		"vm": {"-retentionPeriod=30d", "-maxLabelsPerTimeseries=30", "-search.maxConcurrentRequests=4", "-memory.allowedPercent=60"},
+		"vm": {"-retentionPeriod=30d", "-maxLabelsPerTimeseries=30", "-search.maxConcurrentRequests=4", "-memory.allowedPercent=60", "-relabelConfig=/etc/vm-relabel.yml"},
 		"vl": {"-retentionPeriod=30d", "-retention.maxDiskSpaceUsageBytes=17179869184", "-search.maxConcurrentRequests=4",
 			"-search.maxQueueDuration=10s", "-search.maxQueryDuration=30s", "-memory.allowedPercent=60"},
 	}
