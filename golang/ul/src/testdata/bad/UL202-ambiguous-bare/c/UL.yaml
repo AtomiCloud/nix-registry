@@ -1,0 +1,6 @@
+namespace: example.org/area/c
+premise: Area C
+language:
+  Gadget:
+    desc: A gadget that points at a bare Widget.
+    see: [Widget]
