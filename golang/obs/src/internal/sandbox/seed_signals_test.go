@@ -99,7 +99,7 @@ func TestConcreteProfileDatasourceIsProvisioned(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, d := range Datasources(set, "demo") {
+	for _, d := range datasources(set, "demo", true) {
 		if d.UID == "checkout-profiles" && d.Kind == "profiles" {
 			return
 		}

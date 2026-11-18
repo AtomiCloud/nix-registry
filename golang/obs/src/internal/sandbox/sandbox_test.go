@@ -67,6 +67,7 @@ type fakeRunner struct {
 	// vmArgs is what `inspect --format {{json .Args}}` answers for the vm container (default: it has -relabelConfig).
 	vmArgs        string
 	tempoBindings string
+	tempoFiles    []string
 }
 
 func (f *fakeRunner) Run(_ context.Context, args ...string) (string, error) {
@@ -88,6 +89,12 @@ func (f *fakeRunner) Run(_ context.Context, args ...string) (string, error) {
 			return strings.Join(names, "\n"), nil
 		}
 		return f.ps, nil
+	case args[0] == "cp" && len(args) == 3 && strings.HasSuffix(args[2], ":/etc/tempo.yaml"):
+		b, err := os.ReadFile(args[1])
+		if err != nil {
+			return "", err
+		}
+		f.tempoFiles = append(f.tempoFiles, string(b))
 	case args[0] == "rm":
 		var keep []string
 		for _, ln := range strings.Fields(f.ps) {
@@ -244,6 +251,8 @@ type stackServer struct {
 	versions     map[string]string // overrides: vm, vl, grafana, plugin, tempo
 	annotations  []map[string]any
 	groups       []map[string]any
+	groupMethods []string
+	groupRoutes  []string
 	traces       []map[string]any
 	profileLoads int
 }
@@ -267,6 +276,8 @@ func newStackServer(t *testing.T) *stackServer {
 		_ = json.NewDecoder(r.Body).Decode(&m)
 		s.mu.Lock()
 		s.groups = append(s.groups, m)
+		s.groupMethods = append(s.groupMethods, r.Method)
+		s.groupRoutes = append(s.groupRoutes, r.URL.EscapedPath())
 		s.mu.Unlock()
 		fmt.Fprint(w, `{}`)
 	})

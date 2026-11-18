@@ -29,6 +29,12 @@ type Datasource struct {
 // name (a platform pins its uids: fixture-metrics ...), and one default per kind
 // (obs-metrics, obs-logs, obs-traces, obs-profiles) when no dashboard names one.
 func Datasources(set *files.Set, project string) []Datasource {
+	return datasources(set, project, false)
+}
+
+// datasources adds concrete profile UIDs only for look. The legacy sandbox
+// provisioning remains byte-for-byte compatible with 0.4's default profile UID.
+func datasources(set *files.Set, project string, profiles bool) []Datasource {
 	type kind struct{ name, typ, comp string }
 	kinds := map[files.Kind]kind{
 		files.Metrics: {"metrics", "prometheus", "vm"},
@@ -72,14 +78,16 @@ func Datasources(set *files.Set, project string) []Datasource {
 			}
 		}
 	}
-	for _, d := range set.Dashboards {
-		b, err := os.ReadFile(filepath.Join(set.Dir, filepath.FromSlash(d.File)))
-		if err != nil {
-			continue
-		} // ImportDashboards reports the file error.
-		var raw any
-		if json.Unmarshal(b, &raw) == nil {
-			profileRefs(raw)
+	if profiles {
+		for _, d := range set.Dashboards {
+			b, err := os.ReadFile(filepath.Join(set.Dir, filepath.FromSlash(d.File)))
+			if err != nil {
+				continue
+			} // ImportDashboards reports the file error.
+			var raw any
+			if json.Unmarshal(b, &raw) == nil {
+				profileRefs(raw)
+			}
 		}
 	}
 	pyro, _ := ByName("pyroscope")

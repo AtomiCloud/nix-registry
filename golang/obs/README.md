@@ -913,7 +913,7 @@ the prompt asks that agent to stop it after review. `--keep` instead asks the ag
 leave it running for a person; the prompt includes the exact cleanup command. `sandbox
 up|down|status` remain available. When reusing a baseline-only seed from `sandbox up`,
 `look` asks for `sandbox down` first, so baseline and incident logs cannot be mixed.
-An older stack without the published Tempo receiver gets the same recreate-first
+Stacks started by `sandbox up` or an older obs, without the published Tempo receiver, get a recreate-first
 diagnostic. A repeated default look on an expired live snapshot recreates only that
 project's labelled containers, volumes and network and says it did so; it never prunes
 or touches another project. Explicit `--seed-base` historical snapshots remain reusable.

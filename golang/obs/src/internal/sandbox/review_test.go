@@ -31,12 +31,26 @@ func TestLegacySandboxSpecAndLoaders(t *testing.T) {
 		t.Errorf("sandbox up Tempo config changed from 70b4358: %s", got)
 	}
 	s := newStackServer(t)
-	cfg := s.cfg(t, &fakeRunner{})
+	fr := &fakeRunner{}
+	cfg := s.cfg(t, fr)
+	if err := os.WriteFile(filepath.Join(cfg.Dir, "dashboards", "profiles.json"), []byte(`{"uid":"profiles","panels":[{"id":1,"type":"flamegraph","datasource":{"type":"grafana-pyroscope-datasource","uid":"checkout-profiles"},"targets":[{"refId":"A"}]}]}`), 0644); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := Up(context.Background(), cfg); err != nil {
 		t.Fatal(err)
 	}
 	if len(s.traces) != 0 || s.profileLoads != 0 {
 		t.Fatalf("legacy sandbox up called new loaders: traces=%d profiles=%d", len(s.traces), s.profileLoads)
+	}
+	var provisioned []string
+	for _, ds := range s.dsPosts {
+		provisioned = append(provisioned, ds["uid"].(string))
+	}
+	if strings.Join(provisioned, ",") != "payments-metrics,payments-logs,obs-traces,obs-profiles" {
+		t.Errorf("legacy datasource provisioning changed: %v", provisioned)
+	}
+	if len(fr.tempoFiles) != 1 || fr.tempoFiles[0] != tempoConfig {
+		t.Error("sandbox up wrote the look Tempo config instead of the original 0.4 file")
 	}
 }
 
@@ -110,7 +124,7 @@ func TestLookRejectsOldTempoReceiver(t *testing.T) {
 	cfg := s.cfg(t, fr)
 	cfg.ApplyIncidents = true
 	_, err := Up(context.Background(), cfg)
-	if err == nil || !strings.Contains(err.Error(), "run `obs sandbox down` first (stack from an older obs)") {
+	if err == nil || !strings.Contains(err.Error(), "stack started by obs sandbox up or an older obs") || !strings.Contains(err.Error(), "run `obs sandbox down` first") {
 		t.Fatalf("want older-stack receiver diagnostic, got %v", err)
 	}
 }

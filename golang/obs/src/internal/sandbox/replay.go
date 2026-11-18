@@ -62,7 +62,7 @@ func (c *Config) checkLookReceiver(ctx context.Context, have map[string]existing
 	}
 	var bindings map[string][]json.RawMessage
 	if json.Unmarshal([]byte(b), &bindings) != nil || len(bindings["4318/tcp"]) == 0 {
-		return fmt.Errorf("Tempo receiver is not published: run `obs sandbox down` first (stack from an older obs); use --project %s", c.Project)
+		return fmt.Errorf("Tempo receiver is not published: stack started by obs sandbox up or an older obs; run `obs sandbox down` first; use --project %s", c.Project)
 	}
 	return nil
 }

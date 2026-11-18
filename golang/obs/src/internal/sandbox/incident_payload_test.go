@@ -7,6 +7,7 @@ import (
 	"github.com/AtomiCloud/obs/internal/seed"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -30,6 +31,9 @@ func TestIncidentAnnotationAndAlertProvisioningPayload(t *testing.T) {
 		_ = json.Unmarshal(b, &v)
 		switch {
 		case strings.Contains(r.URL.Path, "/rule-groups/"):
+			if r.Method != http.MethodPut || r.URL.EscapedPath() != "/api/v1/provisioning/folder/obs-demo/rule-groups/"+url.PathEscape(v["title"].(string)) {
+				t.Errorf("wrong rule-group method or route: %s %s", r.Method, r.URL.EscapedPath())
+			}
 			rules += len(v["rules"].([]any))
 			for _, raw := range v["rules"].([]any) {
 				rule := raw.(map[string]any)
@@ -100,6 +104,9 @@ func TestLookSeedContainsIncidentData(t *testing.T) {
 	}
 	if len(s.groups) != 1 {
 		t.Fatalf("got %d rule-group PUTs, want 1", len(s.groups))
+	}
+	if s.groupMethods[0] != http.MethodPut || s.groupRoutes[0] != "/api/v1/provisioning/folder/obs-demo/rule-groups/payment-errors" {
+		t.Errorf("wrong Up rule-group request: %s %s", s.groupMethods[0], s.groupRoutes[0])
 	}
 	uids := map[string]bool{}
 	for _, raw := range s.groups[0]["rules"].([]any) {

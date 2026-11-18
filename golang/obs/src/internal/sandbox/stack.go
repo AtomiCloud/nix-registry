@@ -441,7 +441,7 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 	}
 
 	st := readState(cfg)
-	dss := Datasources(set, cfg.Project)
+	dss := datasources(set, cfg.Project, cfg.ApplyIncidents)
 	info.Datasources = map[string][]string{}
 	for _, d := range dss {
 		info.Datasources[d.Kind] = append(info.Datasources[d.Kind], d.UID)
