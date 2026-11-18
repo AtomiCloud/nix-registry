@@ -28,7 +28,7 @@ var (
 
 // ReadOnly says whether obs live may send method to path. The error names both.
 func ReadOnly(method, path string) error {
-	if strings.Contains(path, "..") || !strings.HasPrefix(path, "/") {
+	if strings.Contains(path, "..") || !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") || strings.ContainsAny(path, "?#%\\ \x00") {
 		return fmt.Errorf("read-only guard: refused %s %s (not a plain query path)", method, path)
 	}
 	switch method {
@@ -42,6 +42,43 @@ func ReadOnly(method, path string) error {
 		}
 	}
 	return fmt.Errorf("read-only guard: refused %s %s (obs live only sends GET or POST to the stores' query endpoints)", method, path)
+}
+
+// baseURL parses a target address and refuses anything that is not a plain http(s) address: user
+// names and passwords (Go turns them into Basic Auth), a query string or a fragment. The error
+// never repeats the address, which may hold a secret.
+func baseURL(base string) (*url.URL, error) {
+	u, err := url.Parse(base)
+	switch {
+	case err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Opaque != "":
+		return nil, fmt.Errorf("read-only guard: the target address is not a plain http:// or https:// URL")
+	case u.User != nil:
+		return nil, fmt.Errorf("read-only guard: the target address carries a user name or password; use headers: with an environment variable name")
+	case u.RawQuery != "" || u.ForceQuery || strings.Contains(base, "#") || u.Fragment != "":
+		return nil, fmt.Errorf("read-only guard: the target address has a query string or a fragment")
+	}
+	return u, nil
+}
+
+// checkHop runs the guard on a URL the client is about to request: the request URL itself and
+// every redirect hop. It must stay on the target's scheme and host, carry no credentials, and be
+// a query path under the target's own path prefix.
+func checkHop(method string, base, hop *url.URL) error {
+	switch {
+	case hop.Scheme != base.Scheme || hop.Host != base.Host:
+		return fmt.Errorf("read-only guard: refused redirect to %s://%s (obs live never leaves the target's own host)", hop.Scheme, hop.Host)
+	case hop.User != nil:
+		return fmt.Errorf("read-only guard: refused redirect carrying credentials")
+	}
+	prefix := strings.TrimRight(base.Path, "/")
+	if !strings.HasPrefix(hop.Path, prefix+"/") {
+		return fmt.Errorf("read-only guard: refused redirect to %s %s (outside %s)", method, hop.Path, base.Host+prefix)
+	}
+	rel := strings.TrimPrefix(hop.Path, prefix)
+	if err := ReadOnly(method, rel); err != nil {
+		return fmt.Errorf("read-only guard: refused redirect to %s %s: %v", method, hop.Path, err)
+	}
+	return nil
 }
 
 // Client is the one HTTP path every live command uses.
@@ -79,18 +116,34 @@ func (c *Client) Get(ctx context.Context, base, path string, q url.Values) ([]by
 	if base == "" {
 		return nil, fmt.Errorf("GET %s: the target has no URL for this store (set it under targets: in obs.yaml)", path)
 	}
-	u := base + path
-	if len(q) > 0 {
-		u += "?" + q.Encode()
+	bu, err := baseURL(base)
+	if err != nil {
+		return nil, fmt.Errorf("GET %s: %v", path, err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	final := *bu
+	final.Path = strings.TrimRight(bu.Path, "/") + path
+	final.RawPath = ""
+	final.RawQuery = q.Encode()
+	// The guard runs on the URL as it will be sent, not only on the path argument.
+	if err := checkHop(http.MethodGet, bu, &final); err != nil {
+		return nil, err
+	}
+	base = bu.Scheme + "://" + bu.Host + strings.TrimRight(bu.Path, "/")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, final.String(), nil)
 	if err != nil {
 		return nil, err
 	}
 	for k, v := range c.Headers {
 		req.Header.Set(k, v)
 	}
-	resp, err := c.http().Do(req)
+	hc := *c.http() // a copy: the guard below is set for this request whatever client the caller gave
+	hc.CheckRedirect = func(r *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return fmt.Errorf("read-only guard: stopped after 5 redirects")
+		}
+		return checkHop(r.Method, bu, r.URL)
+	}
+	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("GET %s%s: %v", base, path, err)
 	}

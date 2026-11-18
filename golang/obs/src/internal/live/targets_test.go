@@ -132,3 +132,64 @@ func TestParseEstimates(t *testing.T) {
 		t.Fatal("a negative estimate must fail")
 	}
 }
+
+// tokenShaped values are built at run time, so no literal in the source looks like a credential
+// to a secrets scanner.
+var tokenShaped = []string{
+	"glsa" + "_" + strings.Repeat("Ab1", 12),
+	"gh" + "p_" + strings.Repeat("Zy9", 12),
+	"gl" + "c_" + strings.Repeat("Qw3", 10),
+	"github" + "_pat_" + strings.Repeat("Mn5", 15),
+	"AK" + "IA" + strings.Repeat("7", 16),
+	"NOTAKNOWNPREFIX" + strings.Repeat("X", 60),
+}
+
+func TestTokenShapedHeaderValueIsRefusedAndNeverPrinted(t *testing.T) {
+	for _, tok := range tokenShaped {
+		src := "prod:\n  metrics: https://vm\n  headers:\n    Authorization: " + tok + "\n"
+		_, err := ParseTargets(node(t, src), "obs.yaml")
+		if err == nil {
+			t.Errorf("%q passes as an environment variable name", tok)
+			continue
+		}
+		if strings.Contains(err.Error(), tok) || !strings.Contains(err.Error(), "targets.prod.headers.Authorization") {
+			t.Errorf("the error must name the header and never the value: %v", err)
+		}
+	}
+}
+
+func TestResolveNeverPrintsATokenShapedValue(t *testing.T) {
+	// A Spec that did not come through ParseTargets still must not leak: Resolve checks again.
+	for _, tok := range tokenShaped {
+		specs := map[string]Spec{"prod": {Metrics: "https://vm", Headers: map[string]string{"Authorization": tok}, Line: 3}}
+		_, err := Resolve("prod", specs, nil, func(string) string { return "" }, "obs.yaml")
+		if err == nil {
+			t.Errorf("%q must be refused", tok)
+			continue
+		}
+		if strings.Contains(err.Error(), tok) || !strings.Contains(err.Error(), "Authorization") {
+			t.Errorf("the error must name the header and never the value: %v", err)
+		}
+	}
+}
+
+func TestTargetURLsRefuseCredentialsQueryAndFragment(t *testing.T) {
+	for name, tc := range map[string]string{
+		"credentials":          "https://admin:hunter2secret@vm.example",
+		"user only":            "https://hunter2secret@vm.example",
+		"query":                "https://vm.example/?token=hunter2secret",
+		"empty query":          "https://vm.example/?",
+		"fragment":             "https://vm.example/#hunter2secret",
+		"credentials and path": "https://admin:hunter2secret@vm.example/prefix",
+	} {
+		src := "prod:\n  metrics: " + tc + "\n"
+		_, err := ParseTargets(node(t, src), "obs.yaml")
+		if err == nil {
+			t.Errorf("%s: %q must be refused", name, tc)
+			continue
+		}
+		if strings.Contains(err.Error(), "hunter2secret") || !strings.Contains(err.Error(), "targets.prod.metrics") {
+			t.Errorf("%s: the error must name the key and never echo the URL: %v", name, err)
+		}
+	}
+}

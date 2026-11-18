@@ -38,6 +38,35 @@ var localDefaults = map[string]string{
 
 var envNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+// tokenPrefixes are the starts of well-known credentials that happen to look like an environment
+// variable name (Grafana service accounts and Cloud tokens, GitHub tokens, AWS key ids, JWTs).
+var tokenPrefixes = []string{"glsa_", "glc_", "ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_", "AKIA", "ASIA", "AIza", "eyJ"}
+
+// maxEnvName is the longest environment variable name accepted; a real name is short, a token is not.
+const maxEnvName = 64
+
+// envNameProblem says why v cannot be the NAME of an environment variable, or "" when it can.
+// The answer never repeats v: v may be a secret that someone wrote into the file.
+func envNameProblem(v string) string {
+	switch {
+	case !envNameRe.MatchString(v):
+		return "it is not a bare environment variable name"
+	case len(v) > maxEnvName:
+		return fmt.Sprintf("it is longer than %d characters, which no environment variable name is", maxEnvName)
+	}
+	for _, p := range tokenPrefixes {
+		if strings.HasPrefix(v, p) {
+			return "it starts like an access token (" + p + "...)"
+		}
+	}
+	return ""
+}
+
+var userinfoRe = regexp.MustCompile(`://[^/?#]*@`)
+
+// redactURL hides the user:password part of a URL before it goes into a message.
+func redactURL(s string) string { return userinfoRe.ReplaceAllString(s, "://***@") }
+
 type specFail func(line int, format string, args ...any) error
 
 func failer(path string) specFail {
@@ -52,7 +81,15 @@ func failer(path string) specFail {
 func checkURL(fail specFail, key string, n *yaml.Node) (string, error) {
 	u, err := url.Parse(n.Value)
 	if n.Kind != yaml.ScalarNode || err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return "", fail(n.Line, "%s: %q is not an http:// or https:// URL", key, n.Value)
+		return "", fail(n.Line, "%s: %q is not an http:// or https:// URL", key, redactURL(n.Value))
+	}
+	switch {
+	case u.User != nil:
+		return "", fail(n.Line, "%s: the URL carries a user name or password; put the credential in headers: as an environment variable name (the value is not repeated here)", key)
+	case u.RawQuery != "" || u.ForceQuery || strings.Contains(n.Value, "?"):
+		return "", fail(n.Line, "%s: the URL has a query string; write the bare address, obs adds the query endpoints itself", key)
+	case u.Fragment != "" || strings.Contains(n.Value, "#"):
+		return "", fail(n.Line, "%s: the URL has a fragment (#...); write the bare address", key)
 	}
 	return strings.TrimRight(n.Value, "/"), nil
 }
@@ -100,8 +137,11 @@ func ParseTargets(n *yaml.Node, path string) (map[string]Spec, error) {
 				sp.Headers = map[string]string{}
 				for h := 0; h+1 < len(v.Content); h += 2 {
 					hk, hv := v.Content[h], v.Content[h+1]
-					if hv.Kind != yaml.ScalarNode || !envNameRe.MatchString(hv.Value) {
+					if hv.Kind != yaml.ScalarNode {
 						return nil, fail(hv.Line, "%s.%s: the value must be the NAME of an environment variable that holds the header value (a secret is never written in the file)", key, hk.Value)
+					}
+					if why := envNameProblem(hv.Value); why != "" {
+						return nil, fail(hv.Line, "%s.%s: the value must be the NAME of an environment variable that holds the header value (a secret is never written in the file); %s, so it is refused and not printed", key, hk.Value, why)
 					}
 					sp.Headers[hk.Value] = hv.Value
 				}
@@ -157,6 +197,9 @@ func Resolve(name string, specs map[string]Spec, sandbox map[string]string, gete
 	}
 	sort.Strings(hs)
 	for _, h := range hs {
+		if why := envNameProblem(sp.Headers[h]); why != "" {
+			return nil, fail(sp.Line, "targets.%s.headers.%s: the value must be the NAME of an environment variable (a secret is never written in the file); %s, so it is refused and not printed", name, h, why)
+		}
 		v := getenv(sp.Headers[h])
 		if v == "" {
 			return nil, fail(sp.Line, "targets.%s.headers.%s: environment variable %s is not set", name, h, sp.Headers[h])
