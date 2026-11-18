@@ -122,13 +122,19 @@ done
 "$UL" gen --root "$fast" >/dev/null
 ceiling_ms=2000 # the spec says 1 s; the sandbox shares a busy builder, so the ceiling here is 2 s and the Go test holds the 1 s line
 timed() {
-  local name="$1" start end ms
+  local name="$1" start end ms rc=0
   shift
   start=$(date +%s%N)
-  "$@" >/dev/null 2>&1 || true
+  "$@" >/dev/null 2>&1 || rc=$?
   end=$(date +%s%N)
   ms=$(((end - start) / 1000000))
-  if [ "$ms" -lt "$ceiling_ms" ]; then ok "speed $name: ${ms} ms"; else bad "speed $name: ${ms} ms (limit $ceiling_ms)"; fi
+  if [ "$rc" -ne 0 ]; then
+    bad "speed $name: exit $rc"
+  elif [ "$ms" -lt "$ceiling_ms" ]; then
+    ok "speed $name: ${ms} ms"
+  else
+    bad "speed $name: ${ms} ms (limit $ceiling_ms)"
+  fi
 }
 timed all "$UL" all --root "$fast"
 timed lookup "$UL" lookup "alias050 x05" --root "$fast" --from area042/x.go

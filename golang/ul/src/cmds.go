@@ -161,19 +161,27 @@ func cmdLookup(g *globals, args []string, e *env) (int, error) {
 			parts = append(parts, strings.TrimRight(f.renderLookupMD(m), "\n"))
 		}
 		if len(parts) > 0 {
-			io.WriteString(e.stdout, strings.Join(parts, "\n\n")+"\n")
+			if _, err := io.WriteString(e.stdout, strings.Join(parts, "\n\n")+"\n"); err != nil {
+				return 2, err
+			}
 		}
 	default:
 		for i, m := range matches {
 			if i > 0 {
-				fmt.Fprintln(e.stdout)
+				if _, err := fmt.Fprintln(e.stdout); err != nil {
+					return 2, err
+				}
 			}
-			io.WriteString(e.stdout, f.renderLookupText(m))
+			if _, err := io.WriteString(e.stdout, f.renderLookupText(m)); err != nil {
+				return 2, err
+			}
 		}
 	}
 	if len(matches) == 0 {
 		if format != "json" {
-			fmt.Fprintf(e.stderr, "ul: no match for %q\n", pos[0])
+			if _, err := fmt.Fprintf(e.stderr, "ul: no match for %q\n", pos[0]); err != nil {
+				return 2, err
+			}
 			if len(near) > 0 {
 				var ns []string
 				for _, n := range near {
@@ -181,7 +189,9 @@ func cmdLookup(g *globals, args []string, e *env) (int, error) {
 						ns = append(ns, n.E.Word)
 					}
 				}
-				fmt.Fprintf(e.stderr, "near: %s\n", strings.Join(ns, ", "))
+				if _, err := fmt.Fprintf(e.stderr, "near: %s\n", strings.Join(ns, ", ")); err != nil {
+					return 2, err
+				}
 			}
 		}
 		return 1, nil
@@ -266,6 +276,23 @@ type problemsOut struct {
 	Problems []Problem `json:"problems"`
 }
 
+// mdRefusal says why ul must not read or write the UL.md at p, or "" when it may: a regular
+// file or a missing one is fine; a symlink (its target can be anywhere) or anything else is not.
+func mdRefusal(p string) string {
+	st, err := os.Lstat(p)
+	switch {
+	case err == nil && st.Mode().IsRegular():
+		return ""
+	case err == nil && st.Mode()&fs.ModeSymlink != 0:
+		return "UL.md is a symlink; replace it with a regular file"
+	case err == nil:
+		return "UL.md is not a regular file"
+	case errors.Is(err, fs.ErrNotExist):
+		return ""
+	}
+	return "UL.md cannot be inspected: " + readErrText(err)
+}
+
 func (f *Final) withMDProblems(l *loaded) []Problem {
 	probs := slices.Clone(f.Problems)
 	for _, ns := range f.NS {
@@ -273,7 +300,12 @@ func (f *Final) withMDProblems(l *loaded) []Problem {
 		if !l.scan.MD[rel] {
 			continue
 		}
-		got, err := os.ReadFile(filepath.Join(l.root, filepath.FromSlash(rel)))
+		full := filepath.Join(l.root, filepath.FromSlash(rel))
+		if why := mdRefusal(full); why != "" {
+			probs = append(probs, Problem{Code: "UL301", File: rel, Line: 1, Message: why})
+			continue
+		}
+		got, err := os.ReadFile(full)
 		if err != nil || string(got) != f.renderGen(ns) {
 			probs = append(probs, Problem{Code: "UL301", File: rel, Line: 1, Message: "UL.md differs from what ul gen writes; run ul gen"})
 		}
@@ -319,7 +351,9 @@ func cmdCheck(g *globals, args []string, e *env) (int, error) {
 		}
 	} else {
 		for _, p := range probs {
-			fmt.Fprintf(e.stdout, "%s:%d: %s %s\n", p.File, p.Line, p.Code, p.Message)
+			if _, err := fmt.Fprintf(e.stdout, "%s:%d: %s %s\n", p.File, p.Line, p.Code, p.Message); err != nil {
+				return 2, err
+			}
 		}
 	}
 	if len(probs) > 0 {
@@ -346,16 +380,33 @@ func cmdGen(g *globals, args []string, e *env) (int, error) {
 	f := l.final()
 	if !*check && len(f.Problems) > 0 {
 		for _, p := range f.Problems {
-			fmt.Fprintf(e.stderr, "%s:%d: %s %s\n", p.File, p.Line, p.Code, p.Message)
+			if _, err := fmt.Fprintf(e.stderr, "%s:%d: %s %s\n", p.File, p.Line, p.Code, p.Message); err != nil {
+				return 2, err
+			}
 		}
-		fmt.Fprintln(e.stderr, "ul gen: fix these problems first (ul check lists them)")
+		if _, err := fmt.Fprintln(e.stderr, "ul gen: fix these problems first (ul check lists them)"); err != nil {
+			return 2, err
+		}
 		return 1, nil
 	}
 	drift := 0
 	for _, ns := range f.NS {
 		rel := path.Join(path.Dir(ns.File), mdName)
+		full := filepath.Join(l.root, filepath.FromSlash(rel))
+		if why := mdRefusal(full); why != "" {
+			// Never read or write through a symlinked UL.md: its target may be anywhere.
+			drift++
+			if *check {
+				if _, err := fmt.Fprintf(e.stdout, "%s:1: UL301 %s\n", rel, why); err != nil {
+					return 2, err
+				}
+			} else if _, err := fmt.Fprintf(e.stderr, "ul gen: refusing %s: %s\n", rel, why); err != nil {
+				return 2, err
+			}
+			continue
+		}
 		want := f.renderGen(ns)
-		got, rerr := os.ReadFile(filepath.Join(l.root, filepath.FromSlash(rel)))
+		got, rerr := os.ReadFile(full)
 		same := rerr == nil && bytes.Equal(got, []byte(want))
 		switch {
 		case same:
@@ -365,12 +416,16 @@ func cmdGen(g *globals, args []string, e *env) (int, error) {
 			if rerr != nil {
 				msg = "UL.md is missing; run ul gen"
 			}
-			fmt.Fprintf(e.stdout, "%s:1: UL301 %s\n", rel, msg)
-		default:
-			if err := os.WriteFile(filepath.Join(l.root, filepath.FromSlash(rel)), []byte(want), 0o644); err != nil {
+			if _, err := fmt.Fprintf(e.stdout, "%s:1: UL301 %s\n", rel, msg); err != nil {
 				return 2, err
 			}
-			fmt.Fprintf(e.stdout, "wrote %s\n", rel)
+		default:
+			if err := os.WriteFile(full, []byte(want), 0o644); err != nil {
+				return 2, err
+			}
+			if _, err := fmt.Fprintf(e.stdout, "wrote %s\n", rel); err != nil {
+				return 2, err
+			}
 		}
 	}
 	if drift > 0 {

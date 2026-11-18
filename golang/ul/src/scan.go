@@ -32,9 +32,15 @@ func resolveRoot(flagRoot, cwd string) (string, error) {
 	if flagRoot != "" {
 		abs := flagRoot
 		if !filepath.IsAbs(abs) {
-			abs = filepath.Join(realPath(cwd), abs) // the kernel resolves .. on the real path
+			// The kernel resolves .. on the real path; join without cleaning so a .. after a
+			// symlink is still there when EvalSymlinks walks it.
+			abs = realPath(cwd) + string(filepath.Separator) + abs
 		}
-		abs = filepath.Clean(abs)
+		if r, err := filepath.EvalSymlinks(abs); err == nil {
+			abs = r
+		} else {
+			abs = filepath.Clean(abs)
+		}
 		st, err := os.Stat(abs)
 		if err != nil {
 			return "", err
@@ -120,8 +126,8 @@ func scanRepo(root string) (*scanResult, error) {
 			if rel == "" {
 				continue
 			}
-			if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(rel))); err != nil {
-				continue // tracked but deleted from the work tree
+			if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(rel))); errors.Is(err, fs.ErrNotExist) {
+				continue // tracked but deleted from the work tree; any other error is load's to report
 			}
 			res.note(rel)
 		}
@@ -131,6 +137,7 @@ func scanRepo(root string) (*scanResult, error) {
 		return nil, err
 	}
 	slices.Sort(res.Yaml)
+	res.Yaml = slices.Compact(res.Yaml) // a conflicted file is listed once per index stage
 	return res, nil
 }
 

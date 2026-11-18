@@ -32,7 +32,7 @@ func golden(t *testing.T, name, got string) {
 }
 
 func TestGoldenAll(t *testing.T) {
-	dir := fixture(t, "clean")
+	dir := realDir(t, fixture(t, "clean"))
 	te := newEnv(t, dir)
 	js := strings.ReplaceAll(te.mustOK("all", "--root", dir), dir, "/ROOT")
 	golden(t, "all.json", js)
@@ -85,7 +85,7 @@ func TestGoldenGen(t *testing.T) {
 }
 
 func TestJSONContract(t *testing.T) {
-	dir := fixture(t, "clean")
+	dir := realDir(t, fixture(t, "clean"))
 	te := newEnv(t, dir)
 	raw := te.mustOK("all", "--root", dir)
 	for _, must := range []string{`"schema": "ul/v1"`, `"replacedBy": null`,
@@ -171,4 +171,15 @@ func TestAnchorsAreGitHubStyle(t *testing.T) {
 	if !strings.Contains(s, "## X\n") || !strings.Contains(s, "## X.\n") {
 		t.Errorf("headings missing:\n%s", s)
 	}
+}
+
+// realDir resolves symlinks in a fixture folder: ul prints real paths, and the temp folder of
+// the machine (macOS /var, or a TMPDIR that is a link) may not be one.
+func realDir(t *testing.T, dir string) string {
+	t.Helper()
+	r, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
 }

@@ -73,8 +73,14 @@ func fromParts(root, cwd, p string) ([]string, bool) {
 		abs = filepath.Join(realPath(cwd), abs) // the kernel resolves .. on the real path
 	}
 	abs = filepath.Clean(abs)
-	if st, err := os.Stat(abs); err != nil || !st.IsDir() {
-		abs = filepath.Dir(abs)
+	st, serr := os.Stat(abs)
+	switch r, rerr := filepath.EvalSymlinks(abs); {
+	case serr == nil && st.IsDir():
+		// a folder keeps its own name
+	case serr == nil && rerr == nil:
+		abs = filepath.Dir(r) // an existing file: its real folder, even when the file is a symlink
+	default:
+		abs = filepath.Dir(abs) // a missing path: the nearest existing parent is resolved below
 	}
 	abs = realExisting(abs)
 	rel, err := filepath.Rel(root, abs)

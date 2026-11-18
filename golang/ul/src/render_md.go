@@ -2,6 +2,7 @@ package main
 
 import (
 	"path"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -42,8 +43,59 @@ func (ns *FNS) sections() (active, retired []*FEntry) {
 	return
 }
 
-// anchorsOf gives each word its GitHub-style heading anchor in the namespace's UL.md. The
-// title heading counts too, so a word named like the title gets the "-1" suffix.
+var (
+	atxHeading = regexp.MustCompile(`^ {0,3}#{1,6}(?:[ \t]+(.*?))?[ \t]*$`)
+	atxClosing = regexp.MustCompile(`(?:^|[ \t]+)#+$`)
+	setextRule = regexp.MustCompile(`^ {0,3}(?:=+|-+)[ \t]*$`)
+	fenceOpen  = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})")
+	inlineLink = regexp.MustCompile(`\[([^\]]*)\]\([^)]*\)`)
+	blankLine  = regexp.MustCompile(`^\s*$`)
+)
+
+// headingTexts lists the headings Markdown s renders, in order: ATX headings and setext
+// headings (a one-line paragraph over === or ---), none of them inside a fenced code block.
+func headingTexts(s string) []string {
+	var out []string
+	var fence string // the opening fence while inside a code block
+	prev := ""       // the previous line when it is a plain paragraph line
+	for _, line := range strings.Split(strings.ReplaceAll(s, "\r\n", "\n"), "\n") {
+		if fence != "" {
+			if t := strings.TrimSpace(line); strings.HasPrefix(t, fence[:1]) && strings.Trim(t, fence[:1]) == "" && len(t) >= len(fence) {
+				fence = ""
+			}
+			continue
+		}
+		if m := fenceOpen.FindStringSubmatch(line); m != nil {
+			fence, prev = m[1], ""
+			continue
+		}
+		if m := atxHeading.FindStringSubmatch(line); m != nil {
+			out = append(out, atxClosing.ReplaceAllString(m[1], ""))
+			prev = ""
+			continue
+		}
+		if prev != "" && setextRule.MatchString(line) {
+			out = append(out, strings.TrimSpace(prev))
+			prev = ""
+			continue
+		}
+		if blankLine.MatchString(line) {
+			prev = ""
+		} else {
+			prev = line
+		}
+	}
+	for i, h := range out {
+		out[i] = inlineLink.ReplaceAllString(h, "$1")
+	}
+	return out
+}
+
+// anchorsOf gives each word its GitHub-style heading anchor in the namespace's UL.md. GitHub
+// numbers duplicate headings in document order, so every heading counts, in the order
+// renderNS emits it: the title, the premise's own headings, then per word its heading and the
+// headings inside its description (retired) and details. A word named like an earlier heading
+// gets the "-1" suffix.
 func (ns *FNS) anchorsOf() map[*FEntry]string {
 	if ns.anchors != nil {
 		return ns.anchors
@@ -59,10 +111,21 @@ func (ns *FNS) anchorsOf() map[*FEntry]string {
 		return base + "-" + strconv.Itoa(n)
 	}
 	next(lastSegment(ns.Namespace))
+	for _, h := range headingTexts(ns.Premise) {
+		next(h)
+	}
 	ns.anchors = map[*FEntry]string{}
 	active, retired := ns.sections()
 	for _, fe := range append(slices.Clone(active), retired...) {
 		ns.anchors[fe] = next(fe.E.Word)
+		if fe.Retired {
+			for _, h := range headingTexts(fe.E.Desc) {
+				next(h)
+			}
+		}
+		for _, h := range headingTexts(strings.TrimRight(fe.E.Details, " \t\r\n")) {
+			next(h)
+		}
 	}
 	return ns.anchors
 }

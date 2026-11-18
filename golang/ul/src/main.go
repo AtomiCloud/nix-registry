@@ -59,12 +59,16 @@ func addCommon(fs *flag.FlagSet, g *globals) {
 	fs.StringVar(&g.format, "format", g.format, "output format")
 }
 
-// parseArgs parses flags that may come before or after the positional arguments.
+// parseArgs parses flags that may come before or after the positional arguments. A bare `--`
+// ends flag parsing: every token after it is positional.
 func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 	var pos []string
 	for {
 		if err := fs.Parse(args); err != nil {
 			return nil, quietErr{err}
+		}
+		if endedAtDashes(fs, args) {
+			return append(pos, fs.Args()...), nil
 		}
 		if fs.NArg() == 0 {
 			return pos, nil
@@ -72,6 +76,29 @@ func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 		pos = append(pos, fs.Arg(0))
 		args = fs.Args()[1:]
 	}
+}
+
+// endedAtDashes reports whether the Parse of args stopped at a bare `--` (which Parse drops),
+// not at a positional and not on a flag value that happens to be `--`.
+func endedAtDashes(fs *flag.FlagSet, args []string) bool {
+	used := len(args) - fs.NArg()
+	if used == 0 || args[used-1] != "--" {
+		return false
+	}
+	i := 0
+	for i < used-1 {
+		name := strings.TrimLeft(args[i], "-")
+		isBool := false
+		if f := fs.Lookup(name); f != nil {
+			_, isBool = f.Value.(interface{ IsBoolFlag() bool })
+		}
+		if strings.Contains(name, "=") || isBool {
+			i++
+		} else {
+			i += 2 // the flag takes the next token as its value
+		}
+	}
+	return i == used-1
 }
 
 func newFlagSet(name string, e *env) *flag.FlagSet {
