@@ -3,267 +3,262 @@
   "root": "/ROOT",
   "namespaces": [
     {
-      "namespace": "durian.cloud/engineering/standards/OOP",
+      "namespace": "example.org/cooking/kitchen",
       "breadcrumb": [
-        "durian.cloud",
-        "engineering",
-        "standards",
-        "OOP"
+        "example.org",
+        "cooking",
+        "kitchen"
       ],
-      "premise": "When writing code, best practice when using object-oriented programming",
-      "file": "docs/standard/oop/UL.yaml"
+      "premise": "Made-up example for tests; the tools of a kitchen",
+      "file": "docs/standard/kitchen/UL.yaml"
     },
     {
-      "namespace": "durian.cloud/shop/billing",
+      "namespace": "example.org/cooking/pastry",
       "breadcrumb": [
-        "durian.cloud",
-        "shop",
-        "billing"
+        "example.org",
+        "cooking",
+        "pastry"
       ],
-      "premise": "Money owed by a customer, from the first charge to the last receipt",
-      "file": "docs/domain/billing/UL.yaml"
+      "premise": "Made-up example for tests; a bakery, from the dough to the loaf",
+      "file": "docs/domain/pastry/UL.yaml"
     },
     {
-      "namespace": "durian.cloud/shop/billing/pay",
+      "namespace": "example.org/cooking/pastry/bread",
       "breadcrumb": [
-        "durian.cloud",
-        "shop",
-        "billing",
-        "pay"
+        "example.org",
+        "cooking",
+        "pastry",
+        "bread"
       ],
-      "premise": "The card payment plugin of billing",
-      "file": "plugins/pay/UL.yaml"
+      "premise": "Made-up example for tests; the bread recipes of the bakery",
+      "file": "recipes/bread/UL.yaml"
     }
   ],
   "words": [
     {
-      "id": "durian.cloud/engineering/standards/OOP#Facade",
-      "word": "Facade",
-      "namespace": "durian.cloud/engineering/standards/OOP",
+      "id": "example.org/cooking/kitchen#Frying pan",
+      "word": "Frying pan",
+      "namespace": "example.org/cooking/kitchen",
       "breadcrumb": [
-        "durian.cloud",
-        "engineering",
-        "standards",
-        "OOP"
-      ],
-      "aliases": [],
-      "desc": "Old name for the one entry object of a plugin.",
-      "details": "",
-      "avoid": [],
-      "see": [],
-      "mentions": [
-        "durian.cloud/engineering/standards/OOP#Plugin"
-      ],
-      "status": "retired",
-      "replacedBy": "durian.cloud/engineering/standards/OOP#Plugin",
-      "file": "docs/standard/oop/UL.yaml",
-      "line": 22
-    },
-    {
-      "id": "durian.cloud/engineering/standards/OOP#OCP",
-      "word": "OCP",
-      "namespace": "durian.cloud/engineering/standards/OOP",
-      "breadcrumb": [
-        "durian.cloud",
-        "engineering",
-        "standards",
-        "OOP"
+        "example.org",
+        "cooking",
+        "kitchen"
       ],
       "aliases": [
-        "Open-Close Principle",
-        "Plugin Design"
+        "Fry pan",
+        "Flat Pan"
       ],
-      "desc": "Add behaviour by adding a plugin, not by editing shared code.",
-      "details": "Code is **open** for extension and **closed** for edits.\n\nAdd a plugin that implements the seam; never rewrite another plugin's line.\n",
+      "desc": "A flat pan for frying food on a hob.",
+      "details": "A frying pan is **flat** and **shallow**.\n\nHeat it on the hob; it never goes in the Oven.\n",
       "avoid": [
-        "extension point"
+        "griddle"
       ],
       "see": [
-        "durian.cloud/engineering/standards/OOP#Plugin",
-        "durian.cloud/engineering/standards/OOP#SRP"
+        "example.org/cooking/kitchen#Oven",
+        "example.org/cooking/kitchen#Wok"
       ],
       "mentions": [
-        "durian.cloud/engineering/standards/OOP#Plugin"
+        "example.org/cooking/kitchen#Oven"
       ],
       "status": "active",
       "replacedBy": null,
-      "file": "docs/standard/oop/UL.yaml",
+      "file": "docs/standard/kitchen/UL.yaml",
       "line": 4
     },
     {
-      "id": "durian.cloud/engineering/standards/OOP#Plugin",
-      "word": "Plugin",
-      "namespace": "durian.cloud/engineering/standards/OOP",
+      "id": "example.org/cooking/kitchen#Oven",
+      "word": "Oven",
+      "namespace": "example.org/cooking/kitchen",
       "breadcrumb": [
-        "durian.cloud",
-        "engineering",
-        "standards",
-        "OOP"
+        "example.org",
+        "cooking",
+        "kitchen"
       ],
       "aliases": [],
-      "desc": "One part added to the core through one seam.",
-      "details": "A plugin owns its own types and joins the core with one registration line.\n",
+      "desc": "A closed box that cooks food with dry heat.",
+      "details": "An oven bakes or roasts; set the heat before the food goes in.\n",
       "avoid": [],
       "see": [
-        "durian.cloud/engineering/standards/OOP#OCP"
+        "example.org/cooking/kitchen#Frying pan"
       ],
       "mentions": [],
       "status": "active",
       "replacedBy": null,
-      "file": "docs/standard/oop/UL.yaml",
+      "file": "docs/standard/kitchen/UL.yaml",
       "line": 13
     },
     {
-      "id": "durian.cloud/engineering/standards/OOP#SRP",
-      "word": "SRP",
-      "namespace": "durian.cloud/engineering/standards/OOP",
+      "id": "example.org/cooking/kitchen#Skillet",
+      "word": "Skillet",
+      "namespace": "example.org/cooking/kitchen",
       "breadcrumb": [
-        "durian.cloud",
-        "engineering",
-        "standards",
-        "OOP"
+        "example.org",
+        "cooking",
+        "kitchen"
       ],
-      "aliases": [
-        "Single Responsibility"
-      ],
-      "desc": "A module has one reason to change.",
-      "details": "Pairs with the Open-Close Principle when a plugin grows.",
+      "aliases": [],
+      "desc": "Old name in this book for a Frying pan.",
+      "details": "",
       "avoid": [],
       "see": [],
       "mentions": [
-        "durian.cloud/engineering/standards/OOP#OCP",
-        "durian.cloud/engineering/standards/OOP#Plugin"
+        "example.org/cooking/kitchen#Frying pan"
+      ],
+      "status": "retired",
+      "replacedBy": "example.org/cooking/kitchen#Frying pan",
+      "file": "docs/standard/kitchen/UL.yaml",
+      "line": 22
+    },
+    {
+      "id": "example.org/cooking/kitchen#Wok",
+      "word": "Wok",
+      "namespace": "example.org/cooking/kitchen",
+      "breadcrumb": [
+        "example.org",
+        "cooking",
+        "kitchen"
+      ],
+      "aliases": [
+        "Round Pan"
+      ],
+      "desc": "A deep pan for stirring food over high heat.",
+      "details": "Use it in place of a Flat Pan when the oven is full.",
+      "avoid": [],
+      "see": [],
+      "mentions": [
+        "example.org/cooking/kitchen#Frying pan",
+        "example.org/cooking/kitchen#Oven"
       ],
       "status": "active",
       "replacedBy": null,
-      "file": "docs/standard/oop/UL.yaml",
+      "file": "docs/standard/kitchen/UL.yaml",
       "line": 18
     },
     {
-      "id": "durian.cloud/shop/billing#Charge",
-      "word": "Charge",
-      "namespace": "durian.cloud/shop/billing",
+      "id": "example.org/cooking/pastry#Crust",
+      "word": "Crust",
+      "namespace": "example.org/cooking/pastry",
       "breadcrumb": [
-        "durian.cloud",
-        "shop",
-        "billing"
+        "example.org",
+        "cooking",
+        "pastry"
       ],
       "aliases": [],
-      "desc": "One amount added to an invoice.",
+      "desc": "The hard outside of a loaf.",
       "details": "",
       "avoid": [],
       "see": [
-        "durian.cloud/shop/billing#Invoice"
+        "example.org/cooking/pastry#Loaf"
       ],
       "mentions": [
-        "durian.cloud/shop/billing#Invoice"
+        "example.org/cooking/pastry#Loaf"
       ],
       "status": "active",
       "replacedBy": null,
-      "file": "docs/domain/billing/UL.yaml",
+      "file": "docs/domain/pastry/UL.yaml",
       "line": 12
     },
     {
-      "id": "durian.cloud/shop/billing#Invoice",
-      "word": "Invoice",
-      "namespace": "durian.cloud/shop/billing",
+      "id": "example.org/cooking/pastry#Loaf",
+      "word": "Loaf",
+      "namespace": "example.org/cooking/pastry",
       "breadcrumb": [
-        "durian.cloud",
-        "shop",
-        "billing"
+        "example.org",
+        "cooking",
+        "pastry"
       ],
       "aliases": [],
-      "desc": "The bill sent to a customer for a period.",
-      "details": "An invoice lists every Charge of the period.\n\nIt is final once sent.\n",
+      "desc": "Bread baked in one piece.",
+      "details": "A loaf has one Crust all round.\n\nIt is done once it sounds hollow.\n",
       "avoid": [
-        "bill",
-        "statement"
+        "bun",
+        "roll"
       ],
       "see": [
-        "durian.cloud/shop/billing#Charge",
-        "durian.cloud/engineering/standards/OOP#OCP"
+        "example.org/cooking/pastry#Crust",
+        "example.org/cooking/kitchen#Oven"
       ],
       "mentions": [
-        "durian.cloud/shop/billing#Charge"
+        "example.org/cooking/pastry#Crust"
       ],
       "status": "active",
       "replacedBy": null,
-      "file": "docs/domain/billing/UL.yaml",
+      "file": "docs/domain/pastry/UL.yaml",
       "line": 4
     },
     {
-      "id": "durian.cloud/shop/billing#Plugin",
-      "word": "Plugin",
-      "namespace": "durian.cloud/shop/billing",
+      "id": "example.org/cooking/pastry#Oven",
+      "word": "Oven",
+      "namespace": "example.org/cooking/pastry",
       "breadcrumb": [
-        "durian.cloud",
-        "shop",
-        "billing"
+        "example.org",
+        "cooking",
+        "pastry"
       ],
       "aliases": [
-        "Payment Plugin"
+        "Deck Oven"
       ],
-      "desc": "A payment method that the billing context can take money with.",
+      "desc": "The big oven of the bakery, used for bread only.",
       "details": "",
       "avoid": [],
       "see": [],
       "mentions": [],
       "status": "active",
       "replacedBy": null,
-      "file": "docs/domain/billing/UL.yaml",
+      "file": "docs/domain/pastry/UL.yaml",
       "line": 15
     },
     {
-      "id": "durian.cloud/shop/billing/pay#Receipt",
-      "word": "Receipt",
-      "namespace": "durian.cloud/shop/billing/pay",
+      "id": "example.org/cooking/pastry/bread#Rise",
+      "word": "Rise",
+      "namespace": "example.org/cooking/pastry/bread",
       "breadcrumb": [
-        "durian.cloud",
-        "shop",
-        "billing",
-        "pay"
+        "example.org",
+        "cooking",
+        "pastry",
+        "bread"
       ],
       "aliases": [],
-      "desc": "Proof that a Charge was paid.",
-      "details": "Issued once; a Plugin never edits it.",
-      "avoid": [],
-      "see": [
-        "durian.cloud/shop/billing#Charge"
-      ],
-      "mentions": [
-        "durian.cloud/engineering/standards/OOP#Plugin",
-        "durian.cloud/shop/billing#Charge",
-        "durian.cloud/shop/billing#Plugin"
-      ],
-      "status": "active",
-      "replacedBy": null,
-      "file": "plugins/pay/UL.yaml",
-      "line": 4
-    },
-    {
-      "id": "durian.cloud/shop/billing/pay#Settle",
-      "word": "Settle",
-      "namespace": "durian.cloud/shop/billing/pay",
-      "breadcrumb": [
-        "durian.cloud",
-        "shop",
-        "billing",
-        "pay"
-      ],
-      "aliases": [],
-      "desc": "Move the money of one Invoice from the card to the shop.",
+      "desc": "Let one Loaf grow before it is baked.",
       "details": "",
       "avoid": [],
       "see": [
-        "durian.cloud/shop/billing#Invoice"
+        "example.org/cooking/pastry#Loaf"
       ],
       "mentions": [
-        "durian.cloud/shop/billing#Invoice"
+        "example.org/cooking/pastry#Loaf"
       ],
       "status": "active",
       "replacedBy": null,
-      "file": "plugins/pay/UL.yaml",
+      "file": "recipes/bread/UL.yaml",
       "line": 8
+    },
+    {
+      "id": "example.org/cooking/pastry/bread#Score",
+      "word": "Score",
+      "namespace": "example.org/cooking/pastry/bread",
+      "breadcrumb": [
+        "example.org",
+        "cooking",
+        "pastry",
+        "bread"
+      ],
+      "aliases": [],
+      "desc": "A cut that lets the Crust open.",
+      "details": "Made once; an Oven never makes it.",
+      "avoid": [],
+      "see": [
+        "example.org/cooking/pastry#Crust"
+      ],
+      "mentions": [
+        "example.org/cooking/kitchen#Oven",
+        "example.org/cooking/pastry#Crust",
+        "example.org/cooking/pastry#Oven"
+      ],
+      "status": "active",
+      "replacedBy": null,
+      "file": "recipes/bread/UL.yaml",
+      "line": 4
     }
   ],
   "problems": []

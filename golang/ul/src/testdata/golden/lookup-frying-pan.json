@@ -1,0 +1,37 @@
+{
+  "schema": "ul/v1",
+  "query": "Flat Pan",
+  "matches": [
+    {
+      "id": "example.org/cooking/kitchen#Frying pan",
+      "word": "Frying pan",
+      "namespace": "example.org/cooking/kitchen",
+      "breadcrumb": [
+        "example.org",
+        "cooking",
+        "kitchen"
+      ],
+      "aliases": [
+        "Fry pan",
+        "Flat Pan"
+      ],
+      "desc": "A flat pan for frying food on a hob.",
+      "details": "A frying pan is **flat** and **shallow**.\n\nHeat it on the hob; it never goes in the Oven.\n",
+      "avoid": [
+        "griddle"
+      ],
+      "see": [
+        "example.org/cooking/kitchen#Oven",
+        "example.org/cooking/kitchen#Wok"
+      ],
+      "mentions": [
+        "example.org/cooking/kitchen#Oven"
+      ],
+      "status": "active",
+      "replacedBy": null,
+      "file": "docs/standard/kitchen/UL.yaml",
+      "line": 4
+    }
+  ],
+  "near": []
+}

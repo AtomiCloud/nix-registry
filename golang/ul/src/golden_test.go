@@ -38,9 +38,9 @@ func TestGoldenAll(t *testing.T) {
 	golden(t, "all.json", js)
 	golden(t, "all.md", te.mustOK("all", "--root", dir, "--format", "md"))
 	golden(t, "all-details.md", te.mustOK("all", "--root", dir, "--format", "md", "--details"))
-	golden(t, "lookup-plugin.txt", te.mustOK("lookup", "plugin", "--root", dir, "--from", "plugins/pay/x.go"))
-	golden(t, "lookup-plugin.md", te.mustOK("lookup", "plugin", "--root", dir, "--format", "md"))
-	golden(t, "lookup-ocp.json", strings.ReplaceAll(te.mustOK("lookup", "Open-Close Principle", "--root", dir, "--format", "json"), dir, "/ROOT"))
+	golden(t, "lookup-oven.txt", te.mustOK("lookup", "oven", "--root", dir, "--from", "recipes/bread/x.go"))
+	golden(t, "lookup-oven.md", te.mustOK("lookup", "oven", "--root", dir, "--format", "md"))
+	golden(t, "lookup-frying-pan.json", strings.ReplaceAll(te.mustOK("lookup", "Flat Pan", "--root", dir, "--format", "json"), dir, "/ROOT"))
 }
 
 // Deterministic: the same input gives the same bytes, run after run.
@@ -115,13 +115,13 @@ func TestJSONContract(t *testing.T) {
 			t.Errorf("bad file/line on %s: %s:%d", w.ID, w.File, w.Line)
 		}
 	}
-	ocp := findWord(t, r, "durian.cloud/engineering/standards/OOP#OCP")
-	if strings.Join(ocp.Breadcrumb, ">") != "durian.cloud>engineering>standards>OOP" || ocp.Status != "active" || ocp.Line != 4 {
-		t.Errorf("OCP: %+v", ocp)
+	pan := findWord(t, r, "example.org/cooking/kitchen#Frying pan")
+	if strings.Join(pan.Breadcrumb, ">") != "example.org>cooking>kitchen" || pan.Status != "active" || pan.Line != 4 {
+		t.Errorf("Frying pan: %+v", pan)
 	}
-	fac := findWord(t, r, "durian.cloud/engineering/standards/OOP#Facade")
-	if fac.Status != "retired" || fac.ReplacedBy == nil || *fac.ReplacedBy != "durian.cloud/engineering/standards/OOP#Plugin" {
-		t.Errorf("Facade: %+v", fac)
+	sk := findWord(t, r, "example.org/cooking/kitchen#Skillet")
+	if sk.Status != "retired" || sk.ReplacedBy == nil || *sk.ReplacedBy != "example.org/cooking/kitchen#Frying pan" {
+		t.Errorf("Skillet: %+v", sk)
 	}
 }
 
@@ -141,15 +141,15 @@ func TestMarkdownShape(t *testing.T) {
 		if strings.Contains(md, "](") {
 			t.Errorf("ul all has no links, found one:\n%s", md)
 		}
-		if strings.Contains(md, "### Charge") != (len(args) == 4) {
+		if strings.Contains(md, "### Crust") != (len(args) == 4) {
 			t.Errorf("word sections must appear only with --details (%v)", args)
 		}
-		if !strings.Contains(md, "durian.cloud > shop > billing > pay") {
+		if !strings.Contains(md, "example.org > cooking > pastry > bread") {
 			t.Errorf("breadcrumb line missing")
 		}
 	}
-	gen, _ := os.ReadFile(filepath.Join(dir, "plugins/pay/UL.md"))
-	if !strings.Contains(string(gen), "(../../docs/domain/billing/UL.md#charge)") {
+	gen, _ := os.ReadFile(filepath.Join(dir, "recipes/bread/UL.md"))
+	if !strings.Contains(string(gen), "(../../docs/domain/pastry/UL.md#crust)") {
 		t.Errorf("a cross-namespace reference must link to the other UL.md:\n%s", gen)
 	}
 }
