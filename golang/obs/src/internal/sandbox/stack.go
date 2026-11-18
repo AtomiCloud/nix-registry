@@ -150,16 +150,21 @@ func checkExisting(c *Config, have map[string]existing) error {
 	return nil
 }
 
-// VMRelabelConfig is the sandbox VictoriaMetrics' -relabelConfig, the same labelmap as the real
-// vminsert (concept 2): a scraped sample reaches the store with durian_cloud_* labels (Alloy drops a
-// relabel rule whose target_label has dots) and the labelmap turns them into the stored durian.cloud.*
-// labels. The labeldrop removes the underscore originals, which labelmap keeps, so only the dotted
-// spelling is stored and a query written with the wrong spelling finds nothing, as in production.
+// VMRelabelConfig is the sandbox VictoriaMetrics' -relabelConfig: Primordial's real vminsert relabel
+// config, copied exactly (same rules, same order). Source: github.com/AtomiCloud/primordial, branch
+// feat/durian-labels, commit 954508c79c36faa38b221d5eb37c5bada9a03068, apps/vm/chart/values.yaml,
+// vminsert.relabel.config. That branch is not merged yet (main has no relabel config), so this follows an
+// unmerged branch; if the branch changes, change this and the README with it.
+//
+// A scraped sample reaches the store with durian_cloud_* labels (Alloy drops a relabel rule whose
+// target_label has dots) and the labelmap turns the four where-from labels into the stored durian.cloud.*
+// labels. The labeldrop removes the underscore originals, which labelmap keeps, and the cluster label.
+// Only landscape, platform, service and module are mapped: any other durian_cloud_* label is left as sent.
 const VMRelabelConfig = `- action: labelmap
-  regex: "durian_cloud_(.+)"
-  replacement: "durian.cloud.$1"
+  regex: 'durian_cloud_(landscape|platform|service|module)'
+  replacement: 'durian.cloud.$1'
 - action: labeldrop
-  regex: "durian_cloud_.+"
+  regex: 'durian_cloud_(landscape|platform|service|module)|cluster'
 `
 
 // vmRelabelPath is where VMRelabelConfig is copied into the VictoriaMetrics container.

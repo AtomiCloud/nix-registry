@@ -212,12 +212,16 @@ dashboard or alert written to the standard returns rows on an obs seed and on th
   nothing. `obs query --static` fails it with `contract-undeclared-label` and names the dotted spelling to write;
   `--live` fails it with `no-rows` and the same hint.
 - **Scraped (non-OTLP) metrics** reach VictoriaMetrics as `durian_cloud_*` (Alloy drops a relabel rule whose
-  `target_label` has dots), and a vminsert `-relabelConfig` `labelmap` rule (`regex: durian_cloud_(.*)`,
+  `target_label` has dots), and a vminsert `-relabelConfig` `labelmap` rule (landscape, platform, service and module only: see below;
   `replacement: durian.cloud.$1`) turns them back into `durian.cloud.*`. `obs scrape` takes the underscore input
   (`--label durian_cloud_landscape=local`), exactly like the real collector. The sandbox's VictoriaMetrics is started
-  with the same labelmap (`-relabelConfig=/etc/vm-relabel.yml`, copied in at `obs sandbox up`), plus a `labeldrop` of the
-  `durian_cloud_*` originals (labelmap alone keeps them), so scraped samples are stored dotted and
-  `{"durian.cloud.service"="checkout"}` returns rows there. A sandbox created by an older obs has no labelmap: run
+  with Primordial's real vminsert relabel config, copied exactly (same rules, same order:
+  `labelmap` of `durian_cloud_(landscape|platform|service|module)` to `durian.cloud.$1`, then `labeldrop` of those four
+  and `cluster`; `-relabelConfig=/etc/vm-relabel.yml`, copied in at `obs sandbox up`). Source: AtomiCloud/primordial, branch
+  `feat/durian-labels`, commit `954508c79c36faa38b221d5eb37c5bada9a03068`, `apps/vm/chart/values.yaml`,
+  `vminsert.relabel.config`; **that branch is not merged yet** (main has no relabel config), so this follows an unmerged
+  branch. Scraped samples are stored dotted and `{"durian.cloud.service"="checkout"}` returns rows there; any other
+  `durian_cloud_*` label is not mapped. A sandbox created by an older obs has no labelmap: run
   `obs sandbox down` and `up` again. NOT TESTED: the labelmap on the real stack with our Alloy v1.21.3.
 - **TraceQL** names are exact too: Tempo keeps attribute names as sent, so a resource or span attribute the contract
   spells dotted must be written dotted (`span.payment.provider`). The underscore form fails `traceql-attribute` and

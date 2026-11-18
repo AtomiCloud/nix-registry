@@ -37,7 +37,7 @@ func scrapedInto(t *testing.T, relabelConfig string) *vm.Engine {
 	defer store.Close()
 	err := scrape.Run(context.Background(), scrape.Options{
 		Targets: []string{target.URL}, VM: store.URL, Job: "obs-scrape", Count: 1,
-		Labels: map[string]string{"durian_cloud_service": "checkout", "durian_cloud_landscape": "local"},
+		Labels: map[string]string{"durian_cloud_service": "checkout", "durian_cloud_landscape": "local", "durian_cloud_other": "x", "cluster": "c1"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -115,6 +115,17 @@ func TestScrapedSamplesAreStoredWithDottedLabels(t *testing.T) {
 	// the underscore originals are not stored: the wrong spelling selects nothing, as in production
 	if n := rowsOf(t, e, `app_up{durian_cloud_service="checkout"}`); n != 0 {
 		t.Errorf("underscore selector: want 0 rows, got %d", n)
+	}
+	// Primordial's rules, exactly: `cluster` is dropped, and only the four where-from labels are mapped,
+	// so any other durian_cloud_* label stays as sent.
+	if n := rowsOf(t, e, `app_up{cluster="c1"}`); n != 0 {
+		t.Errorf("cluster label: want it dropped, got %d rows", n)
+	}
+	if n := rowsOf(t, e, `app_up{durian_cloud_other="x"}`); n != 1 {
+		t.Errorf("an unmapped durian_cloud_* label stays as sent: want 1 row, got %d", n)
+	}
+	if n := rowsOf(t, e, `app_up{"durian.cloud.other"="x"}`); n != 0 {
+		t.Errorf("an unmapped durian_cloud_* label is not renamed: got %d rows", n)
 	}
 }
 
