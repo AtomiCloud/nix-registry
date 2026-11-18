@@ -1,0 +1,5 @@
+namespace: example.org/area/demo
+premise: A demo area
+language:
+  Alpha:
+    details: Only details.

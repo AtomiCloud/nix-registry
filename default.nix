@@ -39,6 +39,11 @@ let
     problemgen = import ./golang/problemgen/default.nix { inherit nixpkgs go; };
     # Offline end-to-end test of problemgen: a build, so no network by construction.
     problemgen-tests = problemgen.passthru.tests;
+    # ul: the ubiquitous-language tool (UL.yaml scan, overlay, JSON/Markdown, lookup, check, gen).
+    # See golang/ul/default.nix.
+    ul = import ./golang/ul/default.nix { inherit nixpkgs go; };
+    # Offline end-to-end test of ul: a build, so no network by construction.
+    ul-tests = ul.passthru.tests;
     # obs: observability query checks (MetricsQL + LogsQL, embedded VictoriaMetrics + VictoriaLogs).
     # Built with its own Go 1.27.4 (golang/obs/go.nix); the exported `go` above stays 1.26.10.
     obs = import ./golang/obs/default.nix { inherit nixpkgs; go = obsGo; };

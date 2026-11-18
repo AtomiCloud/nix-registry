@@ -1,0 +1,10 @@
+namespace: durian.cloud/shop/billing/pay
+premise: The card payment plugin of billing
+language:
+  Receipt:
+    desc: Proof that a Charge was paid.
+    details: Issued once; a Plugin never edits it.
+    see: [Charge]
+  Settle:
+    desc: Move the money of one Invoice from the card to the shop.
+    see: [Invoice]
