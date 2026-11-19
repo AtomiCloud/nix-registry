@@ -1,0 +1,8 @@
+service: checkout
+types:
+  outcome: { kind: enum, values: [ok, error] }
+metrics:
+  checkout.requests:
+    kind: counter
+    budget: 4
+    labels: { outcome: outcome }

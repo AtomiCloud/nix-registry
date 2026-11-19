@@ -1,0 +1,40 @@
+{
+  "scenario": "look",
+  "now_unix": 1795033018,
+  "sandbox": "obs look --keep on tests/fixtures/live-recorded, sandbox livesrec, port base 24000, obs dev built from origin/obs-regroup-look 3f87272",
+  "exchanges": [
+    {
+      "method": "GET",
+      "path": "/api/health",
+      "query": "",
+      "status": 200,
+      "json": {
+        "database": "ok",
+        "version": "13.3.0",
+        "commit": "6f8ce3c693b493043ebcd4787566d2b6b118b0f0"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/search",
+      "query": "limit=5000\u0026type=dash-db",
+      "status": 200,
+      "json": [
+        {
+          "id": 1952900870094848,
+          "uid": "look-payments",
+          "orgId": 1,
+          "title": "Seeded payments",
+          "uri": "db/seeded-payments",
+          "url": "/d/look-payments/seeded-payments",
+          "slug": "",
+          "type": "dash-db",
+          "tags": [],
+          "isStarred": false,
+          "sortMeta": 0,
+          "isDeleted": false
+        }
+      ]
+    }
+  ]
+}

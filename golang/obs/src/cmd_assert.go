@@ -12,6 +12,7 @@ import (
 // metric in a VictoriaMetrics series export and fails when a count is above the contract's
 // worst case. The export is a file; obs makes no network call.
 func runAssert(args []string, stdout, stderr io.Writer) int {
+	fmt.Fprintln(stderr, "note: obs assert is part of obs live usage (obs live usage --target local|dev|stage|prod reads the same series counts from a running store)")
 	fs := flag.NewFlagSet("obs assert", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	dir := fs.String("dir", "observability", "the observability folder (holds contract.yaml)")

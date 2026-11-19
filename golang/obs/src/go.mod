@@ -11,6 +11,7 @@ require (
 	github.com/grafana/dataplane/sdata v0.0.9
 	github.com/grafana/grafana-plugin-sdk-go v0.297.0
 	github.com/grafana/tempo v1.5.1-0.20261021152436-9db7df79d2af
+	github.com/prometheus/prometheus v0.315.1
 	golang.org/x/sys v0.50.0
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -28,6 +29,7 @@ require (
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/coreos/go-systemd/v22 v22.7.0 // indirect
+	github.com/dennwc/varint v1.0.0 // indirect
 	github.com/facette/natsort v0.0.0-20181210072756-2cd4dd1e2dcb // indirect
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/felixge/httpsnoop v1.1.0 // indirect
@@ -90,7 +92,6 @@ require (
 	github.com/prometheus/exporter-toolkit v0.19.0 // indirect
 	github.com/prometheus/otlptranslator v1.0.0 // indirect
 	github.com/prometheus/procfs v0.23.0 // indirect
-	github.com/prometheus/prometheus v0.315.1 // indirect
 	github.com/redis/go-redis/v9 v9.20.0 // indirect
 	github.com/sercand/kuberesolver/v6 v6.0.1 // indirect
 	github.com/sony/gobreaker v1.0.0 // indirect

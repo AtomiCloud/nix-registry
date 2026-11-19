@@ -154,6 +154,7 @@ type alertRule struct {
 	ExecErrState                string            `yaml:"execErrState"`
 	MissingSeriesEvalsToResolve int               `yaml:"missingSeriesEvalsToResolve"`
 	Labels                      map[string]string `yaml:"labels"`
+	Annotations                 map[string]string `yaml:"annotations"`
 	Record                      *struct {
 		Metric string `yaml:"metric"`
 		From   string `yaml:"from"`

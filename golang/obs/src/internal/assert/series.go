@@ -50,6 +50,10 @@ func ReadSeries(path string) ([]Series, error) {
 	return parseSeries(path, f)
 }
 
+// ParseSeries reads a /api/v1/series answer (or export lines) from r; name labels errors.
+// obs live usage reads the same document from a running store, so it shares this reader.
+func ParseSeries(name string, r io.Reader) ([]Series, error) { return parseSeries(name, r) }
+
 func parseSeries(name string, r io.Reader) ([]Series, error) {
 	dec := json.NewDecoder(bufio.NewReaderSize(r, 1<<20))
 	seen := map[string]bool{}
