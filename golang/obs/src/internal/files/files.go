@@ -28,7 +28,7 @@ type Query struct {
 	// Alerts: the rule's relative time range in seconds ("from" of relativeTimeRange).
 	RangeSecs int64
 	// ToSecs is the "to" of relativeTimeRange: the window ends this many seconds before the evaluation.
-	ToSecs int64
+	ToSecs    int64
 	QueryType string // the model's queryType (stats, instant, range ...)
 	// Dashboards.
 	Dash          *Dashboard

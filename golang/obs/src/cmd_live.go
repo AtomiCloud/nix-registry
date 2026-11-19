@@ -59,8 +59,8 @@ func runLive(args []string, stdout, stderr io.Writer) int {
 // liveFlags are the flags every obs live command takes.
 type liveFlags struct {
 	dir, target, project string
-	asJSON      bool
-	timeout     time.Duration
+	asJSON               bool
+	timeout              time.Duration
 }
 
 func (f *liveFlags) register(fs *flag.FlagSet) {

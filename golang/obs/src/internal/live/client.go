@@ -230,13 +230,14 @@ func safeDoError(err error) error {
 	return errors.New("the request failed (obs prints no part of the underlying error)")
 }
 
-// storeText is how obs prints text the store wrote itself (a non-2xx body, a query API error):
-// it is the main diagnostic, so it is kept, but every value obs sent in a header (4+ chars, and each long
-// word of it, for "Bearer <token>") is replaced by ***, since auth proxies echo the credential
-// they refused, and control characters (a terminal escape) become spaces. At most 200 runes.
 // maxStoreText is the largest store text storeText redacts and prints (an excerpt of it).
 const maxStoreText = 8 << 10
 
+// storeText is how obs prints text the store wrote itself (a non-2xx body, a query API error):
+// it is the main diagnostic, so it is kept, but every value obs sent in a header (see secretForms)
+// and vmauth's refused-token list are replaced by ***, since auth proxies echo the credential
+// they refused, and control characters (a terminal escape) become spaces. At most 200 runes; a
+// text over maxStoreText is not printed at all.
 func (c *Client) storeText(s string) string {
 	if len(s) > maxStoreText {
 		// Redaction work grows with the text, and only 200 runes are shown: a large answer (an HTML

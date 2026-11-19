@@ -855,9 +855,16 @@ byte for byte). Scripts that call `obs query ...` need no change. The old comman
 | `obs query --static`                          | part of `obs check` (also runs the limits and the versions)   |
 | `obs query --live`, `obs alerts`, `obs links` | `obs test` (also checks every incident is caught by an alert) |
 | `obs sandbox up`                              | `obs look --keep`                                             |
-| `obs assert`, `obs scrape`                    | `obs live usage`                                              |
+| `obs assert`                                  | `obs live usage`                                              |
 
-`obs profile` and `obs store move` are unchanged. The `obs look` and `obs live` rows arrive with their own parts of 0.5.
+`obs profile` and `obs store move` are unchanged. `obs scrape` still feeds the sandbox; read what it stored with `obs live usage --target local`.
+
+What is new in `obs look` and `obs live` for a caller:
+
+- `obs look` applies the named incidents on the seed timeline: the latest incident is live (its alerts are provisioned into a sandbox-only Grafana folder and reach Firing in Grafana), every incident gets a region annotation, and a `Sandbox alert state (Grafana live)` panel shows Firing, Pending and Normal. The prompt lists the expected states and the window to screenshot in (see _`obs look`_).
+- `obs look` seeds Tempo and Pyroscope as well as the metrics and logs stores, and a seed can opt into `traffic.settings` (level, trend, cycle, spikes, gaps and noise, see _Seed shape_). A seed without `traffic.settings` gives the same data as in 0.4.
+- `obs look --seed-base <unix seconds>` keeps an explicit historical timeline instead of ending the seed at now.
+- `obs live usage|shape|incidents|look --target local|dev|stage|prod` is new and read-only. It reads `targets:` and the optional `estimates:` from `obs.yaml`; the other commands ignore both blocks (see _`obs live`_).
 
 What is new in `obs check` and `obs test` for a caller:
 
