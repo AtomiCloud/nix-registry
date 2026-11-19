@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -289,4 +291,56 @@ func TestFiringDeadlineRoundsPendingUpToWholeIntervals(t *testing.T) {
 			t.Errorf("for %v interval %v: deadline %v, want %v", c.pending, c.interval, got, c.want)
 		}
 	}
+}
+
+// Opus review of PR 133: the call site of firingDeadline, not only the helper. A 15 s pending period at a 10 s
+// interval is Firing by provisioned + 30 s (restoring provisioned + pending + interval gives 25 s).
+func TestNativeForecastRoundsAFractionalPendingPeriod(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "observability")
+	if err := os.CopyFS(dir, os.DirFS("../../../tests/fixtures/look-seeded")); err != nil {
+		t.Fatal(err)
+	}
+	alert := filepath.Join(dir, "alerts", "errors", "warning.yaml")
+	b, err := os.ReadFile(alert)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(alert, []byte(strings.Replace(string(b), "for: 1m", "for: 15s", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sd, err := seed.Load(dir + "/seed.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	incs, err := seed.LoadIncidents(sd, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set, err := files.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	from, to, _, err := seedWindow(sd, incs, set, now, 0, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ds, err := seed.BuildIncidents(sd, from, incs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clipDataset(ds, to)
+	rules, err := nativeForecast(dir, dir+"/seed.yaml", set, ds, now, incs[0].Expect.Fire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range rules {
+		if rule.UID == "payment-pending" {
+			if rule.For != "15s" || rule.FiringAt != now.Add(30*time.Second).UnixMilli() {
+				t.Fatalf("for 15s at 10s: FiringAt %d, want provisioned + 30 s = %d (%+v)", rule.FiringAt, now.Add(30*time.Second).UnixMilli(), rule)
+			}
+			return
+		}
+	}
+	t.Fatal("pending rule forecast absent")
 }

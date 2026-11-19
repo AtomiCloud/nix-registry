@@ -1,6 +1,9 @@
 package sandbox
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -104,4 +107,22 @@ func firingDeadline(pending, interval time.Duration) time.Duration {
 	}
 	whole := (pending + interval - 1) / interval * interval
 	return whole + interval
+}
+
+// rulesKey identifies the alert rule set a forecast was computed for: every definition and its group's
+// interval, in file order. A different checkout of the rules gives a different key.
+func rulesKey(set *files.Set) string {
+	h := sha256.New()
+	for _, rr := range set.Rules {
+		b, err := json.Marshal(struct {
+			File, Name, Interval string
+			Def                  any
+		}{rr.File, rr.Name, rr.Interval, rr.Definition})
+		if err != nil {
+			return "" // never equal to a stored key of a real rule set
+		}
+		h.Write(b)
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }

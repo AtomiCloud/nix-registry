@@ -68,6 +68,8 @@ type fakeRunner struct {
 	vmArgs        string
 	tempoBindings string
 	tempoFiles    []string
+	// failVolumeRm makes `volume rm` fail (a runtime error while a project is removed).
+	failVolumeRm bool
 }
 
 func (f *fakeRunner) Run(_ context.Context, args ...string) (string, error) {
@@ -103,6 +105,8 @@ func (f *fakeRunner) Run(_ context.Context, args ...string) (string, error) {
 			}
 		}
 		f.ps = strings.Join(keep, "\n")
+	case args[0] == "volume" && args[1] == "rm" && f.failVolumeRm:
+		return "", fmt.Errorf("volume is in use")
 	case args[0] == "network" && args[1] == "rm":
 		f.networkExists = false
 	case args[0] == "inspect" && len(args) > 2 && args[2] == "{{json .HostConfig.PortBindings}}":

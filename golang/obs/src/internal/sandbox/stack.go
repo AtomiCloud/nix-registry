@@ -68,6 +68,8 @@ type Info struct {
 	AlertStatePanels    map[string]int64    `json:"alert_state_panels,omitempty"`
 	AnnotatedDashboards []string            `json:"annotated_dashboards,omitempty"`
 	LiveRules           []NativeRuleWindow  `json:"live_rules,omitempty"`
+	// LiveRulesKey identifies the rule set LiveRules was computed for; a retained look with other rules drops them.
+	LiveRulesKey string `json:"live_rules_key,omitempty"`
 }
 
 var nameRe = regexp.MustCompile(`[^a-z0-9]+`)
@@ -478,13 +480,18 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 		info.Incidents, info.IncidentSeed = st.Incidents, st.IncidentSeed
 		info.LiveIncident, info.Replay = st.LiveIncident, st.Replay
 		info.AnnotatedDashboards = append([]string(nil), st.AnnotatedDashboards...)
-		info.LiveRules = st.LiveRules
+		info.LiveRules, info.LiveRulesKey = st.LiveRules, st.LiveRulesKey
+		if key := rulesKey(set); key != st.LiveRulesKey {
+			// The checkout's rules are not the ones the forecast was computed for (a group removed, a pending
+			// period or a query changed): that forecast would describe rules Grafana no longer runs.
+			info.LiveRules, info.LiveRulesKey = nil, key
+		}
 		if cfg.SeedBase != 0 && st.From != cfg.SeedBase*1000 {
 			return nil, fmt.Errorf("sandbox has another seed base; run `obs sandbox down --project %s` first", cfg.Project)
 		}
 		for _, inc := range info.Incidents {
 			if inc.Name == info.LiveIncident && cfg.Now().UnixMilli() >= inc.To {
-				info.LiveIncident = ""
+				info.LiveIncident, info.LiveRules = "", nil // together: a forecast belongs to a current incident
 			}
 		}
 		info.TracesSeeded, info.ProfilesSeeded = st.TracesSeeded, st.ProfilesSeeded
@@ -503,6 +510,7 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 			}
 			for _, inc := range info.Incidents {
 				if inc.Name == info.LiveIncident {
+					info.LiveRulesKey = rulesKey(set)
 					info.LiveRules, err = nativeForecast(cfg.Dir, p, set, cfg.dataset, cfg.Now().UTC().Truncate(time.Second), inc.Fire)
 					if err != nil {
 						return nil, fmt.Errorf("live alert forecast: %w", err)
@@ -550,7 +558,7 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 	if info.LiveIncident != "" && liveSnapshotExpired(info, cfg.Now()) {
 		info.LiveIncident, info.LiveRules = "", nil
 	}
-	writeState(cfg, info)
+	_ = writeState(cfg, info) // a failed write leaves the earlier mark: the next run clears the stores, never the other way
 	if recreated {
 		fmt.Fprintf(cfg.Out, "recreated the old look stack for project %s (only resources labelled %s=%s)\n", cfg.Project, LabelKey, cfg.Project)
 	}
@@ -630,7 +638,9 @@ func loadSeed(ctx context.Context, cfg *Config, info *Info) error {
 	}
 	// From here the stores take data: until the load completes (Up's final state write) the seed is marked
 	// incomplete, so a failure leaves a record that the next run clears the stores first.
-	writeState(*cfg, &Info{Project: cfg.Project, Grafana: info.Grafana, URLs: info.URLs, SeedIncomplete: true})
+	if err := writeState(*cfg, &Info{Project: cfg.Project, Grafana: info.Grafana, URLs: info.URLs, SeedIncomplete: true}); err != nil {
+		return fmt.Errorf("cannot record that the seed load begins (%s), so nothing was loaded: %w", stateFile(*cfg), err)
+	}
 	if live != "" {
 		fmt.Fprintf(cfg.Out, "loading the seed prefix (%s of data; %s is live)\n", to.Sub(from), live)
 	} else {
@@ -733,7 +743,10 @@ func Down(ctx context.Context, cfg Config) error {
 	rm("container", []string{"ps", "-a", "--filter", label, "--format", "{{.Names}}"}, "rm", "-f", "-v")
 	rm("network", []string{"network", "ls", "--filter", label, "--format", "{{.Name}}"}, "network", "rm")
 	rm("volume", []string{"volume", "ls", "--filter", label, "--format", "{{.Name}}"}, "volume", "rm")
-	removeState(cfg)
+	if firstErr == nil {
+		// A removal that failed leaves the state (and a seed-incomplete mark in it): the stores may still be there.
+		removeState(cfg)
+	}
 	return firstErr
 }
 
