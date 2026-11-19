@@ -476,7 +476,7 @@ tells a repository with incidents and no alert yet which incident is uncaught, s
 The flags mean what they mean on the old commands (`--dir`, `--seed`, `--base`, `--names`, `--event-rule`,
 `--contracts`, `--vl-settings`, `--tempo-config`, `--workers`, `--out`, `--steps`, `--recorded`). `--event-rule` reaches both the
 `queries` and the `alerts` part: with `--event-rule off` a log alert that names no contract event is accepted in both (`obs alerts` itself has no such flag and keeps
-the rule on whenever the folder has a contract). Each part prints its own
+the rule on whenever the folder has a contract). `--contracts none` also reaches both parts: the `alerts` part then reads only `--dir`'s contract too, so an invalid or clashing contract elsewhere in the repository cannot fail an isolated run (`obs alerts` has no such flag and keeps reading them). Each part prints its own
 findings as the old command does, then one total per part and one last line:
 
 ```text
@@ -1049,7 +1049,7 @@ seconds>` instead keeps an explicit historical timeline; `--base` remains the gi
 used to find changed dashboards. A seed with no incidents has no expected incident Firing.
 
 Grafana starts pending timers when its scheduler begins evaluating, so the prompt lists
-each live rule's provision time, expected Firing time (`provisioned + for + interval`),
+each live rule's provision time, expected Firing time (a scheduled estimate: `provisioned + for` rounded up to whole evaluation intervals `+ one interval`: for 15s at 10s it is 30s, for 1m at 10s it is 70s; Grafana staggers its evaluations inside each interval, so the real change can come a few seconds later; the alert-state panel does not poll (it only refetches when the dashboard refreshes; obs does not set a dashboard's refresh, so a board without its own auto-refresh never does), so the prompt tells the agent to reload the same URL every interval (unless the board sets its own auto-refresh) from the estimate until the printed hold time, screenshot the first load that shows Firing, and if Firing was never seen record the state it observed on each reload as the finding),
 and the predicted window before the fixed snapshot ages out. The prediction uses the
 same existing evaluator/state machine, projecting at most ten minutes without pushing
 future data. A snapshot that cannot hold the condition through the pending duration is
@@ -1072,7 +1072,7 @@ up|down|status` remain available. When reusing a baseline-only seed from `sandbo
 Stacks started by `sandbox up` or an older obs, without the published Tempo receiver, get a recreate-first
 diagnostic. A repeated default look on an expired live snapshot recreates only that
 project's labelled containers, volumes and network and says it did so; it never prunes
-or touches another project. Explicit `--seed-base` historical snapshots remain reusable.
+or touches another project. So does a look after a seed load that stopped part way (say Tempo failed after the metrics and logs went in): that load is recorded as incomplete (written before anything is uploaded; a look that cannot write it stops, and the record stays until the stores are removed) and the next look clears the stores before loading again; a completed snapshot is reused. A reused snapshot keeps its Firing forecast only while the checkout's rules are the ones it was computed for; after a rule changed, the forecast is dropped (Grafana's own state is still shown). A retained stack's sandbox folder is reconciled on every look: rule groups of an earlier checkout that the checkout no longer has are deleted (all of them when it has no rule left), groups in any other folder are left alone. If the live incident window ended while the setup ran, or before a reused snapshot was reached, the look does not call it current (no live incident, no forecast) and keeps the incident list as historical guidance. Explicit `--seed-base` historical snapshots remain reusable.
 
 **Always exit 0**: a failed setup (no runtime, a pin mismatch, git cannot find the base), a bad flag and
 `--help` print what failed (or the usage) and `ok: false` in JSON, and never fail the CI job that calls it.
@@ -2470,6 +2470,7 @@ source) where its section says so.
 - **`obs live incidents`: what the recording does not hold.** The recorded Grafana state history holds a real Normal -> Pending and Normal -> Alerting change; its tag-only payload now proves a firing observation, with unknown spans. Optional lossless label maps, Alerting -> Normal, Recovering, overlapping instances, absent transitions, title/ID collisions, future windows and capped responses are tested on synthetic payloads. There is no current-state GET in the command or the incident recording. The `ALERTS` grouped list and raw range-selector path (a vmalert-style ruler) are tested on fake stores only, including bounded per-window reads, responses exceeding 64 MiB, merged chunk evidence and a carried-forward evaluation point that must not count as firing inside a later window.
 - **`obs live usage` on a Prometheus server.** The points/min and series queries are parsed by the Prometheus PromQL parser (v0.315.1) and by MetricsQL in the Go tests, and recorded from VictoriaMetrics; no Prometheus server was run.
 - **`obs live usage` with Tempo's own counters.** The sandbox's VictoriaMetrics does not scrape Tempo, so the `--all-services` bytes/min path was recorded as "no tempo_distributor_bytes_received_total"; the case where the counters exist is tested on a fake store only.
+- **`obs look` on a retained stack (one real docker run, 19 Nov 2026, Grafana 13.3.0).** MEASURED: with `--seed-base`, a second look that adds a rule group leaves both groups in the sandbox folder, a third without it deletes only the removed one, a fourth with no rule left deletes the last (read back from `/api/v1/provisioning/alert-rules`). MEASURED: a look whose seed load failed after the metrics and logs went in (Pyroscope stopped while the profiles loaded; the mark `seed_incomplete` was in the state file) was followed by a look that removed the stores, loaded one new window (no sample older than the new window) and cleared the mark; a third look reused the completed snapshot. NOT TESTED for real: the same failure with Tempo (the code path is the same, the failing store differs); a live incident window that closes while a real setup runs (tested with a fake clock only).
 - **`obs live look`** lists dashboards on the local sandbox only; no screenshots are taken by obs (the calling agent takes them).
 - **Live label-spelling check on MetricsQL result labels.** `obs query --live` models which query-made labels
   survive a query (aggregations, binary operations, `group_left`/`group_right`, scalar sides, set operators) for the

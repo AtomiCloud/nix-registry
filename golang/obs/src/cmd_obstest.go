@@ -112,7 +112,7 @@ func runTest(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "note: no alert rules under %s/alerts: obs alerts has nothing to run\n", *dir)
 		part("alerts", "0 alerts", 0)
 	} else {
-		ao := alerts.Options{Dir: *dir, SeedPath: *seedPath, Out: *out, Steps: *steps, Recorded: *recorded, VLSettings: *vlSettings, TempoConfig: *tempoConfig, Obs: of, Base: *base, Workers: *workers, EventRule: *eventRule, AllowEmptyExpect: true}
+		ao := alerts.Options{Dir: *dir, SeedPath: *seedPath, Out: *out, Steps: *steps, Recorded: *recorded, VLSettings: *vlSettings, TempoConfig: *tempoConfig, Obs: of, Base: *base, Workers: *workers, EventRule: *eventRule, AllowEmptyExpect: true, NoOtherContracts: *contracts == "none"}
 		var rc int
 		res, rc = alerts.CheckResult(ao, stdout, stderr)
 		total := "the run stopped before its verdicts"
