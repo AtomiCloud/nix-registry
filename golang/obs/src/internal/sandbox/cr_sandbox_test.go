@@ -304,7 +304,7 @@ func TestSecondSetupOfTheSameProjectDoesNotTearDownARunningLoad(t *testing.T) {
 	// The running setup holds the project lock, as Up does from its state read to its last state write.
 	c := cfg
 	c.defaults()
-	lf, err := os.OpenFile(stateFile(c)+".lock", os.O_CREATE|os.O_RDWR, 0o644)
+	lf, err := os.OpenFile(lockFile(c), os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -335,8 +335,8 @@ func TestSecondSetupOfTheSameProjectDoesNotTearDownARunningLoad(t *testing.T) {
 	}
 }
 
-// A state folder that cannot be made: the setup runs without the lock and still stops before anything is
-// uploaded, because it cannot record that a seed load begins.
+// A state folder that cannot be made: the lock beside it cannot be taken, so the setup stops before anything
+// is uploaded or any container is touched (fail closed).
 func TestLookFailsBeforeUploadingWhenTheStateFolderCannotBeMade(t *testing.T) {
 	s := newStackServer(t)
 	cfg := s.cfg(t, &fakeRunner{})
@@ -347,10 +347,145 @@ func TestLookFailsBeforeUploadingWhenTheStateFolderCannotBeMade(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.StateDir = filepath.Join(blocker, "state") // a directory cannot be made under a file
-	if _, err := Up(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "seed load") {
-		t.Fatalf("want the seed load record error, got %v", err)
+	if _, err := Up(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "sandbox lock") {
+		t.Fatalf("want the lock error, got %v", err)
 	}
 	if s.vmBody != "" || len(s.vlBodies) != 0 {
 		t.Errorf("data was uploaded: vm %d bytes, vl %d bodies", len(s.vmBody), len(s.vlBodies))
+	}
+}
+
+// A lock file that cannot be opened for writing (left by another user) still locks: a second setup of a
+// busy project is refused and removes nothing.
+func TestAReadOnlyLockFileStillLocksTheProject(t *testing.T) {
+	s := newStackServer(t)
+	fr := &fakeRunner{}
+	cfg := s.cfg(t, fr)
+	cfg.Dir = lookFixture
+	cfg.ApplyIncidents = true
+	s.failTraces = true
+	if _, err := Up(context.Background(), cfg); err == nil {
+		t.Fatal("want the Tempo failure that leaves the incomplete mark")
+	}
+	s.failTraces = false
+	c := cfg
+	c.defaults()
+	name := lockFile(c)
+	if err := os.Chmod(name, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := os.OpenFile(name, os.O_RDWR, 0); err == nil {
+		f.Close()
+		t.Skip("running as a user that can write a 0444 file (root): the case cannot be made here")
+	}
+	held, err := os.Open(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	if err := syscall.Flock(int(held.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	runningStack(fr)
+	fr.calls = nil
+	if _, err := Up(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("a busy project with a read-only lock file must refuse, got %v", err)
+	}
+	if fr.has("rm") {
+		t.Fatalf("the running setup's stores were removed: %v", fr.calls)
+	}
+}
+
+// A lock file that cannot be opened at all: refuse rather than run unlocked (with or without state).
+func TestAnUnopenableLockFileRefuses(t *testing.T) {
+	s := newStackServer(t)
+	fr := &fakeRunner{}
+	cfg := s.cfg(t, fr)
+	cfg.Dir = lookFixture
+	cfg.ApplyIncidents = true
+	s.failTraces = true
+	if _, err := Up(context.Background(), cfg); err == nil {
+		t.Fatal("want the Tempo failure that leaves the incomplete mark")
+	}
+	s.failTraces = false
+	c := cfg
+	c.defaults()
+	name := lockFile(c)
+	if err := os.Chmod(name, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := os.Open(name); err == nil {
+		f.Close()
+		t.Skip("running as a user that can read a 0000 file (root): the case cannot be made here")
+	}
+	runningStack(fr)
+	fr.calls = nil
+	if _, err := Up(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "touches no container without it") {
+		t.Fatalf("want a refusal naming the lock, got %v", err)
+	}
+	if fr.has("rm") {
+		t.Fatalf("stores were removed without the lock: %v", fr.calls)
+	}
+}
+
+// With no state file at all, an unopenable lock still refuses: a running setup holds the lock before it
+// writes any state, so "no state" does not mean "nothing running".
+func TestAnUnopenableLockFileRefusesWithoutState(t *testing.T) {
+	s := newStackServer(t)
+	fr := &fakeRunner{}
+	cfg := s.cfg(t, fr)
+	c := cfg
+	c.defaults()
+	name := lockFile(c)
+	if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(name, nil, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := os.Open(name); err == nil {
+		f.Close()
+		t.Skip("running as a user that can read a 0000 file (root): the case cannot be made here")
+	}
+	runningStack(fr)
+	if err := Down(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "touches no container without it") {
+		t.Fatalf("want a refusal naming the lock, got %v", err)
+	}
+	if fr.has("rm") {
+		t.Fatalf("containers were removed without the lock: %v", fr.calls)
+	}
+}
+
+// The default lock depends on no environment variable: invocations with different XDG_CACHE_HOME or TMPDIR
+// that address the same project share it.
+func TestDefaultLockIsSharedAcrossCacheFolders(t *testing.T) {
+	cfg := Config{Project: "demo"}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("TMPDIR", t.TempDir())
+	a := lockFile(cfg)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("TMPDIR", t.TempDir())
+	if b := lockFile(cfg); a != b || a != "/tmp/obs-sandbox-locks/sandbox-demo.lock" {
+		t.Fatalf("lock path must be one machine-wide place per project: %q vs %q", a, b)
+	}
+}
+
+// The shared lock folder is made world-writable with the sticky bit, whatever the umask, so a second user
+// can create the lock of another project.
+func TestSharedLockFolderIsStickyAndWorldWritable(t *testing.T) {
+	old := lockRoot
+	lockRoot = filepath.Join(t.TempDir(), "obs-sandbox-locks")
+	defer func() { lockRoot = old }()
+	unlock, err := lockProject(Config{Project: "demo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+	fi, err := os.Stat(lockRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fi.Mode()&os.ModeSticky == 0 || fi.Mode().Perm() != 0o777 {
+		t.Fatalf("lock folder mode %v, want sticky and 0777", fi.Mode())
 	}
 }
