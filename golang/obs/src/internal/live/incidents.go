@@ -684,14 +684,16 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 			wr.Unknown = "not seen in " + source + " (cannot prove a miss: " + reason + ")"
 			wr.Status = "not_seen"
 		}
-		if reason := rawUnknown[wi]; reason != "" {
-			wr.Fired, wr.Status, wr.Unknown = []string{}, "not_seen", reason
-		}
 		if w.To.After(now) {
 			wr.PartialFired = wr.Fired
 			wr.Fired = []string{}
 			wr.Unknown = "not yet observable: window ends after the history cutoff"
 			wr.Status = "not_yet_observable"
+			if reason := rawUnknown[wi]; reason != "" {
+				wr.Unknown += "; " + reason
+			}
+		} else if reason := rawUnknown[wi]; reason != "" {
+			wr.Fired, wr.Status, wr.Unknown = []string{}, "not_seen", reason
 		}
 		res.Windows = append(res.Windows, wr)
 

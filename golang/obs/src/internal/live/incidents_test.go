@@ -982,3 +982,36 @@ func TestIncidentsRawWindowsChunkAndMergeSamples(t *testing.T) {
 		t.Fatalf("merge timestamped evidence from bounded chunks: reads=%d %+v", rawReads, res)
 	}
 }
+
+func TestIncidentsFutureOversizedChunkPreservesPartialEvidenceAndReason(t *testing.T) {
+	rawReads := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/query_range" {
+			fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[]}}`)
+			return
+		}
+		rawReads++
+		if rawReads == 1 {
+			fmt.Fprintf(w, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"grafana_rule_uid":"high-errors"},"values":[[%d,"1"]]}]}}`, t0.Add(15*time.Minute).Unix())
+			return
+		}
+		largeAlertsAnswer(w)
+	}))
+	defer srv.Close()
+	res, err := Incidents(context.Background(), &Client{}, &Target{Metrics: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: 7 * 24 * time.Hour, Windows: []Window{{From: t0, To: t0.Add(2 * time.Hour)}}, Now: func() time.Time { return t0.Add(90 * time.Minute) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rawReads != 2 || len(res.Windows) != 1 {
+		t.Fatalf("expected one partial window and two raw chunks: reads=%d %+v", rawReads, res.Windows)
+	}
+	wr := res.Windows[0]
+	if wr.Status != "not_yet_observable" || len(wr.Fired) != 0 || len(wr.PartialFired) != 1 || wr.PartialFired[0] != "high-errors" || !strings.Contains(wr.Unknown, "window ends after the history cutoff") || !strings.Contains(wr.Unknown, "raw ALERTS samples too large to read") {
+		t.Fatalf("keep verified partial firing and both uncertainty reasons: %+v", wr)
+	}
+	var out strings.Builder
+	res.Print(&out)
+	if !strings.Contains(out.String(), "partial evidence before the cutoff: [high-errors]") || !strings.Contains(out.String(), "raw ALERTS samples too large to read") || strings.Contains(out.String(), "caught:") {
+		t.Fatalf("text must show partial evidence and the size diagnostic without caught: %s", out.String())
+	}
+}
