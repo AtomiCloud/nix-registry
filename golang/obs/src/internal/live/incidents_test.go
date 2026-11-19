@@ -598,7 +598,7 @@ func TestIncidentsSeenRulesCannotEstablishInstanceCoverage(t *testing.T) {
 func currentRulesBody(active bool) string {
 	rules := []map[string]any{}
 	for id, title := range map[string]string{"high-errors": "High error rate", "slow-charges": "Slow charges", "quiet-rule": "Quiet rule"} {
-		r := map[string]any{"uid": id, "name": title, "type": "alerting", "state": "inactive", "health": "ok", "alerts": []any{}}
+		r := map[string]any{"uid": id, "name": title, "type": "alerting", "state": "inactive", "health": "ok", "alerts": []any{}, "lastEvaluation": t0.Add(30 * time.Minute).Format(time.RFC3339)}
 		if active && id == "high-errors" {
 			r["state"] = "firing"
 			r["alerts"] = []any{map[string]any{"state": "Alerting", "labels": map[string]string{"instance": "silent"}, "activeAt": t0.Add(-8 * 24 * time.Hour).Format(time.RFC3339)}}
@@ -658,5 +658,27 @@ func TestIncidentsCurrentActiveInstanceWithoutTransitionCoversTheWindow(t *testi
 	}
 	if len(res.Windows) != 1 || len(res.Windows[0].Fired) != 1 {
 		t.Fatalf("current active instance must cover named window: %+v", res.Windows)
+	}
+}
+
+func TestIncidentsCurrentSnapshotAfterHistoryEndIsUnknown(t *testing.T) {
+	// A resolution just after the history cutoff must not retroactively make the window quiet.
+	var body map[string]any
+	if err := json.Unmarshal([]byte(currentRulesBody(false)), &body); err != nil {
+		t.Fatal(err)
+	}
+	groups := body["data"].(map[string]any)["groups"].([]any)
+	for _, r := range groups[0].(map[string]any)["rules"].([]any) {
+		r.(map[string]any)["lastEvaluation"] = t0.Add(2 * time.Hour).Format(time.RFC3339)
+	}
+	b, _ := json.Marshal(body)
+	srv := grafanaWithCurrent(t, "[]", string(b))
+	w := Window{From: t0, To: t0.Add(time.Hour)}
+	res, err := Incidents(context.Background(), &Client{}, &Target{Grafana: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: time.Hour, Windows: []Window{w}, Now: func() time.Time { return w.To }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Windows) != 1 || res.Windows[0].Unknown == "" {
+		t.Fatalf("a newer snapshot cannot establish state at an earlier history cutoff: %+v", res.Windows)
 	}
 }

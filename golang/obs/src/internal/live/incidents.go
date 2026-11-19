@@ -258,7 +258,14 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 		if _, ok := coverage.Rules[key]; !ok {
 			coverage.Rules[key] = historyRule{UID: r.UID, Title: r.Name}
 		}
-		known := currentErr == nil && !coverage.Incomplete && !ambiguous[key] && r.Health == "ok" && !r.IsPaused
+		// The snapshot may be read after the annotation cutoff. Its last evaluation
+		// must fall inside the history we read, or a just-resolved alert could look
+		// inactive for an earlier window in which it was actually firing.
+		if r.Health != "ok" || r.IsPaused || r.LastEvaluation.IsZero() || r.LastEvaluation.After(to.Truncate(time.Millisecond)) {
+			coverage.Known[key] = false
+			continue
+		}
+		known := currentErr == nil && !coverage.Incomplete && !ambiguous[key]
 		if r.State != "inactive" && r.State != "pending" && !alerting(r.State) {
 			known = false
 		}

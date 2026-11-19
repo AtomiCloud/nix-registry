@@ -15,13 +15,14 @@ type currentInstance struct {
 }
 
 type currentRule struct {
-	UID      string            `json:"uid"`
-	Name     string            `json:"name"`
-	Type     string            `json:"type"`
-	State    string            `json:"state"`
-	Health   string            `json:"health"`
-	IsPaused bool              `json:"isPaused"`
-	Alerts   []currentInstance `json:"alerts"`
+	UID            string            `json:"uid"`
+	Name           string            `json:"name"`
+	Type           string            `json:"type"`
+	State          string            `json:"state"`
+	Health         string            `json:"health"`
+	IsPaused       bool              `json:"isPaused"`
+	LastEvaluation time.Time         `json:"lastEvaluation"`
+	Alerts         []currentInstance `json:"alerts"`
 }
 
 // currentRules reads an existing GET allowlist entry. No filters or limits: the snapshot
