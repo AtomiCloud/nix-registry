@@ -68,6 +68,8 @@ type fakeRunner struct {
 	vmArgs        string
 	tempoBindings string
 	tempoFiles    []string
+	// failVolumeRm makes `volume rm` fail (a runtime error while a project is removed).
+	failVolumeRm bool
 }
 
 func (f *fakeRunner) Run(_ context.Context, args ...string) (string, error) {
@@ -103,6 +105,8 @@ func (f *fakeRunner) Run(_ context.Context, args ...string) (string, error) {
 			}
 		}
 		f.ps = strings.Join(keep, "\n")
+	case args[0] == "volume" && args[1] == "rm" && f.failVolumeRm:
+		return "", fmt.Errorf("volume is in use")
 	case args[0] == "network" && args[1] == "rm":
 		f.networkExists = false
 	case args[0] == "inspect" && len(args) > 2 && args[2] == "{{json .HostConfig.PortBindings}}":
@@ -255,6 +259,13 @@ type stackServer struct {
 	groupRoutes  []string
 	traces       []map[string]any
 	profileLoads int
+	// existingRules is what Grafana lists as already provisioned (GET alert-rules); deletes are the rule-group
+	// DELETE routes it received; failTraces makes the Tempo receiver answer 500; onGroup runs on every
+	// provisioning write (a test clock that setup advances).
+	existingRules []map[string]any
+	deletes       []string
+	failTraces    bool
+	onGroup       func()
 }
 
 func newStackServer(t *testing.T) *stackServer {
@@ -271,7 +282,23 @@ func newStackServer(t *testing.T) *stackServer {
 	})
 	mux.HandleFunc("/api/folders", ok)
 	mux.HandleFunc("/api/folders/", ok)
+	mux.HandleFunc("/api/v1/provisioning/alert-rules", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		rules := append([]map[string]any{}, s.existingRules...)
+		s.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(rules)
+	})
 	mux.HandleFunc("/api/v1/provisioning/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			s.mu.Lock()
+			s.deletes = append(s.deletes, r.URL.EscapedPath())
+			s.mu.Unlock()
+			w.WriteHeader(204)
+			return
+		}
+		if s.onGroup != nil {
+			s.onGroup()
+		}
 		var m map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&m)
 		s.mu.Lock()
@@ -290,6 +317,10 @@ func newStackServer(t *testing.T) *stackServer {
 		fmt.Fprint(w, `{}`)
 	})
 	mux.HandleFunc("/v1/traces", func(w http.ResponseWriter, r *http.Request) {
+		if s.failTraces {
+			w.WriteHeader(500)
+			return
+		}
 		var m map[string]any
 		_ = json.NewDecoder(r.Body).Decode(&m)
 		s.mu.Lock()

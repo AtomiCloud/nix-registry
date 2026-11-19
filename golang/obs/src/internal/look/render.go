@@ -124,7 +124,7 @@ func render(p *Plan) string {
 						continue
 					}
 					if rule.Supported {
-						w("     live rule %s: provisioned %s; expected Firing by %s (= provisioned + for %s + interval %s). Snapshot predicted to hold Firing until %s; screenshot in that window (prediction computed by obs, verify Grafana).", rule.UID, provisioned, time.UnixMilli(rule.FiringAt).UTC().Format(time.RFC3339), rule.For, rule.Interval, time.UnixMilli(rule.HoldUntil).UTC().Format(time.RFC3339))
+						w("     live rule %s: provisioned %s; expected Firing by about %s (a scheduled estimate: provisioned + for %s rounded up to whole intervals of %s, + one interval; Grafana staggers when it evaluates inside each interval, so the real change can come a few seconds later). Snapshot predicted to hold Firing until %s. Do not screenshot on the clock. Grafana's alert-state panel does not poll (it only refetches when the dashboard refreshes), so unless the board sets its own auto-refresh a page opened while %s was Pending stays Pending: reload the same URL every %s from the estimate on and screenshot the first load that shows Firing. Stop reloading at %s. If Firing was never seen by then, record the state you observed on each reload as the finding (prediction computed by obs, verify Grafana).", rule.UID, provisioned, time.UnixMilli(rule.FiringAt).UTC().Format(time.RFC3339), rule.For, rule.Interval, time.UnixMilli(rule.HoldUntil).UTC().Format(time.RFC3339), rule.UID, rule.Interval, time.UnixMilli(rule.HoldUntil).UTC().Format(time.RFC3339))
 					} else {
 						w("     live rule %s: snapshot does not support the expected Firing window (for=%s, interval=%s). Record a finding; do not claim native Firing from replay annotations.", rule.UID, rule.For, rule.Interval)
 					}

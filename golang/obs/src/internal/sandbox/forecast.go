@@ -1,6 +1,9 @@
 package sandbox
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -68,7 +71,7 @@ func nativeForecast(dir, seedPath string, set *files.Set, ds *seed.Dataset, prov
 			continue
 		}
 		row.Expected = "Firing"
-		row.FiringAt = provisioned.Add(pending + interval).UnixMilli()
+		row.FiringAt = provisioned.Add(firingDeadline(pending, interval)).UnixMilli()
 		began := false
 		for _, step := range byUID[uid].Steps {
 			if step.T < row.FiringAt {
@@ -93,4 +96,33 @@ func nativeForecast(dir, seedPath string, set *files.Set, ds *seed.Dataset, prov
 		out = append(out, row)
 	}
 	return out, nil
+}
+
+// firingDeadline is how long after provisioning a rule is sure to be Firing. Grafana evaluates every interval
+// and fires at the first evaluation whose time in Pending has reached "for", so the pending period counts in
+// whole intervals (for 15 s at 10 s: two), and the first evaluation may be a full interval after provisioning.
+func firingDeadline(pending, interval time.Duration) time.Duration {
+	if interval <= 0 {
+		return pending + interval
+	}
+	whole := (pending + interval - 1) / interval * interval
+	return whole + interval
+}
+
+// rulesKeyOf identifies the alert rule set a forecast was computed for: every definition and its group's
+// interval, in file order. A different checkout of the rules gives a different key.
+func rulesKeyOf(set *files.Set) string {
+	h := sha256.New()
+	for _, rr := range set.Rules {
+		b, err := json.Marshal(struct {
+			File, Name, Interval string
+			Def                  any
+		}{rr.File, rr.Name, rr.Interval, rr.Definition})
+		if err != nil {
+			return "" // never equal to a stored key of a real rule set
+		}
+		h.Write(b)
+		h.Write([]byte{0})
+	}
+	return hex.EncodeToString(h.Sum(nil))
 }

@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 )
@@ -26,21 +27,53 @@ func readState(cfg Config) *Info {
 	if err != nil {
 		return nil
 	}
-	var i Info
-	if json.Unmarshal(b, &i) != nil || i.Grafana == "" {
+	var f stateJSON
+	if json.Unmarshal(b, &f) != nil || f.Grafana == "" {
 		return nil
 	}
+	i := f.Info
+	i.rulesKey = f.RulesKey
 	return &i
 }
 
-// writeState is best effort: a sandbox works without it, it only remembers the seed window.
-func writeState(cfg Config, i *Info) {
+// stateJSON is the state file: the public Info plus what only the next run needs.
+type stateJSON struct {
+	Info
+	// RulesKey is the fingerprint of the rules the stored forecast was computed for.
+	RulesKey string `json:"live_rules_key,omitempty"`
+}
+
+// writeState replaces the state file in one step (a temporary file, then a rename), so a reader or a crash
+// never sees half a file. A sandbox works without its state (it only remembers the seed window), so most
+// callers ignore the error; the mark that a seed load began must not (see loadSeed).
+func writeState(cfg Config, i *Info) error {
 	f := stateFile(cfg)
-	if os.MkdirAll(filepath.Dir(f), 0o755) != nil {
-		return
+	if err := os.MkdirAll(filepath.Dir(f), 0o755); err != nil {
+		return err
 	}
-	b, _ := json.MarshalIndent(i, "", "  ")
-	_ = os.WriteFile(f, b, 0o644)
+	b, err := json.MarshalIndent(stateJSON{Info: *i, RulesKey: i.rulesKey}, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(f), filepath.Base(f)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	_, werr := tmp.Write(b)
+	cerr := tmp.Close()
+	if err := errors.Join(werr, cerr); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	if err := os.Rename(tmp.Name(), f); err != nil {
+		_ = os.Remove(tmp.Name())
+		return err
+	}
+	return nil
 }
 
 func removeState(cfg Config) { _ = os.Remove(stateFile(cfg)) }
