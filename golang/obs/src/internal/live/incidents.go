@@ -43,6 +43,7 @@ type FiredAlert struct {
 	// StartedBeforeWindow: the alert was already firing when the window began; First is the window start.
 	StartedBeforeWindow bool                `json:"started_before_window,omitempty"`
 	GrafanaAlertID      int64               `json:"grafana_alert_id,omitempty"`
+	IDSource            string              `json:"id_source,omitempty"`
 	SpanUnknown         bool                `json:"span_unknown,omitempty"`
 	Observations        []FiringObservation `json:"observations,omitempty"`
 	ruleUID             string
@@ -63,7 +64,8 @@ func (o FiringObservation) inside(from, to time.Time) bool {
 	return !o.At.Before(from) && o.At.Before(to)
 }
 
-// Missed is an incident (a file, or a window the user named) that no alert caught.
+// Missed is a repo incident with no defined catching rule, or a sampled-window finding
+// from the ALERTS-series fallback. Unobserved Grafana windows never populate it.
 type Missed struct {
 	Incident   string  `json:"incident,omitempty"`
 	Window     *Window `json:"window,omitempty"`
@@ -84,6 +86,7 @@ type WindowResult struct {
 	Window  Window   `json:"window"`
 	Fired   []string `json:"fired"`
 	Unknown string   `json:"unknown,omitempty"`
+	Status  string   `json:"status,omitempty"`
 }
 
 // IncidentsResult of `obs live incidents`.
@@ -128,15 +131,16 @@ const stateLookback = 7 * 24 * time.Hour
 const annotationLimit = 10000
 
 type annotationCoverage struct {
-	Rules       map[string]historyRule
-	Known       map[string]bool // rules whose instance inventory and states are established
-	CurrentNote string
-	Incomplete  bool
+	Rules      map[string]historyRule
+	NoHistory  bool
+	Incomplete bool
 }
 
 type historyRule struct {
-	UID, Title string
-	AlertID    int64
+	UID, Title  string
+	AlertID     int64
+	Source      string
+	UIDConflict bool
 }
 
 func (r historyRule) key() string {
@@ -181,29 +185,36 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 	if err := c.GetJSON(ctx, t.Grafana, "/api/annotations", q, &all); err != nil {
 		return nil, nil, err
 	}
-	coverage := &annotationCoverage{Rules: map[string]historyRule{}, Known: map[string]bool{}, Incomplete: len(all) >= annotationLimit}
-	current, currentErr := currentRules(ctx, c, t)
-	if currentErr != nil {
-		coverage.CurrentNote = "current alert state unavailable: " + currentErr.Error()
-	}
-	// Resolve numeric history IDs to a current UID only through a unique title, and only
-	// when history has no conflicting UID evidence. Never merge two same-title rules.
-	historyTitles := map[string]map[string]bool{}
+	coverage := &annotationCoverage{Rules: map[string]historyRule{}, NoHistory: len(all) == 0, Incomplete: len(all) >= annotationLimit}
+	// Numeric IDs can be tied to an explicit UID under an older title. Reconcile
+	// that evidence across all titles before considering any repo title match.
+	uidsByID := map[int64]map[string]bool{}
 	for _, a := range all {
-		r := historyRule{UID: a.AlertUID, Title: a.AlertName, AlertID: a.AlertID}
-		if historyTitles[r.Title] == nil {
-			historyTitles[r.Title] = map[string]bool{}
+		if a.AlertID != 0 && a.AlertUID != "" {
+			if uidsByID[a.AlertID] == nil {
+				uidsByID[a.AlertID] = map[string]bool{}
+			}
+			uidsByID[a.AlertID][a.AlertUID] = true
 		}
-		historyTitles[r.Title][r.key()] = true
-	}
-	currentTitles := map[string][]currentRule{}
-	for _, r := range current {
-		currentTitles[r.Name] = append(currentTitles[r.Name], r)
 	}
 	identity := func(a annotation) historyRule {
-		r := historyRule{UID: a.AlertUID, Title: a.AlertName, AlertID: a.AlertID}
-		if r.UID == "" && r.AlertID != 0 && len(historyTitles[r.Title]) == 1 && len(currentTitles[r.Title]) == 1 {
-			r.UID = currentTitles[r.Title][0].UID
+		r := historyRule{UID: a.AlertUID, Title: a.AlertName, AlertID: a.AlertID, Source: "alert_id"}
+		if r.UID != "" {
+			r.Source = "uid"
+			return r
+		}
+		if len(uidsByID[r.AlertID]) == 1 {
+			for uid := range uidsByID[r.AlertID] {
+				r.UID = uid
+			}
+			r.Source = "uid_from_alert_id"
+		}
+		if len(uidsByID[r.AlertID]) > 1 {
+			r.UIDConflict = true
+			r.Source = "ambiguous_alert_id"
+		}
+		if r.UID == "" && r.AlertID == 0 {
+			r.Source = "unknown"
 		}
 		return r
 	}
@@ -219,18 +230,20 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 		key := rule.key()
 		coverage.Rules[key] = rule
 		at := time.UnixMilli(a.Time).UTC()
+		// Keep evidence on both sides of a transition. At an exclusive window end,
+		// Alerting -> Recovering still proves firing immediately before that timestamp.
+		for _, obs := range []FiringObservation{{At: at, Previous: true}, {At: at}} {
+			firing := alerting(a.NewState)
+			if obs.Previous {
+				firing = alerting(a.PrevState)
+			}
+			if firing && obs.inside(from, to) {
+				observations[key] = append(observations[key], obs)
+			}
+		}
 		labels, lossless := a.instanceIdentity()
-		if !lossless || (rule.UID == "" && rule.AlertID == 0) {
+		if !lossless || rule.UIDConflict || (rule.UID == "" && rule.AlertID == 0) {
 			ambiguous[key] = true
-			var obs *FiringObservation
-			if alerting(a.NewState) {
-				obs = &FiringObservation{At: at}
-			} else if alerting(a.PrevState) {
-				obs = &FiringObservation{At: at, Previous: true}
-			}
-			if obs != nil && obs.inside(from, to) {
-				observations[key] = append(observations[key], *obs)
-			}
 			continue // tags and annotation text do not provide lossless instance identity
 		}
 		inst := instance{Rule: key, Labels: labels}
@@ -253,52 +266,6 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 			open[inst] = nil
 		}
 	}
-	for _, r := range current {
-		key := r.UID
-		if _, ok := coverage.Rules[key]; !ok {
-			coverage.Rules[key] = historyRule{UID: r.UID, Title: r.Name}
-		}
-		// The snapshot may be read after the annotation cutoff. Its last evaluation
-		// must fall inside the history we read, or a just-resolved alert could look
-		// inactive for an earlier window in which it was actually firing.
-		if r.Health != "ok" || r.IsPaused || r.LastEvaluation.IsZero() || r.LastEvaluation.After(to.Truncate(time.Millisecond)) {
-			coverage.Known[key] = false
-			continue
-		}
-		known := currentErr == nil && !coverage.Incomplete && !ambiguous[key]
-		if r.State != "inactive" && r.State != "pending" && !alerting(r.State) {
-			known = false
-		}
-		if alerting(r.State) && len(r.Alerts) == 0 {
-			known = false
-		}
-		currentSeen := map[string]bool{}
-		for _, a := range r.Alerts {
-			labels, ok := labelIdentity(a.Labels)
-			if !ok || currentSeen[labels] {
-				known = false
-				continue
-			}
-			currentSeen[labels] = true
-			inst := instance{Rule: key, Labels: labels}
-			if !knownCurrentState(a.State) {
-				known = false
-				continue
-			}
-			if !seen[inst] && !ambiguous[key] && !coverage.Incomplete {
-				if alerting(a.State) {
-					if a.ActiveAt == nil || a.ActiveAt.After(readFrom) {
-						known = false
-						continue
-					}
-					open[inst] = &interval{From: readFrom}
-				}
-			} else if seen[inst] && (open[inst] != nil) != alerting(a.State) {
-				known = false
-			}
-		}
-		coverage.Known[key] = known
-	}
 	for inst, iv := range open {
 		if iv != nil {
 			iv.To = to
@@ -307,6 +274,9 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 	}
 	out := map[string]*FiredAlert{}
 	for key, ss := range spans {
+		if len(observations[key]) == 0 {
+			continue
+		} // no direct firing evidence in the report window
 		for _, iv := range mergeIntervals(ss) {
 			if !iv.To.After(from) || !iv.From.Before(to) {
 				continue // over before the window began, or after it ended
@@ -314,7 +284,7 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 			f := out[key]
 			if f == nil {
 				r := coverage.Rules[key]
-				f = &FiredAlert{ID: key, Title: r.Title, GrafanaAlertID: r.AlertID, ruleUID: r.UID, SpanUnknown: ambiguous[key]}
+				f = &FiredAlert{ID: key, Title: r.Title, GrafanaAlertID: r.AlertID, IDSource: r.Source, ruleUID: r.UID, SpanUnknown: ambiguous[key] || coverage.Incomplete}
 				out[key] = f
 			}
 			if iv.From.Before(from) {
@@ -336,25 +306,20 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 		f := out[key]
 		if f == nil {
 			r := coverage.Rules[key]
-			f = &FiredAlert{ID: key, Title: r.Title, GrafanaAlertID: r.AlertID, ruleUID: r.UID}
+			f = &FiredAlert{ID: key, Title: r.Title, GrafanaAlertID: r.AlertID, IDSource: r.Source, ruleUID: r.UID, SpanUnknown: ambiguous[key] || coverage.Incomplete}
 			out[key] = f
 		}
-		f.SpanUnknown = true
 		f.Observations = obs
 		for _, o := range obs {
-			if f.First.IsZero() || o.At.Before(f.First) {
+			if f.SpanUnknown && (f.First.IsZero() || o.At.Before(f.First)) {
 				f.First = o.At
 			}
-			if o.At.After(f.Last) {
+			if f.SpanUnknown && o.At.After(f.Last) {
 				f.Last = o.At
 			}
 		}
 	}
 	return out, coverage, nil
-}
-
-func knownCurrentState(s string) bool {
-	return alerting(s) || strings.EqualFold(s, "normal") || strings.EqualFold(s, "inactive") || strings.EqualFold(s, "pending")
 }
 
 // mergeIntervals unions the firing spans of all instances of one rule, in time order.
@@ -475,7 +440,7 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 	if t.Grafana == "" && t.Metrics == "" {
 		return nil, fmt.Errorf("target %q has no grafana URL and no metrics URL: obs live incidents reads Grafana's alert state history, or the ALERTS series (set targets.%s.grafana)", t.Name, t.Name)
 	}
-	const grafanaWhy = "Grafana-managed alert rules keep every state change in Grafana's state history; they do not write an ALERTS series (only a vmalert-style ruler does)"
+	const grafanaWhy = "Grafana-managed rules may publish firing transitions to annotation history; publication can lag and history can be disabled, retained or kept elsewhere, so absence never proves a miss; an ALERTS series is written only by a vmalert-style ruler"
 	var fired map[string]*FiredAlert
 	var err error
 	var coverage *annotationCoverage
@@ -531,44 +496,38 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 		}
 	}
 	matchedHistory := map[string]string{}
-	knownRepo := map[string]bool{}
-	canMiss := true
 	if coverage != nil {
 		titleCount := map[string]int{}
 		for _, r := range coverage.Rules {
 			titleCount[r.Title]++
 		}
-		canMiss = !coverage.Incomplete && coverage.CurrentNote == ""
+		seenRepo := map[string]bool{}
 		for key, h := range coverage.Rules {
 			id := ""
 			if h.UID != "" {
 				if _, ok := byID[h.UID]; ok {
 					id = h.UID
 				}
-			} else if h.AlertID != 0 && titleCount[h.Title] == 1 && len(byTitle[h.Title]) == 1 {
+			} else if !h.UIDConflict && h.AlertID != 0 && titleCount[h.Title] == 1 && len(byTitle[h.Title]) == 1 {
 				id = byTitle[h.Title][0].ID
 			}
 			if id != "" {
 				matchedHistory[key] = id
-				knownRepo[id] = coverage.Known[key]
-			}
-			if !coverage.Known[key] {
-				canMiss = false
+				seenRepo[id] = true
 			}
 		}
 		for _, r := range rules {
-			if !r.Record && !knownRepo[r.ID] {
+			if !r.Record && !seenRepo[r.ID] {
 				res.UnknownState = append(res.UnknownState, RuleRow{ID: r.ID, Title: r.Title, File: r.File})
-				canMiss = false
 			}
 		}
 		res.HistoryIncomplete = coverage.Incomplete
-		res.HistoryNote = "current Grafana rules and instance states are combined with uncapped history; missing or ambiguous identities leave state unknown; tag-only transitions prove firing observations, not spans"
-		if coverage.CurrentNote != "" {
-			res.HistoryNote += "; " + coverage.CurrentNote
+		res.HistoryNote = "Grafana history proves firing observations, never a definite miss: annotations are asynchronous, may use another backend, be disabled, retained or inaccessible"
+		if coverage.NoHistory {
+			res.HistoryNote += "; no alert state history returned; cannot tell quiet from history not kept in annotations"
 		}
 		if coverage.Incomplete {
-			res.HistoryNote += fmt.Sprintf("; incomplete history: the response reached the %d-entry limit, so named windows cannot be declared missed", annotationLimit)
+			res.HistoryNote += fmt.Sprintf("; incomplete history: response reached the %d-entry limit", annotationLimit)
 		}
 		sort.Slice(res.UnknownState, func(i, j int) bool { return res.UnknownState[i].ID < res.UnknownState[j].ID })
 	}
@@ -599,6 +558,9 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 			}
 		}
 		if r, ok := byID[match]; ok {
+			if f.ruleUID == "" {
+				f.IDSource = "repo_title"
+			}
 			f.ID, f.InRepo, f.Runbook = r.ID, true, r.Runbook
 			if f.Title == "" {
 				f.Title = r.Title
@@ -649,10 +611,12 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 		wr := WindowResult{Window: w, Fired: []string{}}
 		for _, f := range res.Fired {
 			caught := false
-			for _, s := range f.spans {
-				if s.From.Before(w.To) && s.To.After(w.From) {
-					caught = true
-					break
+			if coverage == nil {
+				for _, s := range f.spans {
+					if s.From.Before(w.To) && s.To.After(w.From) {
+						caught = true
+						break
+					}
 				}
 			}
 			for _, o := range f.Observations {
@@ -665,11 +629,25 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 				wr.Fired = append(wr.Fired, f.ID)
 			}
 		}
-		if len(wr.Fired) == 0 && coverage != nil && !canMiss {
-			wr.Unknown = "unknown from Grafana history: current state or instance identity could not establish coverage"
+		if len(wr.Fired) > 0 {
+			wr.Status = "caught"
+		}
+		if len(wr.Fired) == 0 && coverage != nil {
+			reason := "annotations may be unpublished, disabled, retained, inaccessible or kept on another backend"
+			if coverage.NoHistory {
+				reason = "no alert state history returned; cannot tell quiet from history not kept in annotations"
+			} else if coverage.Incomplete {
+				reason = "incomplete history: annotation response reached its limit"
+			}
+			wr.Unknown = "not seen in Grafana history (cannot prove a miss: " + reason + ")"
+			wr.Status = "not_seen"
+		}
+		if w.To.After(now) {
+			wr.Unknown = "not yet observable: window ends after the history cutoff"
+			wr.Status = "not_yet_observable"
 		}
 		res.Windows = append(res.Windows, wr)
-		if len(wr.Fired) == 0 && wr.Unknown == "" {
+		if len(wr.Fired) == 0 && wr.Unknown == "" && coverage == nil {
 			ww := w
 			story := fmt.Sprintf("real incident on %s between %s and %s: no alert caught it", t.Name, w.From.Format(time.RFC3339), w.To.Format(time.RFC3339))
 			sug := fmt.Sprintf("# suggested incidents/%s.yaml: fire stays empty until you add the alert that should have caught it\n%s", slug(w.From.Format("2006-01-02t1504")), entry(story, "", w.To.Sub(w.From)))
@@ -693,7 +671,7 @@ func (r *IncidentsResult) Print(w io.Writer) {
 		fmt.Fprintf(w, "history: %s\n", r.HistoryNote)
 	}
 	for _, rule := range r.UnknownState {
-		fmt.Fprintf(w, "  %s: state over the window is unknown from history (current state or unambiguous instance history unavailable)\n", rule.ID)
+		fmt.Fprintf(w, "  %s: state over the window is unknown from history (no unambiguous transition for this rule)\n", rule.ID)
 	}
 	fmt.Fprintf(w, "\nFIRED (%d alert(s))\n", len(r.Fired))
 	for _, f := range r.Fired {
@@ -713,6 +691,11 @@ func (r *IncidentsResult) Print(w io.Writer) {
 	}
 	for _, wr := range r.Windows {
 		fmt.Fprintf(w, "  window %s..%s: fired %v\n", wr.Window.From.Format(time.RFC3339), wr.Window.To.Format(time.RFC3339), wr.Fired)
+		if strings.HasPrefix(r.Source, "Grafana state history") {
+			for _, id := range wr.Fired {
+				fmt.Fprintf(w, "    caught: %s fired (seen in Grafana history)\n", id)
+			}
+		}
 		if wr.Unknown != "" {
 			fmt.Fprintf(w, "    %s\n", wr.Unknown)
 		}

@@ -103,9 +103,7 @@ func TestRecordedShape(t *testing.T) {
 }
 
 func TestRecordedIncidents(t *testing.T) {
-	// The historic recording predates the current-state read. Exercise its unavailable
-	// path explicitly; the current-state success path is covered by synthetic HTTP tests.
-	h := recordedStores(t, "incidents", currentRulesPath)
+	h := recordedStores(t, "incidents")
 	res, err := Incidents(context.Background(), &Client{}, h.Target, IncidentOptions{Dir: liveFixtureDir, Since: time.Hour, Now: func() time.Time { return h.Now }})
 	if err != nil {
 		t.Fatal(err)
