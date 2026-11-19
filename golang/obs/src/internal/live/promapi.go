@@ -28,6 +28,51 @@ type Mat struct {
 	Samples []Sample
 }
 
+type rawPoint struct {
+	At time.Time
+	V  float64
+}
+type rawMat struct {
+	Labels  map[string]string
+	Samples []rawPoint
+}
+
+// rawSamples uses an instant range selector, not query_range evaluation points. The
+// pinned VictoriaMetrics QueryHandler exports underlying samples for this expression.
+// Include one extra millisecond on the open left edge, then filter exact bounds at use.
+func (c *Client) rawSamples(ctx context.Context, base, selector string, from, to time.Time) ([]rawMat, error) {
+	end := to.UnixMilli()
+	width := end - from.UnixMilli() + 1
+	if width <= 0 {
+		return nil, fmt.Errorf("raw samples: invalid time range")
+	}
+	q := selector + "[" + strconv.FormatInt(width, 10) + "ms]"
+	v := url.Values{"query": {q}, "time": {strconv.FormatFloat(float64(end)/1000, 'f', 3, 64)}}
+	b, err := c.Get(ctx, base, "/api/v1/query", v)
+	if err != nil {
+		return nil, err
+	}
+	r, err := c.decodeProm(b, "raw samples")
+	if err != nil {
+		return nil, err
+	}
+	if r.Data.ResultType != "matrix" {
+		return nil, fmt.Errorf("raw samples: expected a matrix response to a range selector")
+	}
+	var out []rawMat
+	for _, x := range r.Data.Result {
+		m := rawMat{Labels: x.Metric}
+		for _, p := range x.Values {
+			if s, ok := parseSample(p); ok && !math.IsInf(s.V, 0) {
+				ts := p[0].(float64)
+				m.Samples = append(m.Samples, rawPoint{At: time.UnixMilli(int64(math.Round(ts * 1000))).UTC(), V: s.V})
+			}
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+
 type promResp struct {
 	Status    string `json:"status"`
 	Error     string `json:"error"`

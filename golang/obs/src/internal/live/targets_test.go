@@ -16,6 +16,33 @@ func node(t *testing.T, src string) *yaml.Node {
 	return doc.Content[0]
 }
 
+func TestMalformedTargetURLPrintsOnlyKeyAndLine(t *testing.T) {
+	for _, value := range []string{"https://vm.example:bad/?token=test-secret", "https://vm.example/%zz?token=test-secret", "vm.example/test-secret"} {
+		_, err := ParseTargets(node(t, "prod:\n  metrics: "+value+"\n"), "obs.yaml")
+		if err == nil || !strings.Contains(err.Error(), "obs.yaml:2: targets.prod.metrics") || strings.Contains(err.Error(), "vm.example") || strings.Contains(err.Error(), "test-secret") {
+			t.Fatalf("invalid URL diagnostic must contain only its location: %v", err)
+		}
+	}
+}
+
+func TestTargetHeaderNamesAreCanonicalAndDuplicatesFailBeforeValues(t *testing.T) {
+	specs, err := ParseTargets(node(t, "prod:\n  metrics: https://vm\n  headers:\n    authorization: TOKEN\n"), "obs.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if specs["prod"].Headers["Authorization"] != "TOKEN" {
+		t.Fatalf("header names must be canonical: %+v", specs)
+	}
+	_, err = ParseTargets(node(t, "prod:\n  headers:\n    Authorization: TOKEN\n    authorization: Bearer test-secret\n"), "obs.yaml")
+	if err == nil || !strings.Contains(err.Error(), "obs.yaml:4: targets.prod.headers.authorization") || !strings.Contains(err.Error(), "duplicate") || strings.Contains(err.Error(), "test-secret") {
+		t.Fatalf("case-insensitive duplicate must be rejected before checking its value: %v", err)
+	}
+	_, err = Resolve("prod", map[string]Spec{"prod": {Line: 3, Headers: map[string]string{"Authorization": "FIRST", "authorization": "SECOND"}}}, nil, func(string) string { t.Error("duplicate must fail before any environment lookup"); return "value" }, "obs.yaml")
+	if err == nil || !strings.Contains(err.Error(), "duplicate") || !strings.Contains(err.Error(), "obs.yaml:3: targets.prod.headers.authorization") {
+		t.Fatalf("direct Spec duplicates must also fail: %v", err)
+	}
+}
+
 const goodTargets = `
 prod:
   metrics: https://vm.prod.example/
@@ -42,7 +69,7 @@ func TestParseTargetsAndResolveHeadersFromEnvironment(t *testing.T) {
 	if tg.Metrics != "https://vm.prod.example" {
 		t.Fatalf("trailing slash must be trimmed: %q", tg.Metrics)
 	}
-	if tg.Headers["Authorization"] != "Bearer abc" || tg.Headers["X-Scope-OrgID"] != "acme" {
+	if tg.Headers["Authorization"] != "Bearer abc" || tg.Headers["X-Scope-Orgid"] != "acme" {
 		t.Fatalf("headers not taken from the environment: %v", tg.Headers)
 	}
 }

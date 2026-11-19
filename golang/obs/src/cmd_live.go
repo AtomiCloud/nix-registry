@@ -273,7 +273,7 @@ func runLiveIncidents(args []string, stdout, stderr io.Writer) int {
 	f.register(fs)
 	since := fs.String("since", "7d", "how far back to look for alerts that fired")
 	var windows multiFlag
-	fs.Var(&windows, "window", "a time range you name, from..to (RFC 3339, 2026-11-10, or -6h..-2h; repeatable); a window with no alert in it is an incident no alert caught")
+	fs.Var(&windows, "window", "a time range you name, from..to (RFC 3339, 2026-11-10, or -6h..-2h; repeatable); reports observed firing or unknown, never a proven miss")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}

@@ -176,8 +176,8 @@ func Usage(ctx context.Context, c *Client, t *Target, ct *contract.Contract, o U
 	series, err := assert.ParseSeries("the target's /api/v1/series answer", bytes.NewReader(raw))
 	if err != nil {
 		// an empty answer is a valid "nothing stored"
-		if !strings.Contains(err.Error(), "empty") {
-			return nil, fmt.Errorf("active series: %w", err)
+		if len(bytes.TrimSpace(raw)) != 0 {
+			return nil, fmt.Errorf("active series: %s", c.storeText(err.Error()))
 		}
 		series = nil
 	}

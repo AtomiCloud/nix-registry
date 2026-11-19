@@ -103,6 +103,8 @@ func (c *Client) http() *http.Client {
 
 const maxBody = 64 << 20
 
+var errResponseTooLarge = errors.New("response exceeds the 64 MiB read limit")
+
 // GetJSON GETs base+path?query and decodes the JSON answer into out.
 func (c *Client) GetJSON(ctx context.Context, base, path string, q url.Values, out any) error {
 	b, err := c.Get(ctx, base, path, q)
@@ -161,12 +163,15 @@ func (c *Client) Get(ctx context.Context, base, path string, q url.Values) ([]by
 		return nil, fmt.Errorf("GET %s%s: %v", base, path, safeDoError(err))
 	}
 	defer resp.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	b, err := io.ReadAll(io.LimitReader(resp.Body, maxBody+1))
 	if err != nil {
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			return nil, fmt.Errorf("GET %s%s: reading the response: the store closed the connection mid-response", base, path)
 		}
 		return nil, fmt.Errorf("GET %s%s: reading the response: %v", base, path, safeDoError(err))
+	}
+	if len(b) > maxBody {
+		return nil, fmt.Errorf("GET %s%s: %w", base, path, errResponseTooLarge)
 	}
 	if resp.StatusCode/100 != 2 {
 		body := c.storeText(string(b))

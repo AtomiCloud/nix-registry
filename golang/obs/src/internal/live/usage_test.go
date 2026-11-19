@@ -43,6 +43,21 @@ func testContract(t *testing.T) *contract.Contract {
 	return c
 }
 
+func TestUsageSeriesParserErrorRedactsEchoedCredentials(t *testing.T) {
+	for _, message := range []string{"bad token: Bearer test-sent-header-123\x1b[2J", "bad token: Bearer test-sent-header-123 empty"} {
+		t.Run(message, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				json.NewEncoder(w).Encode(map[string]string{"status": "error", "error": message})
+			}))
+			defer srv.Close()
+			_, err := Usage(context.Background(), &Client{Headers: map[string]string{"Authorization": "Bearer test-sent-header-123"}}, &Target{Metrics: srv.URL}, testContract(t), UsageOptions{})
+			if err == nil || strings.Contains(err.Error(), "test-sent-header-123") || strings.Contains(err.Error(), "\x1b") || !strings.Contains(err.Error(), "active series") {
+				t.Fatalf("series API failure must stay an error and pass through storeText: %v", err)
+			}
+		})
+	}
+}
+
 // validPromQL parses q with the Prometheus parser AND with MetricsQL: a query obs sends to a
 // target must run on a Prometheus and on a VictoriaMetrics store (targets: dev, stage and prod
 // may be either).
