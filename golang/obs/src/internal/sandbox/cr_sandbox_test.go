@@ -492,9 +492,9 @@ func TestLockRefusesSymlinksOtherFilesAndBadNames(t *testing.T) {
 	if _, err := lockProject(Config{Project: "dir"}); err == nil || !strings.Contains(err.Error(), "touches no container") {
 		t.Fatalf("a directory in the lock's place must be refused, got %v", err)
 	}
-	for _, p := range []string{"../x", "a/b", "", "-x"} {
-		if _, err := lockProject(Config{Project: p}); err == nil {
-			t.Errorf("project %q must be refused", p)
+	for _, p := range []string{"../x", "a/b", "", "-x", "..", "a b"} {
+		if _, err := lockProject(Config{Project: p}); err == nil || !strings.Contains(err.Error(), "sandbox project") {
+			t.Errorf("project %q must be refused by the name check, got %v", p, err)
 		}
 	}
 	unlock, err := lockProject(Config{Project: "ok-1.a_b"})
