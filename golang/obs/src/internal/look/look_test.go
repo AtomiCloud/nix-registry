@@ -429,12 +429,12 @@ func TestLiveRulePromptSaysToReloadAndWhatToRecordWhenFiringIsNeverSeen(t *testi
 	info.Incidents = []sandbox.IncidentInfo{{Name: "spike", From: info.From, To: info.To, Fire: []string{"pending"}}}
 	info.LiveRules = []sandbox.NativeRuleWindow{{UID: "pending", Expected: "Firing", ProvisionedAt: at.UnixMilli(), For: "15s", Interval: "10s", FiringAt: at.Add(30 * time.Second).UnixMilli(), HoldUntil: at.Add(5 * time.Minute).UnixMilli(), Supported: true}}
 	p := Setup(context.Background(), Options{Dir: dir, Checklist: cl, Files: []string{"dashboards/overview.json"}}, fakeUp(&info, nil))
-	for _, want := range []string{"does not poll", "reload the same URL", "every 10s", "until 2026-11-18T20:05:00Z", "Firing was never seen", "record the state you observed"} {
+	for _, want := range []string{"does not poll", "only refetches when the dashboard refreshes", "unless the board sets its own auto-refresh", "reload the same URL", "every 10s", "until 2026-11-18T20:05:00Z", "Firing was never seen", "record the state you observed"} {
 		if !strings.Contains(p.Prompt, want) {
 			t.Errorf("live prompt lacks %q", want)
 		}
 	}
-	if strings.Contains(p.Prompt, "until the alert-state panel shows Firing for") {
-		t.Errorf("the prompt still waits on a panel that does not refresh itself")
+	if strings.Contains(p.Prompt, "until the alert-state panel shows Firing for") || strings.Contains(p.Prompt, "auto-refresh off") {
+		t.Errorf("the prompt still waits on a panel that does not refresh itself, or claims the board has auto-refresh off")
 	}
 }
