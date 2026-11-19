@@ -846,9 +846,10 @@ kept and quoted (`{"payment.provider"="stripe"}`, `by ("payment.provider")`); th
 
 ## Migrating from 0.4 to 0.5
 
-Nothing is removed. Every command of 0.4 keeps its flags and prints the same output (`tests/compat.sh` compares `obs query --static`,
-`obs query --live`, `obs alerts` and `obs links` with golden files captured from the 0.4 binary on the fixtures: stdout, stderr and exit code,
-byte for byte). Scripts that call `obs query ...` need no change. The old commands print no deprecation note. 0.5 adds the grouped commands:
+Nothing is removed and every command of 0.4 keeps its flags. `obs query`, `obs alerts` and `obs links` print the same output (`tests/compat.sh`
+compares `obs query --static`, `obs query --live`, `obs alerts` and `obs links` with golden files captured from the 0.4 binary on the fixtures:
+stdout, stderr and exit code, byte for byte), so scripts that call them need no change. `obs assert` and `obs scrape` keep their stdout and exit
+codes and add one `note:` line on stderr naming `obs live usage`. `obs check` changes as listed below. 0.5 adds the grouped commands:
 
 | In 0.4                                        | In 0.5                                                        |
 | --------------------------------------------- | ------------------------------------------------------------- |
@@ -864,7 +865,7 @@ What is new in `obs look` and `obs live` for a caller:
 - `obs look` applies the named incidents on the seed timeline: the latest incident is live (its alerts are provisioned into a sandbox-only Grafana folder and reach Firing in Grafana), every incident gets a region annotation, and a `Sandbox alert state (Grafana live)` panel shows Firing, Pending and Normal. The prompt lists the expected states and the window to screenshot in (see _`obs look`_).
 - `obs look` seeds Tempo and Pyroscope as well as the metrics and logs stores, and a seed can opt into `traffic.settings` (level, trend, cycle, spikes, gaps and noise, see _Seed shape_). A seed without `traffic.settings` gives the same data as in 0.4.
 - `obs look --seed-base <unix seconds>` keeps an explicit historical timeline instead of ending the seed at now.
-- `obs live usage|shape|incidents|look --target local|dev|stage|prod` is new and read-only. It reads `targets:` and the optional `estimates:` from `obs.yaml`; the other commands ignore both blocks (see _`obs live`_).
+- `obs live usage|shape|incidents|look --target local|dev|stage|prod` is new and read-only. It reads `targets:` and the optional `estimates:` from `obs.yaml`; the other commands ignore both blocks (see _`obs live`_). An obs 0.4 binary refuses an `obs.yaml` with these blocks (unknown key), so upgrade every caller of a repo before adding them.
 
 What is new in `obs check` and `obs test` for a caller:
 
@@ -1121,9 +1122,9 @@ estimates: # optional: expected log and trace volume (the contract only holds se
 
 Active time series (ATS) and data points per minute (DPM) per metric, against the contract's worst case
 and budget; log lines/min, message bytes/min and streams; spans/min and bytes/min. It replaces `obs assert`
-and `obs scrape` as the recommended command (`assert` keeps working unchanged).
+and `obs scrape` as the recommended command (`assert` keeps working, with one stderr note).
 
-- **It reuses `obs assert`.** The series are read once (`/api/v1/series`, the series with a sample in `--window`) and counted by the code behind `obs assert` (`internal/assert`): per `durian.cloud.landscape`, a histogram's `_bucket`, `_sum` and `_count` together, a per-pod metric up to worst case x `--pods`. The budget is per landscape, so a store holding two landscapes is compared one landscape at a time (the row shows the fullest and lists each). `assert`'s label checks run too and show under FINDINGS: a label that is not in the contract, a pod label on a metric that is not `per_pod`, a value outside its type. `obs assert` itself is unchanged.
+- **It reuses `obs assert`.** The series are read once (`/api/v1/series`, the series with a sample in `--window`) and counted by the code behind `obs assert` (`internal/assert`): per `durian.cloud.landscape`, a histogram's `_bucket`, `_sum` and `_count` together, a per-pod metric up to worst case x `--pods`. The budget is per landscape, so a store holding two landscapes is compared one landscape at a time (the row shows the fullest and lists each). `assert`'s label checks run too and show under FINDINGS: a label that is not in the contract, a pod label on a metric that is not `per_pod`, a value outside its type. `obs assert` keeps its stdout and exit codes; it adds one `note:` line on stderr naming `obs live usage`.
 - **Both thresholds, for series and for points/min.** Each row shows the series and the points/min next to the worst case and the budget of each (a metric without a budget is compared with its worst case). Points/min are measured over `--window` (default 5m): the worst case times 60 / the contract's aggregation interval is the worst-case rate, the budget times the same is the budget rate. A row above the worst case but inside the budget says "above worst case"; above the budget (series or points/min) says "OVER BUDGET" and why.
 - **Rows are ranked by the larger of the two deviations** (series / limit and points/min / limit, limit = budget else worst case): over budget first, then metrics that are not in the contract (the fullest first), then above the worst case, then the rest, platform metrics last. `--top N` keeps the first N, `--over-only` hides the rows that are fine.
 - **An undeclared metric has no budget.** `--unknown fail` (the default) counts every series of a metric that is neither in the contract nor in `platform_metrics` as over budget (exit 1); `warn` shows it and exits 0; `ignore` hides it.
