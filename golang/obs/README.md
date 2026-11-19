@@ -869,7 +869,7 @@ What is new in `obs look` and `obs live` for a caller:
 
 What is new in `obs check` and `obs test` for a caller:
 
-- `obs check` now also fails on a query finding, with the same rule ids, files and tokens as `obs query --static`. A CI that ran both can run one. It takes
+- `obs check` now also fails on a query finding, with the same rule ids, files and tokens as `obs query --static`. A CI that ran both can run one, except for the `[empty]` rule: `obs check` accepts a folder with no alert and no dashboard, so keep `obs query --static` where CI relies on it to fail such a folder. It takes
   `--names`, `--event-rule`, `--vl-settings`, `--tempo-config` (new) next to `--contracts`.
 - `obs check --contracts none` now also runs the query rules with this folder's contract only, so a dashboard that reads a metric another contract declares is red there (as with `obs query --static --contracts none`). The limits it prints are unchanged.
   **Remedy for a query that reads a metric of another contract:** leave `--contracts auto` (the default), which reads the repository's other `observability/contract.yaml` files too, or fix the reported query so it uses only a metric this folder's contract declares.
