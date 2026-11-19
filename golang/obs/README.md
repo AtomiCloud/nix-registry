@@ -1100,9 +1100,11 @@ stack (the local sandbox, or a real cluster) and compares them with what the rep
 pulls and compares; the calling LLM (or a person) judges. `--json` prints the same content for an
 LLM, the default is a table.
 
-**Read-only guarantee.** obs live sends only `GET`, to the stores' query endpoints (the guard also allows a few more read endpoints such as `status/tsdb`, and would let a `POST` through to them, never anywhere else): `/api/v1/query`, `query_range`, `series` (VictoriaMetrics),
+**Read-only guarantee.** obs live sends only `GET`. Its direct request paths are `/api/v1/query`, `query_range`, `series` (VictoriaMetrics),
 `/select/logsql/stats_query` (VictoriaLogs), `/api/metrics/query_range` (Tempo), and
-Grafana's `/api/health`, `/api/search`, `/api/annotations`. Every request goes through one guard
+Grafana's `/api/health`, `/api/search`, `/api/annotations`. A redirect is followed only within the same scheme, host and target path
+prefix, and only to a path the guard allows, so an allowed redirect can reach a few more read endpoints (such as `status/tsdb`). The guard
+would also let a `POST` through to the store query paths, never anywhere else. Every request goes through one guard
 (`internal/live/client.go`, `ReadOnly`) that refuses any other method or path before the network is
 touched. The guard checks the URL as it will be sent (not only the path argument): the target address must be
 a plain `http://` or `https://` address with no user name, password, query string or fragment, and the client
