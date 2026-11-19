@@ -3,6 +3,7 @@ package live
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -44,6 +45,7 @@ type FiredAlert struct {
 	GrafanaAlertID      int64               `json:"grafana_alert_id,omitempty"`
 	IDSource            string              `json:"id_source,omitempty"`
 	SpanUnknown         bool                `json:"span_unknown,omitempty"`
+	TimeSource          string              `json:"time_source,omitempty"`
 	Observations        []FiringObservation `json:"observations,omitempty"`
 	ruleUID             string
 	spans               []interval
@@ -354,42 +356,100 @@ func mergeIntervals(spans []interval) []interval {
 	return merged
 }
 
-// fromAlertsSeries reads the ALERTS{alertstate="firing"} series a vmalert-style ruler writes.
-func fromAlertsSeries(ctx context.Context, c *Client, t *Target, from, to time.Time) (map[string]*FiredAlert, error) {
-	mats, err := c.rawSamples(ctx, t.Metrics, `ALERTS{alertstate="firing"}`, from, to)
+// fromAlertsSeries keeps the lookback list grouped. Evaluation times describe this
+// list only; they are never window evidence. Raw samples are fetched per named window.
+func fromAlertsSeries(ctx context.Context, c *Client, t *Target, from, to time.Time, windows []Window) (map[string]*FiredAlert, map[int]string, error) {
+	step := time.Minute
+	if d := to.Sub(from) / 10000; d > step {
+		step = (d/time.Second + 1) * time.Second
+	}
+	mats, err := c.Range(ctx, t.Metrics, `max by (alertname, grafana_rule_uid) (ALERTS{alertstate="firing"})`, from, to, step)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := map[string]*FiredAlert{}
-	for _, m := range mats {
-		key := m.Labels["grafana_rule_uid"]
-		source := "ruler_uid"
+	alert := func(labels map[string]string) *FiredAlert {
+		key, source := labels["grafana_rule_uid"], "ruler_uid"
 		if key == "" {
-			key = m.Labels["alertname"]
-			source = "alertname"
+			key, source = labels["alertname"], "alertname"
 		}
 		f := out[key]
 		if f == nil {
-			f = &FiredAlert{ID: key, Title: m.Labels["alertname"], ruleUID: m.Labels["grafana_rule_uid"], IDSource: source, SpanUnknown: true}
-		}
-		for _, s := range m.Samples {
-			o := FiringObservation{At: s.At}
-			if s.V <= 0 || !o.inside(from, to) {
-				continue
-			}
-			f.Observations = append(f.Observations, o)
-			if f.First.IsZero() || s.At.Before(f.First) {
-				f.First = s.At
-			}
-			if s.At.After(f.Last) {
-				f.Last = s.At
-			}
-		}
-		if len(f.Observations) > 0 {
+			f = &FiredAlert{ID: key, Title: labels["alertname"], ruleUID: labels["grafana_rule_uid"], IDSource: source, SpanUnknown: true, TimeSource: "query_evaluation"}
 			out[key] = f
 		}
+		return f
 	}
-	return out, nil
+	for _, m := range mats {
+		for _, p := range m.Samples {
+			if p.V <= 0 {
+				continue
+			}
+			f, at := alert(m.Labels), time.Unix(p.T, 0).UTC()
+			if f.First.IsZero() || at.Before(f.First) {
+				f.First = at
+			}
+			if at.After(f.Last) {
+				f.Last = at
+			}
+		}
+	}
+	unknown := map[int]string{}
+	seenSamples := map[*FiredAlert]map[time.Time]bool{}
+	for i, w := range windows {
+		end := w.To
+		if end.After(to) {
+			end = to
+		}
+		// An hour bounds each raw export independently of the default seven-day list.
+		for start := w.From; start.Before(end); {
+			stop := start.Add(time.Hour)
+			if stop.After(end) {
+				stop = end
+			}
+			raw, err := c.rawSamples(ctx, t.Metrics, `ALERTS{alertstate="firing"}`, start, stop)
+			if errors.Is(err, errResponseTooLarge) {
+				unknown[i] = "raw ALERTS samples too large to read"
+				break
+			}
+			if err != nil {
+				return nil, nil, err
+			}
+			for _, m := range raw {
+				for _, p := range m.Samples {
+					o := FiringObservation{At: p.At}
+					if p.V <= 0 || !o.inside(start, stop) {
+						continue
+					}
+					f := alert(m.Labels)
+					// A rule absent at grouped evaluation steps can still have a raw firing sample.
+					if f.First.IsZero() {
+						f.First, f.Last, f.TimeSource = p.At, p.At, "raw_sample"
+					}
+					if f.TimeSource == "raw_sample" {
+						if p.At.Before(f.First) {
+							f.First = p.At
+						}
+						if p.At.After(f.Last) {
+							f.Last = p.At
+						}
+					}
+					if seenSamples[f] == nil {
+						seenSamples[f] = map[time.Time]bool{}
+					}
+					if !seenSamples[f][o.At] {
+						seenSamples[f][o.At] = true
+						f.Observations = append(f.Observations, o)
+					}
+				}
+			}
+			start = stop
+		}
+	}
+	for _, f := range out {
+		sort.Slice(f.Observations, func(i, j int) bool { return f.Observations[i].At.Before(f.Observations[j].At) })
+	}
+	return out, unknown, nil
 }
 
 type incidentFile struct {
@@ -437,6 +497,7 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 	var fired map[string]*FiredAlert
 	var err error
 	var coverage *annotationCoverage
+	var rawUnknown map[int]string
 	if t.Grafana != "" {
 		fired, coverage, err = fromAnnotations(ctx, c, t, from, now)
 		if err == nil {
@@ -450,7 +511,7 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 		res.SourceWhy = "the target has no grafana URL, so the ALERTS series is used (it exists only when a vmalert-style ruler wrote it)"
 	}
 	if res.Source == "" {
-		fired, err = fromAlertsSeries(ctx, c, t, from, now)
+		fired, rawUnknown, err = fromAlertsSeries(ctx, c, t, from, now, o.Windows)
 		if err != nil {
 			return nil, fmt.Errorf("alerts series: %w", err)
 		}
@@ -587,7 +648,7 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 		}
 	}
 	// windows the user names
-	for _, w := range o.Windows {
+	for wi, w := range o.Windows {
 		wr := WindowResult{Window: w, Fired: []string{}}
 		for _, f := range res.Fired {
 			caught := false
@@ -622,6 +683,9 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 			}
 			wr.Unknown = "not seen in " + source + " (cannot prove a miss: " + reason + ")"
 			wr.Status = "not_seen"
+		}
+		if reason := rawUnknown[wi]; reason != "" {
+			wr.Fired, wr.Status, wr.Unknown = []string{}, "not_seen", reason
 		}
 		if w.To.After(now) {
 			wr.PartialFired = wr.Fired
@@ -660,6 +724,10 @@ func (r *IncidentsResult) Print(w io.Writer) {
 		early := ""
 		if f.StartedBeforeWindow {
 			early = " (already firing when the window began; first is the window start)"
+		}
+		if f.TimeSource == "query_evaluation" {
+			fmt.Fprintf(w, "  %s: firing present at grouped query evaluations, first evaluation %s; exact firing times, spans, duration and firing count unknown%s\n", f.ID, f.First.Format(time.RFC3339), repo)
+			continue
 		}
 		if f.SpanUnknown {
 			fmt.Fprintf(w, "  %s: firing observed, first %s; spans, duration and firing count unknown%s\n", f.ID, f.First.Format(time.RFC3339), repo)

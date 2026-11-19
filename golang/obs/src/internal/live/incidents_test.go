@@ -194,7 +194,7 @@ func TestIncidentsFallsBackToAlertsSeriesWithoutGrafana(t *testing.T) {
 	if !strings.Contains(res.Source, "ALERTS series") || !strings.Contains(res.SourceWhy, "no grafana URL") {
 		t.Fatalf("source: %q why: %q", res.Source, res.SourceWhy)
 	}
-	if len(res.Fired) != 1 || res.Fired[0].ID != "high-errors" || !res.Fired[0].SpanUnknown || len(res.Fired[0].Observations) != 10 {
+	if len(res.Fired) != 1 || res.Fired[0].ID != "high-errors" || !res.Fired[0].SpanUnknown || len(res.Fired[0].Observations) != 0 || res.Fired[0].TimeSource != "query_evaluation" {
 		t.Fatalf("fired: %+v", res.Fired)
 	}
 	if len(queries) == 0 || !strings.Contains(queries[0], `ALERTS{alertstate="firing"}`) {
@@ -833,14 +833,14 @@ func TestIncidentsAlertsFallbackUsesRawSampleTimesNotEvaluationTimes(t *testing.
 			}))
 			defer srv.Close()
 			win := Window{From: t0.Add(55 * time.Second), To: t0.Add(65 * time.Second)}
-			res, err := Incidents(context.Background(), &Client{}, &Target{Metrics: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: time.Hour, Windows: []Window{win}, Now: func() time.Time { return t0.Add(2 * time.Minute) }})
+			res, err := Incidents(context.Background(), &Client{}, &Target{Metrics: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: time.Hour, Windows: []Window{win, {From: rawAt, To: rawAt.Add(time.Second)}}, Now: func() time.Time { return t0.Add(2 * time.Minute) }})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(res.Windows) != 1 || res.Windows[0].Status != "not_seen" || len(res.Windows[0].Fired) != 0 {
+			if len(res.Windows) != 2 || res.Windows[0].Status != "not_seen" || len(res.Windows[0].Fired) != 0 || res.Windows[1].Status != "caught" {
 				t.Fatalf("a carried-forward query point is not a raw firing observation: %+v", res.Windows)
 			}
-			if len(res.Fired) != 1 || !res.Fired[0].First.Equal(rawAt) || len(res.Fired[0].Observations) != 1 || !res.Fired[0].Observations[0].At.Equal(rawAt) {
+			if len(res.Fired) != 1 || res.Fired[0].TimeSource != "query_evaluation" || len(res.Fired[0].Observations) != 1 || !res.Fired[0].Observations[0].At.Equal(rawAt) {
 				t.Fatalf("preserve the underlying sample timestamp, including milliseconds: %+v", res.Fired)
 			}
 			assertReadOnly(t, rec)
@@ -891,5 +891,94 @@ func TestIncidentsRecoveringAtWindowEndPreservesPreviousEvidence(t *testing.T) {
 	}
 	if len(res.Windows) != 1 || res.Windows[0].Status != "caught" || len(res.Windows[0].Fired) != 1 || res.Windows[0].Fired[0] != "high-errors" {
 		t.Fatalf("Alerting -> Recovering proves firing just before the window end as well as after it: %+v", res.Windows)
+	}
+}
+
+// This is valid JSON larger than the HTTP client cap, without allocating a huge fixture.
+func largeAlertsAnswer(w http.ResponseWriter) {
+	fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[`)
+	padding := strings.Repeat(" ", 64<<10)
+	for i := 0; i < maxBody/len(padding)+1; i++ {
+		if _, err := fmt.Fprint(w, padding); err != nil {
+			return
+		}
+	}
+	fmt.Fprint(w, `{"metric":{"alertname":"High error rate","grafana_rule_uid":"high-errors"},"values":[[1,"1"]]}]}}`)
+}
+
+func TestIncidentsAlertsLookbackStaysGrouped(t *testing.T) {
+	var rawReads int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/query" {
+			rawReads++
+			largeAlertsAnswer(w)
+			return
+		}
+		if r.URL.Query().Get("query") != `max by (alertname, grafana_rule_uid) (ALERTS{alertstate="firing"})` {
+			t.Errorf("lookback must stay grouped: %s", r.URL.RawQuery)
+		}
+		fmt.Fprintf(w, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"alertname":"High error rate","grafana_rule_uid":"high-errors"},"values":[[%d,"1"]]}]}}`, t0.Unix())
+	}))
+	defer srv.Close()
+	res, err := Incidents(context.Background(), &Client{}, &Target{Metrics: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: 7 * 24 * time.Hour, Now: func() time.Time { return t0.Add(time.Hour) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rawReads != 0 || len(res.Fired) != 1 || len(res.Fired[0].Observations) != 0 {
+		t.Fatalf("no named windows need no raw reads: reads=%d result=%+v", rawReads, res)
+	}
+}
+
+func TestIncidentsOversizedRawWindowIsUnknown(t *testing.T) {
+	rawReads := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/query" {
+			rawReads++
+			largeAlertsAnswer(w)
+			return
+		}
+		fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[]}}`)
+	}))
+	defer srv.Close()
+	res, err := Incidents(context.Background(), &Client{}, &Target{Metrics: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: 7 * 24 * time.Hour, Windows: []Window{{From: t0, To: t0.Add(2 * time.Hour)}}, Now: func() time.Time { return t0.Add(3 * time.Hour) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rawReads != 1 || len(res.Windows) != 1 || res.Windows[0].Status != "not_seen" || len(res.Windows[0].Fired) != 0 || res.Windows[0].Unknown != "raw ALERTS samples too large to read" {
+		t.Fatalf("oversized raw samples must leave only the window unknown: reads=%d %+v", rawReads, res.Windows)
+	}
+}
+
+func TestIncidentsRawWindowsChunkAndMergeSamples(t *testing.T) {
+	rawReads := 0
+	samples := []time.Time{t0.Add(10 * time.Minute), t0.Add(70 * time.Minute)}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/query_range" {
+			fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[]}}`)
+			return
+		}
+		rawReads++
+		q := r.URL.Query().Get("query")
+		width, err := ParseSpan(q[strings.LastIndex(q, "[")+1 : len(q)-1])
+		if err != nil || width > time.Hour+time.Millisecond {
+			t.Errorf("raw read must stay bounded: %s", q)
+		}
+		seconds, _ := strconv.ParseFloat(r.URL.Query().Get("time"), 64)
+		end := time.UnixMilli(int64(seconds * 1000))
+		var points []string
+		for _, at := range samples {
+			if at.After(end.Add(-width)) && !at.After(end) {
+				points = append(points, fmt.Sprintf(`[%d,"1"]`, at.Unix()))
+			}
+		}
+		fmt.Fprintf(w, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"grafana_rule_uid":"high-errors"},"values":[%s]}]}}`, strings.Join(points, ","))
+	}))
+	defer srv.Close()
+	res, err := Incidents(context.Background(), &Client{}, &Target{Metrics: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: 7 * 24 * time.Hour, Windows: []Window{{From: t0, To: t0.Add(2 * time.Hour)}}, Now: func() time.Time { return t0.Add(3 * time.Hour) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rawReads != 2 || len(res.Fired) != 1 || len(res.Fired[0].Observations) != 2 || !res.Fired[0].Observations[0].At.Equal(samples[0]) || !res.Fired[0].Observations[1].At.Equal(samples[1]) || res.Windows[0].Status != "caught" {
+		t.Fatalf("merge timestamped evidence from bounded chunks: reads=%d %+v", rawReads, res)
 	}
 }
