@@ -116,7 +116,7 @@ type harness struct {
 
 // recordedStores returns four fake stores that replay (or, with OBS_LIVE_RECORD, record) the
 // scenario. The Target points at them.
-func recordedStores(t *testing.T, scenario string) *harness {
+func recordedStores(t *testing.T, scenario string, unrecorded ...string) *harness {
 	t.Helper()
 	h := &harness{t: t, rec: &recorder{}}
 	file := filepath.Join("testdata", "recorded", scenario+".json")
@@ -160,6 +160,14 @@ func recordedStores(t *testing.T, scenario string) *harness {
 			if len(real) == 0 {
 				e, ok := replay[key]
 				if !ok {
+					// Explicitly requested unavailable reads are exercised as failures, never
+					// invented successful recordings. Every other missing request still fails.
+					for _, p := range unrecorded {
+						if r.Method == http.MethodGet && r.URL.Path == p {
+							http.Error(w, "this read is NOT TESTED on the old recording", http.StatusServiceUnavailable)
+							return
+						}
+					}
 					h.t.Errorf("request not in %s: %s (the command sends a request that was not recorded; record again)", file, key)
 					http.Error(w, "not recorded", 599)
 					return

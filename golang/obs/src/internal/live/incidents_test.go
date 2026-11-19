@@ -2,6 +2,7 @@ package live
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -68,7 +69,7 @@ func grafanaFake(t *testing.T, rec *recorder, body string, status int) *httptest
 var t0 = time.Date(2026, 11, 10, 14, 0, 0, 0, time.UTC)
 
 func ann(uid, name, prev, next string, at time.Time) string {
-	return fmt.Sprintf(`{"id":1,"alertId":7,"alertName":%q,"alertUID":%q,"prevState":%q,"newState":%q,"time":%d,"timeEnd":%d,"text":"x"}`, name, uid, prev, next, at.UnixMilli(), at.UnixMilli())
+	return fmt.Sprintf(`{"id":1,"alertId":7,"alertName":%q,"alertUID":%q,"prevState":%q,"newState":%q,"time":%d,"timeEnd":%d,"text":"x","data":{"labels":{}}}`, name, uid, prev, next, at.UnixMilli(), at.UnixMilli())
 }
 
 func TestIncidentsListsFiredWithoutIncidentMissingRunbookAndOrphanIncident(t *testing.T) {
@@ -140,14 +141,13 @@ func TestIncidentsListsFiredWithoutIncidentMissingRunbookAndOrphanIncident(t *te
 
 func TestIncidentsNamedWindowWithNoAlertIsNotAlerted(t *testing.T) {
 	dir := writeRepo(t)
-	rec := &recorder{}
-	srv := grafanaFake(t, rec, "["+strings.Join([]string{
+	srv := grafanaWithCurrent(t, "["+strings.Join([]string{
 		ann("high-errors", "High error rate", "Normal", "Alerting", t0),
 		ann("high-errors", "High error rate", "Alerting", "Normal", t0.Add(10*time.Minute)),
 		// Establish the other rules' states too; no transition would leave them unknown.
 		ann("slow-charges", "Slow charges", "Pending", "Normal", t0.Add(-2*time.Hour)),
 		ann("quiet-rule", "Quiet rule", "Pending", "Normal", t0.Add(-2*time.Hour)),
-	}, ",")+"]", 0)
+	}, ",")+"]", currentRulesBody(false))
 	w1 := Window{From: t0.Add(-time.Hour), To: t0.Add(time.Hour)}        // an alert fired inside
 	w2 := Window{From: t0.Add(5 * time.Hour), To: t0.Add(6 * time.Hour)} // nothing fired
 	res, err := Incidents(context.Background(), &Client{}, &Target{Name: "prod", Grafana: srv.URL}, IncidentOptions{
@@ -405,7 +405,7 @@ func TestIncidentsFirstFiringPreviousStateStartsAtLookback(t *testing.T) {
 }
 
 func TestIncidentsNoTransitionIsUnknownRatherThanMissed(t *testing.T) {
-	srv := grafanaFake(t, &recorder{}, "[]", 0)
+	srv := grafanaFake(t, &recorder{}, "["+ann("high-errors", "High error rate", "Pending", "Normal", t0)+"]", 0)
 	w := Window{From: t0, To: t0.Add(time.Hour)}
 	res, err := Incidents(context.Background(), &Client{}, &Target{Name: "prod", Grafana: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: time.Hour, Windows: []Window{w}, Now: func() time.Time { return w.To }})
 	if err != nil {
@@ -418,8 +418,15 @@ func TestIncidentsNoTransitionIsUnknownRatherThanMissed(t *testing.T) {
 	}
 	var out strings.Builder
 	res.Print(&out)
-	if !strings.Contains(out.String(), "unknown") || !strings.Contains(out.String(), "quiet-rule") {
+	if !strings.Contains(out.String(), "quiet-rule: state over the window is unknown from history") {
 		t.Fatalf("report must name the rule whose state history cannot establish: %s", out.String())
+	}
+	found := false
+	for _, r := range res.UnknownState {
+		found = found || r.ID == "quiet-rule"
+	}
+	if !found {
+		t.Fatal("UnknownState must include quiet-rule even when another rule has transitions")
 	}
 }
 
@@ -454,7 +461,7 @@ func TestIncidentsInstancesMergeOverlappingSpansPerRule(t *testing.T) {
 		if reverse {
 			tags[0], tags[1] = tags[1], tags[0]
 		}
-		return strings.TrimSuffix(ann("high-errors", "High error rate", prev, next, at), "}") + fmt.Sprintf(`,"tags":[%q,%q]}`, tags[0], tags[1])
+		return historyRow("high-errors", 7, "High error rate", prev, next, at, map[string]string{"instance": instance}, tags)
 	}
 	srv := grafanaFake(t, &recorder{}, "["+strings.Join([]string{
 		withTags("Normal", "Alerting", "a", t0, false),
@@ -471,5 +478,185 @@ func TestIncidentsInstancesMergeOverlappingSpansPerRule(t *testing.T) {
 	f := fired["high-errors"]
 	if f == nil || f.Firings != 2 || len(f.spans) != 2 || f.spans[0].To.Sub(f.spans[0].From) != 40*time.Minute || !f.Last.Equal(t0.Add(50*time.Minute)) {
 		t.Fatalf("A resolving cannot close B; overlapping instances merge into one span: %+v", f)
+	}
+}
+
+// historyRow lets these tests distinguish the lossless optional label map from Grafana's
+// real, lossy tags (colons replaced with underscores and long labels omitted).
+func historyRow(uid string, id int, title, prev, next string, at time.Time, labels map[string]string, tags []string) string {
+	row := map[string]any{"alertUID": uid, "alertId": id, "alertName": title, "prevState": prev, "newState": next, "time": at.UnixMilli(), "tags": tags}
+	if labels != nil {
+		row["data"] = map[string]any{"labels": labels}
+	}
+	b, _ := json.Marshal(row)
+	return string(b)
+}
+
+func TestIncidentsLosslessLabelsSurviveTagCollisionsAndOmission(t *testing.T) {
+	for _, tags := range [][]string{{"instance:api_9090"}, nil} {
+		srv := grafanaFake(t, &recorder{}, "["+strings.Join([]string{
+			historyRow("high-errors", 7, "High error rate", "Normal", "Alerting", t0, map[string]string{"instance": "api:9090"}, tags),
+			historyRow("high-errors", 7, "High error rate", "Normal", "Alerting", t0.Add(10*time.Minute), map[string]string{"instance": "api_9090"}, tags),
+			historyRow("high-errors", 7, "High error rate", "Alerting", "Normal", t0.Add(20*time.Minute), map[string]string{"instance": "api:9090"}, tags),
+			historyRow("high-errors", 7, "High error rate", "Alerting", "Normal", t0.Add(40*time.Minute), map[string]string{"instance": "api_9090"}, tags),
+		}, ",")+"]", 0)
+		fired, _, err := fromAnnotations(context.Background(), &Client{}, &Target{Grafana: srv.URL}, t0, t0.Add(time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		f := fired["high-errors"]
+		if f == nil || len(f.spans) != 1 || f.spans[0].To.Sub(f.spans[0].From) != 40*time.Minute {
+			t.Fatalf("lossy tags cannot merge distinct label maps: %+v", f)
+		}
+	}
+}
+
+func TestIncidentsTagOnlyHistoryHasUnknownSpans(t *testing.T) {
+	srv := grafanaFake(t, &recorder{}, "["+historyRow("high-errors", 7, "High error rate", "Normal", "Alerting", t0, nil, []string{"instance:api_9090"})+","+historyRow("high-errors", 7, "High error rate", "Alerting", "Normal", t0.Add(20*time.Minute), nil, []string{"instance:api_9090"})+"]", 0)
+	res, err := Incidents(context.Background(), &Client{}, &Target{Grafana: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: time.Hour, Now: func() time.Time { return t0.Add(time.Hour) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Fired) != 1 || res.Fired[0].Longest != 0 || len(res.Fired[0].spans) != 0 {
+		t.Fatalf("tags cannot establish an instance span: %+v", res.Fired)
+	}
+	b, _ := res.JSON()
+	if !strings.Contains(string(b), `"span_unknown": true`) {
+		t.Fatalf("JSON must flag ambiguous spans: %s", b)
+	}
+}
+
+func TestIncidentsNumericRuleIDsWithTheSameTitleStaySeparate(t *testing.T) {
+	rows := []string{}
+	for _, id := range []int{41, 42} {
+		rows = append(rows, historyRow("", id, "Shared title", "Normal", "Alerting", t0, map[string]string{}, nil), historyRow("", id, "Shared title", "Alerting", "Normal", t0.Add(time.Duration(id-20)*time.Minute), map[string]string{}, nil))
+	}
+	srv := grafanaFake(t, &recorder{}, "["+strings.Join(rows, ",")+"]", 0)
+	res, err := Incidents(context.Background(), &Client{}, &Target{Grafana: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: time.Hour, Now: func() time.Time { return t0.Add(time.Hour) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Fired) != 2 || res.Fired[0].ID == res.Fired[1].ID {
+		t.Fatalf("different Grafana alertId values must stay distinct even with equal titles: %+v", res.Fired)
+	}
+}
+
+func TestIncidentsConflictingUIDNeverMatchesByTitle(t *testing.T) {
+	srv := grafanaFake(t, &recorder{}, "["+historyRow("different-rule", 41, "High error rate", "Normal", "Alerting", t0, map[string]string{}, nil)+"]", 0)
+	res, err := Incidents(context.Background(), &Client{}, &Target{Grafana: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: time.Hour, Now: func() time.Time { return t0.Add(time.Hour) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Fired) != 1 || res.Fired[0].InRepo || res.Fired[0].ID != "different-rule" {
+		t.Fatalf("an explicit conflicting UID rules out title matching: %+v", res.Fired)
+	}
+	for _, r := range res.UnknownState {
+		if r.ID == "high-errors" {
+			return
+		}
+	}
+	t.Fatal("a different rule's same title cannot establish high-errors' state")
+}
+
+func TestIncidentsRepoTitleMatchRequiresUniqueRule(t *testing.T) {
+	dir := writeRepo(t)
+	file := filepath.Join(dir, "alerts", "checkout", "warning.yaml")
+	if err := os.WriteFile(file, []byte(fmt.Sprintf(alertCR, "checkout-warning", "slow-charges", "High error rate", "")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv := grafanaFake(t, &recorder{}, "["+historyRow("", 41, "High error rate", "Normal", "Alerting", t0, map[string]string{}, nil)+"]", 0)
+	res, err := Incidents(context.Background(), &Client{}, &Target{Grafana: srv.URL}, IncidentOptions{Dir: dir, Since: time.Hour, Now: func() time.Time { return t0.Add(time.Hour) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Fired) != 1 || res.Fired[0].InRepo {
+		t.Fatalf("same-title repo rules cannot be matched by title: %+v", res.Fired)
+	}
+}
+
+func TestIncidentsSeenRulesCannotEstablishInstanceCoverage(t *testing.T) {
+	rows := []string{}
+	for id, title := range map[string]string{"high-errors": "High error rate", "slow-charges": "Slow charges", "quiet-rule": "Quiet rule"} {
+		rows = append(rows, historyRow(id, 7, title, "Pending", "Normal", t0.Add(-time.Hour), map[string]string{"instance": "quiet"}, nil))
+	}
+	srv := grafanaFake(t, &recorder{}, "["+strings.Join(rows, ",")+"]", 0)
+	w := Window{From: t0, To: t0.Add(time.Hour)}
+	res, err := Incidents(context.Background(), &Client{}, &Target{Grafana: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: time.Hour, Windows: []Window{w}, Now: func() time.Time { return w.To }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range res.IncidentNotAlerted {
+		if m.Window != nil {
+			t.Fatalf("another instance can have fired before the lookback with no transition: %+v", m)
+		}
+	}
+	if len(res.Windows) != 1 || res.Windows[0].Unknown == "" {
+		t.Fatalf("all known rules having rows still cannot prove complete instance inventory: %+v", res.Windows)
+	}
+}
+
+func currentRulesBody(active bool) string {
+	rules := []map[string]any{}
+	for id, title := range map[string]string{"high-errors": "High error rate", "slow-charges": "Slow charges", "quiet-rule": "Quiet rule"} {
+		r := map[string]any{"uid": id, "name": title, "type": "alerting", "state": "inactive", "health": "ok", "alerts": []any{}}
+		if active && id == "high-errors" {
+			r["state"] = "firing"
+			r["alerts"] = []any{map[string]any{"state": "Alerting", "labels": map[string]string{"instance": "silent"}, "activeAt": t0.Add(-8 * 24 * time.Hour).Format(time.RFC3339)}}
+		}
+		rules = append(rules, r)
+	}
+	b, _ := json.Marshal(map[string]any{"status": "success", "data": map[string]any{"groups": []any{map[string]any{"rules": rules}}}})
+	return string(b)
+}
+
+func grafanaWithCurrent(t *testing.T, history, current string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/annotations":
+			fmt.Fprint(w, history)
+		case "/api/prometheus/grafana/api/v1/rules":
+			fmt.Fprint(w, current)
+		default:
+			http.Error(w, "unexpected", 500)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestIncidentsCurrentInactiveStateEstablishesAQuietWindow(t *testing.T) {
+	srv := grafanaWithCurrent(t, "[]", currentRulesBody(false))
+	w := Window{From: t0, To: t0.Add(time.Hour)}
+	res, err := Incidents(context.Background(), &Client{}, &Target{Grafana: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: time.Hour, Windows: []Window{w}, Now: func() time.Time { return w.To }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.UnknownState) != 0 || len(res.Windows) != 1 || res.Windows[0].Unknown != "" {
+		t.Fatalf("inactive current rules with no transitions establish quiet history: %+v", res)
+	}
+	missed := 0
+	for _, m := range res.IncidentNotAlerted {
+		if m.Window != nil {
+			missed++
+		}
+	}
+	if missed != 1 {
+		t.Fatalf("current inactive state plus uncapped history must permit a definite miss: %+v", res.IncidentNotAlerted)
+	}
+}
+
+func TestIncidentsCurrentActiveInstanceWithoutTransitionCoversTheWindow(t *testing.T) {
+	srv := grafanaWithCurrent(t, "[]", currentRulesBody(true))
+	w := Window{From: t0, To: t0.Add(time.Hour)}
+	res, err := Incidents(context.Background(), &Client{}, &Target{Grafana: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: time.Hour, Windows: []Window{w}, Now: func() time.Time { return w.To }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Fired) != 1 || res.Fired[0].ID != "high-errors" || !res.Fired[0].StartedBeforeWindow || res.Fired[0].Longest != time.Hour {
+		t.Fatalf("silent currently firing instance was active for the whole window: %+v", res.Fired)
+	}
+	if len(res.Windows) != 1 || len(res.Windows[0].Fired) != 1 {
+		t.Fatalf("current active instance must cover named window: %+v", res.Windows)
 	}
 }

@@ -103,7 +103,9 @@ func TestRecordedShape(t *testing.T) {
 }
 
 func TestRecordedIncidents(t *testing.T) {
-	h := recordedStores(t, "incidents")
+	// The historic recording predates the current-state read. Exercise its unavailable
+	// path explicitly; the current-state success path is covered by synthetic HTTP tests.
+	h := recordedStores(t, "incidents", currentRulesPath)
 	res, err := Incidents(context.Background(), &Client{}, h.Target, IncidentOptions{Dir: liveFixtureDir, Since: time.Hour, Now: func() time.Time { return h.Now }})
 	if err != nil {
 		t.Fatal(err)
@@ -112,13 +114,13 @@ func TestRecordedIncidents(t *testing.T) {
 	if !strings.Contains(res.Source, "Grafana state history") {
 		t.Fatalf("source: %q", res.Source)
 	}
-	// Grafana's own state history: payment-errors went Normal -> Alerting at 20:16:30 UTC and was still
-	// firing when the window ended 28 s later; payment-errors sustained is only Pending (for: 1m).
+	// Grafana's own state history: payment-errors went Normal -> Alerting at 20:16:30 UTC;
+	// its lossy tags cannot prove a continuous span. The sustained rule is only Pending (for: 1m).
 	if len(res.Fired) != 1 {
 		t.Fatalf("fired: %+v", res.Fired)
 	}
 	f := res.Fired[0]
-	if f.ID != "payment-errors" || f.Firings != 1 || f.Longest != 28*time.Second || !f.InRepo || f.Incident != "payment-spike" || f.StartedBeforeWindow {
+	if f.ID != "payment-errors" || f.Firings != 0 || f.Longest != 0 || !f.SpanUnknown || len(f.Observations) != 1 || !f.InRepo || f.Incident != "payment-spike" || f.StartedBeforeWindow {
 		t.Fatalf("%+v", f)
 	}
 	if !f.First.Equal(time.Unix(1795032990, 0).UTC()) {
