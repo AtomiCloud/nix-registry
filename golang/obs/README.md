@@ -846,37 +846,55 @@ kept and quoted (`{"payment.provider"="stripe"}`, `by ("payment.provider")`); th
 
 ## Migrating from 0.4 to 0.5
 
-Nothing is removed and every command of 0.4 keeps its flags. `obs query`, `obs alerts` and `obs links` print the same output (`tests/compat.sh`
-compares `obs query --static`, `obs query --live`, `obs alerts` and `obs links` with golden files captured from the 0.4 binary on the fixtures:
-stdout, stderr and exit code, byte for byte), so scripts that call them need no change. `obs assert` and `obs scrape` keep their stdout and exit
-codes and add one `note:` line on stderr naming `obs live usage`. `obs check` changes as listed below. 0.5 adds the grouped commands:
+All 0.4 commands and flags remain available. For the 58 cases in `tests/compat.sh`, `obs query --static`, `obs query --live`,
+`obs alerts` and `obs links` match 0.4 stdout, stderr and exit codes byte for byte (golden files captured from the 0.4 binary).
+`obs assert` and `obs scrape` keep their stdout and exit codes and add one `note:` line on stderr naming `obs live usage`.
+`obs check` changes as listed below. `obs profile` and `obs store move` are unchanged. 0.5 adds the grouped commands:
 
-| In 0.4                                        | In 0.5                                                        |
-| --------------------------------------------- | ------------------------------------------------------------- |
-| `obs query --static`                          | part of `obs check` (also runs the limits and the versions)   |
-| `obs query --live`, `obs alerts`, `obs links` | `obs test` (also checks every incident is caught by an alert) |
-| `obs sandbox up`                              | `obs look --keep` when a dashboard is selected (`obs sandbox up` still works, also with none) |
-| `obs assert`                                  | `obs live usage`                                              |
+| In 0.4                                        | In 0.5 |
+| --------------------------------------------- | ------ |
+| `obs query --static`                          | `obs check`: contract limits, evaluator versions and static query rules. See below for the empty-folder and reporting differences. |
+| `obs query --live`, `obs alerts`, `obs links` | `obs test`: runs seeded query checks, alert evaluation when rules exist, and link checks when traces are present, declared or queried. It also checks named incidents for a passing `expect.fire` verdict. |
+| `obs sandbox up`                              | For a dashboard review, `obs look --keep` starts or reuses a compatible sandbox and tells the reviewer to leave it running. Use `obs sandbox up` for a stack without a dashboard review. |
+| `obs assert`                                  | Use `obs assert` to check a saved series export. Use `obs live usage` to inspect a running store, with a recent time window, contract-service filtering by default, and live budget checks. |
 
-`obs profile` and `obs store move` are unchanged. `obs scrape` still feeds the sandbox; read what it stored with `obs live usage --target local`.
+`obs scrape` still writes to the sandbox by default and accepts `--vm-url`. To inspect recent sandbox samples for the contract service,
+run `obs live usage --target local` against that same sandbox project.
 
 What is new in `obs look` and `obs live` for a caller:
 
-- `obs look` applies the named incidents on the seed timeline: the latest named incident window covers now, the alert rules are provisioned into a sandbox-only Grafana folder, every incident gets a region annotation, and a `Sandbox alert state (Grafana live)` panel shows Grafana's own Firing, Pending and Normal state. A rule the latest incident expects to fire reaches Firing once Grafana evaluates it and the snapshot holds its condition through `for:` at the scheduled evaluations (the prompt lists the expected Firing time, forecast at most ten minutes ahead); a quiet-only (`disturbance:`) latest incident expects Normal. The prompt lists the expected states and the window to screenshot in (see _`obs look`_).
-- `obs look` seeds Tempo and Pyroscope as well as the metrics and logs stores, and a seed can opt into `traffic.settings` (level, trend, cycle, spikes, gaps and noise, see _Seed shape_). A seed without `traffic.settings` gives the same data as in 0.4.
-- `obs look --seed-base <unix seconds>` keeps an explicit historical timeline instead of ending the seed at now.
-- `obs live usage|shape|incidents|look --target local|dev|stage|prod` is new and read-only. It reads `targets:` and the optional `estimates:` from `obs.yaml`; the other commands ignore both blocks (see _`obs live`_). An obs 0.4 binary refuses an `obs.yaml` with these blocks (unknown key), so upgrade every caller of a repo before adding them.
+- After selecting a dashboard, a successful `obs look` setup provisions the supplied rules in a sandbox Grafana folder, adds a native
+  alert-state panel (`Sandbox alert state (Grafana live)`) when rules exist, and marks each loaded incident with a region annotation on the
+  sandbox dashboards.
+- A newly loaded default seed places the latest-ending named incident over the snapshot time when that window exceeds the longest `for:`
+  duration plus two evaluation intervals among its expected-firing rules. Pass a nonzero `--seed-base` whose seed ends by the current time for
+  historical replay.
+- When the current incident has a forecast, the prompt treats `expect.fire` rules as expected Firing and the other alert rules as expected
+  Normal, including quiet-only disturbances. It prints a predicted screenshot window only for a supported Firing forecast. The forecast covers
+  up to ten minutes, and the panel shows the state Grafana actually reports (see _`obs look`_).
+- At a fixed start time, an unchanged 0.4-compatible seed without `traffic.settings` generates the same baseline data. A seed can opt into
+  `traffic.settings` (level, trend, cycle, spikes, gaps and noise, see _Seed shape_). A successful look seed load adds synthetic Pyroscope
+  profiles and sends Tempo traces when the loaded snapshot contains spans.
+- `obs live` is read-only. It resolves `--target` from `targets:` in `obs.yaml`, with a local sandbox fallback. `obs live usage` also reads
+  optional `estimates:`. obs 0.4 commands that load `obs.yaml` reject either key, so upgrade those readers before adding the blocks (see
+  _`obs live`_).
 
 What is new in `obs check` and `obs test` for a caller:
 
-- `obs check` now also fails on a query finding, with the same rule ids, files and tokens as `obs query --static`. A CI that ran both can run one, except for the `[empty]` rule: `obs check` accepts a folder with no alert and no dashboard, so keep `obs query --static` where CI relies on it to fail such a folder. It takes
-  `--names`, `--event-rule`, `--vl-settings`, `--tempo-config` (new) next to `--contracts`.
-- `obs check --contracts none` now also runs the query rules with this folder's contract only, so a dashboard that reads a metric another contract declares is red there (as with `obs query --static --contracts none`). The limits it prints are unchanged.
-  **Remedy for a query that reads a metric of another contract:** leave `--contracts auto` (the default), which reads the repository's other `observability/contract.yaml` files too, or fix the reported query so it uses only a metric this folder's contract declares.
-- `obs check` on a folder with no `contract.yaml` was exit 2; it now skips the limits with a note and checks the queries.
-- `obs check`'s last line is `obs check: ok: <contract counts>; queries: <query totals>` (it was `obs check: ok: <contract counts>`), and a failure line
-  lists every failing half. The prefixes `obs check: ok:` and `obs check: FAILED:` are unchanged.
-- `obs test` is new, including the rule `[incident-uncaught]`: a folder whose incidents list only quiet alerts is red there, unless the incident carries `disturbance: "<reason>"` (see _Every incident is caught by at least one alert_).
+- `obs check` runs the same static query rules as `obs query --static` and adds limits and version checks. It skips the `[empty]` rule for a
+  folder with no alerts or dashboards, reports contract failures in the contract checks, and can report query findings alongside a version
+  mismatch. Keep `obs query --static` if CI relies on its `[empty]` failure or its own command output. It takes `--names`, `--event-rule`,
+  `--vl-settings`, `--tempo-config` (new) next to `--contracts`.
+- With a valid local contract, `--contracts none` restricts metric lookup to that contract and its platform metrics; an explicit metric
+  declared only by another contract fails. With a valid local contract and `--contracts auto` (the default), obs includes the other regular
+  `observability/contract.yaml` files found by discovery below the Git root, outside ignored and fixture directories.
+- For an existing folder with no `contract.yaml`, `obs check` prints a note, skips limits and still checks queries (0.4 exited 2). On success it
+  prints `obs check: ok: <contract status>; queries: <query totals>`. The contract status is the counts and hash when a contract exists, or
+  `no contract.yaml, limits not checked` when it is absent. Exit-1 summaries use `obs check: FAILED:` and list the failed checks. Usage and input
+  errors can end earlier with exit 2 and a diagnostic.
+- For judged incidents, `obs test` reports `[incident-uncaught]` unless at least one alert listed in `expect.fire` passes its fire verdict. An
+  incident with a nonblank `disturbance:` reason and no fire expectations is exempt from this coverage rule. Other alert, query and link checks
+  still apply (see _Every incident is caught by at least one alert_).
 
 ## Migrating from 0.3 to 0.4
 
@@ -1082,8 +1100,8 @@ stack (the local sandbox, or a real cluster) and compares them with what the rep
 pulls and compares; the calling LLM (or a person) judges. `--json` prints the same content for an
 LLM, the default is a table.
 
-**Read-only guarantee.** obs live sends only `GET` to the stores' query endpoints (the guard would also let a `POST` through to the same endpoints, never anywhere else): `/api/v1/query`, `query_range`, `series`, `status/tsdb` (VictoriaMetrics),
-`/select/logsql/stats_query` and friends (VictoriaLogs), `/api/metrics/query_range` (Tempo), and
+**Read-only guarantee.** obs live sends only `GET`, to the stores' query endpoints (the guard also allows a few more read endpoints such as `status/tsdb`, and would let a `POST` through to them, never anywhere else): `/api/v1/query`, `query_range`, `series` (VictoriaMetrics),
+`/select/logsql/stats_query` (VictoriaLogs), `/api/metrics/query_range` (Tempo), and
 Grafana's `/api/health`, `/api/search`, `/api/annotations`. Every request goes through one guard
 (`internal/live/client.go`, `ReadOnly`) that refuses any other method or path before the network is
 touched. The guard checks the URL as it will be sent (not only the path argument): the target address must be
