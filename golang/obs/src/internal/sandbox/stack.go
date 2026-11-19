@@ -62,6 +62,7 @@ type Info struct {
 	TracesSeeded        bool                `json:"traces_seeded,omitempty"`
 	ProfilesSeeded      bool                `json:"profiles_seeded,omitempty"`
 	IncidentSeed        bool                `json:"incident_seed,omitempty"`
+	SeedIncomplete      bool                `json:"seed_incomplete,omitempty"`
 	LiveIncident        string              `json:"live_incident,omitempty"`
 	Replay              []ReplayTransition  `json:"alert_replay,omitempty"`
 	AlertStatePanels    map[string]int64    `json:"alert_state_panels,omitempty"`
@@ -351,6 +352,15 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 	if err != nil {
 		return nil, fmt.Errorf("container runtime: %w", err)
 	}
+	if st := readState(cfg); st != nil && st.SeedIncomplete {
+		// An earlier load stopped part way (say Tempo failed after metrics and logs went in): those stores hold
+		// part of a seed whose window is gone. Loading again would stack a second window on top of it.
+		fmt.Fprintf(cfg.Out, "the earlier seed load did not finish: removing the stores of project %s (only resources labelled %s=%s) to load the seed again\n", cfg.Project, LabelKey, cfg.Project)
+		if err := Down(ctx, cfg); err != nil {
+			return nil, fmt.Errorf("clearing the part-loaded seed: %w", err)
+		}
+		have = map[string]existing{}
+	}
 	if err := checkExisting(&cfg, have); err != nil {
 		return nil, err
 	}
@@ -535,6 +545,11 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 			info.AnnotatedDashboards = append(info.AnnotatedDashboards, uid)
 		}
 	}
+	// Setup takes time (uploads, provisioning): the incident window may have closed meanwhile. Then it is
+	// not current; the incident list stays as historical guidance.
+	if info.LiveIncident != "" && liveSnapshotExpired(info, cfg.Now()) {
+		info.LiveIncident, info.LiveRules = "", nil
+	}
 	writeState(cfg, info)
 	if recreated {
 		fmt.Fprintf(cfg.Out, "recreated the old look stack for project %s (only resources labelled %s=%s)\n", cfg.Project, LabelKey, cfg.Project)
@@ -613,6 +628,9 @@ func loadSeed(ctx context.Context, cfg *Config, info *Info) error {
 			}
 		}
 	}
+	// From here the stores take data: until the load completes (Up's final state write) the seed is marked
+	// incomplete, so a failure leaves a record that the next run clears the stores first.
+	writeState(*cfg, &Info{Project: cfg.Project, Grafana: info.Grafana, URLs: info.URLs, SeedIncomplete: true})
 	if live != "" {
 		fmt.Fprintf(cfg.Out, "loading the seed prefix (%s of data; %s is live)\n", to.Sub(from), live)
 	} else {

@@ -41,6 +41,9 @@ type Options struct {
 	// AllowEmptyExpect lets an incident with no fire and no quiet alert load (`obs test` reports it as
 	// [incident-uncaught]); `obs alerts` keeps refusing it.
 	AllowEmptyExpect bool
+	// NoOtherContracts is `obs test --contracts none`: the static check reads this folder's contract only, not the
+	// repository's other observability/contract.yaml files. `obs alerts` leaves it false.
+	NoOtherContracts bool
 }
 
 // TempoAlertingNote is printed once per obs alerts run that has trace rules.
@@ -158,7 +161,7 @@ func run(o Options, stdout, stderr io.Writer, res *RunResult) int {
 		}
 	}
 	set.Queries, set.Dashboards = queries, nil
-	rep := check.Static(set, check.Options{Dir: o.Dir, EventRule: o.EventRule})
+	rep := check.Static(set, check.Options{Dir: o.Dir, EventRule: o.EventRule, NoOtherContracts: o.NoOtherContracts})
 	rep.Print(stdout)
 	if rep.Failures() > 0 {
 		return 1

@@ -23,6 +23,9 @@ func TestIncidentAnnotationAndAlertProvisioningPayload(t *testing.T) {
 	}
 	var rules, markers int
 	hc := &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/api/v1/provisioning/alert-rules" {
+			return reply(`[]`), nil // nothing provisioned yet: no stale group to remove
+		}
 		if r.Body == nil {
 			return reply(`{}`), nil
 		}
@@ -268,4 +271,22 @@ func TestNativeForecastWindow(t *testing.T) {
 		}
 	}
 	t.Fatal("pending rule forecast absent")
+}
+
+// Review of PR 131: a fractional pending period waits whole evaluation intervals. Grafana moves a rule to
+// Firing at the first evaluation whose time in Pending has reached "for"; evaluations are one interval apart.
+func TestFiringDeadlineRoundsPendingUpToWholeIntervals(t *testing.T) {
+	for _, c := range []struct {
+		pending, interval, want time.Duration
+	}{
+		{time.Minute, 10 * time.Second, 70 * time.Second},      // unchanged: a whole number of intervals
+		{15 * time.Second, 10 * time.Second, 30 * time.Second}, // 2 intervals of pending + 1 for the first evaluation; was 25 s
+		{0, 10 * time.Second, 10 * time.Second},                // no for: the first evaluation fires it
+		{time.Second, time.Minute, 2 * time.Minute},
+		{time.Minute, 0, time.Minute}, // an unreadable interval never divides by zero
+	} {
+		if got := firingDeadline(c.pending, c.interval); got != c.want {
+			t.Errorf("for %v interval %v: deadline %v, want %v", c.pending, c.interval, got, c.want)
+		}
+	}
 }

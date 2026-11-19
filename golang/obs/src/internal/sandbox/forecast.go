@@ -68,7 +68,7 @@ func nativeForecast(dir, seedPath string, set *files.Set, ds *seed.Dataset, prov
 			continue
 		}
 		row.Expected = "Firing"
-		row.FiringAt = provisioned.Add(pending + interval).UnixMilli()
+		row.FiringAt = provisioned.Add(firingDeadline(pending, interval)).UnixMilli()
 		began := false
 		for _, step := range byUID[uid].Steps {
 			if step.T < row.FiringAt {
@@ -93,4 +93,15 @@ func nativeForecast(dir, seedPath string, set *files.Set, ds *seed.Dataset, prov
 		out = append(out, row)
 	}
 	return out, nil
+}
+
+// firingDeadline is how long after provisioning a rule is sure to be Firing. Grafana evaluates every interval
+// and fires at the first evaluation whose time in Pending has reached "for", so the pending period counts in
+// whole intervals (for 15 s at 10 s: two), and the first evaluation may be a full interval after provisioning.
+func firingDeadline(pending, interval time.Duration) time.Duration {
+	if interval <= 0 {
+		return pending + interval
+	}
+	whole := (pending + interval - 1) / interval * interval
+	return whole + interval
 }

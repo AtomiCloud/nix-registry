@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"html"
 	"net/http"
@@ -69,10 +70,11 @@ func ProvisionAlerts(ctx context.Context, hc *http.Client, grafana, project stri
 	if len(set.Problems) > 0 {
 		return fmt.Errorf("%s: %s", set.Problems[0].File, set.Problems[0].Msg)
 	}
-	if len(set.Rules) == 0 {
-		return nil
-	}
 	folder := "obs-" + project
+	if len(set.Rules) == 0 {
+		// A retained stack may still hold groups of an earlier checkout: with no rule left, none stays.
+		return removeStaleGroups(ctx, hc, grafana, folder, nil)
+	}
 	code, b, err := send(ctx, hc, http.MethodGet, grafana+"/api/folders/"+url.PathEscape(folder), nil)
 	if err != nil {
 		return err
@@ -175,6 +177,52 @@ func ProvisionAlerts(ctx context.Context, hc *http.Client, grafana, project stri
 		}
 		if code/100 != 2 {
 			return fmt.Errorf("grafana alert group %s: HTTP %d: %s", name, code, b)
+		}
+	}
+	keep := map[string]bool{}
+	for _, name := range names {
+		keep[name] = true
+	}
+	return removeStaleGroups(ctx, hc, grafana, folder, keep)
+}
+
+// removeStaleGroups deletes the rule groups in obs's sandbox folder that the checkout no longer has.
+// Grafana replaces the group a PUT addresses, not the folder, so a retained stack keeps evaluating a
+// removed group (and shows it in the live alert-state panel) until it is deleted. The folder is made by
+// obs for this sandbox only; groups of any other folder are never listed for deletion.
+func removeStaleGroups(ctx context.Context, hc *http.Client, grafana, folder string, keep map[string]bool) error {
+	code, b, err := send(ctx, hc, http.MethodGet, grafana+"/api/v1/provisioning/alert-rules", nil)
+	if err != nil {
+		return err
+	}
+	if code/100 != 2 {
+		return fmt.Errorf("grafana alert rules: HTTP %d: %s", code, b)
+	}
+	var listed []struct {
+		FolderUID string `json:"folderUID"`
+		RuleGroup string `json:"ruleGroup"`
+	}
+	if err := json.Unmarshal(b, &listed); err != nil {
+		return fmt.Errorf("grafana alert rules: unexpected answer: %w", err)
+	}
+	stale := map[string]bool{}
+	for _, r := range listed {
+		if r.FolderUID == folder && r.RuleGroup != "" && !keep[r.RuleGroup] {
+			stale[r.RuleGroup] = true
+		}
+	}
+	var names []string
+	for name := range stale {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		code, b, err := send(ctx, hc, http.MethodDelete, grafana+"/api/v1/provisioning/folder/"+url.PathEscape(folder)+"/rule-groups/"+url.PathEscape(name), nil)
+		if err != nil {
+			return err
+		}
+		if code/100 != 2 && code != http.StatusNotFound {
+			return fmt.Errorf("grafana removing alert group %s: HTTP %d: %s", name, code, b)
 		}
 	}
 	return nil

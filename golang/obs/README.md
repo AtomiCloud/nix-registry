@@ -476,7 +476,7 @@ tells a repository with incidents and no alert yet which incident is uncaught, s
 The flags mean what they mean on the old commands (`--dir`, `--seed`, `--base`, `--names`, `--event-rule`,
 `--contracts`, `--vl-settings`, `--tempo-config`, `--workers`, `--out`, `--steps`, `--recorded`). `--event-rule` reaches both the
 `queries` and the `alerts` part: with `--event-rule off` a log alert that names no contract event is accepted in both (`obs alerts` itself has no such flag and keeps
-the rule on whenever the folder has a contract). Each part prints its own
+the rule on whenever the folder has a contract). `--contracts none` also reaches both parts: the `alerts` part then reads only `--dir`'s contract too, so an invalid or clashing contract elsewhere in the repository cannot fail an isolated run (`obs alerts` has no such flag and keeps reading them). Each part prints its own
 findings as the old command does, then one total per part and one last line:
 
 ```text
@@ -1049,7 +1049,7 @@ seconds>` instead keeps an explicit historical timeline; `--base` remains the gi
 used to find changed dashboards. A seed with no incidents has no expected incident Firing.
 
 Grafana starts pending timers when its scheduler begins evaluating, so the prompt lists
-each live rule's provision time, expected Firing time (`provisioned + for + interval`),
+each live rule's provision time, expected Firing time (`provisioned + for` rounded up to whole evaluation intervals `+ one interval`: for 15s at 10s it is 30s, for 1m at 10s it is 70s),
 and the predicted window before the fixed snapshot ages out. The prediction uses the
 same existing evaluator/state machine, projecting at most ten minutes without pushing
 future data. A snapshot that cannot hold the condition through the pending duration is
@@ -1072,7 +1072,7 @@ up|down|status` remain available. When reusing a baseline-only seed from `sandbo
 Stacks started by `sandbox up` or an older obs, without the published Tempo receiver, get a recreate-first
 diagnostic. A repeated default look on an expired live snapshot recreates only that
 project's labelled containers, volumes and network and says it did so; it never prunes
-or touches another project. Explicit `--seed-base` historical snapshots remain reusable.
+or touches another project. So does a look after a seed load that stopped part way (say Tempo failed after the metrics and logs went in): that load is recorded as incomplete and the next look clears the stores before loading again; a completed snapshot is reused. A retained stack's sandbox folder is reconciled on every look: rule groups of an earlier checkout that the checkout no longer has are deleted (all of them when it has no rule left), groups in any other folder are left alone. If the live incident window ended while the setup ran, the look does not call it current (no live incident, no forecast) and keeps the incident list as historical guidance. Explicit `--seed-base` historical snapshots remain reusable.
 
 **Always exit 0**: a failed setup (no runtime, a pin mismatch, git cannot find the base), a bad flag and
 `--help` print what failed (or the usage) and `ok: false` in JSON, and never fail the CI job that calls it.
