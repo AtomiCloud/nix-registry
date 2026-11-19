@@ -27,11 +27,20 @@ func readState(cfg Config) *Info {
 	if err != nil {
 		return nil
 	}
-	var i Info
-	if json.Unmarshal(b, &i) != nil || i.Grafana == "" {
+	var f stateJSON
+	if json.Unmarshal(b, &f) != nil || f.Grafana == "" {
 		return nil
 	}
+	i := f.Info
+	i.rulesKey = f.RulesKey
 	return &i
+}
+
+// stateJSON is the state file: the public Info plus what only the next run needs.
+type stateJSON struct {
+	Info
+	// RulesKey is the fingerprint of the rules the stored forecast was computed for.
+	RulesKey string `json:"live_rules_key,omitempty"`
 }
 
 // writeState replaces the state file in one step (a temporary file, then a rename), so a reader or a crash
@@ -42,7 +51,7 @@ func writeState(cfg Config, i *Info) error {
 	if err := os.MkdirAll(filepath.Dir(f), 0o755); err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(i, "", "  ")
+	b, err := json.MarshalIndent(stateJSON{Info: *i, RulesKey: i.rulesKey}, "", "  ")
 	if err != nil {
 		return err
 	}

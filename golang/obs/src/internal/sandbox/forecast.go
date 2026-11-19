@@ -109,9 +109,9 @@ func firingDeadline(pending, interval time.Duration) time.Duration {
 	return whole + interval
 }
 
-// rulesKey identifies the alert rule set a forecast was computed for: every definition and its group's
+// rulesKeyOf identifies the alert rule set a forecast was computed for: every definition and its group's
 // interval, in file order. A different checkout of the rules gives a different key.
-func rulesKey(set *files.Set) string {
+func rulesKeyOf(set *files.Set) string {
 	h := sha256.New()
 	for _, rr := range set.Rules {
 		b, err := json.Marshal(struct {

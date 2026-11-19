@@ -392,9 +392,29 @@ func TestLiveRulePromptHasScreenshotTimesAndNormalControl(t *testing.T) {
 	info.Incidents = []sandbox.IncidentInfo{{Name: "spike", From: info.From, To: info.To, Fire: []string{"pending"}, Quiet: []string{"control"}}}
 	info.LiveRules = []sandbox.NativeRuleWindow{{UID: "pending", Expected: "Firing", ProvisionedAt: at.UnixMilli(), For: "1m0s", Interval: "10s", FiringAt: at.Add(70 * time.Second).UnixMilli(), HoldUntil: at.Add(5 * time.Minute).UnixMilli(), Supported: true}, {UID: "control", Expected: "Normal", ProvisionedAt: at.UnixMilli(), For: "0s", Interval: "10s", Supported: true}}
 	p := Setup(context.Background(), Options{Dir: dir, Checklist: cl, Files: []string{"dashboards/overview.json"}}, fakeUp(&info, nil))
-	for _, want := range []string{"live rule pending: provisioned 2026-11-18T20:00:00Z", "expected Firing by 2026-11-18T20:01:10Z", "hold Firing until 2026-11-18T20:05:00Z", "live rule control: expected Normal"} {
+	for _, want := range []string{"live rule pending: provisioned 2026-11-18T20:00:00Z", "expected Firing by about 2026-11-18T20:01:10Z", "hold Firing until 2026-11-18T20:05:00Z", "live rule control: expected Normal"} {
 		if !strings.Contains(p.Prompt, want) {
 			t.Errorf("live prompt lacks %q", want)
 		}
+	}
+}
+
+// GPT re-review of PR 133: the Firing time is the scheduled tick (Grafana staggers dispatch inside a tick), so
+// the prompt calls it an estimate, prints the rounding it really uses, and says to wait for the panel.
+func TestLiveRulePromptCallsTheFiringTimeAnEstimateAndWaitsForThePanel(t *testing.T) {
+	dir, cl := project(t)
+	info := *testInfo
+	at := time.Date(2026, 11, 18, 20, 0, 0, 0, time.UTC)
+	info.LiveIncident = "spike"
+	info.Incidents = []sandbox.IncidentInfo{{Name: "spike", From: info.From, To: info.To, Fire: []string{"pending"}}}
+	info.LiveRules = []sandbox.NativeRuleWindow{{UID: "pending", Expected: "Firing", ProvisionedAt: at.UnixMilli(), For: "15s", Interval: "10s", FiringAt: at.Add(30 * time.Second).UnixMilli(), HoldUntil: at.Add(5 * time.Minute).UnixMilli(), Supported: true}}
+	p := Setup(context.Background(), Options{Dir: dir, Checklist: cl, Files: []string{"dashboards/overview.json"}}, fakeUp(&info, nil))
+	for _, want := range []string{"scheduled estimate", "rounded up to whole intervals", "until the alert-state panel shows Firing"} {
+		if !strings.Contains(p.Prompt, want) {
+			t.Errorf("live prompt lacks %q:\n%s", want, p.Prompt)
+		}
+	}
+	if strings.Contains(p.Prompt, "= provisioned + for 15s + interval 10s") {
+		t.Errorf("the prompt still prints an equation that gives 25s beside the 30s time:\n%s", p.Prompt)
 	}
 }

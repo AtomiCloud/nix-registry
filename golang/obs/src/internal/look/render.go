@@ -124,7 +124,7 @@ func render(p *Plan) string {
 						continue
 					}
 					if rule.Supported {
-						w("     live rule %s: provisioned %s; expected Firing by %s (= provisioned + for %s + interval %s). Snapshot predicted to hold Firing until %s; screenshot in that window (prediction computed by obs, verify Grafana).", rule.UID, provisioned, time.UnixMilli(rule.FiringAt).UTC().Format(time.RFC3339), rule.For, rule.Interval, time.UnixMilli(rule.HoldUntil).UTC().Format(time.RFC3339))
+						w("     live rule %s: provisioned %s; expected Firing by about %s (a scheduled estimate: provisioned + for %s rounded up to whole intervals of %s, + one interval; Grafana staggers when it evaluates inside each interval, so the real change can come a few seconds later). Snapshot predicted to hold Firing until %s. Do not screenshot on the clock: wait until the alert-state panel shows Firing for %s, then screenshot before that time (prediction computed by obs, verify Grafana).", rule.UID, provisioned, time.UnixMilli(rule.FiringAt).UTC().Format(time.RFC3339), rule.For, rule.Interval, time.UnixMilli(rule.HoldUntil).UTC().Format(time.RFC3339), rule.UID)
 					} else {
 						w("     live rule %s: snapshot does not support the expected Firing window (for=%s, interval=%s). Record a finding; do not claim native Firing from replay annotations.", rule.UID, rule.For, rule.Interval)
 					}

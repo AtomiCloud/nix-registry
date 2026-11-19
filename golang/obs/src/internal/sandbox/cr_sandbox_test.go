@@ -2,6 +2,7 @@ package sandbox
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
@@ -259,5 +260,27 @@ func TestRetainedExpiredWindowClearsIncidentAndForecastTogether(t *testing.T) {
 	}
 	if again.LiveIncident != "" || len(again.LiveRules) != 0 || len(again.Incidents) != 1 {
 		t.Errorf("expired window: live %q rules %v incidents %d (history stays, forecast goes)", again.LiveIncident, again.LiveRules, len(again.Incidents))
+	}
+}
+
+// A historical reuse without a forecast leaves the public Info as it was: no fingerprint, no forecast.
+func TestHistoricalReuseJSONHasNoFingerprint(t *testing.T) {
+	s := newStackServer(t)
+	fr := &fakeRunner{}
+	cfg := s.cfg(t, fr)
+	cfg.Dir = lookFixture
+	cfg.ApplyIncidents = true
+	cfg.SeedBase = time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC).Unix()
+	if _, err := Up(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	runningStack(fr)
+	again, err := Up(context.Background(), cfg)
+	if err != nil || !again.Reused {
+		t.Fatalf("%v reused=%v", err, again.Reused)
+	}
+	b, _ := json.Marshal(again)
+	if strings.Contains(string(b), "live_rules") {
+		t.Errorf("a historical reuse with no forecast prints forecast fields: %s", b)
 	}
 }

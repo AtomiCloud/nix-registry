@@ -68,8 +68,9 @@ type Info struct {
 	AlertStatePanels    map[string]int64    `json:"alert_state_panels,omitempty"`
 	AnnotatedDashboards []string            `json:"annotated_dashboards,omitempty"`
 	LiveRules           []NativeRuleWindow  `json:"live_rules,omitempty"`
-	// LiveRulesKey identifies the rule set LiveRules was computed for; a retained look with other rules drops them.
-	LiveRulesKey string `json:"live_rules_key,omitempty"`
+	// rulesKey identifies the rule set LiveRules was computed for; a retained look with other rules drops
+	// them. It lives in the state file only (see state.go), never in the JSON of obs look.
+	rulesKey string
 }
 
 var nameRe = regexp.MustCompile(`[^a-z0-9]+`)
@@ -480,11 +481,11 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 		info.Incidents, info.IncidentSeed = st.Incidents, st.IncidentSeed
 		info.LiveIncident, info.Replay = st.LiveIncident, st.Replay
 		info.AnnotatedDashboards = append([]string(nil), st.AnnotatedDashboards...)
-		info.LiveRules, info.LiveRulesKey = st.LiveRules, st.LiveRulesKey
-		if key := rulesKey(set); key != st.LiveRulesKey {
+		info.LiveRules, info.rulesKey = st.LiveRules, st.rulesKey
+		if key := rulesKeyOf(set); key != st.rulesKey {
 			// The checkout's rules are not the ones the forecast was computed for (a group removed, a pending
 			// period or a query changed): that forecast would describe rules Grafana no longer runs.
-			info.LiveRules, info.LiveRulesKey = nil, key
+			info.LiveRules, info.rulesKey = nil, key
 		}
 		if cfg.SeedBase != 0 && st.From != cfg.SeedBase*1000 {
 			return nil, fmt.Errorf("sandbox has another seed base; run `obs sandbox down --project %s` first", cfg.Project)
@@ -510,7 +511,7 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 			}
 			for _, inc := range info.Incidents {
 				if inc.Name == info.LiveIncident {
-					info.LiveRulesKey = rulesKey(set)
+					info.rulesKey = rulesKeyOf(set)
 					info.LiveRules, err = nativeForecast(cfg.Dir, p, set, cfg.dataset, cfg.Now().UTC().Truncate(time.Second), inc.Fire)
 					if err != nil {
 						return nil, fmt.Errorf("live alert forecast: %w", err)

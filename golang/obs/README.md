@@ -1049,7 +1049,7 @@ seconds>` instead keeps an explicit historical timeline; `--base` remains the gi
 used to find changed dashboards. A seed with no incidents has no expected incident Firing.
 
 Grafana starts pending timers when its scheduler begins evaluating, so the prompt lists
-each live rule's provision time, expected Firing time (`provisioned + for` rounded up to whole evaluation intervals `+ one interval`: for 15s at 10s it is 30s, for 1m at 10s it is 70s),
+each live rule's provision time, expected Firing time (a scheduled estimate: `provisioned + for` rounded up to whole evaluation intervals `+ one interval`: for 15s at 10s it is 30s, for 1m at 10s it is 70s; Grafana staggers its evaluations inside each interval, so the real change can come a few seconds later and the prompt tells the agent to wait until the alert-state panel shows Firing),
 and the predicted window before the fixed snapshot ages out. The prediction uses the
 same existing evaluator/state machine, projecting at most ten minutes without pushing
 future data. A snapshot that cannot hold the condition through the pending duration is
