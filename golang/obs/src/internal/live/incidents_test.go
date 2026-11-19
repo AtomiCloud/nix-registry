@@ -660,6 +660,22 @@ func TestIncidentsNumericIDReconcilesExplicitUIDAcrossTitles(t *testing.T) {
 	}
 }
 
+func TestIncidentsTitleUniquenessIncludesEarlierTitlesOfOtherRules(t *testing.T) {
+	history := "[" + strings.Join([]string{
+		historyRow("different-rule", 41, "High error rate", "Pending", "Normal", t0.Add(-2*time.Hour), map[string]string{}, nil),
+		historyRow("different-rule", 41, "Renamed external rule", "Pending", "Normal", t0.Add(-time.Hour), map[string]string{}, nil),
+		historyRow("", 42, "High error rate", "Normal", "Alerting", t0, map[string]string{}, nil),
+	}, ",") + "]"
+	srv := grafanaFake(t, &recorder{}, history, 0)
+	res, err := Incidents(context.Background(), &Client{}, &Target{Grafana: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: time.Hour, Now: func() time.Time { return t0.Add(time.Hour) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Fired) != 1 || res.Fired[0].InRepo {
+		t.Fatalf("a prior title on another rule is still conflicting title evidence: %+v", res.Fired)
+	}
+}
+
 func TestIncidentsRepoTitleUniquenessPrecedesAnyInferredUID(t *testing.T) {
 	dir := writeRepo(t)
 	if err := os.WriteFile(filepath.Join(dir, "alerts", "checkout", "warning.yaml"), []byte(fmt.Sprintf(alertCR, "checkout-warning", "slow-charges", "High error rate", "")), 0o644); err != nil {

@@ -132,6 +132,7 @@ const annotationLimit = 10000
 
 type annotationCoverage struct {
 	Rules      map[string]historyRule
+	TitleRules map[string]map[string]bool
 	NoHistory  bool
 	Incomplete bool
 }
@@ -185,7 +186,7 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 	if err := c.GetJSON(ctx, t.Grafana, "/api/annotations", q, &all); err != nil {
 		return nil, nil, err
 	}
-	coverage := &annotationCoverage{Rules: map[string]historyRule{}, NoHistory: len(all) == 0, Incomplete: len(all) >= annotationLimit}
+	coverage := &annotationCoverage{Rules: map[string]historyRule{}, TitleRules: map[string]map[string]bool{}, NoHistory: len(all) == 0, Incomplete: len(all) >= annotationLimit}
 	// Numeric IDs can be tied to an explicit UID under an older title. Reconcile
 	// that evidence across all titles before considering any repo title match.
 	uidsByID := map[int64]map[string]bool{}
@@ -229,6 +230,10 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 		rule := identity(a)
 		key := rule.key()
 		coverage.Rules[key] = rule
+		if coverage.TitleRules[rule.Title] == nil {
+			coverage.TitleRules[rule.Title] = map[string]bool{}
+		}
+		coverage.TitleRules[rule.Title][key] = true
 		at := time.UnixMilli(a.Time).UTC()
 		// Keep evidence on both sides of a transition. At an exclusive window end,
 		// Alerting -> Recovering still proves firing immediately before that timestamp.
@@ -497,10 +502,6 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 	}
 	matchedHistory := map[string]string{}
 	if coverage != nil {
-		titleCount := map[string]int{}
-		for _, r := range coverage.Rules {
-			titleCount[r.Title]++
-		}
 		seenRepo := map[string]bool{}
 		for key, h := range coverage.Rules {
 			id := ""
@@ -508,7 +509,7 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 				if _, ok := byID[h.UID]; ok {
 					id = h.UID
 				}
-			} else if !h.UIDConflict && h.AlertID != 0 && titleCount[h.Title] == 1 && len(byTitle[h.Title]) == 1 {
+			} else if !h.UIDConflict && h.AlertID != 0 && len(coverage.TitleRules[h.Title]) == 1 && len(byTitle[h.Title]) == 1 {
 				id = byTitle[h.Title][0].ID
 			}
 			if id != "" {
