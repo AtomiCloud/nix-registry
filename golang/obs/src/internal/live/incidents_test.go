@@ -676,6 +676,35 @@ func TestIncidentsTitleUniquenessIncludesEarlierTitlesOfOtherRules(t *testing.T)
 	}
 }
 
+func TestIncidentsWindowBetweenTransitionsHasNoDirectFiringEvidence(t *testing.T) {
+	history := "[" + historyRow("high-errors", 41, "High error rate", "Normal", "Alerting", t0, map[string]string{}, nil) + "," + historyRow("high-errors", 41, "High error rate", "Alerting", "Normal", t0.Add(40*time.Minute), map[string]string{}, nil) + "]"
+	srv := grafanaFake(t, &recorder{}, history, 0)
+	w := Window{From: t0.Add(10 * time.Minute), To: t0.Add(20 * time.Minute)}
+	res, err := Incidents(context.Background(), &Client{}, &Target{Grafana: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: time.Hour, Windows: []Window{w}, Now: func() time.Time { return t0.Add(time.Hour) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Windows) != 1 || res.Windows[0].Status != "not_seen" || len(res.Windows[0].Fired) != 0 {
+		t.Fatalf("a reconstructed span is not direct evidence inside this window: %+v", res.Windows)
+	}
+}
+
+func TestIncidentsConflictingUIDsForOneNumericIDBlockTitleFallback(t *testing.T) {
+	history := "[" + strings.Join([]string{
+		historyRow("external-a", 41, "First external title", "Pending", "Normal", t0.Add(-2*time.Hour), map[string]string{}, nil),
+		historyRow("external-b", 41, "Second external title", "Pending", "Normal", t0.Add(-time.Hour), map[string]string{}, nil),
+		historyRow("", 41, "High error rate", "Normal", "Alerting", t0, map[string]string{}, nil),
+	}, ",") + "]"
+	srv := grafanaFake(t, &recorder{}, history, 0)
+	res, err := Incidents(context.Background(), &Client{}, &Target{Grafana: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: time.Hour, Now: func() time.Time { return t0.Add(time.Hour) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Fired) != 1 || res.Fired[0].InRepo || res.Fired[0].IDSource != "ambiguous_alert_id" {
+		t.Fatalf("two explicit UIDs for one numeric ID must forbid the otherwise unique repo title: %+v", res.Fired)
+	}
+}
+
 func TestIncidentsRepoTitleUniquenessPrecedesAnyInferredUID(t *testing.T) {
 	dir := writeRepo(t)
 	if err := os.WriteFile(filepath.Join(dir, "alerts", "checkout", "warning.yaml"), []byte(fmt.Sprintf(alertCR, "checkout-warning", "slow-charges", "High error rate", "")), 0o644); err != nil {
