@@ -409,12 +409,32 @@ func TestLiveRulePromptCallsTheFiringTimeAnEstimateAndWaitsForThePanel(t *testin
 	info.Incidents = []sandbox.IncidentInfo{{Name: "spike", From: info.From, To: info.To, Fire: []string{"pending"}}}
 	info.LiveRules = []sandbox.NativeRuleWindow{{UID: "pending", Expected: "Firing", ProvisionedAt: at.UnixMilli(), For: "15s", Interval: "10s", FiringAt: at.Add(30 * time.Second).UnixMilli(), HoldUntil: at.Add(5 * time.Minute).UnixMilli(), Supported: true}}
 	p := Setup(context.Background(), Options{Dir: dir, Checklist: cl, Files: []string{"dashboards/overview.json"}}, fakeUp(&info, nil))
-	for _, want := range []string{"scheduled estimate", "rounded up to whole intervals", "until the alert-state panel shows Firing"} {
+	for _, want := range []string{"scheduled estimate", "rounded up to whole intervals", "reload the same URL"} {
 		if !strings.Contains(p.Prompt, want) {
 			t.Errorf("live prompt lacks %q:\n%s", want, p.Prompt)
 		}
 	}
 	if strings.Contains(p.Prompt, "= provisioned + for 15s + interval 10s") {
 		t.Errorf("the prompt still prints an equation that gives 25s beside the 30s time:\n%s", p.Prompt)
+	}
+}
+
+// GPT review of PR 133 @657ee85: Grafana's alert-list panel does not poll (it refetches on dashboard refresh
+// events, and the fixture board has auto-refresh off), so the prompt tells the agent to reload the URL.
+func TestLiveRulePromptSaysToReloadAndWhatToRecordWhenFiringIsNeverSeen(t *testing.T) {
+	dir, cl := project(t)
+	info := *testInfo
+	at := time.Date(2026, 11, 18, 20, 0, 0, 0, time.UTC)
+	info.LiveIncident = "spike"
+	info.Incidents = []sandbox.IncidentInfo{{Name: "spike", From: info.From, To: info.To, Fire: []string{"pending"}}}
+	info.LiveRules = []sandbox.NativeRuleWindow{{UID: "pending", Expected: "Firing", ProvisionedAt: at.UnixMilli(), For: "15s", Interval: "10s", FiringAt: at.Add(30 * time.Second).UnixMilli(), HoldUntil: at.Add(5 * time.Minute).UnixMilli(), Supported: true}}
+	p := Setup(context.Background(), Options{Dir: dir, Checklist: cl, Files: []string{"dashboards/overview.json"}}, fakeUp(&info, nil))
+	for _, want := range []string{"does not poll", "reload the same URL", "every 10s", "until 2026-11-18T20:05:00Z", "Firing was never seen", "record the state you observed"} {
+		if !strings.Contains(p.Prompt, want) {
+			t.Errorf("live prompt lacks %q", want)
+		}
+	}
+	if strings.Contains(p.Prompt, "until the alert-state panel shows Firing for") {
+		t.Errorf("the prompt still waits on a panel that does not refresh itself")
 	}
 }
