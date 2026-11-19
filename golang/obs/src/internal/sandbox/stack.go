@@ -345,6 +345,11 @@ func (c *Config) createArgs(k Component) []string {
 // where everything is. A pin mismatch is an error and starts nothing.
 func Up(ctx context.Context, cfg Config) (*Info, error) {
 	cfg.defaults()
+	unlock, err := lockProject(cfg)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
 	set, err := files.Load(cfg.Dir)
@@ -359,7 +364,7 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 		// An earlier load stopped part way (say Tempo failed after metrics and logs went in): those stores hold
 		// part of a seed whose window is gone. Loading again would stack a second window on top of it.
 		fmt.Fprintf(cfg.Out, "the earlier seed load did not finish: removing the stores of project %s (only resources labelled %s=%s) to load the seed again\n", cfg.Project, LabelKey, cfg.Project)
-		if err := Down(ctx, cfg); err != nil {
+		if err := down(ctx, cfg); err != nil {
 			return nil, fmt.Errorf("clearing the part-loaded seed: %w", err)
 		}
 		have = map[string]existing{}
@@ -377,7 +382,7 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 		}
 		previous := readState(cfg)
 		if previous != nil && previous.From != 0 && (cfg.Reseed || (cfg.LiveIncident && cfg.SeedBase == 0 && liveSnapshotExpired(previous, cfg.Now()))) {
-			if err := Down(ctx, cfg); err != nil {
+			if err := down(ctx, cfg); err != nil {
 				return nil, fmt.Errorf("refreshing look snapshot: %w", err)
 			}
 			have = map[string]existing{}
@@ -713,6 +718,16 @@ func copyIn(ctx context.Context, r Runner, container, dest, content string) erro
 // double-checked by name. It never prunes and touches nothing else.
 func Down(ctx context.Context, cfg Config) error {
 	cfg.defaults()
+	unlock, err := lockProject(cfg)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return down(ctx, cfg)
+}
+
+// down removes the project's resources; the caller holds the project lock.
+func down(ctx context.Context, cfg Config) error {
 	prefix := Prefix(cfg.Project)
 	var firstErr error
 	rm := func(kind string, listArgs []string, rmArgs ...string) {

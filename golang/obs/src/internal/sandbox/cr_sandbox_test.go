@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -152,11 +153,13 @@ func TestLookFailsBeforeUploadingWhenTheMarkCannotBeWritten(t *testing.T) {
 	cfg := s.cfg(t, &fakeRunner{})
 	cfg.Dir = lookFixture
 	cfg.ApplyIncidents = true
-	blocker := filepath.Join(t.TempDir(), "file")
-	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+	// The state file cannot be replaced (a directory sits where it goes); the lock next to it still works.
+	cfg.StateDir = t.TempDir()
+	c := cfg
+	c.defaults()
+	if err := os.MkdirAll(filepath.Join(stateFile(c), "x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfg.StateDir = filepath.Join(blocker, "state") // a directory cannot be made under a file
 	if _, err := Up(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "seed load") {
 		t.Fatalf("want an error naming the seed load record, got %v", err)
 	}
@@ -282,5 +285,72 @@ func TestHistoricalReuseJSONHasNoFingerprint(t *testing.T) {
 	b, _ := json.Marshal(again)
 	if strings.Contains(string(b), "live_rules") {
 		t.Errorf("a historical reuse with no forecast prints forecast fields: %s", b)
+	}
+}
+
+// A second setup (or sandbox down) of the same project while one is running must not tear down the stores
+// the running one is loading: the incomplete mark is also present during a load.
+func TestSecondSetupOfTheSameProjectDoesNotTearDownARunningLoad(t *testing.T) {
+	s := newStackServer(t)
+	fr := &fakeRunner{}
+	cfg := s.cfg(t, fr)
+	cfg.Dir = lookFixture
+	cfg.ApplyIncidents = true
+	s.failTraces = true
+	if _, err := Up(context.Background(), cfg); err == nil {
+		t.Fatal("want the Tempo failure that leaves the incomplete mark")
+	}
+	s.failTraces = false
+	// The running setup holds the project lock, as Up does from its state read to its last state write.
+	c := cfg
+	c.defaults()
+	lf, err := os.OpenFile(stateFile(c)+".lock", os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lf.Close()
+	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	runningStack(fr)
+	fr.calls = nil
+	if _, err := Up(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("a second setup of a busy project must refuse, got %v", err)
+	}
+	if err := Down(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("sandbox down of a busy project must refuse, got %v", err)
+	}
+	if fr.has("rm") {
+		t.Fatalf("the running setup's stores were removed: %v", fr.calls)
+	}
+	if st := ReadState(cfg); st == nil || !st.SeedIncomplete {
+		t.Fatalf("the running setup's state must be left alone: %+v", st)
+	}
+	_ = syscall.Flock(int(lf.Fd()), syscall.LOCK_UN)
+	if _, err := Up(context.Background(), cfg); err != nil {
+		t.Fatalf("once the project is free, a failed load is cleared and reloaded: %v", err)
+	}
+	if !fr.has("rm", "-f", "-v", "obs-sandbox-demo-vm") {
+		t.Errorf("the part-loaded stores must be removed once the project is free: %v", fr.calls)
+	}
+}
+
+// A state folder that cannot be made: the setup runs without the lock and still stops before anything is
+// uploaded, because it cannot record that a seed load begins.
+func TestLookFailsBeforeUploadingWhenTheStateFolderCannotBeMade(t *testing.T) {
+	s := newStackServer(t)
+	cfg := s.cfg(t, &fakeRunner{})
+	cfg.Dir = lookFixture
+	cfg.ApplyIncidents = true
+	blocker := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg.StateDir = filepath.Join(blocker, "state") // a directory cannot be made under a file
+	if _, err := Up(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "seed load") {
+		t.Fatalf("want the seed load record error, got %v", err)
+	}
+	if s.vmBody != "" || len(s.vlBodies) != 0 {
+		t.Errorf("data was uploaded: vm %d bytes, vl %d bodies", len(s.vmBody), len(s.vlBodies))
 	}
 }
