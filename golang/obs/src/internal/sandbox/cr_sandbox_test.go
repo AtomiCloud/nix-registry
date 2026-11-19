@@ -506,3 +506,27 @@ func TestLockRefusesSymlinksOtherFilesAndBadNames(t *testing.T) {
 		t.Fatalf("the lock must be a regular file in the lock folder: %v %v", fi, err)
 	}
 }
+
+// A FIFO in the lock's place is rejected at once: no open may wait for a writer before the regular-file check.
+func TestLockRejectsAFIFOPromptly(t *testing.T) {
+	old := lockDir
+	lockDir = t.TempDir()
+	defer func() { lockDir = old }()
+	// 0444: the read-write open fails, so the read-only fallback is the open that could block.
+	if err := syscall.Mkfifo(filepath.Join(lockDir, "obs-sandbox-fifo.lock"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := lockProject(Config{Project: "fifo"})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "not a regular file") {
+			t.Fatalf("a FIFO must be refused as not a regular file, got %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("opening a FIFO lock blocked")
+	}
+}

@@ -32,7 +32,8 @@ func lockFile(cfg Config) string {
 // the incomplete-seed mark of a load that is still running and tear down the stores that load is writing to.
 // It is a flock, released when the process ends however it ends. It fails closed: a busy project, or a lock
 // that cannot be taken safely, is refused before any container is touched (no waiting, no running unlocked).
-// The lock file is opened without following a symlink and must be a regular file.
+// The lock file is opened without following a symlink and without blocking (a FIFO in its place cannot stall
+// the open), and must be a regular file.
 func lockProject(cfg Config) (func(), error) {
 	if !projectName.MatchString(cfg.Project) {
 		return nil, fmt.Errorf("sandbox project %q: use letters, digits, '_', '.' and '-' (starting with a letter or digit)", cfg.Project)
@@ -43,10 +44,10 @@ func lockProject(cfg Config) (func(), error) {
 			return nil, fmt.Errorf("sandbox lock %s: %w (obs touches no container without it)", name, err)
 		}
 	}
-	f, err := os.OpenFile(name, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW, 0o644)
+	f, err := os.OpenFile(name, os.O_CREATE|os.O_RDWR|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o644)
 	if err != nil {
 		// flock works on a read-only descriptor too (a lock file another user created).
-		ro, rerr := os.OpenFile(name, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+		ro, rerr := os.OpenFile(name, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
 		if rerr != nil {
 			return nil, fmt.Errorf("sandbox lock %s: %w (obs touches no container without it)", name, err)
 		}
