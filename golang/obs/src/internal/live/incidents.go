@@ -8,7 +8,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -64,13 +63,11 @@ func (o FiringObservation) inside(from, to time.Time) bool {
 	return !o.At.Before(from) && o.At.Before(to)
 }
 
-// Missed is a repo incident with no defined catching rule, or a sampled-window finding
-// from the ALERTS-series fallback. Unobserved Grafana windows never populate it.
-type Missed struct {
-	Incident   string  `json:"incident,omitempty"`
-	Window     *Window `json:"window,omitempty"`
-	Reason     string  `json:"reason"`
-	Suggestion string  `json:"suggested_entry,omitempty"`
+// IncidentGap is a repo incident file with no declared catching rule.
+// Unobserved live windows never populate it.
+type IncidentGap struct {
+	Incident string `json:"incident"`
+	Reason   string `json:"reason"`
 }
 
 // RuleRow is one alert rule of the repo.
@@ -83,10 +80,11 @@ type RuleRow struct {
 
 // WindowResult lists what fired inside one named window.
 type WindowResult struct {
-	Window  Window   `json:"window"`
-	Fired   []string `json:"fired"`
-	Unknown string   `json:"unknown,omitempty"`
-	Status  string   `json:"status,omitempty"`
+	Window       Window   `json:"window"`
+	Fired        []string `json:"fired"`
+	Unknown      string   `json:"unknown,omitempty"`
+	Status       string   `json:"status,omitempty"`
+	PartialFired []string `json:"partial_fired,omitempty"`
 }
 
 // IncidentsResult of `obs live incidents`.
@@ -98,10 +96,9 @@ type IncidentsResult struct {
 	SourceWhy          string         `json:"source_why"`
 	Fired              []FiredAlert   `json:"fired"`
 	FiredNoIncident    []FiredAlert   `json:"fired_but_no_incident"`
-	IncidentNotAlerted []Missed       `json:"incident_not_alerted"`
+	IncidentNotAlerted []IncidentGap  `json:"incident_not_alerted"`
 	NoRunbook          []RuleRow      `json:"alert_without_runbook"`
 	Windows            []WindowResult `json:"windows,omitempty"`
-	Suggestions        []string       `json:"suggested_incident_entries"`
 	HistoryIncomplete  bool           `json:"history_incomplete,omitempty"`
 	HistoryNote        string         `json:"history_note,omitempty"`
 	UnknownState       []RuleRow      `json:"unknown_state,omitempty"`
@@ -226,6 +223,7 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 	type instance struct{ Rule, Labels string }
 	open := map[instance]*interval{}
 	seen := map[instance]bool{}
+	lastState := map[instance]string{}
 	for _, a := range all {
 		rule := identity(a)
 		key := rule.key()
@@ -252,6 +250,12 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 			continue // tags and annotation text do not provide lossless instance identity
 		}
 		inst := instance{Rule: key, Labels: labels}
+		if seen[inst] && !strings.EqualFold(lastState[inst], a.PrevState) {
+			ambiguous[key] = true // a transition was omitted; spans cannot be reconstructed reliably
+			if !alerting(a.PrevState) {
+				open[inst] = nil
+			}
+		}
 		if !seen[inst] && alerting(a.PrevState) {
 			// the history starts after the alert began firing: it was already alerting when the read began
 			start := readFrom
@@ -261,6 +265,7 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 			open[inst] = &interval{From: start}
 		}
 		seen[inst] = true
+		lastState[inst] = a.NewState
 		switch {
 		case alerting(a.NewState) && open[inst] == nil:
 			open[inst] = &interval{From: at}
@@ -315,6 +320,14 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 			out[key] = f
 		}
 		f.Observations = obs
+		if f.SpanUnknown {
+			f.spans = nil
+			f.Firings = 0
+			f.Longest = 0
+			f.StartedBeforeWindow = false
+			f.First = time.Time{}
+			f.Last = time.Time{}
+		}
 		for _, o := range obs {
 			if f.SpanUnknown && (f.First.IsZero() || o.At.Before(f.First)) {
 				f.First = o.At
@@ -360,11 +373,15 @@ func fromAlertsSeries(ctx context.Context, c *Client, t *Target, from, to time.T
 		f := out[key]
 		if f == nil {
 			f = &FiredAlert{ID: key, Title: m.Labels["alertname"], ruleUID: m.Labels["grafana_rule_uid"]}
-			out[key] = f
 		}
 		var cur *interval
 		var prev int64
 		for _, s := range m.Samples {
+			obs := FiringObservation{At: time.Unix(s.T, 0).UTC()}
+			if s.V <= 0 || !obs.inside(from, to) {
+				continue
+			}
+			f.Observations = append(f.Observations, obs)
 			if cur == nil || s.T-prev > int64(2*step.Seconds()) {
 				if cur != nil {
 					f.spans = append(f.spans, *cur)
@@ -381,6 +398,9 @@ func fromAlertsSeries(ctx context.Context, c *Client, t *Target, from, to time.T
 		}
 		if cur != nil {
 			f.spans = append(f.spans, *cur)
+		}
+		if len(f.Observations) > 0 {
+			out[key] = f
 		}
 	}
 	return out, nil
@@ -409,24 +429,6 @@ func readIncidents(dir string) ([]incidentFile, error) {
 		out = append(out, incidentFile{Name: name, Inc: i})
 	}
 	return out, nil
-}
-
-var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
-
-func slug(s string) string {
-	return strings.Trim(slugRe.ReplaceAllString(strings.ToLower(s), "-"), "-")
-}
-
-func entry(story, id string, dur time.Duration) string {
-	if dur < 10*time.Minute {
-		dur = 10 * time.Minute
-	}
-	d := DurText(dur.Round(time.Minute))
-	fire := "[]"
-	if id != "" {
-		fire = "[" + id + "]"
-	}
-	return fmt.Sprintf("story: %s\nwindow: { start: 10m, duration: %s } # offsets inside seed.length: where the seed places it\nchange: [] # what changed in the data: use `obs live shape`; each entry is { metric, where, rate | latency_x | share_x }\nexpect: { fire: %s, quiet: [], fire_within: 5m, resolve_within: 5m }", strconv.Quote(story), d, fire)
 }
 
 // Incidents reads the alerts that fired on the target and compares them with the repo.
@@ -580,15 +582,6 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 	for _, f := range res.Fired {
 		if f.Incident == "" {
 			res.FiredNoIncident = append(res.FiredNoIncident, f)
-			title := f.Title
-			if title == "" {
-				title = f.ID
-			}
-			story := fmt.Sprintf("%s fired %d time(s) on %s between %s and %s", title, f.Firings, t.Name, f.First.Format(time.RFC3339), f.Last.Format(time.RFC3339))
-			if f.SpanUnknown {
-				story = fmt.Sprintf("firing observed for %s on %s between %s and %s; spans, duration and firing count unknown", title, t.Name, f.First.Format(time.RFC3339), f.Last.Format(time.RFC3339))
-			}
-			res.Suggestions = append(res.Suggestions, fmt.Sprintf("# suggested incidents/%s.yaml\n%s", slug(f.ID), entry(story, f.ID, f.Longest)))
 		}
 	}
 
@@ -602,9 +595,9 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 		}
 		switch {
 		case len(i.Inc.Expect.Fire) == 0:
-			res.IncidentNotAlerted = append(res.IncidentNotAlerted, Missed{Incident: i.Name, Reason: "incidents/" + i.Name + ".yaml has no alert under expect.fire, so no alert catches it (obs test: incident not caught by any alert)"})
+			res.IncidentNotAlerted = append(res.IncidentNotAlerted, IncidentGap{Incident: i.Name, Reason: "incidents/" + i.Name + ".yaml has no declared catching rule under expect.fire (obs test configuration gap)"})
 		case live == 0:
-			res.IncidentNotAlerted = append(res.IncidentNotAlerted, Missed{Incident: i.Name, Reason: "incidents/" + i.Name + ".yaml names alerts under expect.fire that are not rules in alerts/: " + strings.Join(i.Inc.Expect.Fire, ", ")})
+			res.IncidentNotAlerted = append(res.IncidentNotAlerted, IncidentGap{Incident: i.Name, Reason: "incidents/" + i.Name + ".yaml names alerts under expect.fire that are not rules in alerts/: " + strings.Join(i.Inc.Expect.Fire, ", ")})
 		}
 	}
 	// windows the user names
@@ -612,14 +605,6 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 		wr := WindowResult{Window: w, Fired: []string{}}
 		for _, f := range res.Fired {
 			caught := false
-			if coverage == nil {
-				for _, s := range f.spans {
-					if s.From.Before(w.To) && s.To.After(w.From) {
-						caught = true
-						break
-					}
-				}
-			}
 			for _, o := range f.Observations {
 				if o.inside(w.From, w.To) {
 					caught = true
@@ -633,27 +618,33 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 		if len(wr.Fired) > 0 {
 			wr.Status = "caught"
 		}
-		if len(wr.Fired) == 0 && coverage != nil {
+		if len(wr.Fired) == 0 {
 			reason := "annotations may be unpublished, disabled, retained, inaccessible or kept on another backend"
-			if coverage.NoHistory {
+			if coverage == nil {
+				reason = "Grafana history unavailable; ALERTS cannot see Grafana-managed rules"
+				if t.Grafana == "" {
+					reason = "Grafana history not configured; ALERTS cannot see Grafana-managed rules"
+				}
+			} else if coverage.NoHistory {
 				reason = "no alert state history returned; cannot tell quiet from history not kept in annotations"
 			} else if coverage.Incomplete {
 				reason = "incomplete history: annotation response reached its limit"
 			}
-			wr.Unknown = "not seen in Grafana history (cannot prove a miss: " + reason + ")"
+			source := "Grafana history"
+			if coverage == nil {
+				source = "ALERTS samples"
+			}
+			wr.Unknown = "not seen in " + source + " (cannot prove a miss: " + reason + ")"
 			wr.Status = "not_seen"
 		}
 		if w.To.After(now) {
+			wr.PartialFired = wr.Fired
+			wr.Fired = []string{}
 			wr.Unknown = "not yet observable: window ends after the history cutoff"
 			wr.Status = "not_yet_observable"
 		}
 		res.Windows = append(res.Windows, wr)
-		if len(wr.Fired) == 0 && wr.Unknown == "" && coverage == nil {
-			ww := w
-			story := fmt.Sprintf("real incident on %s between %s and %s: no alert caught it", t.Name, w.From.Format(time.RFC3339), w.To.Format(time.RFC3339))
-			sug := fmt.Sprintf("# suggested incidents/%s.yaml: fire stays empty until you add the alert that should have caught it\n%s", slug(w.From.Format("2006-01-02t1504")), entry(story, "", w.To.Sub(w.From)))
-			res.IncidentNotAlerted = append(res.IncidentNotAlerted, Missed{Window: &ww, Reason: "no alert caught it: nothing fired between " + w.From.Format(time.RFC3339) + " and " + w.To.Format(time.RFC3339), Suggestion: sug})
-		}
+
 	}
 	for _, r := range rules {
 		if r.Runbook == "" && !r.Record {
@@ -691,21 +682,30 @@ func (r *IncidentsResult) Print(w io.Writer) {
 		fmt.Fprintf(w, "  %s: %d firing(s), first %s, longest %s in the window%s%s\n", f.ID, f.Firings, f.First.Format(time.RFC3339), f.Longest.Round(time.Second), early, repo)
 	}
 	for _, wr := range r.Windows {
-		fmt.Fprintf(w, "  window %s..%s: fired %v\n", wr.Window.From.Format(time.RFC3339), wr.Window.To.Format(time.RFC3339), wr.Fired)
-		if strings.HasPrefix(r.Source, "Grafana state history") {
-			for _, id := range wr.Fired {
-				fmt.Fprintf(w, "    caught: %s fired (seen in Grafana history)\n", id)
+		fmt.Fprintf(w, "  window %s..%s:\n", wr.Window.From.Format(time.RFC3339), wr.Window.To.Format(time.RFC3339))
+		switch wr.Status {
+		case "caught":
+			source := "ALERTS samples"
+			if strings.HasPrefix(r.Source, "Grafana state history") {
+				source = "Grafana history"
 			}
-		}
-		if wr.Unknown != "" {
+			for _, id := range wr.Fired {
+				fmt.Fprintf(w, "    caught: %s fired (seen in %s)\n", id, source)
+			}
+		case "not_seen":
 			fmt.Fprintf(w, "    %s\n", wr.Unknown)
+		case "not_yet_observable":
+			fmt.Fprintf(w, "    %s\n", wr.Unknown)
+			if len(wr.PartialFired) > 0 {
+				fmt.Fprintf(w, "    partial evidence before the cutoff: %v\n", wr.PartialFired)
+			}
 		}
 	}
 	fmt.Fprintf(w, "\nfired-but-no-incident (%d): an alert fired and no incident file expects it\n", len(r.FiredNoIncident))
 	for _, f := range r.FiredNoIncident {
 		fmt.Fprintf(w, "  %s\n", f.ID)
 	}
-	fmt.Fprintf(w, "\nincident-not-alerted (%d): an incident no alert catches\n", len(r.IncidentNotAlerted))
+	fmt.Fprintf(w, "\nincident-not-alerted (%d): repo incident files without declared catching rules\n", len(r.IncidentNotAlerted))
 	for _, m := range r.IncidentNotAlerted {
 		fmt.Fprintf(w, "  %s\n", m.Reason)
 	}
@@ -717,19 +717,7 @@ func (r *IncidentsResult) Print(w io.Writer) {
 		}
 		fmt.Fprintf(w, "  %s in %s%s\n", a.ID, a.File, fired)
 	}
-	sug := append([]string(nil), r.Suggestions...)
-	for _, m := range r.IncidentNotAlerted {
-		if m.Suggestion != "" {
-			sug = append(sug, m.Suggestion)
-		}
-	}
-	if len(sug) > 0 {
-		fmt.Fprintln(w, "\nSUGGESTED incident.yaml ENTRIES (text only: obs live incidents writes nothing; add one in a pull request, then obs test shows what to fix)")
-		for _, s := range sug {
-			fmt.Fprintf(w, "\n%s\n", s)
-		}
-	}
-	fmt.Fprintln(w, "\nobs live incidents: nothing is judged here; exit 0")
+	fmt.Fprintln(w, "\nobs live incidents: observations only; writes nothing; exit 0")
 }
 
 // JSON is the machine form.
