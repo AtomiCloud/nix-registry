@@ -141,7 +141,13 @@ func TestIncidentsListsFiredWithoutIncidentMissingRunbookAndOrphanIncident(t *te
 func TestIncidentsNamedWindowWithNoAlertIsNotAlerted(t *testing.T) {
 	dir := writeRepo(t)
 	rec := &recorder{}
-	srv := grafanaFake(t, rec, "["+ann("high-errors", "High error rate", "Normal", "Alerting", t0)+","+ann("high-errors", "High error rate", "Alerting", "Normal", t0.Add(10*time.Minute))+"]", 0)
+	srv := grafanaFake(t, rec, "["+strings.Join([]string{
+		ann("high-errors", "High error rate", "Normal", "Alerting", t0),
+		ann("high-errors", "High error rate", "Alerting", "Normal", t0.Add(10*time.Minute)),
+		// Establish the other rules' states too; no transition would leave them unknown.
+		ann("slow-charges", "Slow charges", "Pending", "Normal", t0.Add(-2*time.Hour)),
+		ann("quiet-rule", "Quiet rule", "Pending", "Normal", t0.Add(-2*time.Hour)),
+	}, ",")+"]", 0)
 	w1 := Window{From: t0.Add(-time.Hour), To: t0.Add(time.Hour)}        // an alert fired inside
 	w2 := Window{From: t0.Add(5 * time.Hour), To: t0.Add(6 * time.Hour)} // nothing fired
 	res, err := Incidents(context.Background(), &Client{}, &Target{Name: "prod", Grafana: srv.URL}, IncidentOptions{
@@ -362,5 +368,108 @@ func TestIncidentsNamedWindowSeesAnAlertThatClearsInsideIt(t *testing.T) {
 		if m.Window != nil {
 			t.Fatalf("an alert did fire in the window: %+v", m)
 		}
+	}
+}
+
+func TestIncidentsRecoveringContinuesTheFiringSpan(t *testing.T) {
+	srv := grafanaFake(t, &recorder{}, "["+strings.Join([]string{
+		ann("high-errors", "High error rate", "Normal", "Alerting", t0),
+		ann("high-errors", "High error rate", "Alerting", "Recovering", t0.Add(10*time.Minute)),
+		ann("high-errors", "High error rate", "Recovering", "Alerting", t0.Add(20*time.Minute)),
+		ann("high-errors", "High error rate", "Alerting", "Normal", t0.Add(30*time.Minute)),
+	}, ",")+"]", 0)
+	fired, _, err := fromAnnotations(context.Background(), &Client{}, &Target{Grafana: srv.URL}, t0, t0.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := fired["high-errors"]
+	if f == nil || f.Firings != 1 || len(f.spans) != 1 || f.spans[0].To.Sub(f.spans[0].From) != 30*time.Minute {
+		t.Fatalf("Alerting -> Recovering -> Alerting must stay one 30m span: %+v", f)
+	}
+}
+
+func TestIncidentsFirstFiringPreviousStateStartsAtLookback(t *testing.T) {
+	for _, prev := range []string{"Alerting", "Recovering"} {
+		t.Run(prev, func(t *testing.T) {
+			srv := grafanaFake(t, &recorder{}, "["+ann("high-errors", "High error rate", prev, "Alerting", t0.Add(20*time.Minute))+"]", 0)
+			fired, _, err := fromAnnotations(context.Background(), &Client{}, &Target{Grafana: srv.URL}, t0, t0.Add(time.Hour))
+			if err != nil {
+				t.Fatal(err)
+			}
+			f := fired["high-errors"]
+			if f == nil || !f.StartedBeforeWindow || !f.First.Equal(t0) {
+				t.Fatalf("first prevState %s establishes firing at the lookback start: %+v", prev, f)
+			}
+		})
+	}
+}
+
+func TestIncidentsNoTransitionIsUnknownRatherThanMissed(t *testing.T) {
+	srv := grafanaFake(t, &recorder{}, "[]", 0)
+	w := Window{From: t0, To: t0.Add(time.Hour)}
+	res, err := Incidents(context.Background(), &Client{}, &Target{Name: "prod", Grafana: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: time.Hour, Windows: []Window{w}, Now: func() time.Time { return w.To }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range res.IncidentNotAlerted {
+		if m.Window != nil {
+			t.Fatalf("no transitions cannot establish a miss: %+v", m)
+		}
+	}
+	var out strings.Builder
+	res.Print(&out)
+	if !strings.Contains(out.String(), "unknown") || !strings.Contains(out.String(), "quiet-rule") {
+		t.Fatalf("report must name the rule whose state history cannot establish: %s", out.String())
+	}
+}
+
+func TestIncidentsCappedHistoryCannotEstablishAMiss(t *testing.T) {
+	entries := make([]string, 10000)
+	for i := range entries {
+		entries[i] = ann("quiet-rule", "Quiet rule", "Normal", "Pending", t0.Add(2*time.Hour))
+	}
+	entries[0] = ann("high-errors", "High error rate", "Pending", "Normal", t0.Add(-time.Hour))
+	entries[1] = ann("slow-charges", "Slow charges", "Pending", "Normal", t0.Add(-time.Hour))
+	srv := grafanaFake(t, &recorder{}, "["+strings.Join(entries, ",")+"]", 0)
+	w := Window{From: t0, To: t0.Add(time.Hour)}
+	res, err := Incidents(context.Background(), &Client{}, &Target{Name: "prod", Grafana: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: 3 * time.Hour, Windows: []Window{w}, Now: func() time.Time { return t0.Add(3 * time.Hour) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range res.IncidentNotAlerted {
+		if m.Window != nil {
+			t.Fatalf("capped history cannot establish a miss: %+v", m)
+		}
+	}
+	var out strings.Builder
+	res.Print(&out)
+	if !strings.Contains(out.String(), "incomplete") || !strings.Contains(out.String(), "10000") {
+		t.Fatalf("report must state that history reached the limit: %s", out.String())
+	}
+}
+
+func TestIncidentsInstancesMergeOverlappingSpansPerRule(t *testing.T) {
+	withTags := func(prev, next, instance string, at time.Time, reverse bool) string {
+		tags := []string{"alertname:High error rate", "instance:" + instance}
+		if reverse {
+			tags[0], tags[1] = tags[1], tags[0]
+		}
+		return strings.TrimSuffix(ann("high-errors", "High error rate", prev, next, at), "}") + fmt.Sprintf(`,"tags":[%q,%q]}`, tags[0], tags[1])
+	}
+	srv := grafanaFake(t, &recorder{}, "["+strings.Join([]string{
+		withTags("Normal", "Alerting", "a", t0, false),
+		withTags("Normal", "Alerting", "b", t0.Add(10*time.Minute), false),
+		withTags("Alerting", "Normal", "a", t0.Add(20*time.Minute), true),
+		withTags("Alerting", "Normal", "b", t0.Add(40*time.Minute), true),
+		withTags("Normal", "Alerting", "a", t0.Add(50*time.Minute), false),
+		withTags("Alerting", "Normal", "a", t0.Add(55*time.Minute), true),
+	}, ",")+"]", 0)
+	fired, _, err := fromAnnotations(context.Background(), &Client{}, &Target{Grafana: srv.URL}, t0, t0.Add(time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := fired["high-errors"]
+	if f == nil || f.Firings != 2 || len(f.spans) != 2 || f.spans[0].To.Sub(f.spans[0].From) != 40*time.Minute || !f.Last.Equal(t0.Add(50*time.Minute)) {
+		t.Fatalf("A resolving cannot close B; overlapping instances merge into one span: %+v", f)
 	}
 }

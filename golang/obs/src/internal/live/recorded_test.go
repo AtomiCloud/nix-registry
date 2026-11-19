@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -38,6 +39,46 @@ type exchange struct {
 	Status int             `json:"status"`
 	JSON   json.RawMessage `json:"json,omitempty"`
 	Text   string          `json:"text,omitempty"`
+}
+
+func TestRecordingPublishesOnlyAfterPassingTest(t *testing.T) {
+	if mode := os.Getenv("OBS_RECORDING_GUARD_CHILD"); mode != "" {
+		recordedStores(t, "guard")
+		if mode == "fail" {
+			t.Error("planted recording failure")
+		}
+		return
+	}
+	for _, mode := range []string{"fail", "pass"} {
+		t.Run(mode, func(t *testing.T) {
+			dir := t.TempDir()
+			file := filepath.Join(dir, "testdata", "recorded", "guard.json")
+			if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			const original = "existing fixture must survive a failed recording\n"
+			if err := os.WriteFile(file, []byte(original), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command(os.Args[0], "-test.run=^TestRecordingPublishesOnlyAfterPassingTest$")
+			cmd.Dir = dir
+			cmd.Env = append(os.Environ(), "OBS_RECORDING_GUARD_CHILD="+mode, "OBS_LIVE_RECORD=metrics=http://127.0.0.1:1")
+			out, err := cmd.CombinedOutput()
+			if (err != nil) != (mode == "fail") {
+				t.Fatalf("child result: %v: %s", err, out)
+			}
+			got, err := os.ReadFile(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if mode == "fail" && string(got) != original {
+				t.Fatal("failed recording overwrote the existing fixture")
+			}
+			if mode == "pass" && (!json.Valid(got) || !bytes.Contains(got, []byte(`"scenario": "guard"`))) {
+				t.Fatalf("passing recording must publish: %s", got)
+			}
+		})
+	}
 }
 
 type recording struct {
@@ -171,6 +212,9 @@ func recordedStores(t *testing.T, scenario string) *harness {
 	h.Target = &Target{Name: "recorded", Metrics: mk("metrics"), Logs: mk("logs"), Traces: mk("traces"), Grafana: mk("grafana"), Headers: map[string]string{}}
 	if len(real) > 0 {
 		t.Cleanup(func() {
+			if t.Failed() {
+				return
+			}
 			h.mu.Lock()
 			defer h.mu.Unlock()
 			seen := map[string]bool{}

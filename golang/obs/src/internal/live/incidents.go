@@ -63,8 +63,9 @@ type RuleRow struct {
 
 // WindowResult lists what fired inside one named window.
 type WindowResult struct {
-	Window Window   `json:"window"`
-	Fired  []string `json:"fired"`
+	Window  Window   `json:"window"`
+	Fired   []string `json:"fired"`
+	Unknown string   `json:"unknown,omitempty"`
 }
 
 // IncidentsResult of `obs live incidents`.
@@ -80,37 +81,52 @@ type IncidentsResult struct {
 	NoRunbook          []RuleRow      `json:"alert_without_runbook"`
 	Windows            []WindowResult `json:"windows,omitempty"`
 	Suggestions        []string       `json:"suggested_incident_entries"`
+	HistoryIncomplete  bool           `json:"history_incomplete,omitempty"`
+	HistoryNote        string         `json:"history_note,omitempty"`
+	UnknownState       []RuleRow      `json:"unknown_state,omitempty"`
 }
 
 type annotation struct {
-	AlertUID  string `json:"alertUID"`
-	AlertName string `json:"alertName"`
-	PrevState string `json:"prevState"`
-	NewState  string `json:"newState"`
-	Time      int64  `json:"time"`
+	AlertUID  string   `json:"alertUID"`
+	AlertName string   `json:"alertName"`
+	PrevState string   `json:"prevState"`
+	NewState  string   `json:"newState"`
+	Time      int64    `json:"time"`
+	Tags      []string `json:"tags"` // Grafana stores the instance's labels as name:value tags.
 }
 
-func alerting(s string) bool { return strings.HasPrefix(strings.ToLower(s), "alerting") }
+func alerting(s string) bool {
+	s = strings.ToLower(s)
+	return strings.HasPrefix(s, "alerting") || strings.HasPrefix(s, "recovering")
+}
 
-// stateLookback is how far before the window the state history is read, so the state AT the
-// window start is known: an alert that began firing before the window and is still firing, or
-// clears inside it, is an alert that was firing in the window.
+// stateLookback bounds the extra history read before the window. A rule with no transition
+// in that history still has unknown state; silence does not establish that it was quiet.
 const stateLookback = 7 * 24 * time.Hour
+const annotationLimit = 10000
+
+type annotationCoverage struct {
+	Seen       map[string]bool // rule UID or title, including rules with only non-firing transitions
+	Incomplete bool
+}
 
 // fromAnnotations reads Grafana's alert state history (one entry per state change) from
 // stateLookback before the window to its end, rebuilds when each alert was alerting, and keeps
 // what overlaps from..to. An alert already firing at from has its first span start at from.
-func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Time) (map[string]*FiredAlert, error) {
+func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Time) (map[string]*FiredAlert, *annotationCoverage, error) {
 	readFrom := from.Add(-stateLookback)
-	q := url.Values{"type": {"alert"}, "from": {strconv.FormatInt(readFrom.UnixMilli(), 10)}, "to": {strconv.FormatInt(to.UnixMilli(), 10)}, "limit": {"10000"}}
+	q := url.Values{"type": {"alert"}, "from": {strconv.FormatInt(readFrom.UnixMilli(), 10)}, "to": {strconv.FormatInt(to.UnixMilli(), 10)}, "limit": {strconv.Itoa(annotationLimit)}}
 	var all []annotation
 	if err := c.GetJSON(ctx, t.Grafana, "/api/annotations", q, &all); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	coverage := &annotationCoverage{Seen: map[string]bool{}, Incomplete: len(all) >= annotationLimit}
 	sort.SliceStable(all, func(i, j int) bool { return all[i].Time < all[j].Time })
 	spans := map[string][]interval{}
 	titles := map[string]string{}
-	open := map[string]*interval{}
+	type instance struct{ Rule, Labels string }
+	open := map[instance]*interval{}
+	seen := map[instance]bool{}
 	for _, a := range all {
 		key := a.AlertUID
 		if key == "" {
@@ -119,30 +135,43 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 		if titles[key] == "" {
 			titles[key] = a.AlertName
 		}
-		at := time.UnixMilli(a.Time).UTC()
-		if open[key] == nil && alerting(a.PrevState) && !alerting(a.NewState) {
-			// the history starts after the alert began firing: it was already alerting when the read began
-			open[key] = &interval{From: readFrom}
+		coverage.Seen[key] = true
+		if a.AlertName != "" {
+			coverage.Seen[a.AlertName] = true
 		}
+		labels := append([]string(nil), a.Tags...)
+		sort.Strings(labels)
+		encoded, _ := json.Marshal(labels)
+		inst := instance{Rule: key, Labels: string(encoded)}
+		at := time.UnixMilli(a.Time).UTC()
+		if !seen[inst] && alerting(a.PrevState) {
+			// the history starts after the alert began firing: it was already alerting when the read began
+			start := readFrom
+			if coverage.Incomplete {
+				start = at // missing earlier transitions cannot establish firing back to readFrom
+			}
+			open[inst] = &interval{From: start}
+		}
+		seen[inst] = true
 		switch {
-		case alerting(a.NewState) && open[key] == nil:
-			open[key] = &interval{From: at}
-		case !alerting(a.NewState) && open[key] != nil:
-			iv := open[key]
+		case alerting(a.NewState) && open[inst] == nil:
+			open[inst] = &interval{From: at}
+		case !alerting(a.NewState) && open[inst] != nil:
+			iv := open[inst]
 			iv.To = at
 			spans[key] = append(spans[key], *iv)
-			open[key] = nil
+			open[inst] = nil
 		}
 	}
-	for key, iv := range open {
+	for inst, iv := range open {
 		if iv != nil {
 			iv.To = to
-			spans[key] = append(spans[key], *iv)
+			spans[inst.Rule] = append(spans[inst.Rule], *iv)
 		}
 	}
 	out := map[string]*FiredAlert{}
 	for key, ss := range spans {
-		for _, iv := range ss {
+		for _, iv := range mergeIntervals(ss) {
 			if !iv.To.After(from) || !iv.From.Before(to) {
 				continue // over before the window began, or after it ended
 			}
@@ -166,7 +195,21 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 			f.spans = append(f.spans, iv)
 		}
 	}
-	return out, nil
+	return out, coverage, nil
+}
+
+// mergeIntervals unions the firing spans of all instances of one rule, in time order.
+func mergeIntervals(spans []interval) []interval {
+	sort.Slice(spans, func(i, j int) bool { return spans[i].From.Before(spans[j].From) })
+	var merged []interval
+	for _, span := range spans {
+		if len(merged) == 0 || span.From.After(merged[len(merged)-1].To) {
+			merged = append(merged, span)
+		} else if span.To.After(merged[len(merged)-1].To) {
+			merged[len(merged)-1].To = span.To
+		}
+	}
+	return merged
 }
 
 // fromAlertsSeries reads the ALERTS{alertstate="firing"} series a vmalert-style ruler writes.
@@ -276,8 +319,9 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 	const grafanaWhy = "Grafana-managed alert rules keep every state change in Grafana's state history; they do not write an ALERTS series (only a vmalert-style ruler does)"
 	var fired map[string]*FiredAlert
 	var err error
+	var coverage *annotationCoverage
 	if t.Grafana != "" {
-		fired, err = fromAnnotations(ctx, c, t, from, now)
+		fired, coverage, err = fromAnnotations(ctx, c, t, from, now)
 		if err == nil {
 			res.Source, res.SourceWhy = "Grafana state history (/api/annotations?type=alert)", grafanaWhy
 		} else if t.Metrics == "" {
@@ -320,6 +364,17 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 	ruleIDs := map[string]bool{}
 	for _, r := range rules {
 		ruleIDs[r.ID] = true
+		if coverage != nil && !r.Record && !coverage.Seen[r.ID] && !coverage.Seen[r.Title] {
+			res.UnknownState = append(res.UnknownState, RuleRow{ID: r.ID, Title: r.Title, File: r.File})
+		}
+	}
+	if coverage != nil {
+		res.HistoryIncomplete = coverage.Incomplete
+		res.HistoryNote = "rules or instances with no transition have unknown state from history; the report only reconstructs observed instances"
+		if coverage.Incomplete {
+			res.HistoryNote += fmt.Sprintf("; incomplete history: the response reached the %d-entry limit, so named windows cannot be declared missed", annotationLimit)
+		}
+		sort.Slice(res.UnknownState, func(i, j int) bool { return res.UnknownState[i].ID < res.UnknownState[j].ID })
 	}
 	for _, i := range incs {
 		for _, id := range i.Inc.Expect.Fire {
@@ -395,8 +450,11 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 				}
 			}
 		}
+		if len(wr.Fired) == 0 && coverage != nil && (coverage.Incomplete || len(res.UnknownState) > 0 || len(coverage.Seen) == 0) {
+			wr.Unknown = "unknown: history cannot establish whether an alert caught this window"
+		}
 		res.Windows = append(res.Windows, wr)
-		if len(wr.Fired) == 0 {
+		if len(wr.Fired) == 0 && wr.Unknown == "" {
 			ww := w
 			story := fmt.Sprintf("real incident on %s between %s and %s: no alert caught it", t.Name, w.From.Format(time.RFC3339), w.To.Format(time.RFC3339))
 			sug := fmt.Sprintf("# suggested incidents/%s.yaml: fire stays empty until you add the alert that should have caught it\n%s", slug(w.From.Format("2006-01-02t1504")), entry(story, "", w.To.Sub(w.From)))
@@ -416,6 +474,12 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 func (r *IncidentsResult) Print(w io.Writer) {
 	fmt.Fprintf(w, "obs live incidents: target %s, %s to %s (UTC)\n", r.Target, r.From.Format(time.RFC3339), r.To.Format(time.RFC3339))
 	fmt.Fprintf(w, "source: %s\nwhy: %s\n", r.Source, r.SourceWhy)
+	if r.HistoryNote != "" {
+		fmt.Fprintf(w, "history: %s\n", r.HistoryNote)
+	}
+	for _, rule := range r.UnknownState {
+		fmt.Fprintf(w, "  %s: state over the window is unknown from history (no transition)\n", rule.ID)
+	}
 	fmt.Fprintf(w, "\nFIRED (%d alert(s))\n", len(r.Fired))
 	for _, f := range r.Fired {
 		repo := ""
@@ -430,6 +494,9 @@ func (r *IncidentsResult) Print(w io.Writer) {
 	}
 	for _, wr := range r.Windows {
 		fmt.Fprintf(w, "  window %s..%s: fired %v\n", wr.Window.From.Format(time.RFC3339), wr.Window.To.Format(time.RFC3339), wr.Fired)
+		if wr.Unknown != "" {
+			fmt.Fprintf(w, "    %s\n", wr.Unknown)
+		}
 	}
 	fmt.Fprintf(w, "\nfired-but-no-incident (%d): an alert fired and no incident file expects it\n", len(r.FiredNoIncident))
 	for _, f := range r.FiredNoIncident {

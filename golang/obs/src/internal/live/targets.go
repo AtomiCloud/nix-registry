@@ -6,6 +6,7 @@ package live
 
 import (
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"regexp"
@@ -81,7 +82,7 @@ func failer(path string) specFail {
 func checkURL(fail specFail, key string, n *yaml.Node) (string, error) {
 	u, err := url.Parse(n.Value)
 	if n.Kind != yaml.ScalarNode || err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
-		return "", fail(n.Line, "%s: %q is not an http:// or https:// URL", key, redactURL(n.Value))
+		return "", fail(n.Line, "%s: want an http:// or https:// URL (the value is not repeated here)", key)
 	}
 	switch {
 	case u.User != nil:
@@ -137,13 +138,17 @@ func ParseTargets(n *yaml.Node, path string) (map[string]Spec, error) {
 				sp.Headers = map[string]string{}
 				for h := 0; h+1 < len(v.Content); h += 2 {
 					hk, hv := v.Content[h], v.Content[h+1]
+					header := http.CanonicalHeaderKey(hk.Value)
+					if _, duplicate := sp.Headers[header]; duplicate {
+						return nil, fail(hk.Line, "%s.%s: duplicate HTTP header (names are case-insensitive)", key, hk.Value)
+					}
 					if hv.Kind != yaml.ScalarNode {
 						return nil, fail(hv.Line, "%s.%s: the value must be the NAME of an environment variable that holds the header value (a secret is never written in the file)", key, hk.Value)
 					}
 					if why := envNameProblem(hv.Value); why != "" {
 						return nil, fail(hv.Line, "%s.%s: the value must be the NAME of an environment variable that holds the header value (a secret is never written in the file); %s, so it is refused and not printed", key, hk.Value, why)
 					}
-					sp.Headers[hk.Value] = hv.Value
+					sp.Headers[header] = hv.Value
 				}
 			default:
 				return nil, fail(k.Line, "unknown key %s (known here: metrics, logs, traces, grafana, headers)", key)
@@ -196,6 +201,14 @@ func Resolve(name string, specs map[string]Spec, sandbox map[string]string, gete
 		hs = append(hs, h)
 	}
 	sort.Strings(hs)
+	canonical := map[string]bool{}
+	for _, h := range hs {
+		key := http.CanonicalHeaderKey(h)
+		if canonical[key] {
+			return nil, fail(sp.Line, "targets.%s.headers.%s: duplicate HTTP header (names are case-insensitive)", name, h)
+		}
+		canonical[key] = true
+	}
 	for _, h := range hs {
 		if why := envNameProblem(sp.Headers[h]); why != "" {
 			return nil, fail(sp.Line, "targets.%s.headers.%s: the value must be the NAME of an environment variable (a secret is never written in the file); %s, so it is refused and not printed", name, h, why)
@@ -204,7 +217,7 @@ func Resolve(name string, specs map[string]Spec, sandbox map[string]string, gete
 		if v == "" {
 			return nil, fail(sp.Line, "targets.%s.headers.%s: environment variable not set (the header's value is read from the environment; the variable name is not repeated here)", name, h)
 		}
-		t.Headers[h] = v
+		t.Headers[http.CanonicalHeaderKey(h)] = v
 	}
 	return t, nil
 }
