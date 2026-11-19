@@ -465,27 +465,44 @@ func TestDefaultLockIsSharedAcrossCacheFolders(t *testing.T) {
 	a := lockFile(cfg)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("TMPDIR", t.TempDir())
-	if b := lockFile(cfg); a != b || a != "/tmp/obs-sandbox-locks/sandbox-demo.lock" {
+	if b := lockFile(cfg); a != b || a != "/tmp/obs-sandbox-demo.lock" {
 		t.Fatalf("lock path must be one machine-wide place per project: %q vs %q", a, b)
 	}
 }
 
-// The shared lock folder is made world-writable with the sticky bit, whatever the umask, so a second user
-// can create the lock of another project.
-func TestSharedLockFolderIsStickyAndWorldWritable(t *testing.T) {
-	old := lockRoot
-	lockRoot = filepath.Join(t.TempDir(), "obs-sandbox-locks")
-	defer func() { lockRoot = old }()
-	unlock, err := lockProject(Config{Project: "demo"})
+// The lock is never taken through a symlink or on anything but a regular file, and a project name cannot
+// reach outside the lock folder.
+func TestLockRefusesSymlinksOtherFilesAndBadNames(t *testing.T) {
+	old := lockDir
+	lockDir = t.TempDir()
+	defer func() { lockDir = old }()
+	target := filepath.Join(t.TempDir(), "victim")
+	if err := os.WriteFile(target, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(lockDir, "obs-sandbox-link.lock")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lockProject(Config{Project: "link"}); err == nil {
+		t.Fatal("a symlinked lock file must be refused")
+	}
+	if err := os.Mkdir(filepath.Join(lockDir, "obs-sandbox-dir.lock"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lockProject(Config{Project: "dir"}); err == nil || !strings.Contains(err.Error(), "touches no container") {
+		t.Fatalf("a directory in the lock's place must be refused, got %v", err)
+	}
+	for _, p := range []string{"../x", "a/b", "", "-x"} {
+		if _, err := lockProject(Config{Project: p}); err == nil {
+			t.Errorf("project %q must be refused", p)
+		}
+	}
+	unlock, err := lockProject(Config{Project: "ok-1.a_b"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	unlock()
-	fi, err := os.Stat(lockRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if fi.Mode()&os.ModeSticky == 0 || fi.Mode().Perm() != 0o777 {
-		t.Fatalf("lock folder mode %v, want sticky and 0777", fi.Mode())
+	if fi, err := os.Lstat(filepath.Join(lockDir, "obs-sandbox-ok-1.a_b.lock")); err != nil || !fi.Mode().IsRegular() {
+		t.Fatalf("the lock must be a regular file in the lock folder: %v %v", fi, err)
 	}
 }
