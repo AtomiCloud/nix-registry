@@ -356,48 +356,34 @@ func mergeIntervals(spans []interval) []interval {
 
 // fromAlertsSeries reads the ALERTS{alertstate="firing"} series a vmalert-style ruler writes.
 func fromAlertsSeries(ctx context.Context, c *Client, t *Target, from, to time.Time) (map[string]*FiredAlert, error) {
-	step := time.Minute
-	if need := time.Duration(float64(to.Sub(from)) / 10000); need > step {
-		step = need.Round(time.Second) + time.Second
-	}
-	mats, err := c.Range(ctx, t.Metrics, `max by (alertname, grafana_rule_uid) (ALERTS{alertstate="firing"})`, from, to, step)
+	mats, err := c.rawSamples(ctx, t.Metrics, `ALERTS{alertstate="firing"}`, from, to)
 	if err != nil {
 		return nil, err
 	}
 	out := map[string]*FiredAlert{}
 	for _, m := range mats {
 		key := m.Labels["grafana_rule_uid"]
+		source := "ruler_uid"
 		if key == "" {
 			key = m.Labels["alertname"]
+			source = "alertname"
 		}
 		f := out[key]
 		if f == nil {
-			f = &FiredAlert{ID: key, Title: m.Labels["alertname"], ruleUID: m.Labels["grafana_rule_uid"]}
+			f = &FiredAlert{ID: key, Title: m.Labels["alertname"], ruleUID: m.Labels["grafana_rule_uid"], IDSource: source, SpanUnknown: true}
 		}
-		var cur *interval
-		var prev int64
 		for _, s := range m.Samples {
-			obs := FiringObservation{At: time.Unix(s.T, 0).UTC()}
-			if s.V <= 0 || !obs.inside(from, to) {
+			o := FiringObservation{At: s.At}
+			if s.V <= 0 || !o.inside(from, to) {
 				continue
 			}
-			f.Observations = append(f.Observations, obs)
-			if cur == nil || s.T-prev > int64(2*step.Seconds()) {
-				if cur != nil {
-					f.spans = append(f.spans, *cur)
-				}
-				cur = &interval{From: time.Unix(s.T, 0).UTC()}
-				f.Firings++
-				if f.First.IsZero() || cur.From.Before(f.First) {
-					f.First = cur.From
-				}
-				f.Last = cur.From
+			f.Observations = append(f.Observations, o)
+			if f.First.IsZero() || s.At.Before(f.First) {
+				f.First = s.At
 			}
-			cur.To = time.Unix(s.T, 0).UTC().Add(step)
-			prev = s.T
-		}
-		if cur != nil {
-			f.spans = append(f.spans, *cur)
+			if s.At.After(f.Last) {
+				f.Last = s.At
+			}
 		}
 		if len(f.Observations) > 0 {
 			out[key] = f

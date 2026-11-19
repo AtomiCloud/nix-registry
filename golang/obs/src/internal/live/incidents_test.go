@@ -194,7 +194,7 @@ func TestIncidentsFallsBackToAlertsSeriesWithoutGrafana(t *testing.T) {
 	if !strings.Contains(res.Source, "ALERTS series") || !strings.Contains(res.SourceWhy, "no grafana URL") {
 		t.Fatalf("source: %q why: %q", res.Source, res.SourceWhy)
 	}
-	if len(res.Fired) != 1 || res.Fired[0].ID != "high-errors" || res.Fired[0].Firings != 1 {
+	if len(res.Fired) != 1 || res.Fired[0].ID != "high-errors" || !res.Fired[0].SpanUnknown || len(res.Fired[0].Observations) != 10 {
 		t.Fatalf("fired: %+v", res.Fired)
 	}
 	if len(queries) == 0 || !strings.Contains(queries[0], `ALERTS{alertstate="firing"}`) {
@@ -769,19 +769,82 @@ func TestIncidentsFutureWindowRendersOnlyPartialEvidence(t *testing.T) {
 }
 
 func TestIncidentsMissingTransitionMarksSpanUnknownWithoutZeroTimes(t *testing.T) {
-	history := "[" + historyRow("high-errors", 41, "High error rate", "Normal", "Pending", t0, map[string]string{}, nil) + "," + historyRow("high-errors", 41, "High error rate", "Alerting", "Normal", t0.Add(40*time.Minute), map[string]string{}, nil) + "]"
+	history := "[" + strings.Join([]string{
+		historyRow("high-errors", 41, "High error rate", "Normal", "Alerting", t0.Add(-30*time.Minute), map[string]string{}, nil),
+		historyRow("high-errors", 41, "High error rate", "Alerting", "Normal", t0.Add(10*time.Minute), map[string]string{}, nil),
+		historyRow("high-errors", 41, "High error rate", "Alerting", "Normal", t0.Add(30*time.Minute), map[string]string{}, nil),
+	}, ",") + "]"
 	srv := grafanaFake(t, &recorder{}, history, 0)
 	res, err := Incidents(context.Background(), &Client{}, &Target{Grafana: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: time.Hour, Now: func() time.Time { return t0.Add(time.Hour) }})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Fired) != 1 || !res.Fired[0].SpanUnknown || res.Fired[0].First.IsZero() || res.Fired[0].Last.IsZero() {
+	if len(res.Fired) != 1 || !res.Fired[0].SpanUnknown || !res.Fired[0].First.Equal(t0.Add(10*time.Minute)) || !res.Fired[0].Last.Equal(t0.Add(30*time.Minute)) || res.Fired[0].StartedBeforeWindow {
 		t.Fatalf("disagreement with the previous reconstructed state must preserve only direct evidence: %+v", res.Fired)
 	}
 	var out strings.Builder
 	res.Print(&out)
 	if strings.Contains(out.String(), "0001-") {
 		t.Fatalf("never print a year-zero firing time: %s", out.String())
+	}
+}
+
+func TestIncidentsAlertsFallbackUsesRawSampleTimesNotEvaluationTimes(t *testing.T) {
+	for _, offset := range []time.Duration{50 * time.Second, 50*time.Second + 125*time.Millisecond, -58 * time.Minute} {
+		t.Run(offset.String(), func(t *testing.T) {
+			rawAt := t0.Add(offset)
+			rec := &recorder{}
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				rec.record(r)
+				at := t0.Add(time.Minute) // query_range carries the older sample forward to this evaluation.
+				if offset < 0 {
+					at = rawAt
+				} // left-boundary control: an evaluation can coincide with a raw sample.
+				if r.URL.Path == "/api/v1/query" {
+					at = rawAt
+					q := r.URL.Query().Get("query")
+					if !strings.HasPrefix(q, `ALERTS{alertstate="firing"}[`) || !strings.HasSuffix(q, "]") {
+						t.Errorf("raw range selector required: %q", q)
+					}
+					if err := validPromQL(q); err != nil {
+						t.Error(err)
+					}
+					// Model the instant range selector's open lower bound. This also proves
+					// the request covers the full window and preserves its inclusive start.
+					seconds, err := strconv.ParseFloat(r.URL.Query().Get("time"), 64)
+					if err != nil {
+						t.Error(err)
+						http.Error(w, "bad time", 400)
+						return
+					}
+					width, err := ParseSpan(q[strings.LastIndex(q, "[")+1 : len(q)-1])
+					if err != nil {
+						t.Error(err)
+						http.Error(w, "bad window", 400)
+						return
+					}
+					end := time.Unix(int64(seconds), 0)
+					if !rawAt.After(end.Add(-width)) || rawAt.After(end) {
+						fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[]}}`)
+						return
+					}
+				}
+				fmt.Fprintf(w, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"alertname":"High error rate","grafana_rule_uid":"high-errors"},"values":[[%s,"1"]]}]}}`, strconv.FormatFloat(float64(at.UnixMilli())/1000, 'f', 3, 64))
+			}))
+			defer srv.Close()
+			win := Window{From: t0.Add(55 * time.Second), To: t0.Add(65 * time.Second)}
+			res, err := Incidents(context.Background(), &Client{}, &Target{Metrics: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: time.Hour, Windows: []Window{win}, Now: func() time.Time { return t0.Add(2 * time.Minute) }})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(res.Windows) != 1 || res.Windows[0].Status != "not_seen" || len(res.Windows[0].Fired) != 0 {
+				t.Fatalf("a carried-forward query point is not a raw firing observation: %+v", res.Windows)
+			}
+			if len(res.Fired) != 1 || !res.Fired[0].First.Equal(rawAt) || len(res.Fired[0].Observations) != 1 || !res.Fired[0].Observations[0].At.Equal(rawAt) {
+				t.Fatalf("preserve the underlying sample timestamp, including milliseconds: %+v", res.Fired)
+			}
+			assertReadOnly(t, rec)
+		})
 	}
 }
 
