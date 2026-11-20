@@ -2,75 +2,148 @@ package gen
 
 import (
 	"fmt"
+	"github.com/AtomiCloud/obs/internal/contract"
 	"path"
 	"path/filepath"
-
-	"github.com/AtomiCloud/obs/internal/contract"
 )
 
-// DotnetNamespace preserves the root contract default and scopes feature contracts
-// to the folder that owns their observability files. Explicit namespaces win.
+func csharpIdentifier(value string) string {
+	p := Pascal(Clean(value))
+	if p == "" {
+		return "Value"
+	}
+	if p[0] >= '0' && p[0] <= '9' {
+		return "V" + p
+	}
+	return p
+}
+func adjacentDotnetProject(c *contract.Contract) bool {
+	if filepath.Base(filepath.Dir(c.File)) != "observability" {
+		return false
+	}
+	projects, _ := filepath.Glob(filepath.Join(filepath.Dir(filepath.Dir(c.File)), "*.csproj"))
+	return len(projects) > 0
+}
+func hasDotnetTarget(c *contract.Contract) bool {
+	for _, target := range c.Generate {
+		if target.Lang == "dotnet" {
+			return true
+		}
+	}
+	return false
+}
+func dotnetRootCandidate(c *contract.Contract) bool {
+	dir := path.Dir(ContractPath(c))
+	return dir == "." || dir == "observability" || adjacentDotnetProject(c)
+}
+
+// DotnetNamespace uses discovered valid siblings only to disambiguate adjacent
+// project roots of the same service. Commands diagnose discovery errors separately.
 func DotnetNamespace(c *contract.Contract, namespace string) string {
 	if namespace != "" {
 		return namespace
 	}
-	ident := func(value string) string {
-		p := Pascal(Clean(value))
-		if p == "" {
-			return "Value"
+	cs := []*contract.Contract{c}
+	if adjacentDotnetProject(c) {
+		found, _ := contract.Discover(filepath.Dir(c.File))
+		for _, file := range found {
+			other, err := contract.Load(file)
+			if err == nil && len(other.Validate()) == 0 {
+				cs = append(cs, other)
+			}
 		}
-		if p[0] >= '0' && p[0] <= '9' {
-			return "V" + p
-		}
-		return p
 	}
-	ns := ident(c.Service)
+	return dotnetNamespaceFor(c, namespace, cs)
+}
+func dotnetNamespaceFor(c *contract.Contract, namespace string, cs []*contract.Contract) string {
+	if namespace != "" {
+		return namespace
+	}
+	ns := csharpIdentifier(c.Service)
 	dir := path.Dir(ContractPath(c))
-	// App/App.csproj beside App/observability is a service root too. A
-	// grouped contract below observability remains a feature contract.
-	if filepath.Base(filepath.Dir(c.File)) == "observability" {
-		projects, _ := filepath.Glob(filepath.Join(filepath.Dir(filepath.Dir(c.File)), "*.csproj"))
-		if len(projects) > 0 {
+	if dir == "." || dir == "observability" {
+		return ns + ".Signals"
+	}
+	if adjacentDotnetProject(c) {
+		candidates := 0
+		for _, other := range cs {
+			if other.Service == c.Service && dotnetRootCandidate(other) && (other == c || hasDotnetTarget(other)) {
+				candidates++
+			}
+		}
+		if candidates <= 1 {
 			return ns + ".Signals"
 		}
 	}
-	if dir != "." && dir != "observability" {
-		feature := path.Base(dir)
-		if feature == "observability" {
-			feature = path.Base(path.Dir(dir))
-		}
-		ns += "." + ident(feature)
+	feature := path.Base(dir)
+	if feature == "observability" {
+		feature = path.Base(path.Dir(dir))
 	}
-	return ns + ".Signals"
+	return ns + "." + csharpIdentifier(feature) + ".Signals"
 }
 
-// TargetClashes checks the resolved destinations of all contracts, independently
-// of which feature is being generated. No manifest reads or generation is needed.
+// signalFilename is the fixed per-contract file emitted by each language. A test
+// compares this list with each registered generator's actual outputs.
+func signalFilename(lang string) string {
+	return map[string]string{"go": "signals.go", "bun": "signals.ts", "dotnet": "Signals.g.cs", "dart": "signals.g.dart"}[lang]
+}
+
+// TargetClashes compares resolved folders and every full generated destination
+// across contracts. A single contract retains shared-folder/different-file support.
 func TargetClashes(cs []*contract.Contract) []string {
 	type owner struct {
 		file, lang string
-		contract   *contract.Contract
+		c          *contract.Contract
 	}
-	outputs := map[string]owner{}
+	folders := map[string]owner{}
+	files := map[string]owner{}
 	namespaces := map[string]owner{}
+	badFolders := map[string]bool{}
 	var issues []string
+	checkFile := func(c *contract.Contract, lang, name string) {
+		current := owner{ContractPath(c), lang, c}
+		destination, err := generatedDestination(name)
+		if err != nil {
+			issues = append(issues, fmt.Sprintf("[generate-file] contract %s: %v", current.file, err))
+			return
+		}
+		if previous, exists := files[destination]; exists && previous.c != c {
+			if !(lang != "" && previous.lang != "" && badFolders[filepath.Dir(destination)]) {
+				issues = append(issues, fmt.Sprintf("[generate-file-clash] contract %s and contract %s resolve to the same generated file %s", previous.file, current.file, destination))
+			}
+		} else {
+			files[destination] = current
+		}
+	}
 	for _, c := range cs {
+		for _, file := range []string{EventsFile, AggregationFile, KeepFile} {
+			checkFile(c, "", filepath.Join(filepath.Dir(c.File), file))
+		}
 		for index, target := range c.Generate {
 			current := owner{ContractPath(c), target.Lang, c}
-			destination := resolve(filepath.Join(Root(filepath.Dir(c.File)), filepath.FromSlash(target.Out)))
-			if previous, exists := outputs[destination]; exists && previous.contract != c {
-				issues = append(issues, fmt.Sprintf("[generate-out-clash] contract %s (%s) and contract %s (%s) resolve to the same out: folder %s", previous.file, previous.lang, current.file, current.lang, contract.RelPath(filepath.Join(destination, "."))))
+			written := filepath.Join(Root(filepath.Dir(c.File)), filepath.FromSlash(target.Out))
+			destination, err := resolvedPath(written)
+			if err != nil {
+				issues = append(issues, fmt.Sprintf("[generate-out] contract %s out: %q: %v", current.file, target.Out, err))
 			} else {
-				outputs[destination] = current
+				if previous, exists := folders[destination]; exists && previous.c != c {
+					issues = append(issues, fmt.Sprintf("[generate-out-clash] contract %s (%s) and contract %s (%s) resolve to the same out: folder %s", previous.file, previous.lang, current.file, current.lang, destination))
+					badFolders[destination] = true
+				} else {
+					folders[destination] = current
+				}
+				if file := signalFilename(target.Lang); file != "" {
+					checkFile(c, target.Lang, filepath.Join(written, file))
+				}
 			}
 			if target.Lang == "dotnet" {
-				ns, err := CanonicalDotnetNamespace(DotnetNamespace(c, target.Module))
+				ns, err := CanonicalDotnetNamespace(dotnetNamespaceFor(c, target.Module, cs))
 				if err != nil {
 					issues = append(issues, fmt.Sprintf("[generate-namespace] contract %s generate[%d].%v", current.file, index, err))
 					continue
 				}
-				if previous, exists := namespaces[ns]; exists && previous.contract != c {
-					issues = append(issues, fmt.Sprintf("[generate-namespace-clash] contract %s and contract %s resolve to the same .NET namespace %s", previous.file, current.file, ns))
+				if previous, exists := namespaces[ns]; exists && previous.c != c {
+					issues = append(issues, fmt.Sprintf("[generate-namespace-clash] contract %s and contract %s resolve to the same .NET namespace %s; set namespace: on one target", previous.file, current.file, ns))
 				} else {
 					namespaces[ns] = current
 				}

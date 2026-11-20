@@ -120,8 +120,10 @@ func TestPackageIdentityStopsAtProjectBoundary(t *testing.T) {
 					t.Fatal(err)
 				}
 				target := contract.Target{Lang: tc.lang, Out: "gen"}
-				if id, err := gen.PackageIdentity(root, target); err == nil {
-					t.Fatalf("manifest above project boundary was used: %q", id)
+				if id, err := gen.PackageIdentity(root, target); git && err == nil {
+					t.Fatalf("manifest above Git boundary was used: %q", id)
+				} else if !git && (err != nil || id == "") {
+					t.Fatalf("no-Git compatibility lookup failed: %q %v", id, err)
 				}
 				target.PackageID = "explicit"
 				if id, err := gen.PackageIdentity(root, target); err != nil || id != "explicit" {

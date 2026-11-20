@@ -827,6 +827,10 @@ Git root. An `out:` that leaves the Git root, or is absolute, is refused before 
 check is made on the written path and on its resolved path, so a symlink in `out:` cannot lead outside.
 With no `.git`, `out:` may not use `..` or a symlink that leads out of the project folder, and the header's contract path is relative to the folder that holds
 `observability/`, whatever the working directory (so `--check` from another folder sees the same headers).
+Each generated-file destination must be a regular file or absent. A symlink at the file itself,
+including a dangling symlink, is refused before any file is written. Directory aliases are allowed
+within the permitted root; full destinations are resolved through existing ancestors (including a
+missing tail) and compared across all contracts. Aliases to the same generated file are refused.
 
 Each `generate:` target gets its package identity from the nearest language manifest at or above `out:`:
 Go's `go.mod` module path, Bun's `package.json` name, Dart's `pubspec.yaml` name, or .NET's `.csproj`
@@ -836,8 +840,9 @@ multiple .NET projects at the same level need an explicit `package_id:`. Optiona
 manifest discovery (and can resolve computed MSBuild properties). It is the package's stable identity,
 not the feature name or the generated namespace. Manifest edits change generated registration too;
 `obs gen --check` detects that drift even when the contract hash stays the same.
-The walk stops at the Git root, or the project root without `.git`; a manifest above that boundary
-is never used. Set `package_id:` when the owning manifest is unavailable inside the project.
+The walk follows the resolved `out:` directory's ancestors and stops at the resolved Git root.
+Without `.git`, it continues upward as in 0.5, so a manifest above the project can be picked up.
+Use `package_id:` to pin the identity outside Git or when the owning manifest is unavailable.
 
 Each `generate:` target accepts optional `interfaces:` to override its dependency import. The merged-port
 registration behavior is now specified in [the corpus port design and four interfaces goals](https://github.com/ProtoDurian/diene-corpus/pull/116)
@@ -848,6 +853,9 @@ For .NET, an explicit `namespace:` wins. The default stays `<Service>.Signals` f
 `observability/contract.yaml`, including a service project such as `App/App.csproj` beside
 `App/observability/`; feature contracts use `<Service>.<Feature>.Signals`, where Feature is
 the PascalCase feature folder in either `<feature>/observability/` or `observability/<feature>/`.
+An adjacent `.csproj` keeps the root default only when it is the sole discovered valid .NET root
+candidate for that service. Several such projects (for example `src/Orders` and `src/Billing`)
+use `<Service>.<Feature>.Signals`; a remaining namespace clash tells you to set `namespace:` on one target.
 This lets two features of the same service compile in one assembly without editing a shared namespace.
 Namespaces must be dotted C# identifiers without whitespace around dots; invalid spellings name the
 `namespace:` key and contract. A leading `@` is canonicalized per segment when comparing namespaces.
@@ -900,6 +908,8 @@ feature before any signal; a hand-kept list or late/lazy registration does not s
 For feature contracts, the default .NET namespace now includes the feature folder. Root contracts keep
 their old default. Remove any cross-contract namespace or output-folder collision reported by `obs gen`
 or `obs check`; explicitly choosing one namespace for two contracts is refused too.
+If a 0.5 repository has a symlink at a generated-file path, replace that link with the real generated
+file before regenerating. Directory aliases within the allowed root may remain.
 
 The 58 compatibility goldens cover query, alerts and links output; they do not cover generated code.
 For an unchanged single-contract repository those command outputs remain byte-identical. Generated
