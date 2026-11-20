@@ -32,7 +32,8 @@ type IncidentOptions struct {
 type interval struct {
 	From, To time.Time
 	open     bool
-	// inferredStart: the history shows this span end but not start; From is only where the read began.
+	// inferredStart: the history shows this span end but not start; From is the first entry's own time,
+	// because retention may have dropped the real start (the span never claims firing before it).
 	inferredStart bool
 	// early: the span began before the report window (before clipping).
 	early bool
@@ -60,6 +61,9 @@ type FiredAlert struct {
 	ruleUID             string
 	spans               []interval
 	key                 string
+	// titles: every alert title seen for this identity (the ALERTS fallback can show one UID under
+	// several titles); the title-match uniqueness check counts each of them.
+	titles map[string]bool
 }
 
 // FiringObservation proves firing at a transition, without assuming a continuous span.
@@ -270,12 +274,10 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 			}
 		}
 		if !seen[inst] && alerting(a.PrevState) {
-			// the history starts after the alert began firing: it was already alerting when the read began
-			start := readFrom
-			if coverage.Incomplete {
-				start = at // missing earlier transitions cannot establish firing back to readFrom
-			}
-			open[inst] = &interval{From: start, inferredStart: true}
+			// The history starts after the alert began firing, but not when: retention or a capped read may
+			// have dropped the start. The span starts at this entry, the earliest time firing is observed, so
+			// the report never says it was firing before the window from this alone.
+			open[inst] = &interval{From: at, inferredStart: true}
 		}
 		seen[inst] = true
 		lastState[inst] = a.NewState
@@ -429,9 +431,10 @@ func fromAlertsSeries(ctx context.Context, c *Client, t *Target, from, to time.T
 		}
 		f := out[key]
 		if f == nil {
-			f = &FiredAlert{ID: id, Title: labels["alertname"], ruleUID: labels["grafana_rule_uid"], IDSource: source, SpanUnknown: true, TimeSource: "query_evaluation"}
+			f = &FiredAlert{ID: id, Title: labels["alertname"], ruleUID: labels["grafana_rule_uid"], IDSource: source, SpanUnknown: true, TimeSource: "query_evaluation", titles: map[string]bool{}}
 			out[key] = f
 		}
+		f.titles[labels["alertname"]] = true
 		return f
 	}
 	for _, m := range mats {
@@ -654,7 +657,13 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 	// unique in the source, so it never matches a repository rule.
 	firedTitles := map[string]int{}
 	for _, k := range ids {
-		firedTitles[fired[k].Title]++
+		if len(fired[k].titles) == 0 {
+			firedTitles[fired[k].Title]++
+			continue
+		}
+		for title := range fired[k].titles {
+			firedTitles[title]++
+		}
 	}
 	firedRule := map[string]bool{}
 	for _, k := range ids {

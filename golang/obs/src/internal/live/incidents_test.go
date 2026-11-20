@@ -333,7 +333,8 @@ func TestIncidentsNoTransitionInWindowDoesNotProveCurrentFiring(t *testing.T) {
 }
 
 func TestIncidentsFirstEntryNormalWithPreviousAlertingNeedsNoEarlierHistory(t *testing.T) {
-	// Grafana's own retention may hold no entry before the window: prevState says it was firing.
+	// Grafana's own retention may hold no entry before the window: prevState says it was firing, but not
+	// since when, so the report keeps the entry's own time and does not say it was firing at the window start.
 	dir := writeRepo(t)
 	rec := &recorder{}
 	now := t0.Add(time.Hour)
@@ -342,7 +343,7 @@ func TestIncidentsFirstEntryNormalWithPreviousAlertingNeedsNoEarlierHistory(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Fired) != 1 || res.Fired[0].Longest != 0 || !res.Fired[0].StartedBeforeWindow || res.Fired[0].Firings != 1 {
+	if len(res.Fired) != 1 || res.Fired[0].Longest != 0 || res.Fired[0].StartedBeforeWindow || res.Fired[0].Firings != 0 || !res.Fired[0].First.Equal(t0.Add(40*time.Minute)) {
 		t.Fatalf("%+v", res.Fired)
 	}
 }
@@ -387,7 +388,7 @@ func TestIncidentsRecoveringContinuesTheFiringSpan(t *testing.T) {
 	}
 }
 
-func TestIncidentsFirstFiringPreviousStateStartsAtLookback(t *testing.T) {
+func TestIncidentsFirstFiringPreviousStateStartsAtTheEntry(t *testing.T) {
 	for _, prev := range []string{"Alerting", "Recovering"} {
 		t.Run(prev, func(t *testing.T) {
 			srv := grafanaFake(t, &recorder{}, "["+ann("high-errors", "High error rate", prev, "Alerting", t0.Add(20*time.Minute))+"]", 0)
@@ -396,8 +397,8 @@ func TestIncidentsFirstFiringPreviousStateStartsAtLookback(t *testing.T) {
 				t.Fatal(err)
 			}
 			f := fired["high-errors"]
-			if f == nil || !f.StartedBeforeWindow || !f.First.Equal(t0) {
-				t.Fatalf("first prevState %s establishes firing at the lookback start: %+v", prev, f)
+			if f == nil || f.StartedBeforeWindow || !f.First.Equal(t0.Add(20*time.Minute)) {
+				t.Fatalf("first prevState %s proves firing at the entry, not since the lookback start: %+v", prev, f)
 			}
 		})
 	}
@@ -1282,7 +1283,7 @@ func TestIncidentsSynthesizedStartIsNotMeasured(t *testing.T) {
 		t.Fatalf("%+v", res.Fired)
 	}
 	f := res.Fired[0]
-	if f.Longest != 0 || f.SpanOpen || !f.StartedBeforeWindow || f.Firings != 1 {
+	if f.Longest != 0 || f.SpanOpen || f.StartedBeforeWindow || f.Firings != 0 {
 		t.Fatalf("the only span has an inferred start: longest_ns must be 0, not a measured duration: %+v", f)
 	}
 	if len(res.Windows) != 1 || res.Windows[0].Status != "caught" || len(res.Windows[0].Fired) != 1 {
@@ -1494,5 +1495,58 @@ func TestIncidentsTitleFallbackSkipsATitleAnotherFiredAlertShares(t *testing.T) 
 	}
 	if len(res.Fired) != 1 || !res.Fired[0].InRepo || res.Fired[0].ID != "high-errors" {
 		t.Fatalf("an uncontested title still matches: %+v", res.Fired)
+	}
+}
+
+// A fired UID seen under two titles counts for both: a name-only alert with either title then shares it,
+// so it never borrows the repository rule's runbook or incident by title.
+func TestIncidentsTitleFallbackCountsEveryTitleOfAFiredIdentity(t *testing.T) {
+	oldTitle := `{"alertname":"A previous title","grafana_rule_uid":"elsewhere"}`
+	newTitle := `{"alertname":"High error rate","grafana_rule_uid":"elsewhere"}`
+	nameOnly := `{"alertname":"High error rate"}`
+	grouped := fmt.Sprintf(`{"metric":%s,"values":[[%d,"1"]]},{"metric":%s,"values":[[%d,"1"]]},{"metric":%s,"values":[[%d,"1"]]}`, oldTitle, t0.Unix(), newTitle, t0.Add(time.Minute).Unix(), nameOnly, t0.Unix())
+	raw := fmt.Sprintf(`{"metric":%s,"values":[[%d,"1"]]}`, nameOnly, t0.Add(10*time.Minute).Unix())
+	srv := seriesServer(t, grouped, raw)
+	res, err := Incidents(context.Background(), &Client{}, &Target{Metrics: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: 7 * 24 * time.Hour, Windows: []Window{{From: t0, To: t0.Add(time.Hour)}}, Now: func() time.Time { return t0.Add(3 * time.Hour) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range res.Fired {
+		if f.InRepo || f.Runbook != "" || f.Incident != "" {
+			t.Fatalf("a title another fired identity carried (even as a later title) must not match: %+v", res.Fired)
+		}
+	}
+}
+
+// With lossless labels, a history whose first entry for an instance is a resolution does not show when
+// the firing began (retention may have dropped it): the report must not say it was already firing when
+// the window began. The resolution's own time stays the first observation and still catches the window.
+func TestIncidentsUnseenStartIsNotAlreadyFiringAtTheWindowStart(t *testing.T) {
+	a := map[string]string{"instance": "a"}
+	now := t0.Add(time.Hour)
+	at := t0.Add(40 * time.Minute)
+	body := twoInstanceHistory(historyRow("high-errors", 7, "High error rate", "Alerting", "Normal", at, a, nil))
+	srv := grafanaFake(t, &recorder{}, body, 0)
+	res, err := Incidents(context.Background(), &Client{}, &Target{Name: "prod", Grafana: srv.URL}, IncidentOptions{
+		Dir: writeRepo(t), Since: 30 * time.Minute, Now: func() time.Time { return now },
+		Windows: []Window{{From: t0.Add(30 * time.Minute), To: t0.Add(45 * time.Minute)}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Fired) != 1 {
+		t.Fatalf("%+v", res.Fired)
+	}
+	f := res.Fired[0]
+	if f.StartedBeforeWindow || !f.First.Equal(at) || f.Longest != 0 {
+		t.Fatalf("an unseen start is not 'already firing at the window start'; first is the observation %s: %+v", at, f)
+	}
+	if len(res.Windows) != 1 || res.Windows[0].Status != "caught" {
+		t.Fatalf("the observation still catches the window: %+v", res.Windows)
+	}
+	var out strings.Builder
+	res.Print(&out)
+	if strings.Contains(out.String(), "already firing when the window began") {
+		t.Fatalf("text claims an unseen start:\n%s", out.String())
 	}
 }
