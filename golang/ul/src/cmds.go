@@ -27,6 +27,10 @@ func load(g *globals, e *env) (*loaded, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A dh given as a path is relative to where ul was started, not to --root.
+	if strings.Contains(opts.dh, "/") && !filepath.IsAbs(opts.dh) {
+		opts.dh = filepath.Join(e.cwd, opts.dh)
+	}
 	root, err := resolveRoot(g.root, e.cwd)
 	if err != nil {
 		if g.root != "" {

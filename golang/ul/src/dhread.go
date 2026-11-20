@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,6 +31,10 @@ type dhProblem struct {
 }
 
 type dhDoc struct {
+	AST    int `json:"ast"`
+	Banner *struct {
+		Text []mdInline `json:"text"`
+	} `json:"banner"`
 	Source   string      `json:"source"`
 	Blocks   []dhBlock   `json:"blocks"`
 	Problems []dhProblem `json:"problems"`
@@ -86,7 +91,27 @@ type mdInline struct {
 // runDh reads pages (paths relative to root) through the dh command. It prints one JSON value
 // per page, in order. dh stops at the first page that does not parse and names it as
 // path:line: message; that page becomes a UL410 problem and the rest are read again.
+// dhBatch is the most pages one dh run is given, so the argument list stays far under the limit of
+// any system.
+const dhBatch = 300
+
 func runDh(dh, root string, pages []string) (map[string]*dhDoc, []Problem, error) {
+	docs := map[string]*dhDoc{}
+	var probs []Problem
+	for len(pages) > 0 {
+		n := min(dhBatch, len(pages))
+		d, p, err := runDhBatch(dh, root, pages[:n])
+		if err != nil {
+			return nil, nil, err
+		}
+		maps.Copy(docs, d)
+		probs = append(probs, p...)
+		pages = pages[n:]
+	}
+	return docs, probs, nil
+}
+
+func runDhBatch(dh, root string, pages []string) (map[string]*dhDoc, []Problem, error) {
 	docs := map[string]*dhDoc{}
 	var probs []Problem
 	rest := slices.Clone(pages)
@@ -118,7 +143,13 @@ func runDh(dh, root string, pages []string) (map[string]*dhDoc, []Problem, error
 			if err := dec.Decode(d); err != nil {
 				return nil, nil, fmt.Errorf("dh json printed fewer pages than it was given, or something that is not a page (%s): %v", p, err)
 			}
+			if d.AST != 1 {
+				return nil, nil, fmt.Errorf("dh json printed something that is not a page for %s (no \"ast\": 1)", p)
+			}
 			docs[p] = d
+		}
+		if dec.More() {
+			return nil, nil, fmt.Errorf("dh json printed more pages than it was given")
 		}
 		break
 	}
@@ -152,6 +183,11 @@ func dhSegs(d *dhDoc, rel string) ([]Seg, []Problem) {
 	}
 	lines := strings.Split(d.Source, "\n")
 	r := &dhReader{lines: lines, rel: rel}
+	if d.Banner != nil {
+		var sb segBuilder
+		inlineText(d.Banner.Text, &sb, 1)
+		r.add(&sb, 1, 20)
+	}
 	r.blocks(d.Blocks, len(lines))
 	return r.segs, append(probs, r.probs...)
 }
@@ -161,20 +197,33 @@ type dhReader struct {
 	rel   string
 	segs  []Seg
 	probs []Problem
+	seen  map[string]int
 }
 
 func (r *dhReader) add(sb *segBuilder, from, to int) {
 	if s, ok := sb.seg(); ok {
 		s.breaks = nil
 		s.src, s.from, s.to = r.lines, from, to
-		r.segs = append(r.segs, s)
+		r.push(s)
 	}
+}
+
+// push adds a run, counting the earlier runs of the page that hold the same text, so a second
+// identical paragraph is found on its own line.
+func (r *dhReader) push(s Seg) {
+	if r.seen == nil {
+		r.seen = map[string]int{}
+	}
+	k := fmt.Sprintf("%d|%s", s.from, strings.ToLower(s.Text))
+	s.occ = r.seen[k]
+	r.seen[k]++
+	r.segs = append(r.segs, s)
 }
 
 // text adds a short text a part holds (a title, a note, a label) that sits on line.
 func (r *dhReader) text(s string, line, to int) {
 	if strings.TrimSpace(s) != "" {
-		r.segs = append(r.segs, Seg{Text: s, src: r.lines, from: line, to: max(to, line), exact: true})
+		r.push(Seg{Text: s, src: r.lines, from: line, to: max(to, line), exact: true})
 	}
 }
 
@@ -212,7 +261,7 @@ func (r *dhReader) block(b dhBlock, to int) {
 		for _, s := range mdSegs(body, 0) {
 			s.breaks = nil
 			s.src, s.from, s.to = r.lines, from, to
-			r.segs = append(r.segs, s)
+			r.push(s)
 		}
 	}
 	switch b.Type {
@@ -268,7 +317,7 @@ func (r *dhReader) block(b dhBlock, to int) {
 				r.text(s.Title, b.Line, to)
 				for _, m := range mermaidSegs(s.Src, 1) {
 					m.breaks, m.src, m.from, m.to = nil, r.lines, b.Line, to
-					r.segs = append(r.segs, m)
+					r.push(m)
 				}
 			}
 		}
@@ -368,7 +417,9 @@ func inlineText(in []mdInline, sb *segBuilder, line int) {
 			sb.add(x.V, line)
 		case "strong", "em", "del", "link", "coderef":
 			inlineText(x.C, sb, line)
-		default: // code, br, img, kbd, mouse, ref
+		case "br":
+			sb.space()
+		default: // code, img, kbd, mouse, ref
 			sb.gap()
 		}
 	}

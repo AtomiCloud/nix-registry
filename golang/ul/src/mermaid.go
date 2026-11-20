@@ -30,6 +30,9 @@ func mermaidSegs(src string, first int) []Seg {
 				continue
 			}
 		}
+		if kind == "flow" && skipFlow.MatchString(t) {
+			continue // styling and click directives hold no label
+		}
 		// quoted labels: "text"
 		rest := t
 		for _, m := range quotedRe.FindAllStringSubmatch(t, -1) {

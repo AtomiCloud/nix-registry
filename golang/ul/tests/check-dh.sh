@@ -6,9 +6,13 @@ set -euo pipefail
 cd "$(dirname "$0")/../src"
 dh="${DH:-dh}"
 rc=0
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
 while read -r page; do
   [ -f "$page.dherr" ] && continue
-  if ! diff <("$dh" json "$page" | jq .) "$page.dhjson" >/dev/null; then
+  # a file, not a pipe: dh 0.1.0 cuts a large page short when stdout is a pipe
+  "$dh" json "$page" >"$tmp"
+  if ! diff <(jq . "$tmp") "$page.dhjson" >/dev/null; then
     echo "STALE $page: run tests/record-dh.sh"
     rc=1
   fi

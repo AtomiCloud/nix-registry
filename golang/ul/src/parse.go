@@ -314,7 +314,7 @@ func (p *parser) allowedExtra() string {
 }
 
 // langRe is the shape of a language code: a BCP 47 tag such as es, pt or zh-Hans.
-var langRe = regexp.MustCompile(`^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$`)
+var langRe = regexp.MustCompile(`(?i)^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$`)
 
 // translations reads the translations field: a mapping of language code to one fixed term
 // (UL110 refuses anything else).

@@ -8,7 +8,7 @@ import (
 func segTexts(segs []Seg) string {
 	var parts []string
 	for _, s := range segs {
-		parts = append(parts, strings.TrimSpace(s.Text))
+		parts = append(parts, strings.TrimSpace(strings.ReplaceAll(s.Text, gapMark, " ")))
 	}
 	return strings.Join(parts, " | ")
 }

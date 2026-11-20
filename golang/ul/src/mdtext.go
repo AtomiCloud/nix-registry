@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"html"
 	"sort"
 	"strings"
 
@@ -98,9 +99,9 @@ func inlines(n ast.Node, src []byte, lineOf func(int) int, sb *segBuilder) {
 	for c := n.FirstChild(); c != nil; c = c.NextSibling() {
 		switch v := c.(type) {
 		case *ast.Text:
-			sb.add(string(v.Segment.Value(src)), lineOf(v.Segment.Start))
+			sb.add(html.UnescapeString(string(v.Segment.Value(src))), lineOf(v.Segment.Start))
 			if v.SoftLineBreak() || v.HardLineBreak() {
-				sb.gap()
+				sb.space()
 			}
 		case *ast.String:
 			sb.add(string(v.Value), sb.lastLine())

@@ -136,3 +136,42 @@ func TestDhOnlyWhenNeeded(t *testing.T) {
 		t.Fatalf("UL_DH: exit %d: %s", code, errs)
 	}
 }
+
+// Two identical paragraphs give two hits on their own lines, and the banner is prose too.
+func TestDhRepeatedProseAndBanner(t *testing.T) {
+	dir := fixture(t, "dh/repeat")
+	probs, _, _ := checkLines(t, newEnv(t, dir), dir)
+	const page = "docs/domain/kitchen/implementation/repeat.dh.md"
+	want := []string{page + ":9: UL403", page + ":12: UL403", page + ":16: UL403"}
+	if strings.Join(probs, "|") != strings.Join(want, "|") {
+		t.Fatalf("got %v\nwant %v", probs, want)
+	}
+}
+
+// What dh prints is checked: an object that is not a page, or too few or too many pages, is
+// exit 2, never a page silently cleared.
+func TestDhOutputValidated(t *testing.T) {
+	for name, rec := range map[string]string{"empty object": "{}", "no pages": "", "two pages": "{\"ast\":1}{\"ast\":1}"} {
+		dir := fixture(t, "dh/repeat")
+		rp := filepath.Join(dir, "docs/domain/kitchen/implementation/repeat.dh.md.dhjson")
+		if err := os.WriteFile(rp, []byte(rec), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		code, _, errs := newEnv(t, dir).ul("check", "--root", dir, "--dh", useFakeDh(t))
+		if code != 2 || !strings.Contains(errs, "dh json") {
+			t.Errorf("%s: exit %d: %s", name, code, errs)
+		}
+	}
+}
+
+// A --dh path is relative to where ul was started, not to --root.
+func TestDhRelativePath(t *testing.T) {
+	dir := fixture(t, "dh/repeat")
+	bin := useFakeDh(t)
+	cwd := filepath.Dir(bin)
+	te := newEnv(t, cwd)
+	code, _, errs := te.ul("check", "--root", dir, "--dh", "./"+filepath.Base(bin))
+	if code != 1 {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+}

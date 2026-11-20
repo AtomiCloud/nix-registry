@@ -16,6 +16,7 @@ type Seg struct {
 	// own line is looked for in these source lines.
 	src      []string
 	from, to int // 1-based, inclusive
+	occ      int // how many earlier runs of the page hold the same text
 	// exact: Text is written in the source as it is (a title, a label), so it anchors whole.
 	exact bool
 }
@@ -42,10 +43,14 @@ func (s *Seg) lineAt(off int, matched string) int {
 		a = strings.ToLower(strings.TrimSpace(s.Text))
 	}
 	if a != "" {
+		seen := 0
 		for l := s.from; l <= s.to && l <= len(s.src); l++ {
 			if strings.Contains(strings.ToLower(s.src[l-1]), a) {
-				from = l
-				break
+				if seen == s.occ {
+					from = l
+					break
+				}
+				seen++
 			}
 		}
 	}
@@ -80,10 +85,14 @@ func (sb *segBuilder) add(text string, line int) {
 
 // gap puts a break no word crosses where code, a link target or other data was left out.
 func (sb *segBuilder) gap() {
-	if s := sb.b.String(); s != "" && !strings.HasSuffix(s, " ") {
-		sb.b.WriteByte(' ')
+	if s := sb.b.String(); s != "" && !strings.HasSuffix(s, gapMark) {
+		sb.b.WriteString(gapMark)
 	}
 }
+
+// gapMark stands where code or data was left out. It is not a space, so a name written as
+// "Frying `x` pan" is not read as the name "Frying pan".
+const gapMark = "\uFFFC"
 
 func (sb *segBuilder) seg() (Seg, bool) {
 	t := strings.TrimSpace(sb.b.String())
@@ -142,4 +151,11 @@ func anchorOf(text string) string {
 		}
 	}
 	return t
+}
+
+// space is a line break inside a paragraph: it reads as the one space it is.
+func (sb *segBuilder) space() {
+	if s := sb.b.String(); s != "" && !strings.HasSuffix(s, " ") && !strings.HasSuffix(s, gapMark) {
+		sb.b.WriteByte(' ')
+	}
 }

@@ -252,3 +252,113 @@ func TestSpeedDocs(t *testing.T) {
 		t.Fatalf("ul check took %v on 1,000 words and 100 pages; the limit is one second", worst)
 	}
 }
+
+func cleanWith(t *testing.T, files map[string]string) string {
+	t.Helper()
+	dir := fixture(t, "docs/clean")
+	writeTree(t, dir, files)
+	return dir
+}
+
+const kitchenNSLine = "namespaces: [example.org/cooking/kitchen]"
+
+// UL405 flags a listed namespace the page never uses, except an engineering standard's.
+func TestUnusedNamespaceFlag(t *testing.T) {
+	dir := cleanWith(t, map[string]string{
+		"docs/a.md":               "---\ntitle: A\nnamespaces: [example.org/cooking/kitchen, example.org/cooking/pantry]\n---\n\nThe Frying pan here, nothing of the pantry.\n",
+		"docs/domain/std/UL.yaml": "namespace: example.org/engineering/standards/std\npremise: A standard\nlanguage:\n  Rule:\n    desc: A rule.\n",
+		"docs/b.md":               "---\ntitle: B\nnamespaces: [example.org/engineering/standards/std]\n---\n\nNo rule words.\n",
+	})
+	code, out, errs := docsCheck(t, dir)
+	if code != 0 || out != "" {
+		t.Fatalf("exit %d\n%s%s", code, out, errs)
+	}
+	if !strings.Contains(errs, "docs/a.md:3: UL405 flag: namespaces lists example.org/cooking/pantry") || strings.Contains(errs, "docs/b.md") {
+		t.Fatalf("flags:\n%s", errs)
+	}
+}
+
+// UL406 flags an alias that another namespace defines, retired words included.
+func TestSameWordFlagAliasAndRetired(t *testing.T) {
+	dir := cleanWith(t, map[string]string{"docs/domain/pantry/UL.yaml": "namespace: example.org/cooking/pantry\npremise: Pantry\nlanguage:\n  Shelf:\n    desc: A board.\n    aliases: [Fry pan]\n  Old:\n    desc: Retired one.\n    status: retired\n    aliases: [Skillet]\n"})
+	_, _, errs := docsCheck(t, dir)
+	if !strings.Contains(errs, `UL406 flag: "Fry pan" is also defined in`) || !strings.Contains(errs, `UL406 flag: "Skillet" is also defined in`) {
+		t.Fatalf("flags:\n%s", errs)
+	}
+}
+
+// The intro of an overview.yaml is prose against the context's own namespace.
+func TestOverviewIntro(t *testing.T) {
+	dir := cleanWith(t, map[string]string{"docs/domain/kitchen/overview.yaml": "intro: The Frying pan and the Oven.\n"})
+	if code, out, errs := docsCheck(t, dir); code != 0 {
+		t.Fatalf("exit %d\n%s%s", code, out, errs)
+	}
+	writeTree(t, dir, map[string]string{"docs/domain/kitchen/overview.yaml": "intro: |\n  First line.\n  A griddle here.\n"})
+	code, out, _ := docsCheck(t, dir)
+	if code != 1 || !strings.Contains(out, `docs/domain/kitchen/overview.yaml:3: UL403 avoided word "griddle"`) {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+}
+
+// A translation is read for its source whether or not its front matter has namespaces.
+func TestTranslationWithoutNamespaces(t *testing.T) {
+	dir := fixture(t, "docs/clean")
+	rewrite(t, dir, clnTr, "namespaces:\n  - example.org/cooking/kitchen\n", "")
+	rewrite(t, dir, clnTr, "El horno (Oven)", "La cocina (Oven)")
+	code, out, _ := docsCheck(t, dir)
+	if code != 1 || !strings.Contains(out, "UL502") {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+}
+
+// A language tag is matched ignoring case.
+func TestLanguageTagCase(t *testing.T) {
+	dir := fixture(t, "docs/clean")
+	rewrite(t, dir, clnTr, "lang: es", "lang: ES")
+	if code, out, errs := docsCheck(t, dir); code != 0 {
+		t.Fatalf("exit %d\n%s%s", code, out, errs)
+	}
+}
+
+// What a reader reads is what is matched: a name split by code is not the name, an entity is the
+// letter it stands for, a mermaid label is read and a mermaid click target is not.
+func TestReaderEdgeCases(t *testing.T) {
+	dir := cleanWith(t, map[string]string{
+		"docs/split.md":  "---\ntitle: S\nnamespaces: []\n---\n\nFrying `x` pan is not the name.\n",
+		"docs/entity.md": "---\ntitle: E\nnamespaces: " + kitchenNSLine[len("namespaces: "):] + "\n---\n\nA gr&#105;ddle.\n",
+		"docs/lines.md":  "---\ntitle: L\nnamespaces: []\n---\n\nThe Frying\npan is one name over a line break.\n",
+		"docs/mer.md":    "---\ntitle: M\nnamespaces: [example.org/cooking/kitchen]\n---\n\n```mermaid\nflowchart LR\n  a[\"A griddle\"] --> b[Oven]\n  click b \"https://x.test/griddle\"\n```\n",
+	})
+	code, out, _ := docsCheck(t, dir)
+	if code != 1 {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+	for _, want := range []string{
+		"docs/entity.md:6: UL403",
+		`docs/lines.md:6: UL402 "Frying pan"`,
+		"docs/mer.md:8: UL403",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in\n%s", want, out)
+		}
+	}
+	for _, not := range []string{"docs/split.md", "docs/mer.md:9"} {
+		if strings.Contains(out, not) {
+			t.Errorf("unexpected %q in\n%s", not, out)
+		}
+	}
+}
+
+// Which namespace of a page's list comes first does not decide UL409.
+func TestConceptOrderIndependent(t *testing.T) {
+	dir := cleanWith(t, map[string]string{
+		"docs/domain/pantry/UL.yaml": "namespace: example.org/cooking/pantry\npremise: Pantry\nlanguage:\n  Fry pan:\n    desc: The pantry's own pan.\n",
+		"docs/a.md":                  "---\ntitle: A\nconcept: Frying pan\nnamespaces: [example.org/cooking/kitchen]\n---\n\nThe Frying pan.\n",
+		"docs/b.md":                  "---\ntitle: B\nconcept: Fry pan\nnamespaces: [example.org/cooking/pantry, example.org/cooking/kitchen]\n---\n\nThe Fry pan.\n",
+	})
+	// the pantry defines its own Fry pan; the kitchen's alias is also Fry pan
+	code, out, _ := docsCheck(t, dir)
+	if code != 1 || !strings.Contains(out, "docs/b.md:3: UL409") {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+}

@@ -44,7 +44,7 @@ func (l *loaded) translationProblems(f *Final, pages []*page, uses map[string]*p
 			case modeFixed:
 				term := ""
 				for _, tr := range u.fe.E.Translations {
-					if tr.Lang == t.tr.lang {
+					if strings.EqualFold(tr.Lang, t.tr.lang) {
 						term = tr.Term
 					}
 				}
