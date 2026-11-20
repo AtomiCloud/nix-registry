@@ -984,6 +984,11 @@ Not built, because obs cannot know them: the `landscape` and `module` labels (ea
 
 Both are read with the same loader every command uses for obs.yaml (`internal/obsyaml`), so the obs.yaml that loader finds for a
 folder is the one the platform comes from.
+With one `observability/` folder grouped by feature (`observability/<feature>/contract.yaml`), a feature folder with no obs.yaml of its
+own reads the nearest enclosing `observability/obs.yaml`, so `platform:` is written once in the top file and a flat file in
+`observability/<feature>/` takes it from there (the feature's own obs.yaml wins). With `<feature>/observability/` there is no
+fallback to a folder above: write `platform:` in that folder's obs.yaml, or a flat file there is refused (`flat-alert-identity`).
+(tests: `internal/files/flat_inherit_test.go`, `tests/flat.sh`).
 
 A flat file with either value unknown is refused (`flat-alert-identity`) and the message says which file and key to write.
 

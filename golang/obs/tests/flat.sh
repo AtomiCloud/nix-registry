@@ -127,6 +127,31 @@ fresh longuid
 mv "$work/longuid/observability/alerts/charge-errors" "$work/longuid/observability/alerts/a-slug-that-is-too-long-for-a-uid"
 run query --static --dir "$work/longuid/observability" --seed "$seed" --base "$base"
 expect "uid over 40 characters: red" 1 "[flat-alert-uid-length]" "payments-checkout-a-slug-that-is-too-long-for-a-uid-critical"
+# ---- where platform comes from in the two layouts ---------------------------------------------------
+# (i) observability/<feature>/ reads the nearest enclosing observability/obs.yaml: platform only in the top file.
+rm -rf "${work:?}/lay1"
+mkdir -p "$work/lay1/.git" "$work/lay1/observability/checkout"
+echo ref >"$work/lay1/.git/HEAD"
+echo "platform: payments" >"$work/lay1/observability/obs.yaml"
+cp "$fx/ok-flat-alert/observability/contract.yaml" "$work/lay1/observability/checkout/contract.yaml"
+cp -R "$fx/ok-flat-alert/observability/alerts" "$work/lay1/observability/checkout/alerts"
+run query --static --dir "$work/lay1/observability/checkout" --seed "$seed" --base "$base"
+expect "layout (i): platform from the top observability/obs.yaml" 0 "obs query --static: ok: 2 queries" \
+  "rule payments-checkout-error-logs-warning query A"
+# (ii) <feature>/observability/ never falls back: no platform there is a finding that says where to write it.
+rm -rf "${work:?}/lay2"
+mkdir -p "$work/lay2/.git" "$work/lay2/observability" "$work/lay2/Checkout/observability"
+echo ref >"$work/lay2/.git/HEAD"
+echo "platform: payments" >"$work/lay2/observability/obs.yaml" # a decoy above: never read
+cp "$fx/ok-flat-alert/observability/contract.yaml" "$work/lay2/Checkout/observability/contract.yaml"
+cp -R "$fx/ok-flat-alert/observability/alerts" "$work/lay2/Checkout/observability/alerts"
+run query --static --dir "$work/lay2/Checkout/observability" --seed "$seed" --base "$base"
+expect "layout (ii): no fallback, flat-alert-identity names where to write platform" 1 "FAIL $crit" "[flat-alert-identity]" \
+  "$(platform:) in <observability>/obs.yaml" ": FAILED:"
+echo "platform: payments" >"$work/lay2/Checkout/observability/obs.yaml"
+run query --static --dir "$work/lay2/Checkout/observability" --seed "$seed" --base "$base"
+expect "layout (ii): platform written in the feature's own obs.yaml" 0 "obs query --static: ok: 2 queries"
+
 # for: 1d is a duration for every command: the flat check and obs alerts judge it the same way
 fresh for1d
 sed -i "s|^for: 5m|for: 1d|" "$work/for1d/observability/$crit"

@@ -1,0 +1,56 @@
+package files
+
+import (
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+// Where platform comes from for a flat tier file follows obs.yaml's own lookup (obsyaml.Load):
+// layout (i), observability/<feature>/, reads the nearest enclosing observability/obs.yaml;
+// layout (ii), <feature>/observability/, never falls back to a folder above it.
+func TestFlatPlatformInheritedInLayoutOne(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, ".git/HEAD", "ref")
+	write(t, root, "observability/obs.yaml", "platform: tracker\n") // platform only here
+	feature := filepath.Join(root, "observability", "friend")
+	write(t, feature, "contract.yaml", "service: zinc\n")
+	write(t, feature, "alerts/q/critical.yaml", retryQueueFlat)
+	s, err := Load(feature)
+	if err != nil || len(s.Problems) != 0 || len(s.Rules) != 1 {
+		t.Fatalf("%v %+v", err, s.Problems)
+	}
+	if uid := s.Rules[0].Definition.UID; uid != "tracker-zinc-q-critical" {
+		t.Fatalf("uid %q: platform tracker must come from the top observability/obs.yaml", uid)
+	}
+	// the feature's own obs.yaml wins over the top one
+	write(t, feature, "obs.yaml", "platform: other\n")
+	s, _ = Load(feature)
+	if len(s.Rules) != 1 || s.Rules[0].Definition.UID != "other-zinc-q-critical" {
+		t.Fatalf("own obs.yaml must win: %+v %+v", s.Rules, s.Problems)
+	}
+}
+
+func TestFlatPlatformMissingInLayoutTwoNamesWhereToWriteIt(t *testing.T) {
+	root := t.TempDir()
+	write(t, root, ".git/HEAD", "ref")
+	// a decoy above: layout (ii) never reads it
+	write(t, root, "observability/obs.yaml", "platform: tracker\n")
+	feature := filepath.Join(root, "App", "Friend", "observability")
+	write(t, feature, "contract.yaml", "service: zinc\n")
+	write(t, feature, "alerts/q/critical.yaml", retryQueueFlat)
+	s, err := Load(feature)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(s.Rules) != 0 || len(s.Problems) != 1 || s.Problems[0].Rule != "flat-alert-identity" ||
+		!strings.Contains(s.Problems[0].Msg, "`platform:` in <observability>/obs.yaml") || s.Problems[0].File != "alerts/q/critical.yaml" {
+		t.Fatalf("layout (ii) never falls back: %+v %+v", s.Rules, s.Problems)
+	}
+	// writing it where the message says makes the rule build
+	write(t, feature, "obs.yaml", "platform: tracker\n")
+	s, _ = Load(feature)
+	if len(s.Rules) != 1 || s.Rules[0].Definition.UID != "tracker-zinc-q-critical" {
+		t.Fatalf("%+v %+v", s.Rules, s.Problems)
+	}
+}
