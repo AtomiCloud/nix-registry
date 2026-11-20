@@ -1,0 +1,19 @@
+{
+  "schema": "ul/v1",
+  "root": "/ROOT",
+  "problems": [],
+  "flags": [
+    {
+      "code": "UL404",
+      "file": "docs/domain/kitchen/index.md",
+      "line": 10,
+      "message": "\"Oven\" is defined in both example.org/cooking/kitchen and example.org/cooking/pantry, which the page lists"
+    },
+    {
+      "code": "UL406",
+      "file": "docs/domain/pantry/UL.yaml",
+      "line": 6,
+      "message": "\"Oven\" is also defined in example.org/cooking/kitchen; one repo should not define a word twice"
+    }
+  ]
+}

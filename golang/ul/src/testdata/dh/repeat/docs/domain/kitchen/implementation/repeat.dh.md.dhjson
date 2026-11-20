@@ -1,0 +1,89 @@
+{
+  "ast": 1,
+  "format": 8,
+  "source": "---\ntitle: Repeat\nconcept: repeat\ndescription: Two identical paragraphs, and a banner.\nnamespaces:\n  - example.org/cooking/kitchen\nbanner:\n  kind: info\n  text: A banner with a griddle.\n---\n\nUse the Frying pan, never a griddle.\n\nSome other text.\n\nUse the Frying pan, never a griddle.\n\n```terminal\n$ echo hi\n```\n",
+  "path": "docs/domain/kitchen/implementation/repeat.dh.md",
+  "frontMatter": {
+    "title": "Repeat",
+    "concept": "repeat",
+    "description": "Two identical paragraphs, and a banner.",
+    "namespaces": [
+      "example.org/cooking/kitchen"
+    ],
+    "banner": {
+      "kind": "info",
+      "text": "A banner with a griddle."
+    }
+  },
+  "title": "Repeat",
+  "banner": {
+    "kind": "info",
+    "text": [
+      {
+        "t": "text",
+        "v": "A banner with a griddle."
+      }
+    ]
+  },
+  "blocks": [
+    {
+      "type": "markdown",
+      "line": 11,
+      "md": [
+        {
+          "t": "p",
+          "c": [
+            {
+              "t": "text",
+              "v": "Use the Frying pan, never a griddle."
+            }
+          ]
+        },
+        {
+          "t": "p",
+          "c": [
+            {
+              "t": "text",
+              "v": "Some other text."
+            }
+          ]
+        },
+        {
+          "t": "p",
+          "c": [
+            {
+              "t": "text",
+              "v": "Use the Frying pan, never a griddle."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "terminal",
+      "id": null,
+      "line": 18,
+      "attrs": {},
+      "llm": "```terminal\n$ echo hi\n```",
+      "llmKind": "as-is",
+      "steps": [
+        {
+          "title": "",
+          "lines": [
+            {
+              "k": "cmd",
+              "prompt": "$",
+              "text": "echo hi"
+            }
+          ]
+        }
+      ],
+      "prompt": "$",
+      "title": null
+    }
+  ],
+  "headings": [],
+  "problems": [],
+  "highlighted": false,
+  "llm": "---\ntitle: Repeat\nconcept: repeat\ndescription: Two identical paragraphs, and a banner.\nnamespaces:\n  - example.org/cooking/kitchen\nbanner:\n  kind: info\n  text: A banner with a griddle.\nsource: docs/domain/kitchen/implementation/repeat.dh.md\n---\n<!-- Made by dh llm from the source; nobody edits this file. -->\n\nUse the Frying pan, never a griddle.\n\nSome other text.\n\nUse the Frying pan, never a griddle.\n\n```terminal\n$ echo hi\n```\n"
+}

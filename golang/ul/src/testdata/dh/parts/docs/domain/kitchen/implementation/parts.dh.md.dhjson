@@ -1,0 +1,401 @@
+{
+  "ast": 1,
+  "format": 8,
+  "source": "---\ntitle: Parts\nconcept: parts\ndescription: One word, griddle, in every place a part can hold it.\nnamespaces:\n  - example.org/cooking/kitchen\n---\n\nA paragraph with a griddle (line 9).\n\n:::tabs\n### The griddle tab\n\nTab body with a griddle (line 15).\n\n### Second tab\n\nNo bad word here.\n:::\n\n:::accordion\n### Accordion griddle title\n\nAccordion body with a griddle (line 25).\n:::\n\n:::human\nA human-only segment with a griddle (line 29).\n:::\n\n:::llm\nAn LLM text with a griddle (line 33).\n:::\n\n```terminal title=\"Terminal griddle title\" id=griddle\n@step Terminal step griddle\n$ echo griddle\ngriddle\n```\n\n```filetree\n@step Tree step griddle\nsrc/\n  griddle.go  # a note with a griddle\n```\n\n```chart\nkind: bar\ntitle: Chart griddle title\nx: { label: dish, values: [griddle, wok] }\ny: { label: count }\nseries:\n  - name: Series griddle name\n    data: [3, 4]\n```\n\n```mermaid\nflowchart LR\n  griddle1[\"Mermaid griddle label\"] --> wok1[\"Wok\"]\n```\n\n```animation\npill a \"Animation griddle label\"\npill b \"Wok\"\na -> b \"link\"\n@step Animation griddle caption\nsend \"go\" a -> b\n@step Second caption, no bad word\nnote b: a note with a griddle\n```\n\n```tierlist title=\"Tier griddle title\"\nS: Wok\nA: Tier griddle item\n```\n\n```alignment title=\"Which pan?\"\nx: low effort .. high effort\ny: high impact .. low impact\nlow effort / high impact \"Cell griddle label\": Wok\n```\n",
+  "path": "docs/domain/kitchen/implementation/parts.dh.md",
+  "frontMatter": {
+    "title": "Parts",
+    "concept": "parts",
+    "description": "One word, griddle, in every place a part can hold it.",
+    "namespaces": [
+      "example.org/cooking/kitchen"
+    ]
+  },
+  "title": "Parts",
+  "banner": null,
+  "blocks": [
+    {
+      "type": "markdown",
+      "line": 8,
+      "md": [
+        {
+          "t": "p",
+          "c": [
+            {
+              "t": "text",
+              "v": "A paragraph with a griddle (line 9)."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "tabs",
+      "items": [
+        {
+          "title": "The griddle tab",
+          "id": "dh-tabs-11-0",
+          "body": [
+            {
+              "type": "markdown",
+              "line": 13,
+              "md": [
+                {
+                  "t": "p",
+                  "c": [
+                    {
+                      "t": "text",
+                      "v": "Tab body with a griddle (line 15)."
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Second tab",
+          "id": "dh-tabs-11-1",
+          "body": [
+            {
+              "type": "markdown",
+              "line": 17,
+              "md": [
+                {
+                  "t": "p",
+                  "c": [
+                    {
+                      "t": "text",
+                      "v": "No bad word here."
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "id": null,
+      "line": 11,
+      "attrs": {},
+      "llm": "### The griddle tab\n\nTab body with a griddle (line 15).\n\n### Second tab\n\nNo bad word here.",
+      "llmKind": "unwrap"
+    },
+    {
+      "type": "accordion",
+      "items": [
+        {
+          "title": "Accordion griddle title",
+          "id": "dh-accordion-21-0",
+          "body": [
+            {
+              "type": "markdown",
+              "line": 23,
+              "md": [
+                {
+                  "t": "p",
+                  "c": [
+                    {
+                      "t": "text",
+                      "v": "Accordion body with a griddle (line 25)."
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "id": null,
+      "line": 21,
+      "attrs": {},
+      "llm": "### Accordion griddle title\n\nAccordion body with a griddle (line 25).",
+      "llmKind": "unwrap"
+    },
+    {
+      "type": "human",
+      "body": [
+        {
+          "type": "markdown",
+          "line": 28,
+          "md": [
+            {
+              "t": "p",
+              "c": [
+                {
+                  "t": "text",
+                  "v": "A human-only segment with a griddle (line 29)."
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "id": null,
+      "line": 27,
+      "attrs": {},
+      "llm": "An LLM text with a griddle (line 33).",
+      "llmKind": "text"
+    },
+    {
+      "type": "terminal",
+      "id": "dh-griddle",
+      "line": 35,
+      "attrs": {
+        "title": "Terminal griddle title",
+        "id": "griddle"
+      },
+      "llm": "```terminal\n@step Terminal step griddle\n$ echo griddle\ngriddle\n```",
+      "llmKind": "as-is",
+      "steps": [
+        {
+          "title": "Terminal step griddle",
+          "lines": [
+            {
+              "k": "cmd",
+              "prompt": "$",
+              "text": "echo griddle"
+            },
+            {
+              "k": "out",
+              "text": "griddle"
+            }
+          ]
+        }
+      ],
+      "prompt": "$",
+      "title": "Terminal griddle title"
+    },
+    {
+      "type": "filetree",
+      "id": null,
+      "line": 41,
+      "attrs": {},
+      "llm": "```filetree\n@step Tree step griddle\nsrc/\n  griddle.go  # a note with a griddle\n```",
+      "llmKind": "as-is",
+      "trees": [
+        {
+          "title": "Tree step griddle",
+          "rows": [
+            {
+              "depth": 0,
+              "name": "src/",
+              "folder": true,
+              "badges": [],
+              "closed": false,
+              "note": "",
+              "gap": false,
+              "path": "src/",
+              "line": 0
+            },
+            {
+              "depth": 1,
+              "name": "griddle.go",
+              "folder": false,
+              "badges": [],
+              "closed": false,
+              "note": "a note with a griddle",
+              "gap": false,
+              "path": "src/griddle.go",
+              "line": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "chart",
+      "id": null,
+      "line": 47,
+      "attrs": {},
+      "llm": "Chart (bar): Chart griddle title\n\n| dish | Series griddle name |\n| --- | --- |\n| griddle | 3 |\n| wok | 4 |",
+      "llmKind": "data",
+      "chart": {
+        "kind": "bar",
+        "title": "Chart griddle title",
+        "x": {
+          "label": "dish",
+          "values": [
+            "griddle",
+            "wok"
+          ]
+        },
+        "y": {
+          "label": "count"
+        },
+        "series": [
+          {
+            "name": "Series griddle name",
+            "data": [
+              3,
+              4
+            ]
+          }
+        ]
+      },
+      "controls": [],
+      "initial": {
+        "x": [
+          "griddle",
+          "wok"
+        ],
+        "series": [
+          {
+            "name": "Series griddle name",
+            "data": [
+              3,
+              4
+            ]
+          }
+        ],
+        "vars": {}
+      }
+    },
+    {
+      "type": "mermaid",
+      "id": null,
+      "line": 57,
+      "attrs": {},
+      "llm": "```mermaid\nflowchart LR\n  griddle1[\"Mermaid griddle label\"] --> wok1[\"Wok\"]\n```",
+      "llmKind": "as-is",
+      "steps": [
+        {
+          "title": "",
+          "src": "flowchart LR\n  griddle1[\"Mermaid griddle label\"] --> wok1[\"Wok\"]"
+        }
+      ]
+    },
+    {
+      "type": "animation",
+      "id": null,
+      "line": 62,
+      "attrs": {},
+      "llm": "Animation, 2 steps. Starts with: pill a \"Animation griddle label\"; pill b \"Wok\". Connected: a -> b \"link\".\n\n1. Animation griddle caption\n   a -> b: go\n2. Second caption, no bad word",
+      "llmKind": "steps",
+      "anim": {
+        "head": "pill a \"Animation griddle label\"\npill b \"Wok\"\na -> b \"link\"",
+        "steps": [
+          {
+            "title": "Animation griddle caption",
+            "raw": "send \"go\" a -> b",
+            "line": 66
+          },
+          {
+            "title": "Second caption, no bad word",
+            "raw": "note b: a note with a griddle",
+            "line": 68
+          }
+        ],
+        "base": 63,
+        "info": {}
+      },
+      "texts": [
+        "Animation griddle label",
+        "Wok",
+        "link",
+        "Animation griddle caption",
+        "go",
+        "Second caption, no bad word",
+        "a note with a griddle"
+      ]
+    },
+    {
+      "type": "tierlist",
+      "id": null,
+      "line": 72,
+      "attrs": {
+        "title": "Tier griddle title"
+      },
+      "llm": "Tier list: Tier griddle title (top tier first)\nS: Wok\nA: Tier griddle item\nB: (empty)\nC: (empty)\nD: (empty)",
+      "llmKind": "lines",
+      "tier": {
+        "title": "Tier griddle title",
+        "tiers": [
+          {
+            "name": "S",
+            "colour": "c7",
+            "items": [
+              {
+                "name": "Wok",
+                "note": ""
+              }
+            ],
+            "line": 73
+          },
+          {
+            "name": "A",
+            "colour": "c5",
+            "items": [
+              {
+                "name": "Tier griddle item",
+                "note": ""
+              }
+            ],
+            "line": 74
+          },
+          {
+            "name": "B",
+            "colour": "c3",
+            "items": [],
+            "line": 73
+          },
+          {
+            "name": "C",
+            "colour": "c8",
+            "items": [],
+            "line": 73
+          },
+          {
+            "name": "D",
+            "colour": "c6",
+            "items": [],
+            "line": 73
+          }
+        ],
+        "declared": false,
+        "errors": []
+      }
+    },
+    {
+      "type": "alignment",
+      "id": null,
+      "line": 77,
+      "attrs": {
+        "title": "Which pan?"
+      },
+      "llm": "Alignment grid: Which pan? Columns (x, left to right): low effort, high effort. Rows (y, top to bottom): high impact, low impact.\n\n| cell | items |\n| --- | --- |\n| low effort / high impact \"Cell griddle label\" | Wok |\n\nCells not listed are empty.",
+      "llmKind": "data",
+      "align": {
+        "title": "Which pan?",
+        "xs": [
+          "low effort",
+          "high effort"
+        ],
+        "ys": [
+          "high impact",
+          "low impact"
+        ],
+        "cells": [
+          {
+            "col": 0,
+            "row": 0,
+            "label": "Cell griddle label",
+            "items": [
+              {
+                "name": "Wok",
+                "note": ""
+              }
+            ],
+            "line": 80
+          }
+        ],
+        "points": [],
+        "errors": []
+      }
+    }
+  ],
+  "headings": [],
+  "problems": [],
+  "highlighted": false,
+  "llm": "---\ntitle: Parts\nconcept: parts\ndescription: One word, griddle, in every place a part can hold it.\nnamespaces:\n  - example.org/cooking/kitchen\nsource: docs/domain/kitchen/implementation/parts.dh.md\n---\n<!-- Made by dh llm from the source; nobody edits this file. -->\n\nA paragraph with a griddle (line 9).\n\n### The griddle tab\n\nTab body with a griddle (line 15).\n\n### Second tab\n\nNo bad word here.\n\n### Accordion griddle title\n\nAccordion body with a griddle (line 25).\n\nAn LLM text with a griddle (line 33).\n\n```terminal\n@step Terminal step griddle\n$ echo griddle\ngriddle\n```\n\n```filetree\n@step Tree step griddle\nsrc/\n  griddle.go  # a note with a griddle\n```\n\nChart (bar): Chart griddle title\n\n| dish | Series griddle name |\n| --- | --- |\n| griddle | 3 |\n| wok | 4 |\n\n```mermaid\nflowchart LR\n  griddle1[\"Mermaid griddle label\"] --> wok1[\"Wok\"]\n```\n\nAnimation, 2 steps. Starts with: pill a \"Animation griddle label\"; pill b \"Wok\". Connected: a -> b \"link\".\n\n1. Animation griddle caption\n   a -> b: go\n2. Second caption, no bad word\n\nTier list: Tier griddle title (top tier first)\nS: Wok\nA: Tier griddle item\nB: (empty)\nC: (empty)\nD: (empty)\n\nAlignment grid: Which pan? Columns (x, left to right): low effort, high effort. Rows (y, top to bottom): high impact, low impact.\n\n| cell | items |\n| --- | --- |\n| low effort / high impact \"Cell griddle label\" | Wok |\n\nCells not listed are empty.\n"
+}

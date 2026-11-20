@@ -8,7 +8,8 @@ import (
 )
 
 var allRuleCodes = []string{"UL101", "UL102", "UL103", "UL104", "UL105", "UL106", "UL107", "UL108", "UL109",
-	"UL201", "UL202", "UL203", "UL204", "UL301"}
+	"UL110", "UL201", "UL202", "UL203", "UL204", "UL301",
+	"UL401", "UL402", "UL403", "UL407", "UL408", "UL409", "UL501", "UL502", "UL503"}
 
 // Every planted-failure fixture breaks only the rule its directory names: it is refused with
 // that code and no other.
