@@ -137,6 +137,10 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 				otherFails++
 			}
 		}
+		for _, issue := range gen.TargetClashes(append([]*contract.Contract{c}, others...)) {
+			fmt.Fprintf(stdout, "FAIL %s\n", issue)
+			otherFails++
+		}
 		if otherFails > 0 {
 			contractFails += otherFails
 			reasons = append(reasons, fmt.Sprintf("%d contract failures in the repository's other contracts or across contracts", otherFails))

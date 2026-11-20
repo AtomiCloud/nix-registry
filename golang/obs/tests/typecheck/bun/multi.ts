@@ -1,6 +1,6 @@
 import * as checkout from './signals';
 import * as billing from './billing';
-import { register, logger, metrics, dropped, type EventTable } from '@atomicloud/diene.interfaces';
+import { register, logger, metrics, dropped, tracer, type EventTable } from '@atomicloud/diene.interfaces';
 declare const process: { argv: string[] };
 const check = (ok: boolean, why: unknown) => {
   if (!ok) throw new Error(String(why));
@@ -42,7 +42,7 @@ switch (scenario) {
     check(logger(table.events).error(checkout.ChargeFailed).ok, 'equal table object binds');
     break;
   case 'invalid-registration':
-    table.metrics = () => undefined;
+    table = { contract: 'fresh:contract.yaml', hash: 'x', metrics: () => undefined, events: {}, spans: {} };
     break;
   case 'changed-hash':
     table.hash = 'changed';
@@ -85,6 +85,14 @@ switch (scenario) {
       events: { 'checkout.charge': 'error' },
       spans: {},
     };
+    break;
+  case 'late-span':
+    tracer<checkout.SpanAttrs>(checkout.spanTable).run(checkout.CheckoutQueueConsume, { order_id: 'o' }, () => ({
+      ok: true,
+      value: undefined,
+    }));
+    check(dropped('poisoned') === 0, 'first span');
+    table = { contract: 'late:contract.yaml', hash: 'x', metrics: {}, events: {}, spans: {} };
     break;
   case 'late':
     check(other.error(billing.ChargeFailed).ok, 'first signal');

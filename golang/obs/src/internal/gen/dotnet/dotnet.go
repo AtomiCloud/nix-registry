@@ -22,10 +22,7 @@ func (generator) Lang() string { return "dotnet" }
 
 // Files returns Signals.g.cs.
 func (generator) Files(c *contract.Contract, o gen.Options) ([]gen.File, error) {
-	ns := o.Namespace
-	if ns == "" {
-		ns = ident(c.Service) + ".Signals"
-	}
+	ns := gen.DotnetNamespace(c, o.Namespace)
 	interfaces := o.Interfaces
 	if interfaces == "" {
 		interfaces = "AtomiCloud.Diene.Interfaces"

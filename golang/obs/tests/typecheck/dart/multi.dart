@@ -81,6 +81,9 @@ void main(List<String> args) {
       );
       break;
     case 'invalid-registration':
+      id = 'fresh:contract.yaml';
+      events = {};
+      spans = {};
       metrics = BadMetrics();
       break;
     case 'changed-hash':
@@ -111,6 +114,19 @@ void main(List<String> args) {
       id = 'other:contract.yaml';
       metrics = {};
       events = {'checkout.charge': 'error'};
+      spans = {};
+      break;
+    case 'late-span':
+      check(
+        DurianSignalPort.startSpan(
+          checkout.checkoutQueueConsumeSpan,
+          const checkout.CheckoutQueueConsumeAttributes(orderId: 'o'),
+        ) is DurianSignalOk<bool>,
+        'first span',
+      );
+      id = 'late:contract.yaml';
+      metrics = {};
+      events = {};
       spans = {};
       break;
     case 'late':

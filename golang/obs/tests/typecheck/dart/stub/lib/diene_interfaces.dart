@@ -343,6 +343,7 @@ final class DurianSignalPort {
   final Map<String, int> dropped = {
     'unknown_event': 0,
     'unknown_metric': 0,
+    'unknown_span': 0,
     'unknown_key': 0,
     'unknown_value': 0,
     'register': 0,
@@ -443,6 +444,31 @@ final class DurianSignalPort {
     }
     _closed = true;
     return const DurianSignalOk(true);
+  }
+
+  // Fixture-only assumed span recorder, matching the typed carrier's attributes.
+  static Result<bool> startSpan<A extends DurianSignalLabels>(
+    DurianSignalSpan<A> span,
+    A attrs,
+  ) {
+    final p = _current;
+    if (p == null) return const DurianSignalErr('no port installed');
+    if (p._poisoned)
+      return p._drop('poisoned', 'the port is poisoned until restart');
+    try {
+      final info = p._spans[span.name];
+      if (info == null || info.kind != span.kind)
+        return p._drop('unknown_span', 'unknown span name or kind');
+      if (attrs.entries.keys.join(' ') != info.keys.join(' '))
+        return p._drop(
+          'unknown_key',
+          'span attributes differ from generated keys',
+        );
+      p._closed = true;
+      return const DurianSignalOk(true);
+    } catch (_) {
+      return p._drop('guard_error', 'invalid span attributes');
+    }
   }
 
   static Result<bool> _log(String level, Event<DurianSignalLevel> event) {

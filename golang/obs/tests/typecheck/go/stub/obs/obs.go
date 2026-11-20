@@ -297,3 +297,30 @@ func dropLocked(reason, format string, a ...any) error {
 	dropped[reason]++
 	return fmt.Errorf("dropped.%s: "+format, append([]any{reason}, a...)...)
 }
+
+// StartSpan is the fixture's assumed span-recording entrypoint. The carrier fixes
+// the attributes type; the installed table fixes its name, kind and wire keys.
+func StartSpan[A any](_ context.Context, span DurianSignalSpan[A], attrs A) error {
+	mu.Lock()
+	defer mu.Unlock()
+	if poisoned {
+		return dropLocked("poisoned", "span %q: the port is poisoned", span.name)
+	}
+	info, ok := tables.Spans[span.name]
+	if !ok || info.Kind != span.kind {
+		return dropLocked("unknown_span", "span %q: unknown name or kind", span.name)
+	}
+	typ := reflect.TypeOf(attrs)
+	if typ == nil || typ.Kind() != reflect.Struct {
+		return dropLocked("unknown_key", "span %q: attributes must be a struct", span.name)
+	}
+	keys := make([]string, typ.NumField())
+	for i := range keys {
+		keys[i] = typ.Field(i).Tag.Get("obs")
+	}
+	if !slices.Equal(keys, info.Keys) {
+		return dropLocked("unknown_key", "span %q: attributes %v are not its generated keys %v", span.name, keys, info.Keys)
+	}
+	closed = true
+	return nil
+}

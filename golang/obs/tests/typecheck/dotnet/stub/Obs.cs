@@ -328,6 +328,20 @@ public static class Port
         return Result<bool, string>.Ok(true);
     }
 
+    // Fixture-only assumed span recorder; production adapters may spell this differently.
+    public static Result<bool, string> StartSpan<A>(DurianSignalSpan<A> span, A attrs) where A : IDurianSignalLabels
+    {
+        if (_poisoned) return Drop("poisoned", "the port is poisoned until restart");
+        if (span is null || attrs is null || !Spans.TryGetValue(span.Name, out var info) || info.Kind != span.Kind) return Drop("unknown_span", "unknown span name or kind");
+        try
+        {
+            var keys = typeof(A).GetProperties().Select(p => p.GetCustomAttributes(typeof(DurianSignalLabelAttribute), false).OfType<DurianSignalLabelAttribute>().FirstOrDefault()?.Name ?? string.Empty);
+            if (!keys.SequenceEqual(info.Keys)) return Drop("unknown_key", "span attributes differ from generated keys");
+            _closed = true; return Result<bool, string>.Ok(true);
+        }
+        catch (Exception) { return Drop("guard_error", "invalid span attributes"); }
+    }
+
     internal static Result<bool, string> LogEvent(string level, string? name)
     {
         if (_poisoned) return Drop("poisoned", "the port is poisoned until restart");

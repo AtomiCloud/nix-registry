@@ -51,6 +51,12 @@ func main() {
 		t.Metrics = nil
 		t.Events = map[string]string{"checkout.charge": "error"}
 		t.Spans = nil
+	case "late-span":
+		check(obs.StartSpan(context.Background(), signals.CheckoutQueueConsume, signals.CheckoutQueueConsumeAttrs{OrderId: "o"}) == nil, "first span")
+		t.Contract = "late:contract.yaml"
+		t.Metrics = nil
+		t.Events = nil
+		t.Spans = nil
 	case "late":
 		check(obs.Error(context.Background(), billing.ChargeFailed) == nil, "first signal")
 		t.Contract = "late:contract.yaml"

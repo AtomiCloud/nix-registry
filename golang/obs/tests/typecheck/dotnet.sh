@@ -80,10 +80,12 @@ while read -r f token; do
   fi
 done <"$g/expect"
 cp "$here/fixtures/gen/billing/gen/dotnet/Signals/Signals.g.cs" "$d/Signals/Billing.g.cs"
+cp "$here/fixtures/gen/default-features/Orders/gen/Signals.g.cs" "$d/Signals/Orders.g.cs"
+cp "$here/fixtures/gen/default-features/Friends/gen/Signals.g.cs" "$d/Signals/Friends.g.cs"
 cp -f "$g/multi.cs" "$d/App/Program.cs"
 if out=$(build "$d/App/App.csproj"); then
   # shellcheck disable=SC2154 # obs_port_cases is supplied by stubs.bash
-  for scenario in "${obs_port_cases[@]}" early-real-forgery invalid-registration; do
+  for scenario in "${obs_port_cases[@]}" early-real-forgery invalid-registration default-features; do
     if out=$("$DOTNET" "$d/App/bin/Debug/net10.0/App.dll" "$scenario" 2>&1); then echo "$out"; else
       echo "FAIL multi $scenario: $out"
       fail=1

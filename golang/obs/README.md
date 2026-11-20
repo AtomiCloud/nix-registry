@@ -841,6 +841,19 @@ registration behavior is now specified in [the corpus port design and four inter
 (concept §3). The last column lists the remaining API details that the goals do not spell; the
 interfaces nodes reconcile them. The fixtures validate these models, not published packages:
 
+For .NET, an explicit `namespace:` wins. The default stays `<Service>.Signals` for a root
+`observability/contract.yaml`; feature contracts use `<Service>.<Feature>.Signals`, where Feature is
+the PascalCase feature folder in either `<feature>/observability/` or `observability/<feature>/`.
+This lets two features of the same service compile in one assembly without editing a shared namespace.
+`obs gen` (including `--check`) and `obs check` refuse two targets that resolve to the same .NET
+namespace (`generate-namespace-clash`) or the same `out:` folder in any language (`generate-out-clash`).
+Both contract paths are named. The repository checks share contract discovery and exclude fixture trees;
+`obs check --contracts none` keeps its existing single-contract scope.
+
+The fixture span recorders (`obs.StartSpan`, `Port.StartSpan`, `DurianSignalPort.startSpan`) are
+additional assumed ABI details, not prescribed entrypoint names. Together with Bun's `tracer.run`,
+they test that recording the first span also closes registration and poisons any late feature install.
+
 | Language | Default `interfaces`                             | In the goal                                                                                                                                                                                                                         | Assumed, not in goal                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | -------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Go       | `github.com/ProtoDurian/diene.go-interfaces/obs` | module `ProtoDurian/diene.go-interfaces`; `obs.Add`, `obs.Int[Spec]`, `obs.NewInt`, `obs.AtTime` with an error return; `obs.Error(ctx, Event[Error], ...)`; `obs.Register(DurianSignalTables{Contract, Hash, ...})`, merged boot registration and poison rules | the `/obs` package path; `IntSpec` `Name/Min/Max/Unit` (int64); `Int.Valid`; `Level` and the six markers; `NewEvent/NewCounter/NewHistogram/NewGauge/NewSpan`; `DurianSignal*` carriers and info rows (`Labels`, `Values`, `Ranges`); `Field`; `Record/Set/Warn/Info`; exact `DurianSignalTables` map/row fields; `Dropped(reason)`                                                                        |
@@ -874,6 +887,9 @@ registration now carries a package-qualified contract id and hash, and the files
 package manifest available at or above each `out:`, or set `package_id:` on that target. Upgrade the
 interfaces ports to the merged-table contract described above. Generate boot wiring that registers every
 feature before any signal; a hand-kept list or late/lazy registration does not satisfy the contract.
+For feature contracts, the default .NET namespace now includes the feature folder. Root contracts keep
+their old default. Remove any cross-contract namespace or output-folder collision reported by `obs gen`
+or `obs check`; explicitly choosing one namespace for two contracts is refused too.
 
 The 58 compatibility goldens cover query, alerts and links output; they do not cover generated code.
 For an unchanged single-contract repository those command outputs remain byte-identical. Generated
