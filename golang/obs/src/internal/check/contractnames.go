@@ -18,7 +18,7 @@ func loadContract(o *Options) (c *contract.Contract, problems []string) {
 		return o.Contract, nil
 	}
 	if !o.hasContract() {
-		return nil, nil
+		return loadRepoNames(o)
 	}
 	c, err := contract.Load(o.contractPath())
 	if err != nil {
@@ -146,4 +146,47 @@ func streamHint(tag string, sf map[string]bool) string {
 		return fmt.Sprintf("; did you mean %q?", s)
 	}
 	return ""
+}
+
+// loadRepoNames is the lookup view of a folder with no contract.yaml of its own (the top observability/ folder of
+// a repository with one contract per feature, holding the service-wide alerts and dashboards): the merged metrics
+// of every contract discovery finds, so a query there may read a feature's metric and a misspelt one is red. A
+// repository with no contract, and --contracts none, read no names, as before. Logs, spans and events stay
+// unchecked (o.metricsOnly): they belong to one contract, and this folder has none.
+func loadRepoNames(o *Options) (*contract.Contract, []string) {
+	if o.NoOtherContracts {
+		return nil, nil
+	}
+	found, derr := contract.Discover(o.Dir)
+	var problems []string
+	if derr != nil {
+		problems = append(problems, derr.Error())
+	}
+	var others []*contract.Contract
+	for _, p := range found {
+		oc, err := contract.Load(p)
+		if err != nil {
+			problems = append(problems, strings.ReplaceAll(err.Error(), p, contract.RelPath(p)))
+			continue
+		}
+		if is := oc.Validate(); len(is) > 0 {
+			for _, i := range is {
+				problems = append(problems, oc.Rel()+": "+i.String())
+			}
+			continue
+		}
+		others = append(others, oc)
+	}
+	if len(found) == 0 {
+		return nil, problems
+	}
+	for _, i := range contract.Clashes(others) {
+		problems = append(problems, i.String())
+	}
+	if len(problems) > 0 {
+		return nil, problems
+	}
+	o.metricsOnly = true
+	o.Contract = contract.Merge(&contract.Contract{File: o.contractPath()}, others)
+	return o.Contract, nil
 }

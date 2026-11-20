@@ -29,10 +29,14 @@ func Static(set *files.Set, o Options) *Report {
 	for _, p := range problems {
 		r.add(Fail, o.contractPath(), "", "contract", "%s", p)
 	}
-	if c != nil && o.SpanAttributes == nil {
+	if c != nil && o.SpanAttributes == nil && !o.metricsOnly {
 		o.SpanAttributes = c // the contract names the span attributes a TraceQL query may read
 	}
 	eventOn := o.eventRuleOn()
+	logC := c // the contract of logs and events: the merged names of a folder with no contract have none
+	if o.metricsOnly {
+		logC = nil
+	}
 	if c != nil {
 		for _, d := range set.Dashboards {
 			contractVariables(r, d, c)
@@ -58,7 +62,7 @@ func Static(set *files.Set, o Options) *Report {
 			staticMetrics(r, q, o, c)
 		case files.Logs:
 			r.Counts["logs"]++
-			staticLogs(r, q, o, eventOn, c)
+			staticLogs(r, q, o, eventOn, logC)
 		}
 	}
 	return r

@@ -228,5 +228,67 @@ absent 'docs.thing' || bad "discovery: a contract outside observability/ was rea
 run check --dir "$R/observability"
 check "discovery: --dir observability (no contract of its own) still runs" 0 'contract.yaml not found'
 
+# ---- layout (i): the top observability/ folder has no contract.yaml; its alerts read the features' metrics --------------
+rootalert() { # rootalert <expr>: a service-wide alert in observability/alerts/overview
+  mkdir -p "$R/observability/alerts/overview"
+  cat >"$R/observability/alerts/overview/warning.yaml" <<YAML
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata: { name: overview }
+spec:
+  interval: 1m
+  rules:
+    - uid: overview-errors
+      title: overview errors
+      condition: C
+      for: 1m
+      data:
+        - refId: A
+          datasourceUid: fixture-metrics
+          relativeTimeRange: { from: 60, to: 0 }
+          model:
+            datasource: { type: prometheus, uid: fixture-metrics }
+            expr: '$1'
+            instant: true
+            range: false
+        - { refId: C, datasourceUid: __expr__, model: { type: math, expression: \$A > 0.5 } }
+YAML
+}
+repo "root" i nfctag-errors friend-errors friend.invites ""
+rootalert 'sum(rate(nfctag_scans_total{outcome="error"}[1m])) + sum(rate(friend_invites_total{outcome="error"}[1m]))'
+run check --dir "$R/observability"
+check "root folder with no contract: an alert reading two features' metrics passes obs check" 0 'obs check: ok' 'contract.yaml not found'
+run query --static --dir "$R/observability"
+check "root folder with no contract: ... and obs query --static" 0 'obs query --static: ok'
+rootalert 'sum(rate(nfctag_scan_total{outcome="error"}[1m]))'
+run check --dir "$R/observability"
+check "root folder with no contract: a misspelt feature metric is [contract-undeclared-metric]" 1 '[contract-undeclared-metric]' 'nfctag_scan_total' 'alerts/overview/warning.yaml'
+run query --static --dir "$R/observability"
+check "root folder with no contract: ... in obs query --static too" 1 '[contract-undeclared-metric]' 'nfctag_scan_total'
+run check --dir "$R/observability" --contracts none
+check "root folder with no contract and --contracts none: no names are read (as in 0.5)" 0 'obs check: ok'
+rootalert 'sum(rate(nfctag_scans_total{outcome="wrong"}[1m]))'
+run check --dir "$R/observability"
+check "root folder with no contract: a label value outside the feature contract's type is red" 1 'wrong'
+# a repository with no contract anywhere keeps 0.5: nothing is read
+rm -f "$FA/contract.yaml" "$FB/contract.yaml"
+rootalert 'sum(rate(nfctag_scan_total{outcome="error"}[1m]))'
+run check --dir "$R/observability"
+check "no contract anywhere: nothing is checked, as in 0.5" 0 'obs check: ok' 'contract.yaml not found'
+absent '[contract-undeclared-metric]' || bad "no contract anywhere: names were checked"
+# an invalid feature contract is reported when the root reads it
+repo "root-bad" i nfctag-errors friend-errors friend.invites ""
+rootalert 'sum(rate(friend_invites_total[1m]))'
+sed -i 's/budget: 2/budget: 1/' "$FB/contract.yaml"
+run check --dir "$R/observability"
+check "root folder with no contract: an invalid feature contract is red and names its file" 1 'observability/friend/contract.yaml' '[over-budget]'
+# a root folder with its own contract keeps its own behaviour (names of the other contracts merged, as before)
+repo "root-own" i nfctag-errors friend-errors friend.invites ""
+cp "$FA/contract.yaml" "$R/observability/contract.yaml"
+sed -i 's/^service: nfctag/service: root/; s/nfctag.scans/root.scans/' "$R/observability/contract.yaml"
+rootalert 'sum(rate(friend_invites_total[1m]))'
+run check --dir "$R/observability"
+check "root folder with its own contract: reads the features' metrics (as in 0.5)" 0 'obs check: ok'
+
 echo "features.sh: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
