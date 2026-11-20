@@ -200,3 +200,26 @@ func TestDhUnreadableFrontMatter(t *testing.T) {
 		t.Fatalf("exit %d: %v", code, probs)
 	}
 }
+
+// A large page comes through the pipe whole: the packaged dh once lost the end of any output over
+// 8,192 bytes when stdout was a pipe.
+func TestDhLargePageThroughPipe(t *testing.T) {
+	dir := fixture(t, "dh/repeat")
+	rp := filepath.Join(dir, "docs/domain/kitchen/implementation/repeat.dh.md.dhjson")
+	var doc map[string]any
+	if err := jsonUnmarshal(readAll(t, rp), &doc); err != nil {
+		t.Fatal(err)
+	}
+	doc["llm"] = strings.Repeat("x", 3<<20) // the LLM view of a long page
+	out, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rp, out, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	probs, _, code := checkLines(t, newEnv(t, dir), dir)
+	if code != 1 || len(probs) != 3 {
+		t.Fatalf("exit %d: %v", code, probs)
+	}
+}

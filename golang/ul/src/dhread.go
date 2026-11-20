@@ -7,7 +7,6 @@ import (
 	"html"
 	"io"
 	"maps"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -122,7 +121,7 @@ func runDhBatch(dh, root string, pages []string) (map[string]*dhDoc, []Problem, 
 		cmd.Dir = root
 		var stderr bytes.Buffer
 		cmd.Stderr = &stderr
-		out, err := outputViaFile(cmd)
+		out, err := cmd.Output()
 		if err != nil {
 			if _, lookErr := exec.LookPath(dh); lookErr != nil {
 				return nil, nil, fmt.Errorf("%q is not on PATH (docs pages are read through the dh tool; set --dh or UL_DH)", dh)
@@ -456,23 +455,6 @@ func (r *dhReader) animationFallback(b dhBlock, to int) {
 			r.text(m[1], b.Line, to)
 		}
 	}
-}
-
-// outputViaFile runs cmd and returns what it printed. Its stdout is a temp file, not a pipe: a
-// program that exits right after a large write to a pipe can lose the end of it (the packaged dh
-// printed 8,192 bytes of a 142,291-byte page that way), and a file has no such loss.
-func outputViaFile(cmd *exec.Cmd) ([]byte, error) {
-	f, err := os.CreateTemp("", "ul-dh-*.json")
-	if err != nil {
-		return nil, err
-	}
-	defer os.Remove(f.Name())
-	defer f.Close()
-	cmd.Stdout = f
-	if err := cmd.Run(); err != nil {
-		return nil, err
-	}
-	return os.ReadFile(f.Name())
 }
 
 // frontMatterEnd is the line of the closing --- of the front matter (1 when there is none).
