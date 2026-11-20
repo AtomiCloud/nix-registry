@@ -21,7 +21,7 @@ let
     pname = "ul";
     inherit version;
     src = ./src;
-    vendorHash = "sha256-g+yaVIx4jxpAQ/+WrGKxhVeliYx7nLQe/zsGpxV4Fn4=";
+    vendorHash = "sha256-+kCsPMLO8jE7Gq7iQmPiBnfpC9I6DuWzpaF/EO4ez/w=";
     env.CGO_ENABLED = "0";
     ldflags = [ "-w" "-s" "-X main.version=${version}" ];
     nativeBuildInputs = [ nixpkgs.makeWrapper ];

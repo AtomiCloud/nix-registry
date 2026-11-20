@@ -100,6 +100,9 @@ func runDh(dh, root string, pages []string) (map[string]*dhDoc, []Problem, error
 				return nil, nil, fmt.Errorf("%q is not on PATH (docs pages are read through the dh tool; set --dh or UL_DH)", dh)
 			}
 			msg := strings.TrimSpace(stderr.String())
+			if msg == "" {
+				msg = err.Error()
+			}
 			bad, line, text := whichPage(msg, root, rest)
 			if bad == "" {
 				return nil, nil, fmt.Errorf("dh json failed: %s", msg)
