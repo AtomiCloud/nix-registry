@@ -1,4 +1,6 @@
 // ignore_for_file: avoid_print
+import 'dart:collection';
+
 import 'package:checkout_signals/src/signals/signals.g.dart' as checkout;
 import 'package:checkout_signals/src/billing/signals.g.dart' as billing;
 import 'package:diene_interfaces/diene_interfaces.dart';
@@ -9,6 +11,19 @@ void check(bool ok, Object why) {
 
 final class ForgedEvent extends Event<ErrorLevel> {
   const ForgedEvent() : super('forged.fresh');
+}
+
+final class BadMetrics extends MapBase<String, DurianSignalMetricInfo> {
+  @override
+  Iterable<String> get keys => throw StateError('invalid table');
+  @override
+  DurianSignalMetricInfo? operator [](Object? key) => null;
+  @override
+  void operator []=(String key, DurianSignalMetricInfo value) {}
+  @override
+  void clear() {}
+  @override
+  DurianSignalMetricInfo? remove(Object? key) => null;
 }
 
 void main(List<String> args) {
@@ -64,6 +79,9 @@ void main(List<String> args) {
         install() is DurianSignalOk<DurianSignalPort>,
         'same id/hash/content no-op',
       );
+      break;
+    case 'invalid-registration':
+      metrics = BadMetrics();
       break;
     case 'changed-hash':
       hash = 'changed';

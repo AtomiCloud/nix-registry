@@ -1,6 +1,5 @@
-// planted forging (review round 5): app code installs the port a second time with its own tables. install
-// works once per process: the second call is refused and counted, and poisons the port (every signal,
-// even a valid one, is refused until restart).
+// Planted late registration: a real signal closes registration before the forged table arrives.
+// The late install is refused and every later signal is poisoned until restart.
 // ignore_for_file: avoid_print
 import 'package:checkout_signals/src/signals/signals.g.dart';
 

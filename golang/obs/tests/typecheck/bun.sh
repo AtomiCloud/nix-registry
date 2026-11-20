@@ -79,7 +79,7 @@ sed "s|sha256:HASH|$(obs_port_hash signals.ts)|" multi.ts >multi.tmp
 mv multi.tmp multi.ts
 if "$TSC" "${emit[@]}" signals.ts billing.ts multi.ts >out.txt 2>&1; then
   # shellcheck disable=SC2154 # obs_port_cases is supplied by stubs.bash
-  for scenario in "${obs_port_cases[@]}"; do
+  for scenario in "${obs_port_cases[@]}" invalid-registration; do
     if out=$("$NODE" out/multi.js "$scenario" 2>&1); then echo "$out"; else
       echo "FAIL multi $scenario: $out"
       fail=1

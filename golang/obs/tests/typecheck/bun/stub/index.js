@@ -42,36 +42,40 @@ exports.register = tables => {
     poisoned = true;
     return drop('register', why);
   };
-  if (poisoned) return refuse('the port is already poisoned');
-  if (closed) return refuse('contract "' + tables.contract + '" registered after the first signal');
-  const previous = contracts.get(tables.contract);
-  if (previous) {
-    if (!isDeepStrictEqual(previous, tables))
-      return refuse('contract "' + tables.contract + '" reused with a different hash or table');
-  } else {
-    for (const which of ['metrics', 'events', 'spans']) {
-      for (const name of Object.keys(tables[which] || {})) {
-        if (owners.has(name))
-          return refuse(
-            'signal "' +
-              name +
-              '" is owned by both contract "' +
-              owners.get(name) +
-              '" and contract "' +
-              tables.contract +
-              '"',
-          );
+  try {
+    if (poisoned) return refuse('the port is already poisoned');
+    if (closed) return refuse('contract "' + tables.contract + '" registered after the first signal');
+    const previous = contracts.get(tables.contract);
+    if (previous) {
+      if (!isDeepStrictEqual(previous, tables))
+        return refuse('contract "' + tables.contract + '" reused with a different hash or table');
+    } else {
+      for (const which of ['metrics', 'events', 'spans']) {
+        for (const name of Object.keys(tables[which] || {})) {
+          if (owners.has(name))
+            return refuse(
+              'signal "' +
+                name +
+                '" is owned by both contract "' +
+                owners.get(name) +
+                '" and contract "' +
+                tables.contract +
+                '"',
+            );
+        }
+      }
+      const copy = deepFreeze(structuredClone(tables));
+      contracts.set(tables.contract, copy);
+      for (const which of ['metrics', 'events', 'spans']) {
+        for (const name of Object.keys(copy[which] || {})) owners.set(name, tables.contract);
+        Object.assign(snapshot[which], copy[which]);
       }
     }
-    const copy = deepFreeze(structuredClone(tables));
-    contracts.set(tables.contract, copy);
-    for (const which of ['metrics', 'events', 'spans']) {
-      for (const name of Object.keys(copy[which] || {})) owners.set(name, tables.contract);
-      Object.assign(snapshot[which], copy[which]);
-    }
+    for (const which of ['metrics', 'events', 'spans']) if (tables[which]) registered[which].add(tables[which]);
+    return ok(undefined);
+  } catch {
+    return refuse('invalid registration table contents');
   }
-  for (const which of ['metrics', 'events', 'spans']) if (tables[which]) registered[which].add(tables[which]);
-  return ok(undefined);
 };
 exports.bounded = (spec, n) =>
   Number.isInteger(n) && n >= spec.min && n <= spec.max

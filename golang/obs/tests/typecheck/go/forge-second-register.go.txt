@@ -1,5 +1,5 @@
 // planted forging (review round 5): app code registers a second table that allows its own event and metric.
-// Register works once per process (the generated init ran first); the port must refuse it and keep the first.
+// A real signal closes registration before the forged table arrives; every signal must then be refused.
 package main
 
 import (
@@ -16,7 +16,8 @@ type Free struct {
 
 func main() {
 	_ = obs.Error(context.Background(), obs.NewEvent[obs.ErrorLevel]("checkout.charge.failed"))
- err := obs.Register(obs.DurianSignalTables{
+	err := obs.Register(obs.DurianSignalTables{
+		Contract: "forged:observability/contract.yaml", Hash: "sha256:forged",
 		Metrics: map[string]obs.DurianSignalMetricInfo{"app.free": {Kind: "counter", Keys: []string{"user_id"}, Labels: Free{}}},
 		Events:  map[string]string{"app.made.up": "error"},
 	})

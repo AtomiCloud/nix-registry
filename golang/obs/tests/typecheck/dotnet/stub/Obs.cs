@@ -243,34 +243,50 @@ public static class Port
         IReadOnlyDictionary<string, string> eventLevels,
         IReadOnlyDictionary<string, DurianSignalSpanInfo> spans)
     {
-        Result<bool,string> Refuse(string why) { _poisoned = true; return Drop("register", why); }
-        if (_poisoned) return Refuse($"contract {contract.Id}: the port is already poisoned");
-        if (_closed) return Refuse($"contract {contract.Id} registered after the first signal");
-        var copiedMetrics = metrics.ToDictionary(x=>x.Key, x=>x.Value with {
-            Keys=x.Value.Keys.ToArray(),
-            Values=x.Value.Values?.ToDictionary(v=>v.Key,v=>v.Value.ToArray()),
-            Ranges=x.Value.Ranges?.ToDictionary(v=>v.Key,v=>v.Value.ToArray())
-        });
-        var copiedEvents = eventLevels.ToDictionary(x=>x.Key,x=>x.Value);
-        var copiedSpans = spans.ToDictionary(x=>x.Key,x=>x.Value with {Keys=x.Value.Keys.ToArray()});
-        var fingerprint = System.Text.Json.JsonSerializer.Serialize(new {
-            contract.Hash,
-            Metrics=copiedMetrics.OrderBy(x=>x.Key).Select(x=>new {x.Key,x.Value.Kind,x.Value.Unit,x.Value.Budget,x.Value.AcrossPods,x.Value.PerPod,x.Value.Keys,
-                Values=x.Value.Values?.OrderBy(v=>v.Key).Select(v=>new{v.Key,v.Value}),
-                Ranges=x.Value.Ranges?.OrderBy(v=>v.Key).Select(v=>new{v.Key,v.Value})}),
-            Events=copiedEvents.OrderBy(x=>x.Key), Spans=copiedSpans.OrderBy(x=>x.Key)
-        });
-        if (Contracts.TryGetValue(contract.Id,out var previous))
-            return previous==fingerprint ? Result<bool,string>.Ok(true) : Refuse($"contract {contract.Id} reused with a different hash or table");
-        var names = metrics.Keys.Concat(eventLevels.Keys).Concat(spans.Keys).Distinct().ToArray();
-        foreach(var name in names) if(Owners.TryGetValue(name,out var owner))
-            return Refuse($"signal {name} is owned by both contract {owner} and contract {contract.Id}");
-        Contracts[contract.Id]=fingerprint;
-        foreach(var name in names) Owners[name]=contract.Id;
-        foreach(var row in copiedMetrics) ((Dictionary<string,DurianSignalMetricInfo>)_metrics).Add(row.Key,row.Value);
-        foreach(var row in copiedEvents) ((Dictionary<string,string>)_events).Add(row.Key,row.Value);
-        foreach(var row in copiedSpans) Spans.Add(row.Key,row.Value);
-        return Result<bool,string>.Ok(true);
+        Result<bool, string> Refuse(string why) { _poisoned = true; return Drop("register", why); }
+        try
+        {
+            if (_poisoned) return Refuse($"contract {contract.Id}: the port is already poisoned");
+            if (_closed) return Refuse($"contract {contract.Id} registered after the first signal");
+            var copiedMetrics = metrics.ToDictionary(x => x.Key, x => x.Value with
+            {
+                Keys = x.Value.Keys.ToArray(),
+                Values = x.Value.Values?.ToDictionary(v => v.Key, v => v.Value.ToArray()),
+                Ranges = x.Value.Ranges?.ToDictionary(v => v.Key, v => v.Value.ToArray())
+            });
+            var copiedEvents = eventLevels.ToDictionary(x => x.Key, x => x.Value);
+            var copiedSpans = spans.ToDictionary(x => x.Key, x => x.Value with { Keys = x.Value.Keys.ToArray() });
+            var fingerprint = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                contract.Hash,
+                Metrics = copiedMetrics.OrderBy(x => x.Key).Select(x => new
+                {
+                    x.Key,
+                    x.Value.Kind,
+                    x.Value.Unit,
+                    x.Value.Budget,
+                    x.Value.AcrossPods,
+                    x.Value.PerPod,
+                    x.Value.Keys,
+                    Values = x.Value.Values?.OrderBy(v => v.Key).Select(v => new { v.Key, v.Value }),
+                    Ranges = x.Value.Ranges?.OrderBy(v => v.Key).Select(v => new { v.Key, v.Value })
+                }),
+                Events = copiedEvents.OrderBy(x => x.Key),
+                Spans = copiedSpans.OrderBy(x => x.Key)
+            });
+            if (Contracts.TryGetValue(contract.Id, out var previous))
+                return previous == fingerprint ? Result<bool, string>.Ok(true) : Refuse($"contract {contract.Id} reused with a different hash or table");
+            var names = metrics.Keys.Concat(eventLevels.Keys).Concat(spans.Keys).Distinct().ToArray();
+            foreach (var name in names) if (Owners.TryGetValue(name, out var owner))
+                return Refuse($"signal {name} is owned by both contract {owner} and contract {contract.Id}");
+            Contracts[contract.Id] = fingerprint;
+            foreach (var name in names) Owners[name] = contract.Id;
+            foreach (var row in copiedMetrics) ((Dictionary<string, DurianSignalMetricInfo>)_metrics).Add(row.Key, row.Value);
+            foreach (var row in copiedEvents) ((Dictionary<string, string>)_events).Add(row.Key, row.Value);
+            foreach (var row in copiedSpans) Spans.Add(row.Key, row.Value);
+            return Result<bool, string>.Ok(true);
+        }
+        catch (Exception) { return Refuse("invalid registration table contents"); }
     }
 
     internal static Result<bool, string> Drop(string reason, string why)

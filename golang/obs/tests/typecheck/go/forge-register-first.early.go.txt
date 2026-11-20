@@ -5,5 +5,5 @@ package early
 import obs "github.com/ProtoDurian/diene.go-interfaces/obs"
 
 func init() {
-	_ = obs.Register(obs.DurianSignalTables{Events: map[string]string{"checkout.chrage.faild": "error", "checkout.charge.failed": "error"}})
+	_ = obs.Register(obs.DurianSignalTables{Contract: "forged:observability/contract.yaml", Hash: "sha256:forged", Events: map[string]string{"checkout.chrage.faild": "error", "checkout.charge.failed": "error"}})
 }

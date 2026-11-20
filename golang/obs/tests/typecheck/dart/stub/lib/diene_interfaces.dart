@@ -238,78 +238,86 @@ final class DurianSignalPort {
       return DurianSignalErr('dropped.register: $why');
     }
 
-    if (p._poisoned)
-      return refuse('contract "$contract": the port is already poisoned');
-    if (p._closed)
-      return refuse('contract "$contract" registered after the first signal');
-    final copiedMetrics = metrics.map(
-      (name, row) => MapEntry(
-        name,
-        DurianSignalMetricInfo(
-          kind: row.kind,
-          unit: row.unit,
-          budget: row.budget,
-          acrossPods: row.acrossPods,
-          perPod: row.perPod,
-          labels: row.labels,
-          keys: List.unmodifiable(row.keys),
-          values: Map.unmodifiable(
-            row.values.map((k, v) => MapEntry(k, List<String>.unmodifiable(v))),
-          ),
-          ranges: Map.unmodifiable(
-            row.ranges.map((k, v) => MapEntry(k, List<int>.unmodifiable(v))),
+    try {
+      if (p._poisoned)
+        return refuse('contract "$contract": the port is already poisoned');
+      if (p._closed)
+        return refuse('contract "$contract" registered after the first signal');
+      final copiedMetrics = metrics.map(
+        (name, row) => MapEntry(
+          name,
+          DurianSignalMetricInfo(
+            kind: row.kind,
+            unit: row.unit,
+            budget: row.budget,
+            acrossPods: row.acrossPods,
+            perPod: row.perPod,
+            labels: row.labels,
+            keys: List.unmodifiable(row.keys),
+            values: Map.unmodifiable(
+              row.values.map(
+                (k, v) => MapEntry(k, List<String>.unmodifiable(v)),
+              ),
+            ),
+            ranges: Map.unmodifiable(
+              row.ranges.map((k, v) => MapEntry(k, List<int>.unmodifiable(v))),
+            ),
           ),
         ),
-      ),
-    );
-    final copiedEvents = Map<String, String>.unmodifiable(events);
-    final copiedSpans = spans.map(
-      (k, v) => MapEntry(
-        k,
-        DurianSignalSpanInfo(kind: v.kind, keys: List.unmodifiable(v.keys)),
-      ),
-    );
-    final fingerprint = <String, Object>{
-      'hash': hash,
-      'metrics': copiedMetrics.map(
-        (k, v) => MapEntry(k, <Object>[
-          v.kind,
-          v.unit,
-          v.budget,
-          v.acrossPods,
-          v.perPod,
-          v.labels,
-          v.keys,
-          v.values,
-          v.ranges,
-        ]),
-      ),
-      'events': copiedEvents,
-      'spans': copiedSpans.map((k, v) => MapEntry(k, <Object>[v.kind, v.keys])),
-    };
-    final previous = p._contracts[contract];
-    if (previous != null) {
-      if (_equal(previous, fingerprint)) return DurianSignalOk(p);
-      return refuse(
-        'contract "$contract" reused with a different hash or table',
       );
-    }
-    final names = {...metrics.keys, ...events.keys, ...spans.keys};
-    for (final name in names) {
-      final owner = p._owners[name];
-      if (owner != null)
+      final copiedEvents = Map<String, String>.unmodifiable(events);
+      final copiedSpans = spans.map(
+        (k, v) => MapEntry(
+          k,
+          DurianSignalSpanInfo(kind: v.kind, keys: List.unmodifiable(v.keys)),
+        ),
+      );
+      final fingerprint = <String, Object>{
+        'hash': hash,
+        'metrics': copiedMetrics.map(
+          (k, v) => MapEntry(k, <Object>[
+            v.kind,
+            v.unit,
+            v.budget,
+            v.acrossPods,
+            v.perPod,
+            v.labels,
+            v.keys,
+            v.values,
+            v.ranges,
+          ]),
+        ),
+        'events': copiedEvents,
+        'spans': copiedSpans.map(
+          (k, v) => MapEntry(k, <Object>[v.kind, v.keys]),
+        ),
+      };
+      final previous = p._contracts[contract];
+      if (previous != null) {
+        if (_equal(previous, fingerprint)) return DurianSignalOk(p);
         return refuse(
-          'signal "$name" is owned by both contract "$owner" and contract "$contract"',
+          'contract "$contract" reused with a different hash or table',
         );
+      }
+      final names = {...metrics.keys, ...events.keys, ...spans.keys};
+      for (final name in names) {
+        final owner = p._owners[name];
+        if (owner != null)
+          return refuse(
+            'signal "$name" is owned by both contract "$owner" and contract "$contract"',
+          );
+      }
+      p._contracts[contract] = fingerprint;
+      p._metrics.addAll(copiedMetrics);
+      p._events.addAll(copiedEvents);
+      p._spans.addAll(copiedSpans);
+      for (final name in names) {
+        p._owners[name] = contract;
+      }
+      return DurianSignalOk(p);
+    } catch (_) {
+      return refuse("invalid registration table contents");
     }
-    p._contracts[contract] = fingerprint;
-    p._metrics.addAll(copiedMetrics);
-    p._events.addAll(copiedEvents);
-    p._spans.addAll(copiedSpans);
-    for (final name in names) {
-      p._owners[name] = contract;
-    }
-    return DurianSignalOk(p);
   }
 
   static bool _equal(Object? a, Object? b) {

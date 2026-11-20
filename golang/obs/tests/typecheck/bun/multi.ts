@@ -41,6 +41,9 @@ switch (scenario) {
     check(register(table).ok, 'same id/hash/content must be no-op');
     check(logger(table.events).error(checkout.ChargeFailed).ok, 'equal table object binds');
     break;
+  case 'invalid-registration':
+    table.metrics = () => undefined;
+    break;
   case 'changed-hash':
     table.hash = 'changed';
     break;
