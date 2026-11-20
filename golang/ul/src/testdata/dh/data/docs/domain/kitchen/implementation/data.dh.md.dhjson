@@ -2,7 +2,7 @@
   "ast": 1,
   "format": 8,
   "source": "---\ntitle: Data\nconcept: data\ndescription: Part data that is not prose, and an entity in prose.\nnamespaces:\n  - example.org/cooking/kitchen\ntype: algorithm\ncode:\n  - shop/src/a.ts#a\n  - shop/src/b.ts#b\n  - shop/src/c.ts#c\nbanner:\n  kind: info\n  text: A banner with a griddle.\n---\n\nAn entity: a gr&#105;ddle.\n\n```chart\nkind: line\ntitle: Chart title\nlet: { griddle: \"range(1, 4)\", label: griddle }\nx: { label: n, values: [1, 2, 3] }\ny: { label: count }\nseries:\n  - name: Counts\n    data: [1, 2, 3]\n```\n",
-  "path": "testdata/dh/data/docs/domain/kitchen/implementation/data.dh.md",
+  "path": "docs/domain/kitchen/implementation/data.dh.md",
   "frontMatter": {
     "title": "Data",
     "concept": "data",
@@ -120,5 +120,5 @@
   "headings": [],
   "problems": [],
   "highlighted": false,
-  "llm": "---\ntitle: Data\nconcept: data\ndescription: Part data that is not prose, and an entity in prose.\nnamespaces:\n  - example.org/cooking/kitchen\ntype: algorithm\nbanner:\n  kind: info\n  text: A banner with a griddle.\nsource: testdata/dh/data/docs/domain/kitchen/implementation/data.dh.md\n---\n<!-- Made by dh llm from the source; nobody edits this file. -->\n\nAn entity: a gr&#105;ddle.\n\n```chart\nkind: line\ntitle: Chart title\nlet: { griddle: \"range(1, 4)\", label: griddle }\nx: { label: n, values: [1, 2, 3] }\ny: { label: count }\nseries:\n  - name: Counts\n    data: [1, 2, 3]\n```\n"
+  "llm": "---\ntitle: Data\nconcept: data\ndescription: Part data that is not prose, and an entity in prose.\nnamespaces:\n  - example.org/cooking/kitchen\ntype: algorithm\nbanner:\n  kind: info\n  text: A banner with a griddle.\nsource: docs/domain/kitchen/implementation/data.dh.md\n---\n<!-- Made by dh llm from the source; nobody edits this file. -->\n\nAn entity: a gr&#105;ddle.\n\n```chart\nkind: line\ntitle: Chart title\nlet: { griddle: \"range(1, 4)\", label: griddle }\nx: { label: n, values: [1, 2, 3] }\ny: { label: count }\nseries:\n  - name: Counts\n    data: [1, 2, 3]\n```\n"
 }
