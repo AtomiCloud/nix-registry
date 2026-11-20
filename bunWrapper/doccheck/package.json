@@ -1,0 +1,15 @@
+{
+  "name": "@atomi/doccheck",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test src",
+    "check": "bun src/main.ts check"
+  },
+  "dependencies": {
+    "durian-hypermedia": "github:ProtoDurian/durian-hypermedia#v0.1.0",
+    "marked": "15.0.12",
+    "yaml": "2.8.2"
+  }
+}
