@@ -422,35 +422,104 @@ func (q *Query) ObsFieldFilters(field string) []ObsFieldFilter {
 // per query avoids a set of per-worker stats buffers on every query.
 func (q *Query) ObsSetConcurrency(n uint) { q.opts.concurrency = n }
 
-// ObsTrailingFilterFields returns the fields read by the `filter` pipes that directly follow the last
-// `stats` pipe (the pipes ObsWithoutTrailingFilters removes). A field that is also a `by (...)` label of
-// that stats pipe is a retained group key filtered after the aggregation.
-func (q *Query) ObsTrailingFilterFields() []string {
+// ObsRetainedKeyFilters follows the `by (...)` group keys of the last `stats` pipe through the pipes after
+// it and returns, sorted, the original key name of every key that a later `filter` pipe filters on while it
+// is still that group key. A rename moves the key to its new name (a filter on the new name counts), a copy
+// adds the new name; `math ... as f`, a rename or a copy onto f clears the key f; `fields`/`keep` keeps
+// only the keys it names and `delete` drops the ones it names. Other pipes (sort, limit, offset ...) leave
+// the keys alone. Wildcard field filters on the destination of a rename or copy are not followed.
+func (q *Query) ObsRetainedKeyFilters() []string {
 	idx := getLastPipeStatsIdx(q.pipes)
 	if idx < 0 {
 		return nil
 	}
-	set := map[string]struct{}{}
-	for _, p := range q.pipes[idx+1:] {
-		pf, ok := p.(*pipeFilter)
-		if !ok {
-			break
+	ps := q.pipes[idx].(*pipeStats)
+	keys := map[string]string{} // current field name -> the by(...) name it started as
+	for _, b := range ps.byFields {
+		keys[b.name] = b.name
+	}
+	match := func(filter, name string) bool {
+		if n := len(filter); n > 0 && filter[n-1] == '*' {
+			return len(name) >= n-1 && name[:n-1] == filter[:n-1]
 		}
-		visitFilterRecursive(pf.f, func(leaf filter) bool {
-			switch leaf.(type) {
-			case *filterAnd, *filterOr, *filterNot:
+		return filter == name
+	}
+	matchAny := func(filters []string, name string) bool {
+		for _, f := range filters {
+			if match(f, name) {
+				return true
+			}
+		}
+		return false
+	}
+	hit := map[string]struct{}{}
+	for _, p := range q.pipes[idx+1:] {
+		switch t := p.(type) {
+		case *pipeFilter:
+			visitFilterRecursive(t.f, func(leaf filter) bool {
+				switch leaf.(type) {
+				case *filterAnd, *filterOr, *filterNot:
+					return false
+				}
+				var nf prefixfilter.Filter
+				leaf.updateNeededFields(&nf)
+				for _, a := range nf.GetAllowFilters() {
+					if origin, ok := keys[a]; ok {
+						hit[origin] = struct{}{}
+					}
+				}
 				return false
+			})
+		case *pipeMath:
+			for _, e := range t.entries {
+				delete(keys, e.resultField)
 			}
-			var nf prefixfilter.Filter
-			leaf.updateNeededFields(&nf)
-			for _, a := range nf.GetAllowFilters() {
-				set[a] = struct{}{}
+		case *pipeFields:
+			for k := range keys {
+				if !matchAny(t.fieldFilters, k) {
+					delete(keys, k)
+				}
 			}
-			return false
-		})
+		case *pipeDelete:
+			for k := range keys {
+				if matchAny(t.fieldFilters, k) {
+					delete(keys, k)
+				}
+			}
+		case *pipeRename:
+			for i := range t.srcFieldFilters {
+				if i >= len(t.dstFieldFilters) {
+					break
+				}
+				src, dst := t.srcFieldFilters[i], t.dstFieldFilters[i]
+				origin, isKey := keys[src]
+				delete(keys, src)
+				delete(keys, dst)
+				if isKey && src != dst {
+					keys[dst] = origin
+				} else if isKey {
+					keys[src] = origin
+				}
+			}
+		case *pipeCopy:
+			for i := range t.srcFieldFilters {
+				if i >= len(t.dstFieldFilters) {
+					break
+				}
+				src, dst := t.srcFieldFilters[i], t.dstFieldFilters[i]
+				origin, isKey := keys[src]
+				if src == dst {
+					continue
+				}
+				delete(keys, dst)
+				if isKey {
+					keys[dst] = origin
+				}
+			}
+		}
 	}
 	var out []string
-	for k := range set {
+	for k := range hit {
 		out = append(out, k)
 	}
 	sort.Strings(out)

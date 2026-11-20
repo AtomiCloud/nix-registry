@@ -918,6 +918,14 @@ table, its structural checks, and the "no severity field" rule):
 and a flat file it cannot read as a rule stops it with the finding instead of skipping the file. `obs sandbox up` and `obs look`
 provision a flat rule's summary, description and panel link into Grafana.
 
+**What the landscape check covers, and what it does not.** It reads the parsed query: label matchers (metrics); field filters,
+stream selectors, `if (...)` conditions of stats functions and other pipes, `filter` pipes before the stats and nested sources
+(logs); and a `filter` after the stats on a retained group key, which it follows through `math`, `fields`/`keep`, `delete`, `sort`,
+`limit`, `rename` (the key moves) and `copy` (an overwrite by `math`, `rename` or `copy` ends the trail). It does not follow a key
+through `format`, `extract`, `unpack_*`, `replace` or a wildcard rename/copy target, does not judge `by (landscape)` grouping on its own
+(a grouping is no selector), and does not see a landscape named through a recording rule or another rule's output. A corner it misses is
+a review item, not a guarantee.
+
 Not checked here: that `panel` is a panel id of `dashboards/overview.json`, and that the set has a `runbook.md`
 (the standard's other structural checks). Tier gaps and everything else in the standard's review step stay with the reviewer.
 

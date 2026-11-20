@@ -99,19 +99,12 @@ func landscapeUse(datasource, expr string) string {
 				return f + " filter"
 			}
 		}
-		// A filter after the stats on a group key the stats retained (stats by (landscape) ... | filter
-		// landscape:x) selects a landscape too. A computed field of the same name (stats count() as
-		// landscape | filter landscape:>5) is not a group key and is fine.
-		if by, err := q.StatsLabels(); err == nil {
-			for _, f := range q.TrailingFilterFields() {
-				if !isLandscapeName(f) {
-					continue
-				}
-				for _, b := range by {
-					if b == f {
-						return f + " filter after stats on its group key"
-					}
-				}
+		// A filter after the stats on a group key the stats retained selects a landscape too: the key is
+		// followed through later pipes (math, fields/keep, delete, sort, limit, rename, copy: a rename moves
+		// it, an overwrite by math, rename or copy clears it). A computed field of the same name is fine.
+		for _, origin := range q.RetainedKeyFilters() {
+			if isLandscapeName(origin) {
+				return origin + " group key filtered after the stats"
 			}
 		}
 	}
@@ -371,11 +364,21 @@ var (
 // looksFlat tells, from the text alone, a file that is meant to be a flat tier file but does not parse:
 // a top-level tier key and no top-level CR key. (A parsed file is judged by isFlat on its keys.)
 func looksFlat(b []byte) bool {
-	first := docSep.Split(string(b), 2)[0]
-	if strings.TrimSpace(first) == "" { // a leading --- : the text of the document after it
-		if parts := docSep.Split(string(b), 3); len(parts) > 1 {
-			first = parts[1]
+	for _, seg := range docSep.Split(string(b), -1) {
+		if contentLess(seg) { // a comment header or a leading --- : the document is the next segment
+			continue
+		}
+		return flatKeyLine.MatchString(seg) && !crKeyLine.MatchString(seg)
+	}
+	return false
+}
+
+// contentLess tells a YAML segment that holds only blank lines and # comments.
+func contentLess(seg string) bool {
+	for _, line := range strings.Split(seg, "\n") {
+		if l := strings.TrimSpace(line); l != "" && !strings.HasPrefix(l, "#") {
+			return false
 		}
 	}
-	return flatKeyLine.MatchString(first) && !crKeyLine.MatchString(first)
+	return true
 }

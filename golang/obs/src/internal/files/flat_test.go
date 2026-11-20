@@ -184,6 +184,8 @@ func TestFlatTierFindings(t *testing.T) {
 		{"logs landscape plain group key filtered after stats", "alerts/q/critical.yaml", logsRaw("| stats by (landscape) count() as hits | filter landscape:raichu and hits:>0"), "flat-alert-landscape", "group key"},
 		{"flat tier followed by a ConfigMap", "alerts/q/critical.yaml", retryQueueFlat + "---\napiVersion: v1\nkind: ConfigMap\nmetadata: { name: x }\n", "flat-alert-documents", "more than one YAML document"},
 		{"flat tier preceded by a marker and followed by a CR", "alerts/q/critical.yaml", "---\n" + retryQueueFlat + "---\nkind: GrafanaAlertRuleGroup\n", "flat-alert-documents", "more than one YAML document"},
+		{"comment header, marker, then a tier with a YAML error", "alerts/q/critical.yaml", "# yaml-language-server: $schema=https://example.com/tier.json\n\n---\n" + retryQueueFlat + "summary2: 'unclosed\n", "flat-alert-yaml", "not valid YAML"},
+		{"comment header, marker, a tier and a second document", "alerts/q/critical.yaml", "# header\n---\n" + retryQueueFlat + "---\nkind: ConfigMap\n", "flat-alert-documents", "more than one YAML document"},
 		{"uid over 40", "alerts/a-very-long-slug-name-here/critical.yaml", retryQueueFlat, "flat-alert-uid-length", "tracker-zinc-a-very-long-slug-name-here-critical"},
 	}
 	for _, c := range cases {
@@ -362,6 +364,46 @@ func TestFlatLandscapeNamedComputedFieldIsAllowed(t *testing.T) {
 		s := flatDir(t, "alerts/q/critical.yaml", body)
 		if len(s.Problems) != 0 || len(s.Rules) != 1 {
 			t.Errorf("%s: %+v", name, s.Problems)
+		}
+	}
+}
+
+// A retained stats group key is followed through the later pipes: a filter on it is a landscape selector
+// wherever it has been moved to; an overwrite (math, rename, copy) or a dropped key ends the trail.
+func TestFlatLandscapeGroupKeyIsFollowedThroughLaterPipes(t *testing.T) {
+	refused := map[string]string{
+		"the standard log-ratio shape": "| stats by (landscape) count() as total, count() if (\"http.response.status_code\":>=500) as bad | math bad / total as ratio | filter landscape:=raichu and ratio:>0.01",
+		"dotted key, then fields":      "| stats by (\"durian.cloud.landscape\") count() as hits | filter \"durian.cloud.landscape\":=raichu | fields hits",
+		"plain key, then fields":       "| stats by (landscape) count() as hits | filter landscape:=raichu | fields hits",
+		"a rename moves the key":       "| stats by (landscape) count() as hits | rename landscape as region | filter region:=raichu",
+		"a copy adds the name":         "| stats by (\"durian.cloud.landscape\") count() as hits | copy \"durian.cloud.landscape\" as region | filter region:=raichu",
+		"through sort and limit":       "| stats by (landscape) count() as hits | sort by (hits) | limit 5 | filter landscape:=raichu",
+		"fields keeps the key":         "| stats by (landscape) count() as hits | fields landscape, hits | filter landscape:=raichu",
+		"math of another field":        "| stats by (landscape) count() as hits | math hits * 2 as doubled | filter landscape:=raichu",
+	}
+	for name, pipes := range refused {
+		s := flatDir(t, "alerts/q/critical.yaml", logsRaw(pipes))
+		found := false
+		for _, p := range s.Problems {
+			found = found || (p.Rule == "flat-alert-landscape" && strings.Contains(p.Msg, "group key"))
+		}
+		if !found || len(s.Rules) != 0 {
+			t.Errorf("%s must be refused: %+v", name, s.Problems)
+		}
+	}
+	allowed := map[string]string{
+		"math overwrites the key":        "| stats by (landscape) count() as hits | math hits * 2 as landscape | filter landscape:>5",
+		"a rename onto the key name":     "| stats by (landscape) count() as hits | rename hits as landscape | filter landscape:>5",
+		"a copy onto the key name":       "| stats by (landscape) count() as hits, count() as n | copy hits as landscape | filter landscape:>5",
+		"fields drops the key":           "| stats by (landscape) count() as hits | fields hits | filter landscape:>5",
+		"delete drops the key":           "| stats by (landscape) count() as hits | delete landscape | filter landscape:>5",
+		"the renamed key, old name used": "| stats by (landscape) count() as hits | rename landscape as region | filter landscape:>5",
+		"a computed field, not a key":    "| stats by (service) count() as hits | math hits * 2 as landscape | filter landscape:>5",
+	}
+	for name, pipes := range allowed {
+		s := flatDir(t, "alerts/q/critical.yaml", logsRaw(pipes))
+		if len(s.Problems) != 0 || len(s.Rules) != 1 {
+			t.Errorf("%s must pass: %+v", name, s.Problems)
 		}
 	}
 }

@@ -343,6 +343,7 @@ func (q *Query) FilterFields() ([]string, error) {
 	return out, nil
 }
 
-// TrailingFilterFields returns the fields of the `filter` pipes right after the last `stats` pipe: a
-// threshold on a computed value, or a filter on a group key the stats kept (`by (f)`).
-func (q *Query) TrailingFilterFields() []string { return q.q.ObsTrailingFilterFields() }
+// RetainedKeyFilters returns the `by (...)` names of the last `stats` pipe that a later `filter` pipe
+// filters on while the name is still that retained group key (a rename moves the key, a `math`, rename or
+// copy onto the name clears it, `fields` and `delete` follow it). A computed field that only shares a name is not one.
+func (q *Query) RetainedKeyFilters() []string { return q.q.ObsRetainedKeyFilters() }
