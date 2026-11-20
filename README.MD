@@ -19,7 +19,7 @@ AtomiCloud's Nix Registry for custom built packages.
 - aws-export-credentials
 - cyanprint
 - releaser
-- dh (proposal): Durian Hypermedia LLM views, parsed JSON, translation stamps and token estimates, pinned to v0.2.0; see `bunWrapper/dh/default.nix`
+- dh (proposal): Durian Hypermedia LLM views, parsed JSON, translation stamps and token estimates, pinned to v0.4.0; see `bunWrapper/dh/default.nix`
 - doccheck (proposal): documentation checks, generated maps, outlines and decision records; see `bunWrapper/doccheck/README.md`
 - helm-schema
 - problemgen (definition-first RFC 9457 problems: lint and diff `problems.yaml`, generate Go/TypeScript/C#/Dart code and the Problem record; see `golang/problemgen/default.nix`)

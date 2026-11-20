@@ -8,8 +8,7 @@
     "check": "bun src/main.ts check"
   },
   "dependencies": {
-    "durian-hypermedia": "github:ProtoDurian/durian-hypermedia#v0.2.0",
-    "github-slugger": "2.0.0",
+    "durian-hypermedia": "github:ProtoDurian/durian-hypermedia#v0.4.0",
     "marked": "15.0.12",
     "yaml": "2.8.2"
   }

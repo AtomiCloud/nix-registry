@@ -2,9 +2,8 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parseDocument, stringify } from 'yaml';
-import { parse, type Document, type Block, type MdBlock, type MdInline } from 'durian-hypermedia';
+import { parse, slug as githubSlug, type Document, type Block, type MdBlock, type MdInline } from 'durian-hypermedia';
 import { parseFile, strictYaml } from './dh-library';
-import GithubSlugger, { slug as githubSlug } from 'github-slugger';
 
 export type Issue = { file: string; line: number; check: string; message: string; level: 'error' | 'warn' };
 export type Config = { pageOrder: 'A' | 'B'; innerFolder: string; llmView: 'committed' | 'build' };
@@ -25,8 +24,7 @@ export const DEFAULTS: Config = { pageOrder: 'A', innerFolder: 'model', llmView:
 export const ranks = ['core', 'supporting', 'edge'];
 export const slug = (s: string) => githubSlug(s.trim());
 export function githubAnchors(document: Document): Set<string> {
-  const slugger = new GithubSlugger();
-  return new Set(document.headings.map(heading => slugger.slug(heading.text.replace(/<[^>]*>/g, ''))));
+  return new Set(document.headings.map(heading => heading.id.replace(/^dh-/, '')));
 }
 export const canonical = (s: string) => s.replace(/\.dh\.md$/, '.md');
 export const inside = (root: string, path: string) => {

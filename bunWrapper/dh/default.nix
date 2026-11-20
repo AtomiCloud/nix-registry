@@ -1,13 +1,13 @@
 { nixpkgs, buildBunCli }:
 
-# The manifest pins durian-hypermedia to v0.2.0; bun.lock pins its tag object.
+# The manifest pins durian-hypermedia to v0.4.0; bun.lock pins its tag object.
 # depsHash verifies the complete dependency tree, including that source.
 (buildBunCli {
   name = "dh";
-  version = "0.2.0";
+  version = "0.4.0";
   src = nixpkgs.lib.cleanSource ../doccheck;
   entrypoint = "src/dh-cli.ts";
-  depsHash = "sha256-2sEFwdr43w79xYfmA5BebRSZTC2WOY9Y9+zORsiuatY=";
+  depsHash = "sha256-t8aflTEohqI/NhMVuvmsfUwR9z1jDeK7kWTNykW/0Es=";
   meta = {
     description = "Durian Hypermedia LLM views, parsed JSON, translation stamps and token estimates";
     homepage = "https://github.com/ProtoDurian/durian-hypermedia";
@@ -21,7 +21,7 @@
   doInstallCheck = true;
   installCheckPhase = ''
     runHook preInstallCheck
-    test "$("$out/bin/dh" --version)" = "0.2.0"
+    test "$("$out/bin/dh" --version)" = "0.4.0"
     "$out/bin/dh" --help
     mkdir -p pipe-test/docs
     bun -e 'await Bun.write("pipe-test/docs/large.md", "---\ntitle: Large\nconcept: large\ndescription: A large page.\nnamespaces: []\ntype: feature\n---\n\n" + "A paragraph that must reach the renderer intact.\n\n".repeat(1000));'

@@ -5,8 +5,7 @@
     "": {
       "name": "@atomi/doccheck",
       "dependencies": {
-        "durian-hypermedia": "github:ProtoDurian/durian-hypermedia#v0.2.0",
-        "github-slugger": "2.0.0",
+        "durian-hypermedia": "github:ProtoDurian/durian-hypermedia#v0.4.0",
         "marked": "15.0.12",
         "yaml": "2.8.2",
       },
@@ -61,7 +60,7 @@
 
     "dompurify": ["dompurify@3.4.18", "", { "optionalDependencies": { "@types/trusted-types": "^2.0.7" } }, "sha512-ofe3wI/uNm68HInABYFJYqQxRw1EaKAjNdrFVKqjUY+UZurvNd2L/HuQe097s/4RivWiZyP6tT7aoT8atjfhwg=="],
 
-    "durian-hypermedia": ["durian-hypermedia@github:ProtoDurian/durian-hypermedia#90b4173", { "dependencies": { "chart.js": "4.5.1", "codehike": "1.1.0", "dompurify": "3.4.18", "marked": "15.0.12", "three": "0.180.0" }, "peerDependencies": { "mermaid": "^11.0.0", "react": ">=18 <20", "react-dom": ">=18 <20" }, "optionalPeers": ["mermaid"] }, "ProtoDurian-durian-hypermedia-90b4173", "sha512-TAqVGY4ZD2mmwbVbLtCNkH3kevDlWAPYnDQwDx0xHLFJ+c9X69WYHmAdklRJ0EH0GYcZ0Ix8HJGwuAysf/lpHg=="],
+    "durian-hypermedia": ["durian-hypermedia@github:ProtoDurian/durian-hypermedia#0689828", { "dependencies": { "chart.js": "4.5.1", "codehike": "1.1.0", "dompurify": "3.4.18", "github-slugger": "2.0.0", "marked": "15.0.12", "three": "0.180.0" }, "peerDependencies": { "mermaid": "^11.0.0", "react": ">=18 <20", "react-dom": ">=18 <20" }, "optionalPeers": ["mermaid"] }, "ProtoDurian-durian-hypermedia-0689828", "sha512-0QSZEd5eBlWMmc+n+fvATilrbiGOi6cBWnxNRvYfJS9PCg3W8L/C+9eYzSmr/JJTeDuGoX8kJPqresfU6duvLw=="],
 
     "estree-util-visit": ["estree-util-visit@2.0.0", "", { "dependencies": { "@types/estree-jsx": "^1.0.0", "@types/unist": "^3.0.0" } }, "sha512-m5KgiH85xAhhW8Wta0vShLcUvOsh3LLPI2YVwcbio1l7E09NTLL1EyMZFM1OyWowoH0skScNbhOPl4kcBgzTww=="],
 

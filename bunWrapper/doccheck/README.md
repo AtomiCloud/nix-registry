@@ -2,7 +2,7 @@
 
 `doccheck` (proposal) checks documentation and generates its maps. `dh`
 (proposal) writes the Durian Hypermedia LLM view and renderer input. Both
-executables use the `durian-hypermedia` parser pinned to tag `v0.2.0`.
+executables use the `durian-hypermedia` parser pinned to tag `v0.4.0`.
 `bun.lock` records its tag object, and the Nix dependency hash verifies the
 complete dependency tree. The source is fetched from that tag; no working
 copy is included here.
