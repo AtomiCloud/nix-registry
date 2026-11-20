@@ -8,6 +8,7 @@ import {
   parseDoc,
   editorSpec,
   applyDiff,
+  llmFormOf,
   type Node,
   type PartNode,
 } from '../node_modules/durian-hypermedia/src/core/dh-lib';
@@ -16,6 +17,37 @@ export interface CodeHost {
   repoRoot: string;
   repoName: string;
   codeRoot?: string;
+}
+
+export function llmReplacementWarnings(document: Document): Problem[] {
+  if (!document.source.includes(':::llm')) return [];
+  const output: Problem[] = [];
+  const count = (text: string) => text.trim().split(/\s+/).filter(Boolean).length;
+  let parsed: ReturnType<typeof parseDoc>;
+  try {
+    parsed = parseDoc(document.path, document.source);
+  } catch {
+    return output;
+  }
+  function visit(nodes: Node[]) {
+    for (const node of nodes)
+      if (node.kind === 'part') {
+        if (node.llm) {
+          const replacement = count(node.llm.body);
+          const original = count(node.name === 'human' ? node.body : llmFormOf(node, false));
+          if (original >= 40 && replacement > original && replacement <= 160)
+            output.push({
+              line: node.llm.line,
+              level: 'warn',
+              message: `LLM replacement is ${replacement} words, longer than the ${original}-word part; shorten it or give the reviewer a reason`,
+            });
+        }
+        visit(node.nodes);
+        node.items.forEach(item => visit(item.nodes));
+      }
+  }
+  visit(parsed.body);
+  return output;
 }
 
 function git(root: string, args: string[]): string | null {

@@ -5,7 +5,7 @@
   version = "0.1.0";
   src = nixpkgs.lib.cleanSource ./.;
   entrypoint = "src/main.ts";
-  depsHash = "sha256-TPjJv1+Mk4fEpaZy92EYw4HgUugnuoQJKfW5PA6BXX8=";
+  depsHash = "sha256-2sEFwdr43w79xYfmA5BebRSZTC2WOY9Y9+zORsiuatY=";
   meta = {
     description = "Documentation checks and generated maps through Durian Hypermedia";
     platforms = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];

@@ -3,10 +3,19 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parse } from 'durian-hypermedia';
-import { hydrateEditors } from './dh-code';
+import { hydrateEditors, llmReplacementWarnings } from './dh-code';
 import './dh-library';
 
 const roots: string[] = [];
+test('an LLM replacement longer than a substantial part warns below 160 words', () => {
+  const source = '```terminal\n' + 'word '.repeat(42) + '\n```\n\n:::llm\n';
+  expect(
+    llmReplacementWarnings(parse(source + 'word '.repeat(50) + '\n:::\n', { path: 'example.dh.md' })),
+  ).toHaveLength(1);
+  expect(
+    llmReplacementWarnings(parse(source + 'word '.repeat(30) + '\n:::\n', { path: 'example.dh.md' })),
+  ).toHaveLength(0);
+});
 afterEach(() => roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })));
 function fixture(text = 'const one = 1;\nconst two = 2;\n') {
   const root = mkdtempSync(join(tmpdir(), 'doccheck-editor-'));

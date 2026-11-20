@@ -7,7 +7,7 @@
   version = "0.2.0";
   src = nixpkgs.lib.cleanSource ../doccheck;
   entrypoint = "src/dh-cli.ts";
-  depsHash = "sha256-TPjJv1+Mk4fEpaZy92EYw4HgUugnuoQJKfW5PA6BXX8=";
+  depsHash = "sha256-2sEFwdr43w79xYfmA5BebRSZTC2WOY9Y9+zORsiuatY=";
   meta = {
     description = "Durian Hypermedia LLM views, parsed JSON, translation stamps and token estimates";
     homepage = "https://github.com/ProtoDurian/durian-hypermedia";

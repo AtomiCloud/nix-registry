@@ -96,6 +96,9 @@ test('strict YAML refuses duplicate keys and unquoted colon values', () => {
   expect(strictYaml('title: Example')).toEqual({ title: 'Example' });
   expect(() => strictYaml('title: One\ntitle: Two')).toThrow();
   expect(() => strictYaml('title: One: Two')).toThrow();
+  const first = strictYaml('items: [one, two]');
+  first.items.push('changed');
+  expect(strictYaml('items: [one, two]')).toEqual({ items: ['one', 'two'] });
 });
 
 test('json hydrates parser supplied code ranges from a host checkout', () => {

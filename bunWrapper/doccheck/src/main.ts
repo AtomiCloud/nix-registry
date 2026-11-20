@@ -43,7 +43,13 @@ export function checkAll(
   return issues;
 }
 export function adrNew(docs: string, area: string, title: string): string {
-  if (!title.trim() || !slug(title)) throw new Error('ADR title must contain a name');
+  const adrSlug = title
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+  if (!title.trim() || !adrSlug) throw new Error('ADR title must contain a name with Latin letters or digits');
   let dir =
     area === '.' ? docs : existsSync(join(docs, 'domain', area)) ? join(docs, 'domain', area) : resolve(docs, area);
   if (
@@ -59,7 +65,7 @@ export function adrNew(docs: string, area: string, title: string): string {
   if (ns.some((n, i) => n !== i + 1)) throw new Error('fix ADR numbering before creating another');
   const next = pages.length + 1;
   if (next > 9999) throw new Error('ADR folder is full');
-  const file = join(dir, `${String(next).padStart(4, '0')}-${slug(title)}.md`);
+  const file = join(dir, `${String(next).padStart(4, '0')}-${adrSlug}.md`);
   let namespaces: string[] = [];
   const ul = join(dirname(dir), 'UL.yaml');
   if (existsSync(ul)) {

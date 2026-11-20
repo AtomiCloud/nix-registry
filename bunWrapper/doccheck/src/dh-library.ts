@@ -6,9 +6,16 @@ import { parseDocument } from 'yaml';
 import { Lexer } from 'marked';
 
 /** Strict YAML is shared with the pinned format parser. Duplicate keys refuse. */
+const yamlCache = new Map<string, ReturnType<typeof parseDocument>>();
 export function strictYaml(text: string): any {
-  const doc = parseDocument(text, { uniqueKeys: true });
+  let doc = yamlCache.get(text);
+  if (!doc) {
+    doc = parseDocument(text, { uniqueKeys: true });
+    if (yamlCache.size >= 512) yamlCache.delete(yamlCache.keys().next().value!);
+    yamlCache.set(text, doc);
+  }
   if (doc.errors.length) throw new Error(doc.errors.map(e => e.message).join('; '));
+  // Return fresh values: identical metadata in two pages must not share mutable objects.
   return doc.toJS({ maxAliasCount: 16 });
 }
 setYamlParser(strictYaml);

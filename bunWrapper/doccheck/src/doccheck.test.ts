@@ -103,6 +103,45 @@ function context(docs: string) {
 }
 
 describe('front matter and page rules: clean and refused', () => {
+  test('front matter fragments use GitHub punctuation and duplicate heading anchors', () => {
+    const { docs } = fixture();
+    page(docs, {}, body + '\n## cyan.yaml\n\nA field.\n\n## Repeat\n\nOne.\n\n## Repeat\n\nTwo.\n');
+    const good = page(
+      docs,
+      { related: ['order.md#cyanyaml', 'order.md#repeat-1'] },
+      body + '\n## cyan.yaml\n\nA field.\n\n## Repeat\n\nOne.\n\n## Repeat\n\nTwo.\n',
+    );
+    expect(
+      has(
+        run(i => checkFrontMatter(good, cfg, i)),
+        'front matter paths resolve',
+      ),
+    ).toBe(false);
+    good.fm.related = ['order.md#cyan-yaml', 'order.md#repeat-2'];
+    expect(
+      has(
+        run(i => checkFrontMatter(good, cfg, i)),
+        'front matter paths resolve',
+      ),
+    ).toBe(true);
+  });
+  test('lookup sections follow the walk and precede cases', () => {
+    const { docs } = fixture();
+    const lookup = '\n## Field lookup\n\nA table.\n';
+    const cases = '\n## Case: another order\n\nA case.\n';
+    expect(
+      has(
+        run(i => checkShape(page(docs, {}, body + lookup + cases), cfg, i)),
+        'doc shape',
+      ),
+    ).toBe(false);
+    expect(
+      has(
+        run(i => checkShape(page(docs, {}, body + cases + lookup), cfg, i)),
+        'doc shape',
+      ),
+    ).toBe(true);
+  });
   test('valid front matter passes', () => {
     const { docs } = fixture();
     expect(run(i => checkFrontMatter(page(docs), cfg, i))).toEqual([]);
@@ -360,7 +399,7 @@ describe('outline and generators', () => {
     expect(splitOutline(docs, loadPages(docs))).toBe(1);
     expect(readFileSync(p.file, 'utf8').startsWith(before)).toBe(true);
     const a = loadPages(docs);
-    expect(a[0].fm.order).toBe(1);
+    expect(a[0].fm.order).toBe(10);
     expect(configFor(docs).pageOrder).toBe('A');
     expect(run(i => checkOutline(docs, a, fromPages(docs, a, i), i))).toEqual([]);
   });
@@ -929,6 +968,17 @@ describe('translation and LLM freshness', () => {
 });
 
 describe('ADR and staged change checks', () => {
+  test('ADR titles use ASCII kebab filenames independently of heading anchors', () => {
+    const { docs } = fixture();
+    const file = adrNew(docs, '.', 'Café_order  choice');
+    expect(file.endsWith('0001-cafe-order-choice.md')).toBe(true);
+    expect(
+      has(
+        run(i => checkFrontMatter(loadPage(file, docs), cfg, i)),
+        'ADR shape',
+      ),
+    ).toBe(false);
+  });
   test('ADR new creates required shape; malformed and skipped number refuse', () => {
     const { docs } = fixture();
     const f = adrNew(docs, '.', 'Keep orders together');

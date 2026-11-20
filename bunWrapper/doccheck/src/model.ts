@@ -3,7 +3,8 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parseDocument, stringify } from 'yaml';
 import { parse, type Document, type Block, type MdBlock, type MdInline } from 'durian-hypermedia';
-import { parseFile } from './dh-library';
+import { parseFile, strictYaml } from './dh-library';
+import GithubSlugger, { slug as githubSlug } from 'github-slugger';
 
 export type Issue = { file: string; line: number; check: string; message: string; level: 'error' | 'warn' };
 export type Config = { pageOrder: 'A' | 'B'; innerFolder: string; llmView: 'committed' | 'build' };
@@ -22,13 +23,11 @@ export type Context = { context: string; learns?: string; pages: Entry[] };
 export type Outline = { repoName?: string; contexts: Context[]; guides: Entry[]; repo: Entry[]; readingPath: string[] };
 export const DEFAULTS: Config = { pageOrder: 'A', innerFolder: 'model', llmView: 'committed' };
 export const ranks = ['core', 'supporting', 'edge'];
-export const slug = (s: string) =>
-  s
-    .toLowerCase()
-    .replace(/\./g, '-')
-    .replace(/[^\p{L}\p{N} -]/gu, '')
-    .trim()
-    .replace(/ +/g, '-');
+export const slug = (s: string) => githubSlug(s.trim());
+export function githubAnchors(document: Document): Set<string> {
+  const slugger = new GithubSlugger();
+  return new Set(document.headings.map(heading => slugger.slug(heading.text.replace(/<[^>]*>/g, ''))));
+}
 export const canonical = (s: string) => s.replace(/\.dh\.md$/, '.md');
 export const inside = (root: string, path: string) => {
   const r = relative(resolve(root), resolve(path));
@@ -43,9 +42,7 @@ export const issue = (
   line = 1,
 ) => issues.push({ file, line, check, message, level });
 export function yaml(text: string): any {
-  const d = parseDocument(text, { uniqueKeys: true, strict: true });
-  if (d.errors.length) throw new Error(d.errors.map(e => e.message).join('; '));
-  return d.toJS({ maxAliasCount: 16 });
+  return strictYaml(text);
 }
 export const yamlText = (v: unknown) => stringify(v, { lineWidth: 0 });
 export function readYaml(file: string) {

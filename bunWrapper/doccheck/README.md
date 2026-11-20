@@ -37,7 +37,8 @@ llmView: committed
 
 - `pageOrder: A` keeps `rank`, `order`, `learns` and the optional `readingPath`
   position in page front matter. `order` is a positive integer within the
-  page's folder. `doccheck gen` writes `outline.yaml` from these fields.
+  page's folder. Split and stub creation use gaps of ten, leaving room to
+  insert a page. `doccheck gen` writes `outline.yaml` from these fields.
 - `pageOrder: B` reads a hand-written `docs/outline.yaml`. `doccheck outline
 split` copies its entries into page front matter and selects mode A.
 - `innerFolder` names the folder for a context's model pages. Set it to

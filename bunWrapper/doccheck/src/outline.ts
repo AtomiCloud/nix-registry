@@ -210,7 +210,7 @@ export function splitOutline(docs: string, pages: Page[]): number {
     if (!p) throw new Error(`outline split: ${e.full} has no page; run outline stubs first`);
     if (p.generated) continue;
     const dir = dirname(p.rel);
-    const n = (counts.get(dir) ?? 0) + 1;
+    const n = (counts.get(dir) ?? 0) + 10;
     counts.set(dir, n);
     const read = o.readingPath.findIndex(x => canonical(x) === canonical(e.full));
     const fm = { ...p.fm };
@@ -241,7 +241,7 @@ export function makeStubs(docs: string, o: Outline, c: Config): number {
     if (e.full.match(/^domain\/[^/]+\/index\.md$/)) continue;
     const f = join(docs, e.full);
     const dir = dirname(e.full);
-    const order = (counts.get(dir) ?? 0) + 1;
+    const order = (counts.get(dir) ?? 0) + 10;
     counts.set(dir, order);
     if ([f, f.replace(/\.md$/, '.dh.md'), f.replace(/\.dh\.md$/, '.md')].some(existsSync)) continue;
     // A stub contains no rich parts, so it starts as ordinary Markdown.

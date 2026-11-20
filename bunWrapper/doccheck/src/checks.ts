@@ -29,9 +29,11 @@ import {
   inside,
   planned,
   canonical,
+  githubAnchors,
 } from './model';
 import { CODE_FORM, checkCode } from './code';
 import { expectedLlm, sectionsOf, sectionHashes } from './dh-library';
+import { llmReplacementWarnings } from './dh-code';
 
 export type UlWord = {
   word: string;
@@ -192,7 +194,7 @@ export function checkFrontMatter(p: Page, c: Config, issues: Issue[]) {
       if (!existsSync(dest)) issue(issues, p.file, 'front matter paths resolve', `${k}: ${path} does not resolve`);
       else if (anchor && dest.endsWith('.md')) {
         const d = parse(readFileSync(dest, 'utf8'), { path: dest });
-        if (!d.headings.some(h => h.id.replace(/^dh-/, '') === anchor))
+        if (!githubAnchors(d).has(anchor))
           issue(issues, p.file, 'front matter paths resolve', `${path}: heading does not exist`);
       }
       if (['adrs', 'supersedes'].includes(k) && !dest.split(/[\\/]/).includes('adr'))
@@ -308,6 +310,8 @@ export function proseLineCount(bs: Block[]): number {
 }
 
 export function checkRich(p: Page, issues: Issue[]) {
+  for (const warning of llmReplacementWarnings(p.doc))
+    issue(issues, p.file, 'LLM text placed', warning.message, warning.level, warning.line);
   // The pinned package owns syntax, part evaluation, LLM pairing and rich-data validation.
   // Its pure host cannot read code; the filesystem checks in code.ts own those messages.
   for (const q of checkFormat(p.doc)) {
