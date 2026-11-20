@@ -17,7 +17,7 @@ let
     vendorHash = "sha256-VXDtpfHM8n6be7mWld4GzS3T1Ndl4UMHYgMcaq/uRdk=";
     env.CGO_ENABLED = "0";
     env.OBS_REQUIRE_LLVM = "1";
-    nativeCheckInputs = [ nixpkgs.llvmPackages.llvm ];
+    nativeCheckInputs = [ nixpkgs.llvmPackages.llvm nixpkgs.git ]; # git: the tests of the git-ignored folders
     ldflags = [ "-w" "-s" "-X main.version=${version}" ];
     # third_party/VictoriaLogs is its own Go module (wired by a go.mod replace), not part of this one.
     excludedPackages = [ "third_party" ];
@@ -52,7 +52,7 @@ let
   # TypeScript, C# and Dart compile (go, tsc, the dotnet SDK and dart are inputs here),
   # every planted failure runs red naming file + rule + token, the vendored tree equals its tag.
   tests = nixpkgs.runCommand "obs-tests"
-    { nativeBuildInputs = [ obs nixpkgs.bash nixpkgs.gnugrep nixpkgs.gnused nixpkgs.coreutils nixpkgs.findutils nixpkgs.diffutils go nixpkgs.typescript nixpkgs.dotnet-sdk_10 nixpkgs.dart nixpkgs.llvmPackages.llvm ]; }
+    { nativeBuildInputs = [ obs nixpkgs.bash nixpkgs.gnugrep nixpkgs.gnused nixpkgs.coreutils nixpkgs.findutils nixpkgs.diffutils go nixpkgs.typescript nixpkgs.dotnet-sdk_10 nixpkgs.dart nixpkgs.llvmPackages.llvm nixpkgs.git ]; }
     ''
       OBS_REQUIRE_LLVM=1 bash ${./tests}/run.sh --obs ${obs}/bin/obs --src ${./src} --out ${obs}
       mkdir -p "$out"

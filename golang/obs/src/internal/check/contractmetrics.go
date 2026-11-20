@@ -150,13 +150,22 @@ type metricChecker struct {
 	mv    matcherVars
 	seen  map[string]bool // metric names already reported
 	names []string        // every stored name a regex selector may match
+	// repo is the contract files of a folder with no contract of its own (nil: the folder's own contract). There a
+	// metric in none of them is a note, not a failure, unless it is a near miss of a declared name; see NearMiss.
+	repo []string
 }
 
 // contractMetrics checks the names a MetricsQL query reads against the contract: each metric
 // (exact or by regex), each label of each selector, each label a label function or a grouping
 // reads, and the value of an enum or bounded label.
 func contractMetrics(r *Report, q *files.Query, e metricsql.Expr, c *contract.Contract) {
-	mc := &metricChecker{r: r, q: q, c: c, mv: scanMatchers(q.Expr, dashVars(q), q.Dash != nil), seen: map[string]bool{}, names: storedNames(c)}
+	contractMetricsIn(r, q, e, c, nil)
+}
+
+// contractMetricsIn is contractMetrics for a folder with no contract of its own when repo (the contract files
+// the names were merged from, relative to the Git root) is not nil.
+func contractMetricsIn(r *Report, q *files.Query, e metricsql.Expr, c *contract.Contract, repo []string) {
+	mc := &metricChecker{r: r, q: q, c: c, mv: scanMatchers(q.Expr, dashVars(q), q.Dash != nil), seen: map[string]bool{}, names: storedNames(c), repo: repo}
 	mc.walk(e)
 }
 
@@ -228,7 +237,7 @@ func (mc *metricChecker) labelFunc(fe *metricsql.FuncExpr, sc *labelScope) {
 
 // scopeOf is walk without reporting twice: the labels the expression's output may carry.
 func (mc *metricChecker) scopeOf(e metricsql.Expr) labelScope {
-	quiet := &metricChecker{r: newReport(), q: mc.q, c: mc.c, mv: mc.mv, seen: map[string]bool{}, names: mc.names}
+	quiet := &metricChecker{r: newReport(), q: mc.q, c: mc.c, mv: mc.mv, seen: map[string]bool{}, names: mc.names, repo: mc.repo}
 	return quiet.walk(e)
 }
 
@@ -277,6 +286,10 @@ func (mc *metricChecker) selector(me *metricsql.MetricExpr) labelScope {
 			if !ok {
 				if !mc.seen[name] {
 					mc.seen[name] = true
+					if mc.repo != nil {
+						mc.unknownInRepo(name)
+						continue
+					}
 					hint := ""
 					if s := contract.Suggest(name, mc.names); s != "" {
 						hint = fmt.Sprintf("; did you mean %q?", s)
@@ -299,6 +312,14 @@ func (mc *metricChecker) selector(me *metricsql.MetricExpr) labelScope {
 					}
 				}
 			}
+			if len(matched) == 0 && mc.repo != nil {
+				if !mc.seen["~"+nameRe] {
+					mc.seen["~"+nameRe] = true
+					mc.r.add(Note, mc.q.File, mc.q.Where, "contract-name-unknown",
+						"the metric regex %q matches no metric of the repository's contracts (%s): not checked, this folder has no contract of its own", nameRe, strings.Join(mc.repo, ", "))
+				}
+				continue
+			}
 			if len(matched) == 0 {
 				if !mc.seen["~"+nameRe] {
 					mc.seen["~"+nameRe] = true
@@ -307,6 +328,9 @@ func (mc *metricChecker) selector(me *metricsql.MetricExpr) labelScope {
 				}
 				continue
 			}
+		}
+		if len(matched) == 0 && mc.repo != nil {
+			continue // a selector with no metric name, in a folder with no contract: its labels belong to no contract
 		}
 		allowed := mc.c.AllLabels()
 		if len(matched) > 0 {
@@ -344,6 +368,20 @@ func (mc *metricChecker) selector(me *metricsql.MetricExpr) labelScope {
 		}
 	}
 	return sc
+}
+
+// unknownInRepo judges a metric no contract of the repository declares, read in a folder with no contract of its
+// own: the metric may be an app's own, the platform's (up, kube_*) or another folder's, so it is a note; a near
+// miss of a declared name is the typo the lookup is for, and fails, naming the contract files the names came from.
+func (mc *metricChecker) unknownInRepo(name string) {
+	files := strings.Join(mc.repo, ", ")
+	if s := contract.NearMiss(name, mc.names); s != "" {
+		mc.r.add(Fail, mc.q.File, mc.q.Where, "contract-undeclared-metric",
+			"metric %q is not in the repository's contracts (%s) and not a platform metric; did you mean %q?", name, files, s)
+		return
+	}
+	mc.r.add(Note, mc.q.File, mc.q.Where, "contract-name-unknown",
+		"metric %q is in none of the repository's contracts (%s): not checked, this folder has no contract of its own", name, files)
 }
 
 func firstName(name, re string) string {

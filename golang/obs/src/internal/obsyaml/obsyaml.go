@@ -46,8 +46,11 @@ const grafanaForDashboardSchema = "13.3.0"
 
 // File is a parsed obs.yaml.
 type File struct {
-	Path     string   // the file that was read
-	Versions Versions // the versions the repo targets
+	Path string // the file that was read
+	// Inherited is true when the folder asked for has no obs.yaml and Path is the nearest enclosing
+	// observability folder's (observability/<feature> reads observability/obs.yaml).
+	Inherited bool
+	Versions  Versions // the versions the repo targets
 	// Resolved thresholds. A nil pointer or zero value means obs.yaml does not name that
 	// group, and the consumer keeps its built-in default.
 	Logs      *vl.Limits         // thresholds.logs over the pinned VictoriaLogs defaults
@@ -130,12 +133,73 @@ func Load(dir string) (*File, error) {
 	path := filepath.Join(dir, FileName)
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return nil, nil
+		// A feature folder (observability/<feature>) has no obs.yaml of its own: the nearest enclosing
+		// observability folder's is read instead (File.Inherited says so). None: the built-in values.
+		enc := enclosing(dir)
+		if enc == "" {
+			return nil, nil
+		}
+		eb, eerr := os.ReadFile(enc)
+		if eerr != nil {
+			return nil, eerr
+		}
+		f, perr := Parse(enc, eb)
+		if f != nil {
+			f.Inherited = true
+		}
+		return f, perr
 	}
 	if err != nil {
 		return nil, err
 	}
 	return Parse(path, b)
+}
+
+// enclosing is the obs.yaml of the nearest observability folder above dir (dir's own folder excluded),
+// as a path in the spelling of dir (relative when dir is), or "" when none has one. Only the repository is
+// searched: dir's Git root (dir itself or the nearest ancestor holding .git) is the last folder looked at, and
+// outside a Git repository nothing is read. Only folders named observability count: a folder without an obs.yaml
+// of its own reads that folder's, never an unrelated parent's.
+func enclosing(dir string) string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	root := ""
+	for d := abs; ; d = filepath.Dir(d) {
+		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+			root = d
+			break
+		}
+		if filepath.Dir(d) == d {
+			return "" // no Git repository: no folder above is this repository's
+		}
+	}
+	for d := abs; d != root; {
+		d = filepath.Dir(d)
+		// A folder below the Git root counts when it is named observability; the Git root itself counts by what it
+		// holds (this obs.yaml: a standalone observability repository), never by the name of the checkout folder.
+		if d != root && filepath.Base(d) != "observability" {
+			continue
+		}
+		p := filepath.Join(d, FileName)
+		if st, err := os.Stat(p); err != nil || !st.Mode().IsRegular() {
+			continue
+		}
+		if !insideRepo(p, root) {
+			continue // a symlink to a file outside the repository is not this repository's obs.yaml
+		}
+		if filepath.IsAbs(dir) {
+			return p
+		}
+		if wd, err := os.Getwd(); err == nil {
+			if rel, err := filepath.Rel(wd, p); err == nil {
+				return rel
+			}
+		}
+		return p
+	}
+	return ""
 }
 
 // Parse parses the bytes of an obs.yaml read from path.
@@ -637,4 +701,47 @@ func (f *File) Gate(w io.Writer, cmd string) int {
 		fmt.Fprintf(w, "%s: FAILED: %d version(s) in %s differ from the evaluators embedded in this obs (`obs check` lists them)\n", cmd, len(ms), f.Path)
 	}
 	return len(ms)
+}
+
+// insideRepo is true when file p, once every symlink is resolved, is below the resolved Git root.
+func insideRepo(p, root string) bool {
+	rp, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		return false
+	}
+	rr, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(rr, rp)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+}
+
+// UnusedRootFile is the obs.yaml of the observability folder at the Git root of dir when it exists and a run on
+// dir (which read the obs.yaml f, nil for none) does not use it, else "". A repository keeps one obs.yaml at
+// the root observability/ for its top folder; an app folder elsewhere reads its own or none, and this is how a
+// command says that a root file exists and was not read. The path is relative to the Git root.
+func UnusedRootFile(dir string, f *File) string {
+	if f != nil {
+		return ""
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	root := ""
+	for d := abs; ; d = filepath.Dir(d) {
+		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+			root = d
+			break
+		}
+		if filepath.Dir(d) == d {
+			return ""
+		}
+	}
+	p := filepath.Join(root, "observability", FileName)
+	if st, err := os.Stat(p); err != nil || !st.Mode().IsRegular() || !insideRepo(p, root) {
+		return ""
+	}
+	return "observability/" + FileName
 }

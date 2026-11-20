@@ -12,6 +12,7 @@ import (
 	"github.com/AtomiCloud/obs/internal/contract"
 	"github.com/AtomiCloud/obs/internal/files"
 	"github.com/AtomiCloud/obs/internal/gen"
+	"github.com/AtomiCloud/obs/internal/ruleids"
 )
 
 // runCheck is `obs check` (concept section 11.4), the static check of the observability folder in
@@ -173,16 +174,34 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		} else {
 			total := printMetrics(c, *pods, stdout)
 			fmt.Fprintf(stdout, "metrics total: worst case %d series per landscape\n", total)
+			totals := map[string]int64{c.Service: total}
 			for _, oc := range others {
 				fmt.Fprintf(stdout, "contract %s (service %s, read with this one):\n", gen.ContractPath(oc), oc.Service)
 				ot := printMetrics(oc, *pods, stdout)
 				fmt.Fprintf(stdout, "metrics total (%s): worst case %d series per landscape\n", oc.Service, ot)
+				totals[oc.Service] += ot
 			}
+			printServiceTotals(append([]*contract.Contract{c}, others...), totals, *landscapes, stdout)
 			fmt.Fprintf(stdout, "log streams: worst case %d (service %s x %d landscapes x modules %d; log events add no streams)\n",
 				c.StreamCount(*landscapes), c.Service, *landscapes, maxInt(len(c.Modules), 1))
 			fmt.Fprintf(stdout, "events=%v\n", c.EventNames())
 			okLine = fmt.Sprintf("%d metrics, %d log events, %d spans, %d types, contract hash %s",
 				len(c.MetricOrder), len(c.LogOrder), len(c.SpanOrder), len(c.TypeOrder), shortHash(c))
+		}
+	}
+
+	// Two features shipping one rule uid: Grafana keeps one. Read every observability folder of the repository.
+	if *contracts == "auto" {
+		clashes, rerr := ruleids.All(*dir)
+		if rerr != nil {
+			fmt.Fprintf(stdout, "FAIL %s\n", rerr)
+			reasons = append(reasons, "alert rule ids across the repository could not be read")
+		}
+		for _, cl := range clashes {
+			fmt.Fprintf(stdout, "FAIL %s\n", cl)
+		}
+		if len(clashes) > 0 {
+			reasons = append(reasons, fmt.Sprintf("%d alert rule id clashes across the repository", len(clashes)))
 		}
 	}
 
@@ -254,6 +273,34 @@ func printMetrics(c *contract.Contract, pods int, stdout io.Writer) int64 {
 		fmt.Fprintf(stdout, "metric %s (%s): worst case %d series, %s; %s\n", n, m.Kind, w, budget, podsNote)
 	}
 	return total
+}
+
+// printServiceTotals prints, for every service that several contracts share, the service's total series and
+// log streams across them (the per-contract lines above stay). A service of one contract prints nothing: the
+// output of a repository without a shared service is the same as before. The contract has no service-level
+// budget (budgets are per metric, concept 3.2), so the service total is information; each metric is still
+// judged against its own budget.
+func printServiceTotals(cs []*contract.Contract, totals map[string]int64, landscapes int, stdout io.Writer) {
+	by := map[string][]*contract.Contract{}
+	var order []string
+	for _, c := range cs {
+		if _, seen := by[c.Service]; !seen {
+			order = append(order, c.Service)
+		}
+		by[c.Service] = append(by[c.Service], c)
+	}
+	for _, svc := range order {
+		group := by[svc]
+		if len(group) < 2 {
+			continue
+		}
+		var files []string
+		for _, c := range group {
+			files = append(files, gen.ContractPath(c))
+		}
+		fmt.Fprintf(stdout, "service total (%s, %d contracts: %s): worst case %d series per landscape; log streams worst case %d (%d landscapes x the distinct modules of the contracts); no service-level budget in a contract: each metric is judged on its own budget\n",
+			svc, len(group), strings.Join(files, ", "), totals[svc], contract.ServiceStreamCount(group, landscapes), landscapes)
+	}
 }
 
 // printWarnings prints the contract's warnings (a source: entry that does not say who uses it); they do not fail the check.

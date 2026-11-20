@@ -102,6 +102,12 @@ func run(o Options, stdout, stderr io.Writer, res *RunResult) int {
 		fmt.Fprintln(stderr, "obs alerts:", err)
 		return 2
 	}
+	if !o.NoOtherContracts { // one rule uid in two features: Grafana keeps one (the other observability folders are read)
+		if err := RepoRuleIDs(p); err != nil {
+			fmt.Fprintln(stderr, "obs alerts:", err)
+			return 2
+		}
+	}
 	var tempoFrontend *tempo.Frontend
 	{
 		fe, err := o.Obs.TempoFrontend(o.TempoConfig)
