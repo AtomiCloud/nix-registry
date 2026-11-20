@@ -15,14 +15,17 @@ import (
 const (
 	yamlName = "UL.yaml"
 	mdName   = "UL.md"
+	docsDir  = "docs"
 )
 
 // scanResult lists the UL.yaml files under a root (sorted, relative, slash-separated) and
 // the UL.md files committed beside them.
 type scanResult struct {
-	Root string
-	Yaml []string
-	MD   map[string]bool
+	Root      string
+	Yaml      []string
+	MD        map[string]bool
+	Docs      []string // the .md and .dh.md pages under docs/ (UL.md files excluded)
+	Overviews []string // docs/domain/<context>/overview.yaml
 }
 
 var walkSkip = map[string]bool{".git": true, "node_modules": true, ".direnv": true, "vendor": true}
@@ -117,7 +120,7 @@ func gitFailure(dir string, err error) error {
 func scanRepo(root string) (*scanResult, error) {
 	res := &scanResult{Root: root, MD: map[string]bool{}}
 	cmd := exec.Command("git", "ls-files", "-co", "--exclude-standard", "-z", "--",
-		":(glob)**/"+yamlName, ":(glob)**/"+mdName)
+		":(glob)**/"+yamlName, ":(glob)**/"+mdName, ":(glob)"+docsDir+"/**/*.md", ":(glob)"+docsDir+"/domain/*/overview.yaml")
 	cmd.Dir = root
 	cmd.Env = append(gitEnv(), "GIT_OPTIONAL_LOCKS=0")
 	if out, err := cmd.Output(); err == nil {
@@ -137,6 +140,10 @@ func scanRepo(root string) (*scanResult, error) {
 		return nil, err
 	}
 	slices.Sort(res.Yaml)
+	slices.Sort(res.Docs)
+	res.Docs = slices.Compact(res.Docs)
+	slices.Sort(res.Overviews)
+	res.Overviews = slices.Compact(res.Overviews)
 	res.Yaml = slices.Compact(res.Yaml) // a conflicted file is listed once per index stage
 	return res, nil
 }
@@ -147,6 +154,12 @@ func (r *scanResult) note(rel string) {
 		r.Yaml = append(r.Yaml, rel)
 	case mdName:
 		r.MD[rel] = true
+	default:
+		if isDocPage(rel) {
+			r.Docs = append(r.Docs, rel)
+		} else if isOverview(rel) {
+			r.Overviews = append(r.Overviews, rel)
+		}
 	}
 }
 
@@ -161,12 +174,13 @@ func (r *scanResult) walk(root string) error {
 			}
 			return nil
 		}
-		if d.Name() == yamlName || d.Name() == mdName {
-			rel, err := filepath.Rel(root, path)
-			if err != nil {
-				return err
-			}
-			r.note(filepath.ToSlash(rel))
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		rel = filepath.ToSlash(rel)
+		if d.Name() == yamlName || d.Name() == mdName || isDocPage(rel) || isOverview(rel) {
+			r.note(rel)
 		}
 		return nil
 	})
@@ -176,4 +190,15 @@ func (r *scanResult) walk(root string) error {
 // translated git (nix git ships gettext) would otherwise turn a plain folder into an error.
 func gitEnv() []string {
 	return append(os.Environ(), "LC_ALL=C", "LANGUAGE=")
+}
+
+// isDocPage reports whether rel is a doc page: a .md file (a .dh.md file included) under docs/.
+func isDocPage(rel string) bool {
+	return strings.HasPrefix(rel, docsDir+"/") && strings.HasSuffix(rel, ".md") && filepath.Base(rel) != mdName
+}
+
+// isOverview reports whether rel is docs/domain/<context>/overview.yaml.
+func isOverview(rel string) bool {
+	p := strings.Split(rel, "/")
+	return len(p) == 4 && p[0] == docsDir && p[1] == "domain" && p[3] == "overview.yaml"
 }

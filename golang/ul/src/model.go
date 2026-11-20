@@ -21,16 +21,24 @@ type Named struct {
 }
 
 // Entry is one word of a UL.yaml, as written.
+// Translation is the fixed term of a word in one language (the translations field).
+type Translation struct {
+	Lang string
+	Term string
+	Line int
+}
+
 type Entry struct {
-	Word       string
-	WordLine   int
-	Aliases    []Named
-	Desc       string
-	Details    string
-	Avoid      []Named
-	See        []Named
-	Status     string // "active" or "retired"
-	ReplacedBy Named  // Name == "" when absent
+	Word         string
+	WordLine     int
+	Aliases      []Named
+	Desc         string
+	Details      string
+	Avoid        []Named
+	See          []Named
+	Status       string        // "active" or "retired"
+	ReplacedBy   Named         // Name == "" when absent
+	Translations []Translation // only in --translations fixed
 }
 
 // Doc is one namespace as written in one file.

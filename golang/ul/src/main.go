@@ -14,8 +14,11 @@ import (
 var version = "dev"
 
 type globals struct {
-	root   string
-	format string
+	root         string
+	format       string
+	translations string
+	whatFolder   string
+	dh           string
 }
 
 type env struct {
@@ -30,10 +33,16 @@ const usageText = `ul: the ubiquitous-language tool
 
 Usage: ul [--root DIR] [--format F] <command> [flags]
 
+Flags of every command besides --root and --format:
+  --translations M    UL word translation: fixed (default), english or free
+  --what-folder NAME  the inner what folder of a context (default model)
+  --dh CMD            the dh command that reads .dh.md pages (default $UL_DH, else dh)
+
 Commands:
   all                 the final UL (--format json|md, --details)
   lookup <name>       every match for a word, alias or id (--from PATH, --format text|json|md)
-  check               every rule (--format text|json); exit 1 on problems
+  check               every rule, the UL.yaml rules and the word checks over docs/ pages
+                      (--format text|json); exit 1 on problems; flags (warnings) go to stderr
   gen                 write UL.md beside each UL.yaml (--check: exit 1 on drift)
   --version
 
@@ -57,6 +66,9 @@ func (m *multi) Set(s string) error { *m = append(*m, s); return nil }
 func addCommon(fs *flag.FlagSet, g *globals) {
 	fs.StringVar(&g.root, "root", g.root, "repo root (default: git top level, else the current directory)")
 	fs.StringVar(&g.format, "format", g.format, "output format")
+	fs.StringVar(&g.translations, "translations", g.translations, "UL word translation: fixed (default), english or free")
+	fs.StringVar(&g.whatFolder, "what-folder", g.whatFolder, "name of the inner what folder of a context (default model)")
+	fs.StringVar(&g.dh, "dh", g.dh, "the dh command that reads .dh.md pages (default $UL_DH, else dh)")
 }
 
 // parseArgs parses flags that may come before or after the positional arguments. A bare `--`

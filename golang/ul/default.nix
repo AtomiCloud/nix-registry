@@ -4,6 +4,10 @@
 # UL, and serves it as JSON (`ul/v1`), Markdown, lookups, `ul check` rules and generated UL.md files.
 # Spec: design/registry-tools/ul.md in the diene corpus.
 #
+# `ul check` also reads the doc pages under docs/ (.md with a CommonMark parser, .dh.md through the
+# `dh` tool, which must be on PATH for a repo that has .dh.md pages) and holds them to the word
+# lists; with --translations fixed (the default) it holds translations to each word's fixed term.
+#
 # The source lives in-tree (src/), like problemgen, so the registry release IS the tool
 # release. A static Go binary, wrapped so the repo scan finds git (its one runtime input).
 # The licence and notice files of every linked Go module ship in share/licenses/ul.
@@ -11,13 +15,13 @@
 # Name clash: util-linux also ships a `ul` (an old underline filter). Inside a nix dev shell
 # the registry's `ul` comes first on PATH; outside one, call it by full path.
 let
-  version = "0.1.0";
+  version = "0.2.0";
 
   ul = (nixpkgs.buildGoModule.override { inherit go; }) {
     pname = "ul";
     inherit version;
     src = ./src;
-    vendorHash = "sha256-g+yaVIx4jxpAQ/+WrGKxhVeliYx7nLQe/zsGpxV4Fn4=";
+    vendorHash = "sha256-+kCsPMLO8jE7Gq7iQmPiBnfpC9I6DuWzpaF/EO4ez/w=";
     env.CGO_ENABLED = "0";
     ldflags = [ "-w" "-s" "-X main.version=${version}" ];
     nativeBuildInputs = [ nixpkgs.makeWrapper ];

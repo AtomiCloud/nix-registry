@@ -35,6 +35,7 @@ type Final struct {
 	NS       []*FNS
 	Entries  []*FEntry // by namespace, then word
 	Problems []Problem
+	Flags    []Problem // rules that warn and pass (UL406); only ul check shows them
 
 	byID    map[string]*FEntry
 	nameIdx map[string][]*FEntry          // lower-case word or alias -> distinct entries
@@ -79,6 +80,7 @@ func buildFinal(root string, repo []*Doc, base []Problem) *Final {
 
 	f.buildIndexes()
 	f.checkNames(problem)
+	f.flagSameWord()
 	f.resolveRefs(problem)
 	f.computeMentions()
 	slices.SortStableFunc(f.Problems, func(a, b Problem) int {
@@ -336,5 +338,113 @@ func (f *Final) computeMentions() {
 			fe.Mentions = append(fe.Mentions, id)
 		}
 		slices.Sort(fe.Mentions)
+	}
+}
+
+// span is one whole-word name found in a text: rune offsets [start, end).
+type span struct {
+	start, end int
+	ents       []*FEntry
+}
+
+// scanSpans finds the longest whole-word name at each position, with where it sits. A name
+// also matches with a plural ending: -s, -es, or -ies for a name that ends in y (so
+// "conflict resolvers" is the name "conflict resolver"). At the same end, the exact name wins.
+func (t *trie) scanSpans(s string) []span {
+	rs := foldRunes(s)
+	var out []span
+	atEnd := func(k int) bool { return k == len(rs) || !isWordRune(rs[k]) }
+	hasAt := func(k int, suffix string) bool {
+		x := 0
+		for _, r := range suffix {
+			if k+x >= len(rs) || rs[k+x] != r {
+				return false
+			}
+			x++
+		}
+		return atEnd(k + x)
+	}
+	for i := 0; i < len(rs); {
+		if i > 0 && isWordRune(rs[i-1]) {
+			i++
+			continue
+		}
+		n := t
+		best := -1
+		var bestEnts []*FEntry
+		for j := i; j < len(rs); j++ {
+			if j > i { // n is the node after rs[i..j-1]: a name ending in y that goes on as "ies"
+				if c := n.next['y']; c != nil && len(c.ents) > 0 && hasAt(j, "ies") && j+3 > best {
+					best, bestEnts = j+3, c.ents
+				}
+			}
+			n = n.next[rs[j]]
+			if n == nil {
+				break
+			}
+			if len(n.ents) == 0 {
+				continue
+			}
+			switch {
+			case atEnd(j + 1):
+				if j+1 >= best {
+					best, bestEnts = j+1, n.ents
+				}
+			case hasAt(j+1, "s"):
+				if j+2 > best {
+					best, bestEnts = j+2, n.ents
+				}
+			case hasAt(j+1, "es"):
+				if j+3 > best {
+					best, bestEnts = j+3, n.ents
+				}
+			}
+		}
+		if best > 0 {
+			out = append(out, span{i, best, bestEnts})
+			i = best
+		} else {
+			i++
+		}
+	}
+	return out
+}
+
+// nameTrie holds every word and alias of the final UL.
+func (f *Final) nameTrie() *trie {
+	root := &trie{}
+	for _, fe := range f.Entries {
+		root.insert(fe.E.Word, fe)
+		for _, a := range fe.E.Aliases {
+			root.insert(a.Name, fe)
+		}
+	}
+	return root
+}
+
+// flagSameWord: UL406, a flag. The same word or alias (any case) defined in two namespaces,
+// retired words included. Both are kept (the same-word rule); the later one is flagged.
+func (f *Final) flagSameWord() {
+	keys := make([]string, 0, len(f.nameIdx))
+	for k := range f.nameIdx {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		ents := f.nameIdx[k]
+		for _, fe := range ents[1:] {
+			if fe.NS == ents[0].NS {
+				continue
+			}
+			name, line := fe.E.Word, fe.E.WordLine
+			if fold(fe.E.Word) != k {
+				for _, a := range fe.E.Aliases {
+					if fold(a.Name) == k {
+						name, line = a.Name, a.Line
+					}
+				}
+			}
+			f.Flags = append(f.Flags, Problem{Code: "UL406", File: fe.File, Line: max(line, 1), Message: fmt.Sprintf("%q is also defined in %s; one repo should not define a word twice", name, ents[0].NS.Namespace)})
+		}
 	}
 }

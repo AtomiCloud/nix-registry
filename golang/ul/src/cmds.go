@@ -19,9 +19,18 @@ type loaded struct {
 	scan  *scanResult
 	repo  []*Doc
 	probs []Problem
+	opts  options
 }
 
 func load(g *globals, e *env) (*loaded, error) {
+	opts, err := g.options(e.getenv)
+	if err != nil {
+		return nil, err
+	}
+	// A dh given as a path is relative to where ul was started, not to --root.
+	if strings.Contains(opts.dh, "/") && !filepath.IsAbs(opts.dh) {
+		opts.dh = filepath.Join(e.cwd, opts.dh)
+	}
 	root, err := resolveRoot(g.root, e.cwd)
 	if err != nil {
 		if g.root != "" {
@@ -29,7 +38,7 @@ func load(g *globals, e *env) (*loaded, error) {
 		}
 		return nil, err
 	}
-	l := &loaded{root: root}
+	l := &loaded{root: root, opts: opts}
 	if l.scan, err = scanRepo(root); err != nil {
 		return nil, err
 	}
@@ -41,7 +50,7 @@ func load(g *globals, e *env) (*loaded, error) {
 			l.probs = append(l.probs, Problem{Code: "UL101", File: rel, Line: 1, Message: "cannot read the file: " + readErrText(err)})
 			continue
 		}
-		docs, probs := parseDocs(rel, data)
+		docs, probs := parseDocs(rel, data, opts)
 		l.repo = append(l.repo, docs...)
 		l.probs = append(l.probs, probs...)
 	}
@@ -274,6 +283,7 @@ type problemsOut struct {
 	Schema   string    `json:"schema"`
 	Root     string    `json:"root"`
 	Problems []Problem `json:"problems"`
+	Flags    []Problem `json:"flags,omitempty"` // rules that warn and pass
 }
 
 // mdRefusal says why ul must not read or write the UL.md at p, or "" when it may: a regular
@@ -340,9 +350,16 @@ func cmdCheck(g *globals, args []string, e *env) (int, error) {
 	if err != nil {
 		return 2, err
 	}
-	probs := l.final().withMDProblems(l)
+	f := l.final()
+	probs := f.withMDProblems(l)
+	dp, dflags, err := l.docProblems(f)
+	if err != nil {
+		return 2, err
+	}
+	probs = sortProblems(append(probs, dp...))
+	flags := sortProblems(append(slices.Clone(f.Flags), dflags...))
 	if format == "json" {
-		out := problemsOut{Schema: "ul/v1", Root: l.root, Problems: probs}
+		out := problemsOut{Schema: "ul/v1", Root: l.root, Problems: probs, Flags: flags}
 		if out.Problems == nil {
 			out.Problems = []Problem{}
 		}
@@ -352,6 +369,13 @@ func cmdCheck(g *globals, args []string, e *env) (int, error) {
 	} else {
 		for _, p := range probs {
 			if _, err := fmt.Fprintf(e.stdout, "%s:%d: %s %s\n", p.File, p.Line, p.Code, p.Message); err != nil {
+				return 2, err
+			}
+		}
+		// A flag warns and passes. It goes to stderr, so pre-commit (verbose) shows it and a
+		// script reading stdout sees only what refuses.
+		for _, p := range flags {
+			if _, err := fmt.Fprintf(e.stderr, "%s:%d: %s flag: %s\n", p.File, p.Line, p.Code, p.Message); err != nil {
 				return 2, err
 			}
 		}
@@ -432,4 +456,20 @@ func cmdGen(g *globals, args []string, e *env) (int, error) {
 		return 1, nil
 	}
 	return 0, nil
+}
+
+func sortProblems(probs []Problem) []Problem {
+	slices.SortStableFunc(probs, func(a, b Problem) int {
+		if c := strings.Compare(a.File, b.File); c != 0 {
+			return c
+		}
+		if a.Line != b.Line {
+			return a.Line - b.Line
+		}
+		if c := strings.Compare(a.Code, b.Code); c != 0 {
+			return c
+		}
+		return strings.Compare(a.Message, b.Message)
+	})
+	return slices.Compact(probs)
 }
