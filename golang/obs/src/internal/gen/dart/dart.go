@@ -29,7 +29,7 @@ func (generator) Files(c *contract.Contract, o gen.Options) ([]gen.File, error) 
 	if !regexp.MustCompile(`^[a-z][a-z0-9_]*$`).MatchString(interfaces) {
 		return nil, fmt.Errorf("interfaces %q must be a Dart package name", interfaces)
 	}
-	g := &emitter{c: c, pkg: o.Package, packageID: o.PackageID, interfaces: interfaces, declared: map[string]string{}}
+	g := &emitter{c: c, pkg: o.Package, packageID: o.PackageID, contractID: o.ContractID, interfaces: interfaces, declared: map[string]string{}}
 	if err := g.plan(); err != nil {
 		return nil, err
 	}
@@ -40,6 +40,7 @@ type emitter struct {
 	c          *contract.Contract
 	pkg        string
 	packageID  string
+	contractID string
 	interfaces string
 	declared   map[string]string // top-level identifier -> what declared it
 
@@ -656,7 +657,7 @@ func (g *emitter) render() string {
 	x.line("/// Merges this contract's tables at boot, before the first signal.")
 	x.line("/// Duplicate names, changed contracts and late installs poison the port.")
 	x.line("Result<DurianSignalPort> installSignals() => DurianSignalPort.install(")
-	x.line("  contract: %s,", dq(gen.RegistrationID(c, gen.Options{PackageID: g.packageID})))
+	x.line("  contract: %s,", dq(gen.RegistrationID(c, gen.Options{PackageID: g.packageID, ContractID: g.contractID})))
 	x.line("  hash:")
 	x.line("      %s,", dq("sha256:"+c.Hash))
 	x.line("  metrics: metricTable,")

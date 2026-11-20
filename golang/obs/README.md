@@ -747,7 +747,9 @@ an app can make its own carrier in Go (exported constructors) and Dart (`extends
    at compile time (internal constructors, friend access for Signals only).
 2. A run-time guard in all four checks signals against a merged view of the registered contract tables.
    Each generated contract registers its own table set and hash. Its id is
-   `<package identity>:<repo-relative contract path>`; the path matches the generated header.
+   `<package identity>:<contract path relative to the identity manifest's folder>`, so adding or
+   removing `.git` does not change ids. A `package_id:` override instead uses the Git root, or the
+   project root outside Git, as the path base. Headers retain their source-path ownership marker.
    Go's generated `init()` calls `obs.Register`; Bun's generated `signals.ts` calls `register(...)`
    when it loads; Dart's generated `installSignals()` calls `DurianSignalPort.install`; .NET wiring
    calls `Port.Install(SignalTables.Contract, SignalTables.Metrics, SignalTables.EventLevels, SignalTables.Spans)`.
@@ -849,13 +851,15 @@ registration behavior is now specified in [the corpus port design and four inter
 (concept §3). The last column lists the remaining API details that the goals do not spell; the
 interfaces nodes reconcile them. The fixtures validate these models, not published packages:
 
-For .NET, an explicit `namespace:` wins. The default stays `<Service>.Signals` for a root
-`observability/contract.yaml`, including a service project such as `App/App.csproj` beside
-`App/observability/`; feature contracts use `<Service>.<Feature>.Signals`, where Feature is
-the PascalCase feature folder in either `<feature>/observability/` or `observability/<feature>/`.
-An adjacent `.csproj` keeps the root default only when it is the sole discovered valid .NET root
-candidate for that service. Several such projects (for example `src/Orders` and `src/Billing`)
-use `<Service>.<Feature>.Signals`; a remaining namespace clash tells you to set `namespace:` on one target.
+For .NET, an explicit `namespace:` wins. A service's only .NET contract keeps `<Service>.Signals`
+wherever its `.csproj` sits, including `App/App.csproj` beside `App/observability/` and a project
+under `src/` with a contract under `services/Checkout/observability/`.
+With several valid .NET contracts for one service, the single root candidate (repo-root
+`observability/` or an adjacent `.csproj`, when exactly one exists) keeps `<Service>.Signals`.
+The rest use `<Service>.<Feature>.Signals`; with several root candidates all use feature names.
+Feature is the PascalCase folder in `<feature>/observability/` or `observability/<feature>/`
+(`Root` for a repository-root contract that needs disambiguation). A remaining namespace clash
+tells you to set `namespace:` on one target.
 This lets two features of the same service compile in one assembly without editing a shared namespace.
 Namespaces must be dotted C# identifiers without whitespace around dots; invalid spellings name the
 `namespace:` key and contract. A leading `@` is canonicalized per segment when comparing namespaces.
@@ -905,8 +909,8 @@ registration now carries a package-qualified contract id and hash, and the files
 package manifest available at or above each `out:`, or set `package_id:` on that target. Upgrade the
 interfaces ports to the merged-table contract described above. Generate boot wiring that registers every
 feature before any signal; a hand-kept list or late/lazy registration does not satisfy the contract.
-For feature contracts, the default .NET namespace now includes the feature folder. Root contracts keep
-their old default. Remove any cross-contract namespace or output-folder collision reported by `obs gen`
+A service's sole .NET contract keeps its old namespace default. Multiple contracts use the root-candidate
+and feature namespace rules above. Remove any cross-contract namespace or output-folder collision reported by `obs gen`
 or `obs check`; explicitly choosing one namespace for two contracts is refused too.
 If a 0.5 repository has a symlink at a generated-file path, replace that link with the real generated
 file before regenerating. Directory aliases within the allowed root may remain.

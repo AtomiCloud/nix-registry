@@ -16,21 +16,29 @@ import (
 
 // RegistrationID separates libraries even when their contract paths are identical.
 func RegistrationID(c *contract.Contract, o Options) string {
+	if o.ContractID != "" {
+		return o.ContractID
+	}
 	return o.PackageID + ":" + ContractPath(c)
 }
 
 // PackageIdentity reads the nearest language manifest at or above out. An explicit
 // package_id also supports repositories whose manifests are supplied at build time.
 func PackageIdentity(root string, target contract.Target) (string, error) {
+	id, _, err := packageIdentityLocation(root, target)
+	return id, err
+}
+
+func packageIdentityLocation(root string, target contract.Target) (string, string, error) {
 	if id := strings.TrimSpace(target.PackageID); id != "" {
-		return id, nil
+		return id, "", nil
 	}
 	start, err := filepath.Abs(filepath.Join(root, filepath.FromSlash(target.Out)))
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	fail := func(err error) (string, error) {
-		return "", fmt.Errorf("generate %s out: %q: package identity: %w (or set package_id:)", target.Lang, target.Out, err)
+	fail := func(err error) (string, string, error) {
+		return "", "", fmt.Errorf("generate %s out: %q: package identity: %w (or set package_id:)", target.Lang, target.Out, err)
 	}
 	start, err = resolvedPath(start)
 	if err != nil {
@@ -129,7 +137,7 @@ func PackageIdentity(root string, target contract.Target) (string, error) {
 				if id == "" {
 					return fail(fmt.Errorf("%s has no package identity", file))
 				}
-				return id, nil
+				return id, dir, nil
 			}
 			if !os.IsNotExist(e) {
 				return fail(e)
@@ -140,4 +148,33 @@ func PackageIdentity(root string, target contract.Target) (string, error) {
 		}
 	}
 	return fail(fmt.Errorf("no manifest from %s through project boundary %s", start, boundary))
+}
+
+// RegistrationIdentity is independent of Git when a manifest supplies the identity.
+// Explicit package_id uses the repository root, or the project root outside Git.
+func RegistrationIdentity(obsDir string, target contract.Target) (string, error) {
+	root := Root(obsDir)
+	id, base, err := packageIdentityLocation(root, target)
+	if err != nil {
+		return "", err
+	}
+	if base == "" {
+		base = GitRoot(root)
+		if base == "" {
+			base = root
+		}
+	}
+	base, err = resolvedPath(base)
+	if err != nil {
+		return "", err
+	}
+	source, err := resolvedPath(filepath.Join(obsDir, "contract.yaml"))
+	if err != nil {
+		return "", err
+	}
+	relative, err := filepath.Rel(base, source)
+	if err != nil {
+		return "", err
+	}
+	return id + ":" + filepath.ToSlash(relative), nil
 }

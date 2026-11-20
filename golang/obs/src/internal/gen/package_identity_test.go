@@ -53,7 +53,7 @@ func TestPackageIdentity(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, o := range outs {
-				if o.Lang != "" && (!strings.Contains(string(o.Content), tc.id+":observability/contract.yaml") || !strings.Contains(string(o.Content), "sha256:"+c.Hash)) {
+				if o.Lang != "" && (!strings.Contains(string(o.Content), tc.id+":../observability/contract.yaml") || !strings.Contains(string(o.Content), "sha256:"+c.Hash)) {
 					t.Fatalf("%s lacks identity/hash", o.Path)
 				}
 			}
@@ -71,7 +71,7 @@ func TestPackageIdentity(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, o := range other {
-				if o.Lang != "" && !strings.Contains(string(o.Content), "other:observability/contract.yaml") {
+				if o.Lang != "" && !strings.Contains(string(o.Content), "other:../observability/contract.yaml") {
 					t.Fatalf("%s lacks other library identity", o.Path)
 				}
 			}

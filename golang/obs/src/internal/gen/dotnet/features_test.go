@@ -22,7 +22,9 @@ func TestDefaultFeatureNamespace(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fs, err := gen.Generate("dotnet", c, gen.Options{PackageID: "Shop"})
+		other := &contract.Contract{File: "Other/observability/contract.yaml", Service: "shop", Generate: []contract.Target{{Lang: "dotnet"}}}
+		ns := gen.DotnetNamespaceForContracts(c, "", []*contract.Contract{c, other})
+		fs, err := gen.Generate("dotnet", c, gen.Options{PackageID: "Shop", Namespace: ns})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -34,13 +36,19 @@ func TestDefaultFeatureNamespace(t *testing.T) {
 
 func TestDefaultFeatureGolden(t *testing.T) {
 	root := filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(gentest.Fixture(t)))), "default-features")
+	var contracts []*contract.Contract
 	for _, feature := range []string{"Orders", "Friends"} {
 		c, err := contract.LoadValid(filepath.Join(root, feature, "observability/contract.yaml"))
 		if err != nil {
 			t.Fatal(err)
 		}
 		c.File = feature + "/observability/contract.yaml"
-		fs, err := gen.Generate("dotnet", c, gen.Options{PackageID: "Shop"})
+		contracts = append(contracts, c)
+	}
+	for _, c := range contracts {
+		feature := filepath.Base(filepath.Dir(filepath.Dir(c.File)))
+		ns := gen.DotnetNamespaceForContracts(c, "", contracts)
+		fs, err := gen.Generate("dotnet", c, gen.Options{PackageID: "Shop", Namespace: ns})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -111,6 +119,54 @@ func TestAppRootDefaultNamespace(t *testing.T) {
 		have, err := os.ReadFile(p)
 		if err != nil || !bytes.Equal(have, f.Content) {
 			t.Errorf("%s differs from generated root contract", p)
+		}
+	}
+}
+
+func TestNestedProjectGolden(t *testing.T) {
+	fixture := filepath.Join(filepath.Dir(filepath.Dir(filepath.Dir(gentest.Fixture(t)))), "nested-project")
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range []string{"src/Checkout.csproj", "services/Checkout/observability/contract.yaml"} {
+		body, err := os.ReadFile(filepath.Join(fixture, file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		destination := filepath.Join(root, file)
+		if err := os.MkdirAll(filepath.Dir(destination), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(destination, body, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c, err := contract.LoadValid(filepath.Join(root, "services/Checkout/observability/contract.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if namespace := gen.DotnetNamespace(c, ""); namespace != "Checkout.Signals" {
+		t.Fatalf("sole nested project: %s", namespace)
+	}
+	files, err := gen.Generate("dotnet", c, gen.Options{PackageID: "Checkout"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		destination := filepath.Join(fixture, "src/gen", file.Path)
+		if os.Getenv("OBS_UPDATE_GOLDEN") == "1" {
+			if err := os.MkdirAll(filepath.Dir(destination), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(destination, file.Content, 0644); err != nil {
+				t.Fatal(err)
+			}
+			continue
+		}
+		body, err := os.ReadFile(destination)
+		if err != nil || !bytes.Equal(body, file.Content) {
+			t.Errorf("nested project golden differs: %v", err)
 		}
 	}
 }

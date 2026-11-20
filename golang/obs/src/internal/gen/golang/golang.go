@@ -30,7 +30,7 @@ func (generator) Files(c *contract.Contract, o gen.Options) ([]gen.File, error) 
 	if interfaces == "" {
 		interfaces = "github.com/ProtoDurian/diene.go-interfaces/obs"
 	}
-	w := &writer{c: c, interfaces: interfaces, packageID: o.PackageID, declared: map[string]string{}}
+	w := &writer{c: c, interfaces: interfaces, packageID: o.PackageID, contractID: o.ContractID, declared: map[string]string{}}
 	src := w.render(pkg)
 	if w.err != nil {
 		return nil, w.err
@@ -47,6 +47,7 @@ type writer struct {
 	c          *contract.Contract
 	interfaces string
 	packageID  string
+	contractID string
 	declared   map[string]string // identifier -> what declared it
 	err        error
 }
@@ -162,7 +163,7 @@ func (w *writer) render(pkg string) string {
 	w.f("}\n")
 	w.f("\n// init merges this contract's tables at boot, before the first signal.\n")
 	w.f("// Duplicate names, changed contracts and late registration poison the port until restart.\n")
-	w.f("func init() {\n\t_ = obs.Register(obs.DurianSignalTables{Contract: %q, Hash: %q, Metrics: MetricTable, Events: EventTable, Spans: SpanTable})\n}\n", gen.RegistrationID(c, gen.Options{PackageID: w.packageID}), "sha256:"+c.Hash)
+	w.f("func init() {\n\t_ = obs.Register(obs.DurianSignalTables{Contract: %q, Hash: %q, Metrics: MetricTable, Events: EventTable, Spans: SpanTable})\n}\n", gen.RegistrationID(c, gen.Options{PackageID: w.packageID, ContractID: w.contractID}), "sha256:"+c.Hash)
 	return w.String()
 }
 

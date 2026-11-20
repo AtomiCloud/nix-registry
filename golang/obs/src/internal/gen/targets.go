@@ -3,6 +3,7 @@ package gen
 import (
 	"fmt"
 	"github.com/AtomiCloud/obs/internal/contract"
+	"os"
 	"path"
 	"path/filepath"
 )
@@ -44,7 +45,7 @@ func DotnetNamespace(c *contract.Contract, namespace string) string {
 		return namespace
 	}
 	cs := []*contract.Contract{c}
-	if adjacentDotnetProject(c) {
+	if _, err := os.Stat(c.File); err == nil {
 		found, _ := contract.Discover(filepath.Dir(c.File))
 		for _, file := range found {
 			other, err := contract.Load(file)
@@ -53,31 +54,32 @@ func DotnetNamespace(c *contract.Contract, namespace string) string {
 			}
 		}
 	}
-	return dotnetNamespaceFor(c, namespace, cs)
+	return DotnetNamespaceForContracts(c, namespace, cs)
 }
-func dotnetNamespaceFor(c *contract.Contract, namespace string, cs []*contract.Contract) string {
+func DotnetNamespaceForContracts(c *contract.Contract, namespace string, cs []*contract.Contract) string {
 	if namespace != "" {
 		return namespace
 	}
 	ns := csharpIdentifier(c.Service)
 	dir := path.Dir(ContractPath(c))
-	if dir == "." || dir == "observability" {
-		return ns + ".Signals"
-	}
-	if adjacentDotnetProject(c) {
-		candidates := 0
-		for _, other := range cs {
-			if other.Service == c.Service && dotnetRootCandidate(other) && (other == c || hasDotnetTarget(other)) {
+	contracts, candidates := 0, 0
+	for _, other := range cs {
+		if other.Service == c.Service && (other == c || hasDotnetTarget(other)) {
+			contracts++
+			if dotnetRootCandidate(other) {
 				candidates++
 			}
 		}
-		if candidates <= 1 {
-			return ns + ".Signals"
-		}
+	}
+	if contracts <= 1 || (candidates == 1 && dotnetRootCandidate(c)) {
+		return ns + ".Signals"
 	}
 	feature := path.Base(dir)
 	if feature == "observability" {
 		feature = path.Base(path.Dir(dir))
+	}
+	if feature == "." {
+		feature = "Root"
 	}
 	return ns + "." + csharpIdentifier(feature) + ".Signals"
 }
@@ -137,7 +139,7 @@ func TargetClashes(cs []*contract.Contract) []string {
 				}
 			}
 			if target.Lang == "dotnet" {
-				ns, err := CanonicalDotnetNamespace(dotnetNamespaceFor(c, target.Module, cs))
+				ns, err := CanonicalDotnetNamespace(DotnetNamespaceForContracts(c, target.Module, cs))
 				if err != nil {
 					issues = append(issues, fmt.Sprintf("[generate-namespace] contract %s generate[%d].%v", current.file, index, err))
 					continue

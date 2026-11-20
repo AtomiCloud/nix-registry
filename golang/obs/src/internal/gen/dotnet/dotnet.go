@@ -33,7 +33,7 @@ func (generator) Files(c *contract.Contract, o gen.Options) ([]gen.File, error) 
 	if !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$`).MatchString(interfaces) {
 		return nil, fmt.Errorf("interfaces %q must be a C# namespace", interfaces)
 	}
-	g := &emitter{c: c, ns: ns, interfaces: interfaces, packageID: o.PackageID, declared: map[string]string{}}
+	g := &emitter{c: c, ns: ns, interfaces: interfaces, packageID: o.PackageID, contractID: o.ContractID, declared: map[string]string{}}
 	if err := g.plan(); err != nil {
 		return nil, err
 	}
@@ -45,6 +45,7 @@ type emitter struct {
 	ns         string
 	interfaces string
 	packageID  string
+	contractID string
 	declared   map[string]string // top-level identifier -> what declared it
 
 	typeRef  map[string]string   // contract type -> the C# type of a label value
@@ -343,7 +344,7 @@ func (g *emitter) render() string {
 	x.line("public static class SignalTables")
 	x.line("{")
 	x.line("    /// <summary>The package-qualified contract id and hash used at boot registration.</summary>")
-	x.line("    public static readonly DurianSignalContract Contract = new(%s, %s);", cs(gen.RegistrationID(c, gen.Options{PackageID: g.packageID})), cs("sha256:"+c.Hash))
+	x.line("    public static readonly DurianSignalContract Contract = new(%s, %s);", cs(gen.RegistrationID(c, gen.Options{PackageID: g.packageID, ContractID: g.contractID})), cs("sha256:"+c.Hash))
 	x.blank()
 	x.line("    public static readonly IReadOnlyDictionary<string, DurianSignalMetricInfo> Metrics =")
 	x.line("        new Dictionary<string, DurianSignalMetricInfo>")
