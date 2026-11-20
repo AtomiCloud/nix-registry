@@ -295,6 +295,24 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 		if len(observations[key]) == 0 {
 			continue
 		} // no direct firing evidence in the report window
+		// The longest MEASURED span: one instance with both transitions in history, clipped to the
+		// window. It never comes from the merged union, whose end may only be inferred to the cutoff.
+		var longest time.Duration
+		for _, iv := range ss {
+			if iv.open || !iv.To.After(from) || !iv.From.Before(to) {
+				continue
+			}
+			lo, hi := iv.From, iv.To
+			if lo.Before(from) {
+				lo = from
+			}
+			if hi.After(to) {
+				hi = to
+			}
+			if d := hi.Sub(lo); d > longest {
+				longest = d
+			}
+		}
 		for _, iv := range mergeIntervals(ss) {
 			if !iv.To.After(from) || !iv.From.Before(to) {
 				continue // over before the window began, or after it ended
@@ -321,6 +339,9 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 			}
 			f.Last = iv.From
 			f.spans = append(f.spans, iv)
+		}
+		if f := out[key]; f != nil {
+			f.Longest = longest
 		}
 	}
 	for key, obs := range observations {
@@ -352,17 +373,22 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 	return out, coverage, nil
 }
 
-// mergeIntervals unions the firing spans of all instances of one rule, in time order.
+// mergeIntervals unions the firing spans of all instances of one rule, in time order. A merged span
+// is open when ANY span folded into it is open, including one whose inferred end equals a closed
+// span's end at the cutoff: merging never loses that evidence.
 func mergeIntervals(spans []interval) []interval {
 	sort.Slice(spans, func(i, j int) bool { return spans[i].From.Before(spans[j].From) })
 	var merged []interval
 	for _, span := range spans {
 		if len(merged) == 0 || span.From.After(merged[len(merged)-1].To) {
 			merged = append(merged, span)
-		} else if span.To.After(merged[len(merged)-1].To) {
-			merged[len(merged)-1].To = span.To
-			merged[len(merged)-1].open = span.open
+			continue
 		}
+		last := &merged[len(merged)-1]
+		if span.To.After(last.To) {
+			last.To = span.To
+		}
+		last.open = last.open || span.open
 	}
 	return merged
 }
@@ -637,20 +663,25 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 			}
 			firedRule[r.ID] = true
 		}
-		for _, s := range f.spans {
-			if s.open {
-				continue // inferred to the cutoff: its duration is not measured
-			}
-			if d := s.To.Sub(s.From); d > f.Longest {
-				f.Longest = d
-			}
-		}
 		if f.InRepo {
 			f.Incident = covered[f.ID]
 		} else {
 			f.Incident = covered[f.ruleUID] // an explicit UID the repo has no rule for; never a display name
 		}
 		res.Fired = append(res.Fired, *f)
+	}
+	// A name-only alert (no ruler UID) whose display ID equals another fired alert's display ID is shown
+	// as alertname:<name> everywhere: the window lines, partial_fired, fired[].id and the text.
+	// Without a collision the display ID stays as it was.
+	shown := map[string]int{}
+	for _, f := range res.Fired {
+		shown[f.ID]++
+	}
+	for i := range res.Fired {
+		f := &res.Fired[i]
+		if f.ruleUID == "" && f.Title != "" && shown[f.ID] > 1 && (f.IDSource == "alertname" || f.IDSource == "repo_title") {
+			f.ID = "alertname:" + f.Title
+		}
 	}
 	sort.SliceStable(res.Fired, func(i, j int) bool { return res.Fired[i].ID < res.Fired[j].ID })
 	for _, f := range res.Fired {

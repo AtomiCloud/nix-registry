@@ -1091,6 +1091,63 @@ func TestIncidentsUIDAndAlertNameWithTheSameTextStayApart(t *testing.T) {
 			t.Fatalf("the name-only alert owns the raw sample: %+v", f)
 		}
 	}
+	// The typed identity reaches the named window: the name-only alert is shown as alertname:<name>
+	// wherever it appears, so the window cannot be read as the UID alert having caught it.
+	ids := map[string]bool{}
+	for _, f := range res.Fired {
+		ids[f.ID] = true
+	}
+	if !ids["high-errors"] || !ids["alertname:high-errors"] || len(ids) != 2 {
+		t.Fatalf("fired ids must tell the UID row from the name-only row: %+v", ids)
+	}
+	if len(res.Windows) != 1 || len(res.Windows[0].Fired) != 1 || res.Windows[0].Fired[0] != "alertname:high-errors" {
+		t.Fatalf("windows[].fired must name the name-only alert: %+v", res.Windows)
+	}
+	var out strings.Builder
+	res.Print(&out)
+	if !strings.Contains(out.String(), "caught: alertname:high-errors fired") || strings.Contains(out.String(), "caught: high-errors fired") {
+		t.Fatalf("the printed caught line must carry the typed identity:\n%s", out.String())
+	}
+	if b, err := res.JSON(); err != nil || !strings.Contains(string(b), `"id": "alertname:high-errors"`) {
+		t.Fatalf("json fired[].id must carry it too: %v %s", err, b)
+	}
+}
+
+// Swapping which of the two same-text alerts fired inside the window swaps the attribution.
+func TestIncidentsSwappingWhichSameTextAlertFiredChangesTheWindowAttribution(t *testing.T) {
+	grouped := fmt.Sprintf(`{"metric":{"alertname":"High error rate","grafana_rule_uid":"high-errors"},"values":[[%d,"1"]]},{"metric":{"alertname":"high-errors"},"values":[[%d,"1"]]}`, t0.Unix(), t0.Unix())
+	opts := IncidentOptions{Dir: writeRepo(t), Since: 7 * 24 * time.Hour, Windows: []Window{{From: t0, To: t0.Add(time.Hour)}}, Now: func() time.Time { return t0.Add(3 * time.Hour) }}
+	for name, c := range map[string]struct{ raw, want, notWant string }{
+		"name-only fired": {fmt.Sprintf(`{"metric":{"alertname":"high-errors"},"values":[[%d,"1"]]}`, t0.Add(10*time.Minute).Unix()), "alertname:high-errors", "high-errors"},
+		"uid fired":       {fmt.Sprintf(`{"metric":{"alertname":"High error rate","grafana_rule_uid":"high-errors"},"values":[[%d,"1"]]}`, t0.Add(10*time.Minute).Unix()), "high-errors", "alertname:high-errors"},
+	} {
+		srv := seriesServer(t, grouped, c.raw)
+		res, err := Incidents(context.Background(), &Client{}, &Target{Metrics: srv.URL}, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Windows) != 1 || len(res.Windows[0].Fired) != 1 || res.Windows[0].Fired[0] != c.want {
+			t.Fatalf("%s: window attribution want %q: %+v", name, c.want, res.Windows)
+		}
+		var out strings.Builder
+		res.Print(&out)
+		if !strings.Contains(out.String(), "caught: "+c.want+" fired") || (c.notWant == "alertname:high-errors" && strings.Contains(out.String(), "caught: alertname:")) {
+			t.Fatalf("%s: text attribution:\n%s", name, out.String())
+		}
+	}
+}
+
+// With no collision the name-only alert keeps its plain display ID (old output unchanged).
+func TestIncidentsNameOnlyAlertWithoutCollisionKeepsPlainID(t *testing.T) {
+	grouped := fmt.Sprintf(`{"metric":{"alertname":"high-errors"},"values":[[%d,"1"]]}`, t0.Unix())
+	srv := seriesServer(t, grouped, "")
+	res, err := Incidents(context.Background(), &Client{}, &Target{Metrics: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: 7 * 24 * time.Hour, Now: func() time.Time { return t0.Add(time.Hour) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Fired) != 1 || res.Fired[0].ID != "high-errors" {
+		t.Fatalf("%+v", res.Fired)
+	}
 }
 
 // An alert name that equals a repository UID is not that rule: only an explicit UID, or a unique title, matches.
@@ -1125,5 +1182,84 @@ func TestIncidentsAlertNameEqualToRepoUIDDoesNotMatchTheRule(t *testing.T) {
 		if len(res.Fired) != 1 || !res.Fired[0].InRepo || res.Fired[0].ID != "high-errors" || res.Fired[0].Runbook == "" || res.Fired[0].Incident != "spike" {
 			t.Fatalf("%s match: %+v", name, res.Fired)
 		}
+	}
+}
+
+// twoInstanceHistory builds the history of one rule with two instances (label maps): A and B.
+func twoInstanceHistory(rows ...string) string { return "[" + strings.Join(rows, ",") + "]" }
+
+func incidentsOver(t *testing.T, body string, now time.Time) FiredAlert {
+	t.Helper()
+	srv := grafanaFake(t, &recorder{}, body, 0)
+	res, err := Incidents(context.Background(), &Client{}, &Target{Name: "prod", Grafana: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: 2 * time.Hour, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Fired) != 1 {
+		t.Fatalf("one rule fired: %+v", res.Fired)
+	}
+	return res.Fired[0]
+}
+
+// Merging the spans of several instances of one rule must not lose evidence: the union is open when ANY
+// instance span is open, and longest_ns is the longest measured (closed) single-instance span.
+func TestIncidentsMergedInstancesKeepOpenSpanAndLongestMeasured(t *testing.T) {
+	a, b := map[string]string{"instance": "a"}, map[string]string{"instance": "b"}
+	row := func(prev, next string, at time.Duration, l map[string]string) string {
+		return historyRow("high-errors", 7, "High error rate", prev, next, t0.Add(at), l, nil)
+	}
+	now := t0.Add(time.Hour)
+
+	// (a) A fires +5m resolves +15m (10m measured); B fires +10m and never resolves.
+	f := incidentsOver(t, twoInstanceHistory(
+		row("Normal", "Alerting", 5*time.Minute, a),
+		row("Normal", "Alerting", 10*time.Minute, b),
+		row("Alerting", "Normal", 15*time.Minute, a),
+	), now)
+	if !f.SpanOpen || f.Longest != 10*time.Minute || f.Firings != 1 {
+		t.Fatalf("(a) one open instance keeps span_open, and the closed 10m span is the longest measured: %+v", f)
+	}
+
+	// (b) A resolves exactly at the cutoff end while B is still open: the inferred ends are equal.
+	f = incidentsOver(t, twoInstanceHistory(
+		row("Normal", "Alerting", 5*time.Minute, a),
+		row("Normal", "Alerting", 10*time.Minute, b),
+		row("Alerting", "Normal", 60*time.Minute, a),
+	), now)
+	if !f.SpanOpen || f.Longest != 55*time.Minute {
+		t.Fatalf("(b) an open span whose inferred end equals a closed span's end stays open; longest is A's measured 55m: %+v", f)
+	}
+
+	// Both closed: not open, longest is the longer single-instance span even when they overlap.
+	f = incidentsOver(t, twoInstanceHistory(
+		row("Normal", "Alerting", 5*time.Minute, a),
+		row("Normal", "Alerting", 10*time.Minute, b),
+		row("Alerting", "Normal", 15*time.Minute, a),
+		row("Alerting", "Normal", 30*time.Minute, b),
+	), now)
+	if f.SpanOpen || f.Longest != 20*time.Minute {
+		t.Fatalf("all closed: not open, longest single instance 20m: %+v", f)
+	}
+}
+
+// (c) mergeIntervals itself: deleting the open propagation must fail here.
+func TestMergeIntervalsOpenIsTrueWhenAnyMergedSpanIsOpen(t *testing.T) {
+	end := t0.Add(time.Hour)
+	at := func(m int) time.Time { return t0.Add(time.Duration(m) * time.Minute) }
+	cases := map[string][]interval{
+		"open extends the union":         {{From: at(5), To: at(15)}, {From: at(10), To: end, open: true}},
+		"open ends where closed ends":    {{From: at(5), To: end}, {From: at(10), To: end, open: true}},
+		"open first, closed later":       {{From: at(5), To: end, open: true}, {From: at(10), To: at(20)}},
+		"open ends inside a closed span": {{From: at(5), To: end, open: true}, {From: at(10), To: end}},
+	}
+	for name, spans := range cases {
+		got := mergeIntervals(append([]interval(nil), spans...))
+		if len(got) != 1 || !got[0].open {
+			t.Errorf("%s: %+v", name, got)
+		}
+	}
+	got := mergeIntervals([]interval{{From: at(5), To: at(15)}, {From: at(10), To: at(30)}})
+	if len(got) != 1 || got[0].open || !got[0].To.Equal(at(30)) {
+		t.Errorf("closed spans stay closed: %+v", got)
 	}
 }
