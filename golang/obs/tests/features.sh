@@ -517,6 +517,46 @@ if command -v git >/dev/null 2>&1; then
   run check --dir "$FA"
   check "nested repository inside a feature's alerts/: no false [rule-id-clash]" 0 'obs check: ok'
   absent '[rule-id-clash]' || bad "nested repository inside a feature's alerts/ clashed"
+  if [ "$(id -u)" != 0 ]; then
+    # an unreadable ignored copy must not stop the walk before a real clash in a later folder (a false green)
+    rm -rf "$FB/alerts/vendored"
+    mkdir -p "$FB/alerts/build/x" "$FB/alerts/z-source"
+    cp "$FB/alerts/errors/warning.yaml" "$FB/alerts/z-source/warning.yaml"
+    sed -i 's/friend-errors/nfctag-errors/' "$FB/alerts/z-source/warning.yaml"
+    rm -rf "$FB/alerts/errors"
+    printf 'build/\n' >"$R/.gitignore"
+    chmod 000 "$FB/alerts/build"
+    run check --dir "$FA"
+    check "unreadable ignored copy inside alerts/: the real clash in a later folder is still reported" 1 '[rule-id-clash]' 'friend/alerts/z-source/warning.yaml'
+    printf '' >"$R/.gitignore"
+    run check --dir "$FA"
+    check "unreadable folder inside alerts/ that is NOT ignored: a failure naming it" 1 'cannot read' 'alerts/build'
+    chmod 755 "$FB/alerts/build"
+  fi
+  # the SELECTED folder's own ignored copy: no false repo clash from obs alerts / obs test
+  rm -rf "$FB/alerts/build" "$FB/alerts/z-source"
+  mkdir -p "$FB/alerts/errors" "$FB/alerts/build/errors"
+  cp "$FA/alerts/errors/warning.yaml" "$FB/alerts/errors/warning.yaml"
+  sed -i 's/nfctag-errors/friend-errors/' "$FB/alerts/errors/warning.yaml"
+  cp "$FB/alerts/errors/warning.yaml" "$FB/alerts/build/errors/warning.yaml"
+  printf 'build/\n' >"$R/.gitignore"
+  run alerts --dir "$FB" --base "$base"
+  check "ignored copy inside the selected folder: obs alerts --dir is green" 0
+  run test --dir "$FB" --base "$base"
+  check "ignored copy inside the selected folder: obs test --dir is green" 0
+  printf '' >"$R/.gitignore"
+  rm -rf "$FB/alerts/build"
+fi
+if command -v git >/dev/null 2>&1; then
+  # an alert slug folder named vendor is not pruned: the same uid under alerts/vendor/ in two features clashes
+  repo "vendor" i nfctag-errors friend-errors friend.invites ""
+  rm -rf "${R:?}/.git"
+  git -C "$R" init -q
+  mkdir -p "$FA/alerts/vendor" "$FB/alerts/vendor"
+  cp "$FA/alerts/errors/warning.yaml" "$FA/alerts/vendor/warning.yaml"
+  cp "$FA/alerts/errors/warning.yaml" "$FB/alerts/vendor/warning.yaml"
+  run check --dir "$FA"
+  check "same uid under alerts/vendor/ in two features: [rule-id-clash]" 1 '[rule-id-clash]' 'alerts/vendor/warning.yaml'
 fi
 
 # ---- a repository that is itself an observability folder: recognised by content, never by the checkout folder's name -----

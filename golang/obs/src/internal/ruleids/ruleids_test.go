@@ -168,3 +168,61 @@ func TestCopiesInsideAFoldersAlertsAreNotClashes(t *testing.T) {
 		t.Fatalf("Others = %v, %v; want friend's one rule", others, err)
 	}
 }
+
+// An unreadable ignored copy inside alerts/ is never read, so it cannot stop the walk before a real duplicate in a later
+// folder (a false green); an unreadable folder that is NOT ignored is an error naming it.
+func TestUnreadableFolderInAlerts(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root reads every folder")
+	}
+	root := t.TempDir()
+	gitInit(t, root)
+	a := filepath.Join(root, "observability", "nfctag")
+	b := filepath.Join(root, "observability", "friend")
+	put(t, filepath.Join(a, "contract.yaml"), "service: a\n")
+	put(t, filepath.Join(a, "alerts", "e", "warning.yaml"), alertDoc("shared-errors"))
+	put(t, filepath.Join(b, "contract.yaml"), "service: b\n")
+	put(t, filepath.Join(b, "alerts", "build", "x", "warning.yaml"), alertDoc("other"))
+	put(t, filepath.Join(b, "alerts", "z-source", "warning.yaml"), alertDoc("shared-errors")) // a real duplicate, after build/
+	put(t, filepath.Join(root, ".gitignore"), "build/\n")
+	build := filepath.Join(b, "alerts", "build")
+	if err := os.Chmod(build, 0); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(build, 0o755)
+	cs, err := All(a)
+	if err != nil || len(cs) != 1 || !strings.Contains(cs[0].String(), "z-source") {
+		t.Fatalf("unreadable ignored build/ must not hide the real clash: %v, %v", cs, err)
+	}
+	// the same folder, not ignored: an error naming it
+	put(t, filepath.Join(root, ".gitignore"), "")
+	if _, err := All(a); err == nil || !strings.Contains(err.Error(), "build") {
+		t.Fatalf("an unreadable folder that is not ignored must be an error naming it: %v", err)
+	}
+	if _, err := Others(a); err == nil || !strings.Contains(err.Error(), "build") {
+		t.Fatalf("Others: an unreadable folder that is not ignored must be an error naming it: %v", err)
+	}
+}
+
+// Below an observability folder only the ignored / nested-repository / chart-copy pruning applies, never the name
+// lists: an alert slug folder called vendor is a definition, so one uid under alerts/vendor/ in two features clashes.
+func TestSlugFolderNamedVendorIsNotPruned(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	root := t.TempDir()
+	gitInit(t, root)
+	a := filepath.Join(root, "observability", "nfctag")
+	b := filepath.Join(root, "observability", "friend")
+	put(t, filepath.Join(a, "contract.yaml"), "service: a\n")
+	put(t, filepath.Join(a, "alerts", "vendor", "warning.yaml"), alertDoc("shared-errors"))
+	put(t, filepath.Join(b, "contract.yaml"), "service: b\n")
+	put(t, filepath.Join(b, "alerts", "vendor", "warning.yaml"), alertDoc("shared-errors"))
+	cs, err := All(a)
+	if err != nil || len(cs) != 1 {
+		t.Fatalf("alerts/vendor/ in two features: %v, %v; want one clash", cs, err)
+	}
+}

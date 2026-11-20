@@ -312,7 +312,7 @@ func ptrs(is []Incident) []*Incident {
 // observability folder, or a folder outside any Git repository, has nothing to compare with. The error names
 // both alert files (relative to the Git root), one clash a line.
 func RepoRuleIDs(p *Project) error {
-	others, err := ruleids.Others(p.Dir)
+	others, skip, err := ruleids.OthersSkip(p.Dir)
 	if err != nil {
 		return err
 	}
@@ -322,6 +322,9 @@ func RepoRuleIDs(p *Project) error {
 	var mine []ruleids.Rule
 	mineFiles := map[string]bool{}
 	for _, a := range append(append([]Alert(nil), p.Alerts...), p.Records...) {
+		if skip.Skips(p.Dir, filepath.Join(p.Dir, a.File)) {
+			continue // an ignored or nested-repository copy inside this folder: not a definition (the local parser is unchanged)
+		}
 		file := contract.RelPath(filepath.Join(p.Dir, a.File))
 		mine = append(mine, ruleids.Rule{ID: a.ID, File: file})
 		mineFiles[file] = true

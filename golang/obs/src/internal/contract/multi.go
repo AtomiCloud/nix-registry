@@ -119,6 +119,12 @@ func (w *walkSkip) dir(p, name string) bool {
 	if p == w.abs || strings.HasPrefix(w.abs, p+string(filepath.Separator)) {
 		return false
 	}
+	return w.below(p, name)
+}
+
+// below is the part of dir that also applies below an observability folder (no name lists): ignored, a nested
+// repository, a chart's copy folders.
+func (w *walkSkip) below(p, name string) bool {
 	if w.ignored[p] || hasGit(p) {
 		return true
 	}
@@ -191,7 +197,7 @@ func sameInfo(info os.FileInfo, p string) bool {
 
 // Folders returns every observability folder of dir's repository that holds a contract.yaml or an alerts
 // folder: a folder named observability or below one, at any depth, below the Git root, fixtures and
-// testdata folders skipped. Copies are not folders of their own: a folder git ignores (git check-ignore) and the
+// testdata folders skipped. Copies are not folders of their own: a folder git ignores (one git ls-files call, pruned on entry) and the
 // files/ and templates/ of a folder that holds a Chart.yaml (a chart's copy of the alerts and dashboards) are
 // skipped, except dir itself. Sorted. dir itself is in the list when it qualifies. A dir that is in a
 // fixtures or testdata folder, or in no Git repository, has none. An unreadable folder is an error naming it.
@@ -205,8 +211,11 @@ func Folders(dir string) ([]string, error) {
 // path the walk would not have entered. A nil RepoSkip skips nothing.
 type RepoSkip struct{ w *walkSkip }
 
-// Skips reports whether the absolute path p (a file or a folder) lies in something the walk prunes.
-func (r *RepoSkip) Skips(p string) bool {
+// Skips reports whether the absolute path p (a file or a folder) below the observability folder folder lies in
+// something the walk prunes: a folder git ignores, a nested repository, a chart's files/ or templates/. The name
+// lists (vendor, fixtures, testdata, ...) are NOT applied: they decide which folders are observability folders, and
+// below one an alert slug may be called vendor.
+func (r *RepoSkip) Skips(folder, p string) bool {
 	if r == nil || r.w == nil {
 		return false
 	}
@@ -214,8 +223,8 @@ func (r *RepoSkip) Skips(p string) bool {
 	if w.ignored[p] {
 		return true
 	}
-	for d := filepath.Dir(p); d != w.root && strings.HasPrefix(d, w.root+string(filepath.Separator)); d = filepath.Dir(d) {
-		if w.dir(d, filepath.Base(d)) {
+	for d := filepath.Dir(p); d != folder && strings.HasPrefix(d, folder+string(filepath.Separator)); d = filepath.Dir(d) {
+		if w.below(d, filepath.Base(d)) {
 			return true
 		}
 	}

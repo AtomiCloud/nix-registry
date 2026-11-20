@@ -41,13 +41,20 @@ func ID(r files.Rule) string {
 // A folder that cannot be read is an error naming it. An alert file that cannot be parsed is that folder's own
 // check to report: its rules are the ones that did parse.
 func Others(dir string) ([]Rule, error) {
+	out, _, err := OthersSkip(dir)
+	return out, err
+}
+
+// OthersSkip is Others and the prune set it used, so the caller can apply the same rule to the rules of dir itself
+// (contract.RepoSkip.Skips(dir, file)). The set is nil outside a Git repository.
+func OthersSkip(dir string) ([]Rule, *contract.RepoSkip, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	folders, skip, err := contract.FoldersSkip(abs)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var out []Rule
 	for _, f := range folders {
@@ -56,11 +63,11 @@ func Others(dir string) ([]Rule, error) {
 		}
 		rs, err := read(f, skip)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		out = append(out, rs...)
 	}
-	return out, nil
+	return out, skip, nil
 }
 
 // All returns the rules of every observability folder of dir's repository, dir's own included, and the clashes among
@@ -117,7 +124,7 @@ func Find(rules []Rule, mine map[string]bool) []Clash {
 // the discovery walk prunes (git-ignored, a nested repository, a chart's copy) is not a definition of its uid: the
 // folder's alerts/ is read with the same rule as the folders themselves.
 func read(folder string, skip *contract.RepoSkip) ([]Rule, error) {
-	set, err := files.Load(folder)
+	set, err := files.LoadSkip(folder, func(p string) bool { return skip.Skips(folder, p) }) // pruned before it is read
 	if err != nil {
 		return nil, err
 	}
@@ -126,9 +133,6 @@ func read(folder string, skip *contract.RepoSkip) ([]Rule, error) {
 		id := ID(r)
 		if id == "" {
 			continue // a rule with no uid and no name is that folder's own failure
-		}
-		if skip.Skips(filepath.Join(folder, r.File)) {
-			continue
 		}
 		out = append(out, Rule{ID: id, File: contract.RelPath(filepath.Join(folder, r.File))})
 	}
