@@ -19,6 +19,8 @@ AtomiCloud's Nix Registry for custom built packages.
 - aws-export-credentials
 - cyanprint
 - releaser
+- dh (proposal): Durian Hypermedia LLM views, parsed JSON, translation stamps and token estimates, pinned to v0.2.0; see `bunWrapper/dh/default.nix`
+- doccheck (proposal): documentation checks, generated maps, outlines and decision records; see `bunWrapper/doccheck/README.md`
 - helm-schema
 - problemgen (definition-first RFC 9457 problems: lint and diff `problems.yaml`, generate Go/TypeScript/C#/Dart code and the Problem record; see `golang/problemgen/default.nix`)
 - ul (the ubiquitous-language tool: loads every `UL.yaml` of a repo, overlays them into one final UL and serves it as JSON `ul/v1`, Markdown, `ul lookup`, `ul check` and `ul gen`; util-linux also ships a `ul`, so inside a nix shell the registry one comes first and elsewhere call it by full path; see `golang/ul/default.nix`)

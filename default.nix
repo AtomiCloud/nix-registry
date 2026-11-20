@@ -129,7 +129,7 @@ let
   rust = import ./rust/default.nix { inherit nixpkgs fenix; };
 
   # bun wrapper
-  bun = import ./bunWrapper { inherit nixpkgs; bun = nixpkgs-unstable.bun; };
+  bun = import ./bunWrapper { inherit nixpkgs; inherit (golang) ul; bun = nixpkgs-unstable.bun; };
 
 in
 

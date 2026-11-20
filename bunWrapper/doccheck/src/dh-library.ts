@@ -19,11 +19,38 @@ export function rootOf(path: string): string {
   return at < 0 ? dirname(abs) : abs.slice(0, at);
 }
 
+const pageCache = new Map<string, { source: string; document: Document }>();
+/** Remove an entire CommonMark quote, including lazy continuation lines. */
+export function publicSource(source: string): string {
+  const fm = source.match(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n|$)/)?.[0] ?? '';
+  const body = source.slice(fm.length);
+  const sensitive = (token: any): boolean => {
+    if (token.type === 'blockquote') {
+      const first = token.tokens?.find((item: any) => item.type !== 'space');
+      const inline = first?.tokens?.find((item: any) => item.type !== 'space');
+      if (inline?.type === 'strong' && inline.text === 'Security finding:') return true;
+    }
+    return (token.tokens ?? []).some(sensitive) || (token.items ?? []).some(sensitive);
+  };
+  return (
+    fm +
+    Lexer.lex(body)
+      .map(token => (sensitive(token) ? '\n' : token.raw))
+      .join('')
+  );
+}
 export function parseFile(path: string, publicView = false): Document {
-  return parse(readFileSync(path, 'utf8'), {
+  const source = readFileSync(path, 'utf8');
+  const key = `${resolve(path)}:${publicView}`;
+  const cached = pageCache.get(key);
+  if (cached?.source === source) return cached.document;
+  const document = parse(publicView ? publicSource(source) : source, {
     path: relative(rootOf(path), resolve(path)).split(sep).join('/'),
     publicView,
   });
+  if (pageCache.size >= 512) pageCache.delete(pageCache.keys().next().value!);
+  pageCache.set(key, { source, document });
+  return document;
 }
 
 export function llmForFile(path: string, publicView = false): string {
@@ -33,16 +60,20 @@ export function llmForFile(path: string, publicView = false): string {
   return llmView(doc);
 }
 
-/** Maps and word lists have their own generators; translations have their own view. */
-export function walkPages(target: string): string[] {
+export const contextOverview = (path: string): boolean => /\/docs\/domain\/[^/]+\/index\.md$/.test(resolve(path));
+/** Maps, context overviews and word lists are generated. Translations stay outside the English view. */
+export function walkPages(target: string, includeTranslations = false): string[] {
   const abs = resolve(target);
   if (!statSync(abs).isDirectory()) return abs.endsWith('.md') ? [abs] : [];
   return readdirSync(abs, { withFileTypes: true })
     .flatMap(entry => {
       const path = join(abs, entry.name);
-      if (entry.isSymbolicLink() || entry.name === 'i18n' || entry.name.startsWith('.')) return [];
-      if (entry.isDirectory()) return walkPages(path);
-      return entry.name.endsWith('.md') && !['README.md', 'UL.md'].includes(entry.name) ? [path] : [];
+      if (entry.isSymbolicLink() || (!includeTranslations && entry.name === 'i18n') || entry.name.startsWith('.'))
+        return [];
+      if (entry.isDirectory()) return walkPages(path, includeTranslations);
+      return entry.name.endsWith('.md') && !['README.md', 'UL.md'].includes(entry.name) && !contextOverview(path)
+        ? [path]
+        : [];
     })
     .sort();
 }
@@ -75,12 +106,30 @@ export function expectedLlm(
 ): Map<string, string> {
   const out = new Map<string, string>();
   const index: string[] = [];
+  const intros: string[] = [];
+  const seenContexts = new Set<string>();
+  const reservedIndex = join(resolve(outDir), 'index.md');
   for (const page of readOrder(docsDir, walkPages(docsDir))) {
     const target = join(outDir, relative(docsDir, page).replace(/\.dh\.md$/, '.md'));
     const doc = parseFile(page, publicView);
     const error = doc.problems.find(p => p.level === 'error');
     if (error) throw new Error(`${page}:${error.line}: ${error.message}`);
+    if (out.has(resolve(target)) || resolve(target) === reservedIndex)
+      throw new Error(`${page}: LLM output path collides at ${target}`);
     out.set(resolve(target), llmView(doc));
+    const context = relative(docsDir, page).match(/^domain\/([^/]+)\//)?.[1];
+    if (context && !seenContexts.has(context)) {
+      seenContexts.add(context);
+      const overview = join(docsDir, 'domain', context, 'overview.yaml');
+      const metadata = strictYaml(readFileSync(overview, 'utf8'));
+      if (!metadata || typeof metadata.intro !== 'string') throw new Error(`${overview}: intro is required`);
+      intros.push(
+        `## ${context.charAt(0).toUpperCase() + context.slice(1).replace(/-/g, ' ')}`,
+        '',
+        metadata.intro.trim(),
+        '',
+      );
+    }
     index.push(
       `- [${doc.frontMatter.title ?? relative(docsDir, page)}](${relative(outDir, target)}): ${doc.frontMatter.description ?? ''}`,
     );
@@ -88,7 +137,7 @@ export function expectedLlm(
   if (out.size)
     out.set(
       join(resolve(outDir), 'index.md'),
-      `# Docs for LLMs\n<!-- Made by dh llm from docs/, in reading order; nobody edits this folder. -->\n\n${index.join('\n')}\n`,
+      `# Docs for LLMs\n<!-- Made by dh llm from docs/, in reading order; nobody edits this folder. -->\n\n${intros.join('\n')}${intros.length ? '\n' : ''}## Pages, in reading order\n\n${index.join('\n')}\n`,
     );
   return out;
 }

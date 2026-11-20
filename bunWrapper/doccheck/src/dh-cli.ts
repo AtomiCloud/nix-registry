@@ -13,6 +13,7 @@ import { basename, dirname, join, relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { VERSION, type Block, type Document } from 'durian-hypermedia';
 import { stringify } from 'yaml';
+import { hydrateEditors } from './dh-code';
 import {
   bodyOf,
   expectedLlm,
@@ -70,21 +71,22 @@ export function hydrate(doc: Document, codeRoot: string): Document {
             step.error = String(error instanceof Error ? error.message : error);
           }
         }
-      } else if (block.type === 'editor') {
-        for (const file of block.files) {
-          if (file.code != null || file.made) continue;
-          try {
-            file.code = readCode(file.repo, file.path, file.commit, codeRoot);
-            file.error = null;
-          } catch (error) {
-            file.error = String(error instanceof Error ? error.message : error);
-          }
-        }
       } else if (block.type === 'human') visit(block.body);
       else if (block.type === 'tabs' || block.type === 'accordion') block.items.forEach(item => visit(item.body));
     }
   }
   visit(doc.blocks);
+  const origin = spawnSync('git', ['-C', codeRoot, 'remote', 'get-url', 'origin'], { encoding: 'utf8' });
+  const outline = join(codeRoot, 'docs', 'outline.yaml');
+  const repoName =
+    origin.status === 0
+      ? origin.stdout
+          .trim()
+          .split(/[/:]/)
+          .pop()!
+          .replace(/\.git$/, '')
+      : ((existsSync(outline) ? strictYaml(readFileSync(outline, 'utf8'))?.repoName : undefined) ?? basename(codeRoot));
+  hydrateEditors(doc, { repoRoot: codeRoot, repoName, codeRoot });
   return doc;
 }
 
@@ -189,8 +191,14 @@ export function main(args = process.argv.slice(2)): number {
           if (existsSync(output))
             for (const path of allMd(output)) {
               if (!expected.has(path)) {
-                rmSync(path);
-                console.log(`removed ${path} (no source page)`);
+                const text = readFileSync(path, 'utf8');
+                if (
+                  text.includes('<!-- Made by dh llm from the source; nobody edits this file. -->') ||
+                  text.includes('<!-- Made by dh llm from docs/, in reading order; nobody edits this folder. -->')
+                ) {
+                  rmSync(path);
+                  console.log(`removed ${path} (no source page)`);
+                }
               }
             }
         } else {
@@ -209,8 +217,9 @@ export function main(args = process.argv.slice(2)): number {
         }
         continue;
       }
-      for (const page of walkPages(target)) {
+      for (const page of walkPages(target, command === 'stamp')) {
         const doc = parseFile(page, publicView);
+        if (command === 'stamp' && statSync(target).isDirectory() && !doc.frontMatter.translation) continue;
         const error = doc.problems.find(p => p.level === 'error');
         if (error) throw new Error(`${page}:${error.line}: ${error.message}`);
         if (command === 'stamp') {
