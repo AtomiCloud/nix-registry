@@ -108,7 +108,7 @@ for tc in "$here"/typecheck/*.sh; do
     echo "SKIP generated $lang code compile check: $tool not on PATH"
     continue
   fi
-  if bash "$tc" >"$work/tc-$lang.txt" 2>&1 && ! grep -q '^FAIL' "$work/tc-$lang.txt"; then
+  if OBS_GEN_BINARY="$OBS" bash "$tc" >"$work/tc-$lang.txt" 2>&1 && ! grep -q '^FAIL' "$work/tc-$lang.txt"; then
     ok "generated $lang code compiles and every planted bad consumer is red ($(grep -c '^PASS' "$work/tc-$lang.txt") checks)"
   else
     bad "generated $lang typecheck"

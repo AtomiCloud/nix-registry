@@ -95,4 +95,59 @@ else
   echo "FAIL multi build: $out"
   fail=1
 fi
+
+# Exercise discovery from the generated app, rather than copying precomputed
+# namespaces: a source export and the same checkout must both compile and emit.
+if [ -n "${OBS_GEN_BINARY:-}" ]; then
+  d="$work/export/Signals"
+  mkdir -p "$d"
+  cat >"$d/Signals.csproj" <<'XML'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+</Project>
+XML
+  obs_setup_stub dotnet "$d"
+  for feature in Orders Friends; do
+    mkdir -p "$d/$feature/observability"
+    cat >"$d/$feature/observability/contract.yaml" <<YAML
+service: shop
+logs: {Failed: {event: shop.${feature,,}.failed, level: error}}
+generate: [{lang: dotnet, out: gen}]
+YAML
+  done
+  cat >"$d/Program.cs" <<'CS'
+using AtomiCloud.Diene.Interfaces;
+using Orders = Shop.Orders.Signals;
+using Friends = Shop.Friends.Signals;
+if (!Port.Install(Orders.SignalTables.Contract, Orders.SignalTables.Metrics, Orders.SignalTables.EventLevels, Orders.SignalTables.Spans).IsSuccess ||
+    !Port.Install(Friends.SignalTables.Contract, Friends.SignalTables.Metrics, Friends.SignalTables.EventLevels, Friends.SignalTables.Spans).IsSuccess ||
+    !Log.Error(Orders.Events.Failed).IsSuccess || !Log.Error(Friends.Events.Failed).IsSuccess)
+    throw new Exception("both feature registrations must emit");
+Console.WriteLine("both features emitted");
+CS
+  for layout in export git; do
+    if [ "$layout" = git ]; then mkdir "$d/.git"; fi
+    generated=true
+    for feature in Orders Friends; do
+      if ! out=$("$OBS_GEN_BINARY" gen --dir "$d/$feature/observability" 2>&1); then
+        echo "FAIL $layout $feature generation: $out"
+        fail=1
+        generated=false
+      fi
+    done
+    if "$generated" && out=$(build "$d/Signals.csproj") && run=$("$DOTNET" "$d/bin/Debug/net10.0/Signals.dll" 2>&1) &&
+      grep -q 'both features emitted' <<<"$run"; then
+      echo "PASS $layout: same-service features generate, compile and emit together"
+    else
+      echo "FAIL $layout same-service app: ${out:-} ${run:-}"
+      fail=1
+    fi
+  done
+fi
 exit $fail

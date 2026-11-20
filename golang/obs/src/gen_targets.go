@@ -8,7 +8,7 @@ import (
 // generationTargetIssues is separate from discovery so every command shares the
 // same target resolution while contract discovery can grow with repository layouts.
 func generationTargetIssues(primary *contract.Contract, dir string) ([]string, error) {
-	paths, err := contract.Discover(dir)
+	paths, err := gen.TargetContractPaths(primary)
 	if err != nil {
 		return nil, err
 	}
@@ -18,7 +18,7 @@ func generationTargetIssues(primary *contract.Contract, dir string) ([]string, e
 		if err != nil {
 			continue // obs check diagnoses invalid siblings; gen keeps its 0.5 scope
 		}
-		if issues := other.Validate(); len(issues) > 0 {
+		if issues := other.Validate(); len(issues) > 0 || !gen.ValidGenerateConfig(other) {
 			continue
 		}
 		contracts = append(contracts, other)

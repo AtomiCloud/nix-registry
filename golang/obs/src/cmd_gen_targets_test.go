@@ -87,7 +87,11 @@ func TestGenerationNamespaceValidation(t *testing.T) {
 		"Friends/observability/contract.yaml": "service: shop\ngenerate: [{lang: dotnet, out: gen, package_id: Shop, namespace: Shop . Signals}]\n",
 	})
 	for _, cmd := range []string{"check", "gen"} {
-		rc, out := obs(cmd, "--dir", filepath.Join(root, "Orders/observability"))
+		feature := "Orders"
+		if cmd == "gen" {
+			feature = "Friends"
+		}
+		rc, out := obs(cmd, "--dir", filepath.Join(root, feature+"/observability"))
 		if rc == 0 || !strings.Contains(out, "generate-namespace") || !strings.Contains(out, "Friends/observability/contract.yaml") || !strings.Contains(out, "Shop . Signals") {
 			t.Errorf("%s must name invalid namespace and contract: rc=%d %s", cmd, rc, out)
 		}
@@ -138,20 +142,64 @@ func TestGenerationResolvedOutputCollision(t *testing.T) {
 }
 
 func TestGenerationIgnoresInvalidSiblings(t *testing.T) {
-	for _, bad := range []string{"service: [broken]\n", "service: broken\nmetrics: {bad: {kind: nonsense}}\n"} {
+	for _, bad := range []string{"service: [broken]\n", "service: broken\nmetrics: {bad: {kind: nonsense}}\n", "service: broken\ngenerate: [{lang: dotnet, out: gen, package_id: Broken, namespace: Shop . Signals}]\n"} {
 		root := repo(t, map[string]string{
 			"go.mod":                             "module example.com/valid\n\ngo 1.24\n",
 			"observability/contract.yaml":        "service: valid\nlogs: {Failed: {event: valid.failed, level: error}}\ngenerate: [{lang: go, out: gen}]\n",
 			"Broken/observability/contract.yaml": bad,
 		})
 		dir := filepath.Join(root, "observability")
-		for _, args := range [][]string{{"gen", "--dir", dir}, {"gen", "--check", "--dir", dir}} {
+		for _, args := range [][]string{{"gen", "--dir", dir}, {"gen", "--check", "--dir", dir}, {"gen", "--check", "--lang", "go", "--dir", dir}} {
 			if rc, out := obs(args...); rc != 0 {
 				t.Errorf("valid contract gen must ignore invalid sibling: rc=%d %s", rc, out)
 			}
 		}
 		if rc, out := obs("check", "--dir", dir); rc == 0 || !strings.Contains(out, "Broken/observability/contract.yaml") {
 			t.Errorf("check must still name invalid sibling: rc=%d %s", rc, out)
+		}
+	}
+}
+
+func TestGitlessDotnetFeatureNamespaces(t *testing.T) {
+	root := repo(t, map[string]string{
+		"Shop.csproj":                         "<Project/>",
+		"Orders/observability/contract.yaml":  "service: shop\ngenerate: [{lang: dotnet, out: gen}]\n",
+		"Friends/observability/contract.yaml": "service: shop\ngenerate: [{lang: dotnet, out: gen}]\n",
+	})
+	if err := os.RemoveAll(filepath.Join(root, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	for _, withGit := range []bool{false, true} {
+		if withGit {
+			if err := os.Mkdir(filepath.Join(root, ".git"), 0755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, feature := range []string{"Orders", "Friends"} {
+			dir := filepath.Join(root, feature, "observability")
+			if rc, out := obs("gen", "--dir", dir); rc != 0 {
+				t.Fatal(out)
+			}
+			body, err := os.ReadFile(filepath.Join(root, feature, "gen/Signals.g.cs"))
+			if err != nil || !strings.Contains(string(body), "namespace Shop."+feature+".Signals;") {
+				t.Errorf("withGit=%v %s: %v %s", withGit, feature, err, body)
+			}
+		}
+	}
+}
+
+func TestGitlessGenerationTargetClashes(t *testing.T) {
+	root := repo(t, map[string]string{
+		"Shop.csproj":                         "<Project/>",
+		"Orders/observability/contract.yaml":  "service: shop\ngenerate: [{lang: dotnet, out: gen, namespace: Shared.Signals}]\n",
+		"Friends/observability/contract.yaml": "service: shop\ngenerate: [{lang: dotnet, out: gen, namespace: Shared.Signals}]\n",
+	})
+	if err := os.RemoveAll(filepath.Join(root, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	for _, cmd := range []string{"gen", "check"} {
+		if rc, out := obs(cmd, "--dir", filepath.Join(root, "Orders/observability")); rc == 0 || !strings.Contains(out, "generate-namespace-clash") {
+			t.Errorf("%s must retain true clashes outside Git: rc=%d %s", cmd, rc, out)
 		}
 	}
 }

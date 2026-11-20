@@ -34,22 +34,43 @@ func hasDotnetTarget(c *contract.Contract) bool {
 	return false
 }
 func dotnetRootCandidate(c *contract.Contract) bool {
-	dir := path.Dir(ContractPath(c))
+	dir := path.Dir(dotnetContractPath(c))
 	return dir == "." || dir == "observability" || adjacentDotnetProject(c)
 }
 
-// DotnetNamespace uses discovered valid siblings only to disambiguate adjacent
-// project roots of the same service. Commands diagnose discovery errors separately.
+func dotnetContractPath(c *contract.Contract) string {
+	if GitRoot(filepath.Dir(c.File)) == "" {
+		for _, target := range c.Generate {
+			if target.Lang != "dotnet" {
+				continue
+			}
+			target.PackageID = ""
+			if _, root, err := packageIdentityLocation(Root(filepath.Dir(c.File)), target); err == nil {
+				source, err := resolvedPath(c.File)
+				if err != nil {
+					continue
+				}
+				if relative, err := filepath.Rel(root, source); err == nil {
+					return filepath.ToSlash(relative)
+				}
+			}
+		}
+	}
+	return ContractPath(c)
+}
+
+// DotnetNamespace uses valid siblings to disambiguate contracts of one service.
+// Commands diagnose discovery errors separately.
 func DotnetNamespace(c *contract.Contract, namespace string) string {
 	if namespace != "" {
 		return namespace
 	}
 	cs := []*contract.Contract{c}
 	if _, err := os.Stat(c.File); err == nil {
-		found, _ := contract.Discover(filepath.Dir(c.File))
+		found, _ := TargetContractPaths(c)
 		for _, file := range found {
 			other, err := contract.Load(file)
-			if err == nil && len(other.Validate()) == 0 {
+			if err == nil && len(other.Validate()) == 0 && ValidGenerateConfig(other) {
 				cs = append(cs, other)
 			}
 		}
@@ -61,7 +82,7 @@ func DotnetNamespaceForContracts(c *contract.Contract, namespace string, cs []*c
 		return namespace
 	}
 	ns := csharpIdentifier(c.Service)
-	dir := path.Dir(ContractPath(c))
+	dir := path.Dir(dotnetContractPath(c))
 	contracts, candidates := 0, 0
 	for _, other := range cs {
 		if other.Service == c.Service && (other == c || hasDotnetTarget(other)) {
