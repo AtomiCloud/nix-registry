@@ -4,11 +4,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
+	"github.com/AtomiCloud/obs/internal/engines/vl"
+	"github.com/AtomiCloud/obs/internal/obsyaml"
+	"github.com/VictoriaMetrics/metricsql"
 	"gopkg.in/yaml.v3"
 )
 
@@ -39,12 +42,97 @@ var flatRequired = []string{"title", "datasource", "expr", "for", "summary", "de
 // severities: the file name is the severity, with the title prefix the chart adds.
 var severities = map[string]string{"critical": "🚨", "warning": "⚠️", "info": "ℹ️"}
 
-var (
-	flatDuration = regexp.MustCompile(`^([0-9]+(ms|s|m|h|d|w|y))+$`)
-	// landscapeSel matches `landscape` used as a label or field name (a selector or a filter), never
-	// as part of another word: each landscape's rules already read only that landscape's data.
-	landscapeSel = regexp.MustCompile(`(^|[^A-Za-z0-9_.])"?(durian\.cloud\.)?landscape"?\s*(=~|!~|!=|=|:)`)
-)
+// isLandscapeName tells the label or field a landscape is stored under (concept section 2).
+func isLandscapeName(n string) bool { return n == "landscape" || n == "durian.cloud.landscape" }
+
+// landscapeUse reads the expression with the engines' own parsers and returns the first label
+// matcher (metrics) or field filter (logs) on the landscape, e.g. `landscape=~"r.*"` or
+// `landscape:raichu`. Text that only contains the word (a quoted message, a label value, a metric
+// name) is not a selector. An expression that does not parse returns "": the checker reports it.
+func landscapeUse(datasource, expr string) string {
+	switch datasource {
+	case "metrics":
+		e, err := metricsql.Parse(expr)
+		if err != nil {
+			return ""
+		}
+		found := ""
+		metricsql.VisitAll(e, func(x metricsql.Expr) {
+			me, ok := x.(*metricsql.MetricExpr)
+			if !ok || found != "" {
+				return
+			}
+			for _, group := range me.LabelFilterss {
+				for _, lf := range group {
+					if isLandscapeName(lf.Label) {
+						op := "="
+						switch {
+						case lf.IsRegexp && lf.IsNegative:
+							op = "!~"
+						case lf.IsRegexp:
+							op = "=~"
+						case lf.IsNegative:
+							op = "!="
+						}
+						found = fmt.Sprintf("%s%s%q", lf.Label, op, lf.Value)
+						return
+					}
+				}
+			}
+		})
+		return found
+	case "logs":
+		q, err := vl.Parse(expr, time.Now())
+		if err != nil {
+			return ""
+		}
+		filters, _, _ := q.Fields()
+		for _, f := range filters {
+			if isLandscapeName(strings.TrimPrefix(f, "_stream:")) {
+				return f + " filter"
+			}
+		}
+	}
+	return ""
+}
+
+// boolModifier reports whether a PromQL expression compares with the `bool` modifier, which the
+// standard forbids (any series the expression returns fires, even with value 0: the comparison
+// must filter). Read from the parse tree, so the word inside a string or label value is not one.
+func boolModifier(expr string) bool {
+	e, err := metricsql.Parse(expr)
+	if err != nil {
+		return false
+	}
+	found := false
+	metricsql.VisitAll(e, func(x metricsql.Expr) {
+		if b, ok := x.(*metricsql.BinaryOpExpr); ok && b.Bool {
+			found = true
+		}
+	})
+	return found
+}
+
+// emojiRanges are the code points of emoji and pictographs, plus the joiner and the variation
+// selector that make a symbol render as one. The chart adds 🚨, ⚠️ or ℹ️ from the file name, so a
+// title that carries its own shows it twice.
+var emojiRanges = [][2]rune{
+	{0x1F000, 0x1FAFF}, {0x2600, 0x27BF}, {0x2300, 0x23FF}, {0x2B00, 0x2BFF}, {0x25A0, 0x25FF},
+	{0x2190, 0x21FF}, {0x2934, 0x2935}, {0x3030, 0x3030}, {0x303D, 0x303D}, {0x3297, 0x3299},
+	{0x203C, 0x203C}, {0x2049, 0x2049}, {0x2122, 0x2122}, {0x2139, 0x2139}, {0x24C2, 0x24C2},
+	{0xFE0F, 0xFE0F}, {0x200D, 0x200D}, {0xE0020, 0xE007F},
+}
+
+func emojiIn(title string) (rune, bool) {
+	for _, r := range title {
+		for _, rg := range emojiRanges {
+			if r >= rg[0] && r <= rg[1] {
+				return r, true
+			}
+		}
+	}
+	return 0, false
+}
 
 // isFlat tells a tier file from a CR: no kind, no apiVersion, and at least one key of the table.
 func isFlat(m map[string]any) bool {
@@ -62,34 +150,31 @@ func isFlat(m map[string]any) bool {
 	return false
 }
 
-// resolveIdentity reads platform and service for the rule uid: `platform:` and `service:` of
-// <dir>/obs.yaml, and the contract's `service:` (<dir>/contract.yaml) when obs.yaml has none.
-// A missing or unreadable file is no value; obs.yaml's own errors are reported by its loader.
+// resolveIdentity reads platform and service for the rule uid. Both come from <dir>/obs.yaml
+// through the obs.yaml loader (obsyaml.Load, the one every command uses, so whatever file the loader
+// finds for a folder is the one read here): `platform:` and `service:`. When obs.yaml has no
+// `service:`, the contract's `service:` (<dir>/contract.yaml) is used. A missing, unreadable or
+// invalid file is no value; the loader's own error is reported by the command that loads it.
 func resolveIdentity(dir string) FlatIdentity {
 	var id FlatIdentity
-	read := func(name string) map[string]any {
-		b, err := os.ReadFile(filepath.Join(dir, name))
-		if err != nil {
-			return nil
+	f, _ := obsyaml.Load(dir)
+	if f != nil {
+		if f.Platform != "" {
+			id.Platform, id.PlatformFrom = f.Platform, f.Path+" platform"
 		}
-		var m map[string]any
-		if yaml.Unmarshal(b, &m) != nil {
-			return nil
+		if f.Service != "" {
+			id.Service, id.ServiceFrom = f.Service, f.Path+" service"
 		}
-		return m
 	}
-	str := func(m map[string]any, k string) string {
-		s, _ := m[k].(string)
-		return strings.TrimSpace(s)
-	}
-	obs, ct := read("obs.yaml"), read("contract.yaml")
-	if v := str(obs, "platform"); v != "" {
-		id.Platform, id.PlatformFrom = v, "obs.yaml platform"
-	}
-	if v := str(obs, "service"); v != "" {
-		id.Service, id.ServiceFrom = v, "obs.yaml service"
-	} else if v := str(ct, "service"); v != "" {
-		id.Service, id.ServiceFrom = v, "contract.yaml service"
+	if id.Service == "" {
+		if b, err := os.ReadFile(filepath.Join(dir, "contract.yaml")); err == nil {
+			var m struct {
+				Service string `yaml:"service"`
+			}
+			if yaml.Unmarshal(b, &m) == nil && strings.TrimSpace(m.Service) != "" {
+				id.Service, id.ServiceFrom = strings.TrimSpace(m.Service), filepath.Join(dir, "contract.yaml")+" service"
+			}
+		}
 	}
 	return id
 }
@@ -150,17 +235,29 @@ func (s *Set) readFlat(rel string, m map[string]any) {
 	if d, ok := str["datasource"]; ok && d != "metrics" && d != "logs" {
 		s.flatProblem(rel, "flat-alert-datasource", "datasource %q: want metrics (PromQL) or logs (LogsQL)", d)
 	}
-	if f, ok := str["for"]; ok && !flatDuration.MatchString(f) {
-		s.flatProblem(rel, "flat-alert-for", "for %q is not a duration such as 0m, 10m or 2h", f)
+	if f, ok := str["for"]; ok {
+		if _, err := ParseFor(f); err != nil {
+			s.flatProblem(rel, "flat-alert-for", "for %v", err)
+		}
 	}
 	if e, ok := str["expr"]; ok {
-		if loc := landscapeSel.FindStringSubmatchIndex(e); loc != nil {
-			s.flatProblem(rel, "flat-alert-landscape", "expr selects landscape (%q): each landscape's rules already read only that landscape's data, so expr never selects it", strings.TrimSpace(e[loc[0]:loc[1]]))
+		if u := landscapeUse(str["datasource"], e); u != "" {
+			s.flatProblem(rel, "flat-alert-landscape", "expr selects landscape (%s): each landscape's rules already read only that landscape's data, so expr never selects it", u)
+		}
+		if str["datasource"] == "metrics" && boolModifier(e) {
+			s.flatProblem(rel, "flat-alert-bool", "expr uses the bool modifier: any series the expr returns fires, even with value 0, so let the comparison filter (drop bool)")
+		}
+	}
+	if t, ok := str["title"]; ok {
+		if r, bad := emojiIn(t); bad {
+			s.flatProblem(rel, "flat-alert-title-emoji", "title %q holds the emoji %q: the chart adds the severity emoji from the file name, so a title carries none", t, string(r))
 		}
 	}
 	panel := ""
-	if v, ok := m["panel"]; ok && v != nil {
+	if v, ok := m["panel"]; ok {
 		switch n := v.(type) {
+		case nil:
+			s.flatProblem(rel, "flat-alert-panel", "panel is null: write an integer panel id of dashboards/overview.json, or leave the key out")
 		case int:
 			panel = fmt.Sprint(n)
 		case int64:
@@ -213,6 +310,13 @@ func (s *Set) readFlat(rel string, m map[string]any) {
 	b := alertData{RefID: "B", DatasourceUID: "__expr__", Model: map[string]any{"type": "math", "expression": "is_number($A) || is_nan($A) || is_inf($A)"}}
 	r.Data = []alertData{a, b}
 	s.addRule(rel, uid, "1m", r)
+	last := &s.Rules[len(s.Rules)-1]
+	last.Flat = true
+	// The standard's runbook is the sibling alerts/<slug>/runbook.md; obs cannot build the URL
+	// (no repo URL), so the file stands for the runbook_url annotation.
+	if _, err := os.Stat(filepath.Join(s.Dir, "alerts", slug, "runbook.md")); err == nil {
+		last.RunbookFile = "alerts/" + slug + "/runbook.md"
+	}
 }
 
 // Text is the problem as a one-line message: with its rule id in front when it has one.

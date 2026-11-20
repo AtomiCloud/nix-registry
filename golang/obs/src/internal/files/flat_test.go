@@ -90,6 +90,7 @@ func TestFlatTierBuildsTheRuleTheChartRenders(t *testing.T) {
 	}
 	want := cr.Rules[0]
 	want.File = "alerts/retry-queue/critical.yaml"
+	want.Flat = true
 	delete(want.Definition.Labels, "landscape")
 	delete(want.Definition.Labels, "module")
 	delete(want.Definition.Annotations, "runbook_url")
@@ -160,6 +161,19 @@ func TestFlatTierFindings(t *testing.T) {
 		{"unknown field", "alerts/q/critical.yaml", retryQueueFlat + "runbook: x\n", "flat-alert-field-unknown", `"runbook"`},
 		{"file name is not a severity", "alerts/q/high.yaml", retryQueueFlat, "flat-alert-file-name", "alerts/q/high.yaml"},
 		{"too deep", "alerts/q/r/critical.yaml", retryQueueFlat, "flat-alert-file-name", "alerts/q/r/critical.yaml"},
+		{"bool modifier", "alerts/q/critical.yaml", strings.Replace(retryQueueFlat, "> 5000", "> bool 5000", 1), "flat-alert-bool", "bool"},
+		{"bool modifier in a nested comparison", "alerts/q/critical.yaml", strings.Replace(retryQueueFlat, "expr: webhook_retry_queue_depth{\"durian.cloud.service\"=\"zinc\"} > 5000", "expr: 'sum(rate(x[5m]) > bool 3) > 0'", 1), "flat-alert-bool", "bool"},
+		{"emoji in title", "alerts/q/critical.yaml", strings.Replace(retryQueueFlat, "Retry queue saturated", "🚨 Retry queue saturated", 1), "flat-alert-title-emoji", "🚨"},
+		{"emoji with variation selector in title", "alerts/q/critical.yaml", strings.Replace(retryQueueFlat, "Retry queue saturated", "Retry queue ⚠️", 1), "flat-alert-title-emoji", "emoji"},
+		{"panel null", "alerts/q/critical.yaml", strings.Replace(retryQueueFlat, "panel: 2", "panel: null", 1), "flat-alert-panel", "null"},
+		{"panel empty", "alerts/q/critical.yaml", strings.Replace(retryQueueFlat, "panel: 2", "panel:", 1), "flat-alert-panel", "null"},
+		{"panel string", "alerts/q/critical.yaml", strings.Replace(retryQueueFlat, "panel: 2", "panel: '2'", 1), "flat-alert-panel", "2"},
+		{"panel float", "alerts/q/critical.yaml", strings.Replace(retryQueueFlat, "panel: 2", "panel: 2.5", 1), "flat-alert-panel", "2.5"},
+		{"panel bool", "alerts/q/critical.yaml", strings.Replace(retryQueueFlat, "panel: 2", "panel: true", 1), "flat-alert-panel", "true"},
+		{"logs landscape backtick field filter", "alerts/q/critical.yaml", logsFlat("`landscape`:raichu"), "flat-alert-landscape", "landscape"},
+		{"logs landscape field filter", "alerts/q/critical.yaml", logsFlat("landscape:raichu"), "flat-alert-landscape", "landscape"},
+		{"logs landscape dotted field filter", "alerts/q/critical.yaml", logsFlat("\"durian.cloud.landscape\":raichu"), "flat-alert-landscape", "durian.cloud.landscape"},
+		{"logs landscape stream selector", "alerts/q/critical.yaml", logsFlat("_stream:{landscape=\"raichu\"}"), "flat-alert-landscape", "landscape"},
 		{"uid over 40", "alerts/a-very-long-slug-name-here/critical.yaml", retryQueueFlat, "flat-alert-uid-length", "tracker-zinc-a-very-long-slug-name-here-critical"},
 	}
 	for _, c := range cases {
@@ -218,5 +232,45 @@ func TestNeitherCRNorTierFileKeepsTheOldMessage(t *testing.T) {
 	s := flatDir(t, "alerts/q/critical.yaml", "foo: bar\n")
 	if len(s.Problems) != 1 || s.Problems[0].Rule != "" || !strings.Contains(s.Problems[0].Msg, `kind "": want GrafanaAlertRuleGroup`) {
 		t.Fatalf("%+v", s.Problems)
+	}
+}
+
+// logsFlat is a logs tier file whose expr holds extra (a filter) after the event filter.
+func logsFlat(extra string) string {
+	return "title: Disk corrupted\ndatasource: logs\nexpr: |\n  _stream:{\"durian.cloud.service\"=\"zinc\"} \"durian.cloud/event\":=disk.corrupted " + extra + " | stats count() as hits | filter hits:>0\nfor: 0m\nsummary: s\ndescription: d\n"
+}
+
+// Text that only looks like a landscape selector is fine: the check reads parsed label matchers and
+// field filters, not the characters of the query.
+func TestFlatLandscapeLookAlikesAreNotSelectors(t *testing.T) {
+	for name, body := range map[string]string{
+		"a quoted message": logsFlat(`"the landscape:raichu is down"`),
+		"a label value":    strings.Replace(retryQueueFlat, `"durian.cloud.service"="zinc"`, `"durian.cloud.service"="zinc",job="landscape=raichu"`, 1),
+		"a metric name":    strings.Replace(retryQueueFlat, "webhook_retry_queue_depth", "landscape_total", 1),
+		"another field":    logsFlat("landscape_name:raichu"),
+	} {
+		s := flatDir(t, "alerts/q/critical.yaml", body)
+		if len(s.Problems) != 0 || len(s.Rules) != 1 {
+			t.Errorf("%s: %+v", name, s.Problems)
+		}
+	}
+}
+
+// for is judged by one function everywhere (flat files, obs alerts, the sandbox): 1d is a duration
+// Grafana accepts, so it passes here as it does there.
+func TestFlatForUsesTheSharedDuration(t *testing.T) {
+	for v, ok := range map[string]bool{"0m": true, "10m": true, "1d": true, "1w": true, "2h30m": true, "90s": true, "soon": false, "": false, "-5m": false, "1.5d": false, "10": false} {
+		_, err := ParseFor(v)
+		if (err == nil) != ok {
+			t.Errorf("ParseFor(%q) = %v, want ok=%v", v, err, ok)
+		}
+		body := strings.Replace(retryQueueFlat, "for: 10m", "for: '"+v+"'", 1)
+		s := flatDir(t, "alerts/q/critical.yaml", body)
+		if got := len(s.Rules) == 1; got != ok {
+			t.Errorf("flat file with for %q: built=%v, want %v (%+v)", v, got, ok, s.Problems)
+		}
+	}
+	if d, err := ParseFor(""); err == nil {
+		t.Errorf("empty for: %v", d)
 	}
 }

@@ -887,7 +887,11 @@ Not built, because obs cannot know them: the `landscape` and `module` labels (ea
 **Where platform and service come from.** The uid needs both, and a flat file holds neither:
 
 - `service`: the `service:` key of `observability/obs.yaml` if it has one, else the `service:` of `observability/contract.yaml`.
+  Keep `service:` in obs.yaml for a folder that has no contract of its own.
 - `platform`: the `platform:` key of `observability/obs.yaml` (a new optional key, see [`obs.yaml`](#obsyaml-the-versions-and-thresholds-a-repo-targets)).
+
+Both are read with the same loader every command uses for obs.yaml (`internal/obsyaml`), so the obs.yaml that loader finds for a
+folder is the one the platform comes from.
 
 A flat file with either value unknown is refused (`flat-alert-identity`) and the message says which file and key to write.
 
@@ -900,12 +904,18 @@ table, its structural checks, and the "no severity field" rule):
 | `flat-alert-field-missing`, `-field-type`  | a required field (`title`, `datasource`, `expr`, `for`, `summary`, `description`) missing, empty or not a string |
 | `flat-alert-field-unknown`                 | a key outside the table (`severity` gets its own message: the file name is the severity)                  |
 | `flat-alert-title-length`                  | `title` over 48 characters                                                                               |
+| `flat-alert-title-emoji`                   | `title` holds an emoji (the chart adds the severity emoji from the file name, so it would show twice)    |
 | `flat-alert-datasource`                    | `datasource` is not `metrics` or `logs`                                                                  |
-| `flat-alert-for`                           | `for` is not a duration (`0m`, `10m`, `2h`)                                                              |
-| `flat-alert-landscape`                     | `expr` selects `landscape` (`landscape="x"`, `"durian.cloud.landscape"=~"x"`, `landscape:x`)               |
-| `flat-alert-panel`                         | `panel` is not an integer                                                                                |
+| `flat-alert-for`                           | `for` is not a duration (`0m`, `10m`, `2h`, `1d`), or is negative; the same check `obs alerts` and `obs sandbox` use  |
+| `flat-alert-bool`                          | PromQL `bool` modifier in `expr`, read from the parse tree (the standard: let the comparison filter)       |
+| `flat-alert-landscape`                     | `expr` has a label matcher (metrics) or field filter (logs, also in `_stream:{...}`) on `landscape` or `durian.cloud.landscape`; read from the parsed query, so the word in a quoted message, a label value or a metric name is fine |
+| `flat-alert-panel`                         | `panel` is present but not an integer (`panel: null`, an empty `panel:`, a string, a float or a bool); leave the key out for none |
 | `flat-alert-identity`                      | platform or service unknown (above)                                                                      |
 | `flat-alert-uid-length`                    | the uid is over 40 characters (Grafana's limit)                                                          |
+
+`obs live incidents` also treats the sibling `alerts/<slug>/runbook.md` as the flat rule's runbook (no `alert_without_runbook`),
+and a flat file it cannot read as a rule stops it with the finding instead of skipping the file. `obs sandbox up` and `obs look`
+provision a flat rule's summary, description and panel link into Grafana.
 
 Not checked here: that `panel` is a panel id of `dashboards/overview.json`, and that the set has a `runbook.md`
 (the standard's other structural checks). Tier gaps and everything else in the standard's review step stay with the reviewer.
@@ -917,6 +927,7 @@ Not checked here: that `panel` is a panel id of `dashboards/overview.json`, and 
   changes from exit 1 to the new result: the file is checked as the rule the chart renders, and exits 0 when it is valid.
   A flat file with a rule broken, or with no platform or service to name its uid, is still exit 1 with a `flat-alert-*` rule id.
 - `obs.yaml` has two new optional top-level keys, `platform:` and `service:`. An obs.yaml without them reads as before.
+- A rule's `for` and `keepFiringFor` are judged by one function: Grafana's units (`d`, `w`, `y` too) pass in a flat file, in `obs alerts` and in `obs sandbox`. In 0.5 `obs alerts` refused `for: 1d` in a CR; it now evaluates it.
 - `tests/compat.sh` still holds 58 goldens. ONE changed: `query-static__bad-flat-alert.out` pinned the refusal, so it is
   now `query-static__ok-flat-alert.out` (the fixture `bad-flat-alert` became `ok-flat-alert`, a valid flat fixture, regenerated from the 0.6 binary).
   Every other golden is byte-identical to 0.5.
@@ -1649,7 +1660,8 @@ The harness creates fresh containers for every run: VictoriaLogs retains duplica
 
 ## obs alerts
 
-`obs alerts --dir observability` evaluates the `GrafanaAlertRuleGroup` CRs in
+`obs alerts --dir observability` evaluates the flat alert tier files (see [Flat alert tier files](#flat-alert-tier-files))
+and the `GrafanaAlertRuleGroup` CRs in
 `alerts/<slug>/<severity>.yaml` on the seed and each named incident. It prints one
 line per rule and expectation, including its file and incident window, and exits
 1 on a miss. Every rule must stay quiet on the baseline; rules omitted from an

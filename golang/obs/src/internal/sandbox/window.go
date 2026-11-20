@@ -49,7 +49,7 @@ func seedWindow(sd *seed.Seed, incs []seed.Incident, set *files.Set, now time.Ti
 			}
 			pending := time.Duration(0)
 			if r.Definition.For != "" {
-				pending, err = time.ParseDuration(r.Definition.For)
+				pending, err = files.ParseFor(r.Definition.For)
 				if err != nil {
 					return from, to, "", fmt.Errorf("%s rule %s: invalid for %q", r.File, id, r.Definition.For)
 				}

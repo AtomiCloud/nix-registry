@@ -48,6 +48,9 @@ const grafanaForDashboardSchema = "13.3.0"
 type File struct {
 	Path     string   // the file that was read
 	Versions Versions // the versions the repo targets
+	// Platform and Service name the rule uid of a flat alert tier file (<platform>-<service>-<slug>-<severity>);
+	// empty when the file does not write them.
+	Platform, Service string
 	// Resolved thresholds. A nil pointer or zero value means obs.yaml does not name that
 	// group, and the consumer keeps its built-in default.
 	Logs      *vl.Limits         // thresholds.logs over the pinned VictoriaLogs defaults
@@ -86,6 +89,8 @@ type tracesRaw struct {
 }
 
 type rawFile struct {
+	Platform   string   `yaml:"platform"`
+	Service    string   `yaml:"service"`
 	Versions   Versions `yaml:"versions"`
 	Thresholds struct {
 		Logs    logsRaw `yaml:"logs"`
@@ -181,6 +186,7 @@ func Parse(path string, b []byte) (*File, error) {
 		return nil, fail(0, "%v", err)
 	}
 	f.Versions = raw.Versions
+	f.Platform, f.Service = strings.TrimSpace(raw.Platform), strings.TrimSpace(raw.Service)
 	for _, v := range []struct{ key, val string }{
 		{"versions.grafana", f.Versions.Grafana}, {"versions.victoriametrics", f.Versions.VictoriaMetrics},
 		{"versions.victorialogs", f.Versions.VictoriaLogs}, {"versions.tempo", f.Versions.Tempo},

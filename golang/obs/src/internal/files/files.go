@@ -179,6 +179,10 @@ type alertData struct {
 type Rule struct {
 	File, Interval, Name string
 	Definition           alertRule
+	// Flat is true for a rule built from a flat tier file; RunbookFile is the sibling
+	// alerts/<slug>/runbook.md of such a rule when it exists (relative to the observability folder).
+	Flat        bool
+	RunbookFile string
 }
 
 func (s *Set) readAlert(rel string, b []byte) {

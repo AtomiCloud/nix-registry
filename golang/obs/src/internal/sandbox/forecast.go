@@ -52,7 +52,7 @@ func nativeForecast(dir, seedPath string, set *files.Set, ds *seed.Dataset, prov
 		}
 		pending, interval := time.Duration(0), time.Minute
 		if rr.Definition.For != "" {
-			pending, _ = time.ParseDuration(rr.Definition.For)
+			pending, _ = files.ParseFor(rr.Definition.For)
 		}
 		if rr.Interval != "" {
 			interval, _ = time.ParseDuration(rr.Interval)
