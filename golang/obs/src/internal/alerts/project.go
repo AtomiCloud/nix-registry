@@ -13,7 +13,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AtomiCloud/obs/internal/contract"
 	"github.com/AtomiCloud/obs/internal/files"
+	"github.com/AtomiCloud/obs/internal/ruleids"
 	"github.com/AtomiCloud/obs/internal/seed"
 	"github.com/AtomiCloud/obs/internal/tempoalert"
 	"github.com/VictoriaMetrics/metricsql"
@@ -303,4 +305,40 @@ func ptrs(is []Incident) []*Incident {
 		out[i] = &is[i]
 	}
 	return out
+}
+
+// RepoRuleIDs fails when a rule uid of this project is also defined in another observability folder of the
+// repository (a feature's own folder next to this one): Grafana keeps one rule per uid. A repository with one
+// observability folder, or a folder outside any Git repository, has nothing to compare with. The error names
+// both alert files (relative to the Git root), one clash a line.
+func RepoRuleIDs(p *Project) error {
+	others, skip, err := ruleids.OthersSkip(p.Dir)
+	if err != nil {
+		return err
+	}
+	if len(others) == 0 {
+		return nil
+	}
+	var mine []ruleids.Rule
+	mineFiles := map[string]bool{}
+	absDir, err := filepath.Abs(p.Dir) // the prune set is by absolute path: --dir observability/friend is the normal form
+	if err != nil {
+		return err
+	}
+	for _, a := range append(append([]Alert(nil), p.Alerts...), p.Records...) {
+		if skip.Skips(absDir, filepath.Join(absDir, a.File)) {
+			continue // an ignored or nested-repository copy inside this folder: not a definition (the local parser is unchanged)
+		}
+		file := contract.RelPath(filepath.Join(p.Dir, a.File))
+		mine = append(mine, ruleids.Rule{ID: a.ID, File: file})
+		mineFiles[file] = true
+	}
+	var msgs []string
+	for _, c := range ruleids.Find(append(others, mine...), mineFiles) {
+		msgs = append(msgs, c.String())
+	}
+	if len(msgs) > 0 {
+		return fmt.Errorf("%s", strings.Join(msgs, "\n"))
+	}
+	return nil
 }

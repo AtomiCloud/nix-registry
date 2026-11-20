@@ -34,6 +34,11 @@ type Options struct {
 	// NoOtherContracts turns off reading the repository's other observability/contract.yaml files
 	// (--contracts none). By default every one is read, so a dashboard may use a metric another contract declares.
 	NoOtherContracts bool
+	// metricsOnly is set by loadContract when Contract is the merged view of the repository's contracts for a folder
+	// with none of its own: metric names are checked against it, logs, spans and events are not.
+	metricsOnly bool
+	// repoFiles are the contract files that view was merged from (relative to the Git root), for messages.
+	repoFiles []string
 	// AllowEmpty accepts a folder with no alert and no dashboard (the "empty" rule is off): `obs check` runs the query rules on whatever the folder has.
 	AllowEmpty     bool
 	SpanAttributes SpanAttributeNames

@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/AtomiCloud/obs/internal/obsyaml"
 	"github.com/AtomiCloud/obs/internal/pins"
@@ -20,7 +21,23 @@ func loadObsYaml(dir, cmd string, stderr io.Writer) (*obsyaml.File, bool) {
 		fmt.Fprintf(stderr, "%s: %v\n", cmd, err)
 		return nil, false
 	}
+	noteUnusedRoot(dir, f, cmd, stderr)
 	return f, true
+}
+
+var rootNoted sync.Once
+
+// noteUnusedRoot says once, on stderr, that the repository's root observability/obs.yaml exists and this run did not
+// read it: a folder reads its own obs.yaml, or the one of an enclosing observability folder, and never an unrelated
+// root file, so an app in a monorepo does not suddenly take the root's versions.
+func noteUnusedRoot(dir string, f *obsyaml.File, cmd string, stderr io.Writer) {
+	root := obsyaml.UnusedRootFile(dir, f)
+	if root == "" {
+		return
+	}
+	rootNoted.Do(func() {
+		fmt.Fprintf(stderr, "%s: note: %s exists but %s/%s does not exist, so it is not used: this obs uses its built-in versions and thresholds here; copy %s to %s/%s or add one\n", cmd, root, dir, obsyaml.FileName, root, dir, obsyaml.FileName)
+	})
 }
 
 // gateObsYaml is what `obs query` and `obs alerts` do with a loaded obs.yaml before any
@@ -33,8 +50,16 @@ func gateObsYaml(f *obsyaml.File, cmd string, stdout io.Writer) int {
 	if f.Gate(stdout, cmd) > 0 {
 		return 1
 	}
-	fmt.Fprintf(stdout, "%s: %s: versions match the evaluators embedded in this obs%s\n", cmd, f.Path, appliedText(f))
+	fmt.Fprintf(stdout, "%s: %s: versions match the evaluators embedded in this obs%s%s\n", cmd, f.Path, inheritedText(f), appliedText(f))
 	return 0
+}
+
+// inheritedText says where an obs.yaml came from when the folder asked for has none of its own.
+func inheritedText(f *obsyaml.File) string {
+	if f.Inherited {
+		return " (the enclosing observability folder's: the folder asked for has no obs.yaml)"
+	}
+	return ""
 }
 
 func appliedText(f *obsyaml.File) string {
@@ -52,6 +77,9 @@ func printObsYamlCheck(f *obsyaml.File, dir string, stdout io.Writer) int {
 		fmt.Fprintf(stdout, "note: %s/%s not found: nothing to compare with the versions above; this obs uses its built-in versions and thresholds\n", dir, obsyaml.FileName)
 		return 0
 	}
+	if f.Inherited {
+		fmt.Fprintf(stdout, "note: %s/%s not found: using %s, the enclosing observability folder's\n", dir, obsyaml.FileName, f.Path)
+	}
 	ms := f.Mismatches()
 	for _, m := range ms {
 		fmt.Fprintf(stdout, "FAIL %s %s\n", f.Path, m)
@@ -60,7 +88,7 @@ func printObsYamlCheck(f *obsyaml.File, dir string, stdout io.Writer) int {
 		fmt.Fprintf(stdout, "note %s %s\n", f.Path, n)
 	}
 	if len(ms) == 0 {
-		fmt.Fprintf(stdout, "obs.yaml %s: every version it names matches%s\n", f.Path, appliedText(f))
+		fmt.Fprintf(stdout, "obs.yaml %s: every version it names matches%s%s\n", f.Path, inheritedText(f), appliedText(f))
 	}
 	return len(ms)
 }

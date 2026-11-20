@@ -53,12 +53,13 @@ func (f *sandboxFlags) register(fs *flag.FlagSet) {
 // names (<dir>/obs.yaml), else the pins. A bad obs.yaml or a version with no known image
 // digest is an error that names the key. down and status never read obs.yaml, so a broken
 // file cannot stop a tear-down.
-func (f *sandboxFlags) upConfig(out io.Writer) (sandbox.Config, error) {
+func (f *sandboxFlags) upConfig(out, stderr io.Writer) (sandbox.Config, error) {
 	// obs.yaml first: a bad file or an unpinned version is refused before any runtime is looked for.
 	of, err := obsyaml.Load(f.dir)
 	if err != nil {
 		return sandbox.Config{}, err
 	}
+	noteUnusedRoot(f.dir, of, "obs sandbox", stderr) // the one note every obs.yaml reader prints (cmd_obsyaml.go)
 	comps, err := sandboxComponents(of)
 	if err != nil {
 		return sandbox.Config{}, err
@@ -129,7 +130,7 @@ func runSandbox(args []string, stdout, stderr io.Writer) int {
 	if sub == "down" {
 		cfg, err = f.config(stdout)
 	} else {
-		cfg, err = f.upConfig(stdout)
+		cfg, err = f.upConfig(stdout, stderr)
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "obs sandbox %s: %v\n", sub, err)

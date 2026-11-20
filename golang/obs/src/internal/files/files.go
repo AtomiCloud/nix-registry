@@ -85,7 +85,48 @@ type Set struct {
 }
 
 // Load reads dir. A missing dashboards/ or alerts/ folder is fine; nothing at all is not.
-func Load(dir string) (*Set, error) {
+func Load(dir string) (*Set, error) { return LoadSkip(dir, nil) }
+
+// Walk lists the files below root (an alerts/ or dashboards/ folder) that end in one of suffixes, sorted: the one
+// walk every reader of those folders uses. With skip nil a folder it cannot read is silently left out, as Load always
+// did. With skip not nil a path for which skip is true is pruned before it is read (a folder gets filepath.SkipDir, a
+// file is left out), and a folder that cannot be read and is not pruned is an error naming it.
+func Walk(root string, suffixes []string, skip func(path string) bool) ([]string, error) {
+	var paths []string
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if skip == nil {
+				return nil
+			}
+			return fmt.Errorf("cannot read %s: %w", p, errors.Unwrap(err))
+		}
+		if skip != nil && skip(p) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+		for _, suf := range suffixes {
+			if strings.HasSuffix(p, suf) {
+				paths = append(paths, p)
+				break
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(paths)
+	return paths, nil
+}
+
+// LoadSkip is Load whose walks of alerts/ and dashboards/ use skip (see Walk). The repository rule uid scan passes
+// the discovery's prune set, so an ignored or nested-repository copy below a folder is not read at all.
+func LoadSkip(dir string, skip func(path string) bool) (*Set, error) {
 	st, err := os.Stat(dir)
 	if err != nil {
 		return nil, err
@@ -99,20 +140,14 @@ func Load(dir string) (*Set, error) {
 		if _, err := os.Stat(root); err != nil {
 			continue
 		}
-		var paths []string
-		_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-			if err != nil || d.IsDir() {
-				return err
-			}
-			switch {
-			case sub == "alerts" && (strings.HasSuffix(p, ".yaml") || strings.HasSuffix(p, ".yml")):
-				paths = append(paths, p)
-			case sub == "dashboards" && strings.HasSuffix(p, ".json"):
-				paths = append(paths, p)
-			}
-			return nil
-		})
-		sort.Strings(paths)
+		suffixes := []string{".yaml", ".yml"}
+		if sub == "dashboards" {
+			suffixes = []string{".json"}
+		}
+		paths, err := Walk(root, suffixes, skip)
+		if err != nil {
+			return nil, err
+		}
 		for _, p := range paths {
 			rel, _ := filepath.Rel(dir, p)
 			rel = filepath.ToSlash(rel)

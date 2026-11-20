@@ -72,7 +72,7 @@ func (f *liveFlags) register(fs *flag.FlagSet) {
 }
 
 // resolve loads obs.yaml and resolves --target into the stores to read.
-func (f *liveFlags) resolve(cmd string) (*live.Target, *obsyaml.File, *live.Client, error) {
+func (f *liveFlags) resolve(cmd string, stderr io.Writer) (*live.Target, *obsyaml.File, *live.Client, error) {
 	if f.target == "" {
 		return nil, nil, nil, errors.New("give --target local, dev, stage, prod or a name under targets: in obs.yaml")
 	}
@@ -80,6 +80,7 @@ func (f *liveFlags) resolve(cmd string) (*live.Target, *obsyaml.File, *live.Clie
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	noteUnusedRoot(f.dir, of, cmd, stderr) // the one note every obs.yaml reader prints (cmd_obsyaml.go)
 	path := obsyaml.FileName
 	if of != nil {
 		path = of.Path
@@ -153,7 +154,7 @@ func runLiveUsage(args []string, stdout, stderr io.Writer) int {
 	if !ok {
 		return 2
 	}
-	t, of, c, err := f.resolve(cmd)
+	t, of, c, err := f.resolve(cmd, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", cmd, err)
 		return 2
@@ -221,7 +222,7 @@ func runLiveShape(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s: --window %s at --step %s needs %d points a series; use a step of 1m or more and at most 10000 points\n", cmd, *window, *step, win/st)
 		return 2
 	}
-	t, _, c, err := f.resolve(cmd)
+	t, _, c, err := f.resolve(cmd, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", cmd, err)
 		return 2
@@ -295,7 +296,7 @@ func runLiveIncidents(args []string, stdout, stderr io.Writer) int {
 		}
 		ws = append(ws, pw)
 	}
-	t, _, c, err := f.resolve(cmd)
+	t, _, c, err := f.resolve(cmd, stderr)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", cmd, err)
 		return 2
@@ -346,7 +347,7 @@ func runLiveLook(args []string, stdout, stderr io.Writer) int {
 		}
 		return fail("usage error: " + err.Error())
 	}
-	t, _, c, err := f.resolve(cmd)
+	t, _, c, err := f.resolve(cmd, stderr)
 	if err != nil {
 		return fail(err.Error())
 	}
