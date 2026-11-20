@@ -162,7 +162,8 @@ func packageManifest(root string, target contract.Target) (string, string, error
 				return fail(e)
 			}
 			if len(matches) > 1 {
-				return "", dir, fmt.Errorf("multiple .csproj manifests in %s", dir)
+				_, _, identityErr := fail(fmt.Errorf("multiple .csproj manifests in %s", dir))
+				return "", dir, identityErr
 			}
 			if len(matches) == 1 {
 				name = filepath.Base(matches[0])

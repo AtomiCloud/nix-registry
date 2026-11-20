@@ -68,7 +68,7 @@ func runGen(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 	}
-	issues, err := generationTargetIssues(c, *dir)
+	issues, err := generationTargetIssues(c, want)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", cmd, err)
 		return 2

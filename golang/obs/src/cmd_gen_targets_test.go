@@ -309,3 +309,20 @@ func TestInvalidSiblingInterfacesDoNotAffectNamespace(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerationPreflightHonorsSelectedLanguages(t *testing.T) {
+	root := repo(t, map[string]string{
+		"go.mod":                      "module example.com/selected\ngo 1.24\n",
+		"Shop.csproj":                 "<Project/>",
+		"observability/contract.yaml": "service: shop\ngenerate: [{lang: go, out: gen/go}, {lang: dotnet, out: gen/dotnet, interfaces: Bad-Interfaces}]\n",
+	})
+	dir := filepath.Join(root, "observability")
+	for _, args := range [][]string{{"gen", "--lang", "go", "--dir", dir}, {"gen", "--check", "--lang", "go", "--dir", dir}} {
+		if rc, out := obs(args...); rc != 0 {
+			t.Errorf("selected Go target must ignore unselected .NET syntax: rc=%d %s", rc, out)
+		}
+	}
+	if rc, out := obs("check", "--dir", dir); rc == 0 || !strings.Contains(out, "interfaces") {
+		t.Errorf("check must validate every target: rc=%d %s", rc, out)
+	}
+}
