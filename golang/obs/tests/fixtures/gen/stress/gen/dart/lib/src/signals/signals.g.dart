@@ -317,11 +317,16 @@ const eventTable = <String, String>{
   'payments.provider.settlement.batch.reconciliation.failed': 'error',
 };
 
-/// Builds the telemetry port from this contract's tables, once per process (call it at
-/// start-up). Any other install, earlier or later, poisons the port: it refuses every
-/// signal until restart.
-Result<DurianSignalPort> installSignals() =>
-    DurianSignalPort.install(metrics: metricTable, events: eventTable);
+/// Merges this contract's tables at boot, before the first signal.
+/// Duplicate names, changed contracts and late installs poison the port.
+Result<DurianSignalPort> installSignals() => DurianSignalPort.install(
+  contract: 'pay_signals:observability/contract.yaml',
+  hash:
+      'sha256:5060e61bbe64b9238fc7ba07f1c81cb9ee3035981a56ce618ca94aef955d1cb6',
+  metrics: metricTable,
+  events: eventTable,
+  spans: spanTable,
+);
 
 // ---- spans ----
 

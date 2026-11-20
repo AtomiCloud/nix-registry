@@ -737,7 +737,7 @@ consumers (the Bun stub has an `index.js`, run with the `node` that nixpkgs `tsc
 - requires every planted `forge-*` consumer to compile, run without throwing, and show the port's refusal
   (`dropped.unknown_event`, `unknown_metric`, `unknown_key`, `unknown_value`, `register` or `poisoned`).
 
-The same stubs support the 36 name-fuzz contract/language cases. The .NET harness builds three separate
+The same stubs support the 36 name-fuzz contract/language cases and the two-contract apps: both features emit, equal registration is harmless, duplicate names name both ids, changed tables and late registration poison, and fresh-name forgery is admitted. The .NET harness builds three separate
 assemblies, Obs, Signals and App; only Signals has access to the library's internal constructors.
 
 **Forging: three layers (concept §3.4 "one hole per language").** With shared carriers in the library,
@@ -749,29 +749,43 @@ an app can make its own carrier in Go (exported constructors) and Dart (`extends
    made), and the bases have no generic `add/record/set`: each generated metric class has its own method
    typed to its own labels class, so an upcast cannot reach a covariant check that throws. .NET is closed
    at compile time (internal constructors, friend access for Signals only).
-2. A run-time guard in all four, which checks everything against the generated tables. Go's generated
-   `init()` calls `obs.Register`; Bun's generated `signals.ts` calls `register(...)` when it loads, and
-   `metrics(...)`, `logger(...)` and `tracer(...)` accept only those same table objects (any other table
-   poisons the port, see below); Dart's generated `installSignals()` calls `DurianSignalPort.install`;
-   .NET calls `Port.Install(SignalTables.Metrics, SignalTables.EventLevels)` (no one-shot rule there: .NET
-   carriers cannot be forged, so a foreign table could only drop real signals, never admit a forged one). Each metric row carries its generated
-   labels type (Go, Dart), the allowed values of each enum label and the min..max of each bounded label.
-   The port refuses a name not in its table, a kind or level that differs, a labels value of another type
-   (even with the same keys), keys that are not the name's keys, and a value outside the allowed values or
-   range. Registration is once per process: Go `Register` (called by the generated `init()`), Bun
-   `register` (called by the generated `signals.ts` when it loads) and Dart `install` (called by the
-   generated `installSignals()`). Nothing guarantees the generated call comes first (an independent Go
-   package's `init()`, a Bun module loaded before `signals.ts`, or app code before `installSignals()` can
-   register a forged table earlier), so a competing registration, earlier or later, poisons the port (in
-   Bun also a table passed to `metrics/logger/tracer` that is not the registered object): it is refused
-   and counted (`dropped.register`), and from then on the port refuses every signal (`dropped.poisoned`)
-   until restart. A forged table is never used silently; it is a loud telemetry failure, never an app
-   failure. The lint rule forbids `obs.Register`, Bun `register` and `DurianSignalPort.install` outside
-   generated files.
-   The tables are deep-copied at registration (in Bun also frozen; the guard reads only that copy), so
-   editing the exported generated tables later changes nothing. The port counts `dropped.<reason>`, returns an
-   error and never throws or panics (the type is checked before any field is read; a panic or exception
-   is recovered and counted as a last resort).
+2. A run-time guard in all four checks signals against a merged view of the registered contract tables.
+   Each generated contract registers its own table set and hash. Its id is
+   `<package identity>:<contract path relative to the identity manifest's folder>`. With that manifest, adding or
+   removing `.git` does not change ids. A `package_id:` override uses the same owning manifest's
+   folder as the path base (or the Git root, then project folder, when no manifest is available).
+   Headers retain their source-path ownership marker.
+   Go's generated `init()` calls `obs.Register`; Bun's generated `signals.ts` calls `register(...)`
+   when it loads; Dart's generated `installSignals()` calls `DurianSignalPort.install`; .NET wiring
+   calls `Port.Install(SignalTables.Contract, SignalTables.Metrics, SignalTables.EventLevels, SignalTables.Spans)`.
+   Any number of contracts may register before the first signal. Re-registering the same id, hash and
+   equal table content is a no-op before signals flow. Reusing an id with different content or a different
+   hash, declaring a metric/event/span name already owned by another contract (including across signal
+   kinds), or registering after the first signal is recorded refuses registration and poisons the port.
+   A refused signal records nothing and leaves registration open.
+   A duplicate-name refusal names both contract ids. The refusal counts `dropped.register`; every signal
+   after it is refused and counts `dropped.poisoned` until restart. Bun's `metrics/logger/tracer(table)`
+   accept any registered table object; an unregistered object also poisons the port.
+   Each metric row carries its generated labels type (Go, Dart), allowed enum values and bounded ranges.
+   The port refuses unknown names, wrong kinds/levels, labels of another generated type, wrong keys and
+   out-of-range values. Tables are deep-copied at registration (Bun's copies are also frozen), so later
+   edits to exported tables change nothing. Refusals return errors and are counted; they never throw or panic.
+
+   **Boot wiring is required.** Every feature's registration must run from the templates' GENERATED wiring
+   list at boot, before signals flow: Go imports the packages for their `init()`, Bun imports each
+   `signals.ts`, Dart calls each library's `installSignals()`, and .NET installs each namespace's tables.
+   obs gen does not write that wiring list; the templates' wiring generators own it. No hand-kept list
+   that every feature edits is allowed. A lazy-loaded Bun or Dart feature that registers after the first
+   signal poisons the entire port. Each contract has its own Go package, Bun module, Dart library or .NET
+   namespace; Dart wiring uses import prefixes when the libraries both export `installSignals()`.
+
+   **The forgery guarantee changed.** The old one-table port made every second registration loud.
+   The merged port still makes a forgery that reuses a real name, or registers after signals start, loud.
+   An early forged table containing only NEW names is admitted. The lint rule forbidding registration
+   outside generated code is therefore required; for metrics, the platform's `contract/keep.yaml`
+   write-door rule also drops names no contract lists. New event and span names have NO write-door
+   guard: lint is their only guard. The compile/run fixtures document this admitted fresh-name forgery,
+   including .NET's reflection escape hatch; they do not claim the template lint or platform keep rule runs here.
 3. A lint rule in the template's CI (documented here, NOT TESTED; the lint config lives in the templates).
 
 | Language | Hole the compiler leaves                                                                   | Run-time guard (tested)                                    | Lint rule (NOT TESTED)                                   |
@@ -801,6 +815,7 @@ Lint rule text per language (to copy into the templates):
 
   Assigning to a generated exported variable stays a `forbidigo`/`gocritic` rule as in concept §3.4, and
   `depguard` denies `unsafe` in app packages (an unsafe-made enum value is refused at run time anyway).
+  Registration outside generated code must be forbidden: an early table with only new names is admitted.
 
 - **Dart**: one analyzer-plugin rule (`analysis_server_plugin`): in a file whose first line is not
   `// Code generated by obs gen. DO NOT EDIT.`, flag `extends`, `implements` or `with` of any
@@ -811,6 +826,7 @@ Lint rule text per language (to copy into the templates):
   argument that is not the generated `metricTable`/`eventTable`/`spanTable`.
 - **.NET**: a Roslyn analyzer for `default(Int<...>)`, `null!` of a generated enum class, and reflection
   on generated types (a reflection-made enum value is refused at run time by the allowed values).
+  Forbid `Port.Install` outside generated wiring; this closes early fresh-name table forgery.
 
 **`out:` and orphans.** In a Git repository `out:` may point anywhere under the Git root (for example
 `../shared/bun`); headers name the contract's repository-relative path and the orphan walk starts at the
@@ -818,16 +834,68 @@ Git root. An `out:` that leaves the Git root, or is absolute, is refused before 
 check is made on the written path and on its resolved path, so a symlink in `out:` cannot lead outside.
 With no `.git`, `out:` may not use `..` or a symlink that leads out of the project folder, and the header's contract path is relative to the folder that holds
 `observability/`, whatever the working directory (so `--check` from another folder sees the same headers).
+Each generated-file destination must be a regular file or absent. A symlink at the file itself,
+including a dangling symlink, is refused before any file is written. Directory aliases are allowed
+within the permitted root; full destinations are resolved through existing ancestors (including a
+missing tail) and compared across all contracts. Aliases to the same generated file are refused.
 
-Each `generate:` target accepts optional `interfaces:` to override its dependency import. Every name
-in the last column is assumed, not in the goal; the interfaces nodes reconcile them:
+Each `generate:` target gets its package identity from the nearest language manifest at or above `out:`:
+Go's `go.mod` module path, Bun's `package.json` name, Dart's `pubspec.yaml` name, or .NET's `.csproj`
+literal `PackageId`, then literal `AssemblyName`, then project filename; unevaluated MSBuild expressions
+such as `$(AssemblyName)` fall through to the next choice. This keeps two libraries that both ship
+`observability/contract.yaml` distinct. A missing manifest/identity fails generation naming the target;
+multiple .NET projects at the same level need an explicit `package_id:`. Optional `package_id:` overrides
+the identity value; locating the owning project remains independent of parsing that value.
+It is the package's stable identity,
+not the feature name or the generated namespace. Manifest edits change generated registration too;
+`obs gen --check` detects that drift even when the contract hash stays the same.
+The walk follows the resolved `out:` directory's ancestors and stops at the resolved Git root.
+Without `.git`, it walks up without a bound, so a manifest above the project can be picked up.
+Use `package_id:` to pin the identity outside Git or when the owning manifest is unavailable.
+
+Each `generate:` target accepts optional `interfaces:` to override its dependency import. The merged-port
+registration behavior is now specified in [the corpus port design and four interfaces goals](https://github.com/ProtoDurian/diene-corpus/pull/116)
+(concept §3). The last column lists the remaining API details that the goals do not spell; the
+interfaces nodes reconcile them. The fixtures validate these models, not published packages:
+
+For .NET, an explicit `namespace:` wins. A service's only .NET contract keeps `<Service>.Signals`
+wherever its `.csproj` sits, including `App/App.csproj` beside `App/observability/` and a project
+under `src/` with a contract under `services/Checkout/observability/`.
+With several valid .NET contracts for one service, the single root candidate (repo-root
+`observability/` or an adjacent `.csproj`, when exactly one exists) keeps `<Service>.Signals`.
+The rest use `<Service>.<Feature>.Signals`; with several root candidates all use feature names.
+Feature is the PascalCase folder in `<feature>/observability/` or `observability/<feature>/`
+(`Root` for a repository-root contract that needs disambiguation). A remaining namespace clash
+tells you to set `namespace:` on one target.
+Outside Git, sibling scope for namespace, target-clash and registration-id checks is the topmost
+ancestor folder containing a project marker (`.sln`, `.csproj`, `go.mod`, `package.json` or
+`pubspec.yaml`). Defaults are computed over that topmost project folder, including adjacent feature
+projects under one solution. An export containing only part of a repository can have different
+defaults; set `namespace:` explicitly to pin them for such exports.
+This lets two features of the same service compile in one assembly without editing a shared namespace.
+Namespaces must be dotted C# identifiers without whitespace around dots; invalid spellings name the
+`namespace:` key and contract. A leading `@` is canonicalized per segment when comparing namespaces.
+Generation and checks also refuse two contracts with the same registration id, naming both owners
+relative to their shared owning root. This catches override collisions before boot registration.
+`obs gen` (including `--check`) and `obs check` refuse two targets that resolve to the same .NET
+namespace (`generate-namespace-clash`) or the same `out:` folder in any language (`generate-out-clash`).
+Both contract paths are named. These clashes are across contracts: one contract may still generate
+Go and C# into a shared folder when they write different files, as in 0.5. Writing the same file twice
+is still refused. The repository checks share contract discovery and exclude fixture trees;
+`obs check --contracts none` keeps its existing single-contract scope.
+`obs gen` and `obs gen --check` skip invalid sibling contracts in the clash check, preserving 0.5
+generation of a valid contract; `obs check` still diagnoses those invalid siblings.
+
+The fixture span recorders (`obs.StartSpan`, `Port.StartSpan`, `DurianSignalPort.startSpan`) are
+additional assumed ABI details, not prescribed entrypoint names. Together with Bun's `tracer.run`,
+they test that recording the first span also closes registration and poisons any late feature install.
 
 | Language | Default `interfaces`                             | In the goal                                                                                                                                                                                                                         | Assumed, not in goal                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | -------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Go       | `github.com/ProtoDurian/diene.go-interfaces/obs` | module `ProtoDurian/diene.go-interfaces`; `obs.Add`, `obs.Int[Spec]`, `obs.NewInt`, `obs.AtTime` with an error return; `obs.Error(ctx, Event[Error], ...)`                                                                          | the `/obs` package path; `IntSpec` `Name/Min/Max/Unit` (int64); `Int.Valid`; `Level` and the six markers; `NewEvent/NewCounter/NewHistogram/NewGauge/NewSpan`; `DurianSignal*` carriers and info rows (`Labels`, `Values`, `Ranges`); `Field`; `Record/Set/Warn/Info`; one-shot `Register` returning an error (a second one poisons the port), `DurianSignalTables`, `Dropped`                                                                        |
-| Bun      | `@atomicloud/diene.interfaces`                   | `counter(name, labels)`; `log.error(ev, fields?, err?)`; `bounded(spec, n): Result`; `Tracer`/`Span`, `DurianSignalSpanTable`                                                                                                       | `register(tables)` (one-shot; a second one or a foreign table poisons the port); `metrics(table)`, `histogram/gauge`, `MetricTable` (with `values`, `ranges`); `logger(eventTable)`, `EventTable`, `Level`; `dropped()`; `tracer(table)`; `Bounded<N>`; a synchronous `{ok, value}` Result (the published Result is promise-based)                                                                                                                    |
-| .NET     | `AtomiCloud.Diene.Interfaces`                    | `Port.Add(Names.X, new XLabels(...))`; `Int<Spec>.Of(n)` returning a `Result` (package `AtomiCloud.Diene.Result`: struct `Result<T, E>`, `Ok/Err`, `IsSuccess`); `Log.Error(Event<ErrorLevel>, ...)`; internal carrier constructors | namespace `AtomiCloud.Diene.Result` and `Value/Error`; `IDurianSignal*` interfaces, `Valid/Wire`; `AtTime`; `DurianSignalDate`; label attribute and info rows; `Port.Record/Set/Install/Dropped`; info row `Values`/`Ranges`; `Log.Warn`                                                                                                                                                                                                              |
-| Dart     | `diene_interfaces`                               | `checkoutCharges.add(XLabels(...))`; `error(Event<ErrorLevel>, ...)`; enums; extension types; `shardSpec.of(n)` returning a `Result`; `entries` getter                                                                              | barrel `diene_interfaces.dart`; `DurianSignalWire/Labels/Metric`, carrier bases and constructors; `DurianSignalBoundSpec` and `atTime`; sealed level markers; `DurianSignalPort` (one-shot `install` returning a Result, a second one poisons the port, `add/record/set/dropped`); generated `installSignals()`; `warn/info`; info rows (`labels` Type, `values`, `ranges`); local `Result/DurianSignalOk/DurianSignalErr` in place of `diene_result` |
+| Go       | `github.com/ProtoDurian/diene.go-interfaces/obs` | module `ProtoDurian/diene.go-interfaces`; `obs.Add`, `obs.Int[Spec]`, `obs.NewInt`, `obs.AtTime` with an error return; `obs.Error(ctx, Event[Error], ...)`; `obs.Register(DurianSignalTables{Contract, Hash, ...})`, merged boot registration and poison rules | the `/obs` package path; `IntSpec` `Name/Min/Max/Unit` (int64); `Int.Valid`; `Level` and the six markers; `NewEvent/NewCounter/NewHistogram/NewGauge/NewSpan`; `DurianSignal*` carriers and info rows (`Labels`, `Values`, `Ranges`); `Field`; `Record/Set/Warn/Info`; fixture `StartSpan`; exact `DurianSignalTables` map/row fields; `Dropped(reason)`                                                                        |
+| Bun      | `@atomicloud/diene.interfaces`                   | `counter(name, labels)`; `log.error(ev, fields?, err?)`; `bounded(spec, n): Result`; `Tracer`/`Span`, `DurianSignalSpanTable`; `register({contract, hash, metrics, events, spans})`, merged boot registration and registered-object binding | `metrics(table)`, `histogram/gauge`, `MetricTable` (with `values`, `ranges`); `logger(eventTable)`, `EventTable`, `Level`; `dropped()`; `tracer(table)`; `Bounded<N>`; a synchronous `{ok, value}` Result (the published Result is promise-based)                                                                                                                    |
+| .NET     | `AtomiCloud.Diene.Interfaces`                    | `Port.Add(Names.X, new XLabels(...))`; `Int<Spec>.Of(n)` returning a `Result` (package `AtomiCloud.Diene.Result`: struct `Result<T, E>`, `Ok/Err`, `IsSuccess`); `Log.Error(Event<ErrorLevel>, ...)`; internal carrier constructors; per-contract `Port.Install`, merged boot registration and poison rules | namespace `AtomiCloud.Diene.Result` and `Value/Error`; `IDurianSignal*` interfaces, `Valid/Wire`; `AtTime`; `DurianSignalDate`; label attribute and info rows; `Port.Record/Set/Dropped`; fixture `Port.StartSpan`; `Port.Install(SignalTables.Contract, SignalTables.Metrics, SignalTables.EventLevels, SignalTables.Spans)` returning a Result; `DurianSignalContract(Id, Hash)`; info row `Values`/`Ranges`; `Log.Warn`                                                                                                                                                                                                              |
+| Dart     | `diene_interfaces`                               | `checkoutCharges.add(XLabels(...))`; `error(Event<ErrorLevel>, ...)`; enums; extension types; `shardSpec.of(n)` returning a `Result`; `entries` getter; generated `installSignals()` and `DurianSignalPort.install`, merged boot registration and poison rules | barrel `diene_interfaces.dart`; `DurianSignalWire/Labels/Metric`, carrier bases and constructors; `DurianSignalBoundSpec` and `atTime`; sealed level markers; exact `install(contract:, hash:, metrics:, events:, spans:)` named arguments and Result shape; `add/record/set/dropped`; fixture `startSpan`; `warn/info`; info rows (`labels` Type, `values`, `ranges`); local `Result/DurianSignalOk/DurianSignalErr` in place of `diene_result` |
 
 The compile fixtures model Result locally and do not validate integration with the separately published
 result libraries. .NET name constructors require the real library to grant friend access to the
@@ -931,6 +999,28 @@ Not checked here: that `panel` is a panel id of `dashboards/overview.json`, and 
 
 ## Migrating from 0.5 to 0.6
 
+All 0.5 commands and flags remain available. After upgrading, regenerate with `obs gen`: generated
+registration now carries a package-qualified contract id and hash, and the files change. Make the owning
+package manifest available at or above each `out:`, or set `package_id:` on that target. Upgrade the
+interfaces ports to the merged-table contract described above. Generate boot wiring that registers every
+feature before any signal; a hand-kept list or late/lazy registration does not satisfy the contract.
+A service's sole .NET contract keeps its old namespace default. Multiple contracts use the root-candidate
+and feature namespace rules above. Remove any cross-contract namespace or output-folder collision reported by `obs gen`
+or `obs check`; explicitly choosing one namespace for two contracts is refused too.
+Generation skips siblings whose contract or generate configuration is invalid (including `out:` and
+`interfaces:`); `obs check` reports them.
+If a 0.5 repository has a symlink at a generated-file path, replace that link with the real generated
+file before regenerating. Directory aliases within the allowed root may remain.
+
+The 58 compatibility goldens cover query, alerts and links output; they do not cover generated code.
+For an unchanged single-contract repository those command outputs remain byte-identical. Generated
+single-contract signal files change only at registration (metadata, calls and their comments); the
+per-signal types and tables retain their shapes. The other generated contract data keeps its format.
+The fresh-name forgery gap above is deliberate: lint and the metric keep-list now carry that guarantee;
+new event/span names have lint alone.
+
+Flat alert tier files and `obs live` (part D):
+
 - **A flat tier file that 0.5 refused is now read.** Any CI that relied on that refusal (a flat file making
   `obs query --static` or `obs check` exit 1 with `want GrafanaAlertRuleGroup (this is the flat authoring form ...)`)
   changes from exit 1 to the new result: the file is checked as the rule the chart renders, and exits 0 when it is valid.
@@ -942,6 +1032,7 @@ Not checked here: that `panel` is a panel id of `dashboards/overview.json`, and 
   now `query-static__ok-flat-alert.out` (the fixture `bad-flat-alert` became `ok-flat-alert`, a valid flat fixture, regenerated from the 0.6 binary).
   Every other golden is byte-identical to 0.5.
 - `obs live` prints `read-only: only GET to query endpoints` (0.5 said "GET and POST"; the client only ever sent GET). Its usage text says the same.
+
 
 ## Migrating from 0.4 to 0.5
 

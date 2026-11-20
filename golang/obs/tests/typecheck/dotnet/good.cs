@@ -5,7 +5,7 @@ using Checkout.Signals;
 using AtomiCloud.Diene.Interfaces;
 using AtomiCloud.Diene.Result;
 
-Port.Install(SignalTables.Metrics, SignalTables.EventLevels);
+Port.Install(SignalTables.Contract, SignalTables.Metrics, SignalTables.EventLevels, SignalTables.Spans);
 var shard = Int<ShardSpec>.Of(3);
 if (!shard.IsSuccess)
 {
@@ -59,9 +59,10 @@ if (forgedValue.IsSuccess || Port.Dropped["unknown_value"] != 1) throw new Excep
 Console.WriteLine($"guard-value: {forgedValue.Error}");
 
 // The port reads the tables it was built from: a port built from tables without the signal refuses it.
-Port.Install(new Dictionary<string, DurianSignalMetricInfo>(), new Dictionary<string, string>());
-var refused = Log.Error(Events.ChargeFailed);
-if (refused.IsSuccess || Port.Add(Names.CheckoutCharges, labels).IsSuccess || Port.Dropped["unknown_event"] != 1 || Port.Dropped["unknown_metric"] != 1)
+var missing = (Event<ErrorLevel>)typeof(Event<ErrorLevel>).GetConstructor(BindingFlags.NonPublic | BindingFlags.Instance, [typeof(string)])!.Invoke(["not.in.contract"]);
+var missingCounter = (DurianSignalCounter<CheckoutChargesLabels>)typeof(DurianSignalCounter<CheckoutChargesLabels>).GetConstructor(BindingFlags.NonPublic | BindingFlags.Instance, [typeof(string)])!.Invoke(["not.in.contract"]);
+var refused = Log.Error(missing);
+if (refused.IsSuccess || Port.Add(missingCounter, labels).IsSuccess || Port.Dropped["unknown_event"] != 1 || Port.Dropped["unknown_metric"] != 1)
 {
     throw new Exception("the port did not refuse a signal missing from its tables");
 }
