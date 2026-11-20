@@ -9,10 +9,12 @@ import (
 	"testing"
 )
 
-// fakeDh is the test double of the dh tool: it replays JSON recorded from the real dh.
-func fakeDh(t *testing.T) string {
+// useFakeDh makes the test binary the dh of this test (it replays JSON recorded from the real dh)
+// and returns its path.
+func useFakeDh(t *testing.T) string {
 	t.Helper()
-	p, err := filepath.Abs("testdata/dh/fake-dh")
+	t.Setenv(fakeDhEnv, "1")
+	p, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -22,7 +24,7 @@ func fakeDh(t *testing.T) string {
 // checkJSON runs `ul check` on dir and returns the problems and flags as "file:line: CODE" lines.
 func checkLines(t *testing.T, te *testEnv, dir string, extra ...string) (probs, flags []string, code int) {
 	t.Helper()
-	args := append([]string{"check", "--root", dir, "--format", "json", "--dh", fakeDh(t)}, extra...)
+	args := append([]string{"check", "--root", dir, "--format", "json", "--dh", useFakeDh(t)}, extra...)
 	code, out, errs := te.ul(args...)
 	var res problemsOut
 	if err := jsonUnmarshal(out, &res); err != nil {
@@ -129,7 +131,7 @@ func TestDhOnlyWhenNeeded(t *testing.T) {
 	}
 	// UL_DH is read from the environment ul runs in.
 	te = newEnv(t, dir)
-	te.vars["UL_DH"] = fakeDh(t)
+	te.vars["UL_DH"] = useFakeDh(t)
 	if code, _, errs := te.ul("check", "--root", dir); code != 1 {
 		t.Fatalf("UL_DH: exit %d: %s", code, errs)
 	}

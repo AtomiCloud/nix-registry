@@ -109,10 +109,25 @@ cp -r "$SRC/testdata/bad/UL408-concept-not-word" "$work/what"
 chmod -R u+w "$work/what"
 expect_exit 1 "docs: model/ is the what folder" "$UL" check --root "$work/what"
 expect_exit 0 "docs: --what-folder core leaves model/ alone" "$UL" check --root "$work/what" --what-folder core
+# a test double of dh: it prints the JSON recorded beside each page (tests/record-dh.sh makes it
+# with the real dh); its shebang is the bash of this build, as the sandbox has no /usr/bin/env
+fakedh="$work/fake-dh"
+{
+  printf '#!%s\n' "$(command -v bash)"
+  cat <<'FAKE'
+[ "${1:-}" = json ] || exit 2
+shift
+for p in "$@"; do
+  if [ -f "$p.dherr" ]; then cat "$p.dherr" >&2; exit 1; fi
+  cat "$p.dhjson"
+done
+FAKE
+} >"$fakedh"
+chmod +x "$fakedh"
 # dh is needed only for .dh.md pages
 expect_exit 1 "docs: a .md repo never calls dh" "$UL" check --root "$SRC/testdata/bad/UL403-avoided-word" --dh /no/such/dh
 expect_exit 2 "docs: a .dh.md page with no dh is exit 2" "$UL" check --root "$SRC/testdata/dh/parts" --dh /no/such/dh
-expect_exit 1 "docs: a .dh.md page is read through dh" "$UL" check --root "$SRC/testdata/dh/parts" --dh "$SRC/testdata/dh/fake-dh"
+expect_exit 1 "docs: a .dh.md page is read through dh" "$UL" check --root "$SRC/testdata/dh/parts" --dh "$fakedh"
 [ "$(grep -c UL403 <<<"$out")" = 20 ] && ok "docs: 20 avoided words in the parts of a .dh.md page" || bad "docs: dh parts: $out"
 
 # --- no session layer: the repo scan is the whole UL -------------------------------------
