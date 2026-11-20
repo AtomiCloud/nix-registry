@@ -99,6 +99,21 @@ func landscapeUse(datasource, expr string) string {
 				return f + " filter"
 			}
 		}
+		// A filter after the stats on a group key the stats retained (stats by (landscape) ... | filter
+		// landscape:x) selects a landscape too. A computed field of the same name (stats count() as
+		// landscape | filter landscape:>5) is not a group key and is fine.
+		if by, err := q.StatsLabels(); err == nil {
+			for _, f := range q.TrailingFilterFields() {
+				if !isLandscapeName(f) {
+					continue
+				}
+				for _, b := range by {
+					if b == f {
+						return f + " filter after stats on its group key"
+					}
+				}
+			}
+		}
 	}
 	return ""
 }
@@ -348,6 +363,7 @@ func (p Problem) Text() string {
 }
 
 var (
+	docSep      = regexp.MustCompile(`(?m)^---[ \t]*$`)
 	flatKeyLine = regexp.MustCompile(`(?m)^(title|datasource|expr|for|summary|description|panel)[ \t]*:`)
 	crKeyLine   = regexp.MustCompile(`(?m)^(kind|apiVersion|spec|metadata)[ \t]*:`)
 )
@@ -355,5 +371,11 @@ var (
 // looksFlat tells, from the text alone, a file that is meant to be a flat tier file but does not parse:
 // a top-level tier key and no top-level CR key. (A parsed file is judged by isFlat on its keys.)
 func looksFlat(b []byte) bool {
-	return flatKeyLine.Match(b) && !crKeyLine.Match(b)
+	first := docSep.Split(string(b), 2)[0]
+	if strings.TrimSpace(first) == "" { // a leading --- : the text of the document after it
+		if parts := docSep.Split(string(b), 3); len(parts) > 1 {
+			first = parts[1]
+		}
+	}
+	return flatKeyLine.MatchString(first) && !crKeyLine.MatchString(first)
 }

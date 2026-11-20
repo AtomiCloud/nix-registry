@@ -201,7 +201,12 @@ func (s *Set) readAlert(rel string, b []byte) {
 	var extra yaml.Node
 	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
 		rule, msg := "", "more than one YAML document: one GrafanaAlertRuleGroup CR per file"
-		if looksFlat(b) {
+		// Judge the first document by what it parsed to: a flat tier followed by another document (say a
+		// ConfigMap) is a flat tier with trailing documents, not a CR.
+		var first map[string]any
+		if yaml.NewDecoder(bytes.NewReader(b)).Decode(&first) == nil && isFlat(first) {
+			rule, msg = "flat-alert-documents", "more than one YAML document: a tier file is one flat map"
+		} else if looksFlat(b) {
 			rule, msg = "flat-alert-documents", "more than one YAML document: a tier file is one flat map"
 		}
 		s.Problems = append(s.Problems, Problem{File: rel, Rule: rule, Msg: msg})

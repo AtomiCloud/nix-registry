@@ -421,3 +421,38 @@ func (q *Query) ObsFieldFilters(field string) []ObsFieldFilter {
 // obs alerts runs many small stats queries from parallel rule workers; one worker
 // per query avoids a set of per-worker stats buffers on every query.
 func (q *Query) ObsSetConcurrency(n uint) { q.opts.concurrency = n }
+
+// ObsTrailingFilterFields returns the fields read by the `filter` pipes that directly follow the last
+// `stats` pipe (the pipes ObsWithoutTrailingFilters removes). A field that is also a `by (...)` label of
+// that stats pipe is a retained group key filtered after the aggregation.
+func (q *Query) ObsTrailingFilterFields() []string {
+	idx := getLastPipeStatsIdx(q.pipes)
+	if idx < 0 {
+		return nil
+	}
+	set := map[string]struct{}{}
+	for _, p := range q.pipes[idx+1:] {
+		pf, ok := p.(*pipeFilter)
+		if !ok {
+			break
+		}
+		visitFilterRecursive(pf.f, func(leaf filter) bool {
+			switch leaf.(type) {
+			case *filterAnd, *filterOr, *filterNot:
+				return false
+			}
+			var nf prefixfilter.Filter
+			leaf.updateNeededFields(&nf)
+			for _, a := range nf.GetAllowFilters() {
+				set[a] = struct{}{}
+			}
+			return false
+		})
+	}
+	var out []string
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}

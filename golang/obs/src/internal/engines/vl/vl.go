@@ -342,3 +342,7 @@ func (q *Query) FilterFields() ([]string, error) {
 	sort.Strings(out)
 	return out, nil
 }
+
+// TrailingFilterFields returns the fields of the `filter` pipes right after the last `stats` pipe: a
+// threshold on a computed value, or a filter on a group key the stats kept (`by (f)`).
+func (q *Query) TrailingFilterFields() []string { return q.q.ObsTrailingFilterFields() }

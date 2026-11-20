@@ -99,8 +99,9 @@ func TestLiveIncidentsSiblingRunbookCountsForAFlatRule(t *testing.T) {
 // file that does not parse keeps 0.5's behaviour.
 func TestLiveIncidentsUnreadableFlatTierExitsTwo(t *testing.T) {
 	for name, c := range map[string]struct{ body, rule string }{
-		"unclosed value": {flatLiveTier + "summary2: 'unclosed\n", "[flat-alert-yaml]"},
-		"two documents":  {flatLiveTier + "---\ntitle: again\n", "[flat-alert-documents]"},
+		"unclosed value":       {flatLiveTier + "summary2: 'unclosed\n", "[flat-alert-yaml]"},
+		"two documents":        {flatLiveTier + "---\ntitle: again\n", "[flat-alert-documents]"},
+		"a trailing ConfigMap": {flatLiveTier + "---\napiVersion: v1\nkind: ConfigMap\nmetadata: { name: x }\n", "[flat-alert-documents]"},
 	} {
 		_, run := flatLiveDir(t, c.body, nil)
 		rc, out, stderr := run()

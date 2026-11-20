@@ -180,6 +180,10 @@ func TestFlatTierFindings(t *testing.T) {
 		{"logs landscape in a nested source", "alerts/q/critical.yaml", logsFlat("trace_id:in(_time:5m landscape:raichu | fields trace_id)"), "flat-alert-landscape", "landscape"},
 		{"unclosed YAML value", "alerts/q/critical.yaml", retryQueueFlat + "summary2: 'unclosed\n", "flat-alert-yaml", "not valid YAML"},
 		{"second YAML document", "alerts/q/critical.yaml", retryQueueFlat + "---\ntitle: again\n", "flat-alert-documents", "more than one YAML document"},
+		{"logs landscape group key filtered after stats", "alerts/q/critical.yaml", logsRaw("| stats by (\"durian.cloud.landscape\") count() as hits | filter \"durian.cloud.landscape\":=raichu"), "flat-alert-landscape", "group key"},
+		{"logs landscape plain group key filtered after stats", "alerts/q/critical.yaml", logsRaw("| stats by (landscape) count() as hits | filter landscape:raichu and hits:>0"), "flat-alert-landscape", "group key"},
+		{"flat tier followed by a ConfigMap", "alerts/q/critical.yaml", retryQueueFlat + "---\napiVersion: v1\nkind: ConfigMap\nmetadata: { name: x }\n", "flat-alert-documents", "more than one YAML document"},
+		{"flat tier preceded by a marker and followed by a CR", "alerts/q/critical.yaml", "---\n" + retryQueueFlat + "---\nkind: GrafanaAlertRuleGroup\n", "flat-alert-documents", "more than one YAML document"},
 		{"uid over 40", "alerts/a-very-long-slug-name-here/critical.yaml", retryQueueFlat, "flat-alert-uid-length", "tracker-zinc-a-very-long-slug-name-here-critical"},
 	}
 	for _, c := range cases {
@@ -340,5 +344,24 @@ func TestUnreadableFlatFileIsClassified(t *testing.T) {
 	s = flatDir(t, "alerts/q/critical.yaml", cr+"---\nkind: Other\n")
 	if len(s.Problems) != 1 || s.Problems[0].Rule != "" {
 		t.Fatalf("a two-document CR keeps 0.5's behaviour: %+v", s.Problems)
+	}
+}
+
+// logsRaw is a logs tier file whose expr is the event filter followed by the given pipes.
+func logsRaw(pipes string) string {
+	return "title: Disk corrupted\ndatasource: logs\nexpr: |\n  _stream:{\"durian.cloud.service\"=\"zinc\"} \"durian.cloud/event\":=disk.corrupted " + pipes + "\nfor: 0m\nsummary: s\ndescription: d\n"
+}
+
+// A filter after the stats on a computed field that only shares the name is no landscape selector.
+func TestFlatLandscapeNamedComputedFieldIsAllowed(t *testing.T) {
+	for name, body := range map[string]string{
+		"computed by count":                     logsRaw("| stats count() as landscape | filter landscape:>5"),
+		"computed beside a group":               logsRaw("| stats by (service) count() as landscape | filter landscape:>5"),
+		"group key, threshold on another field": logsRaw("| stats by (\"durian.cloud.landscape\") count() as hits | filter hits:>5"),
+	} {
+		s := flatDir(t, "alerts/q/critical.yaml", body)
+		if len(s.Problems) != 0 || len(s.Rules) != 1 {
+			t.Errorf("%s: %+v", name, s.Problems)
+		}
 	}
 }
