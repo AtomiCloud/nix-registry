@@ -61,8 +61,8 @@ func TestFeatureOutputAliasesMissingLeaf(t *testing.T) {
 func TestMultipleProjectRootsOfSameService(t *testing.T) {
 	root := repo(t, map[string]string{
 		"src/Orders/Orders.csproj": "<Project/>", "src/Billing/Billing.csproj": "<Project/>",
-		"src/Orders/observability/contract.yaml":  "service: shop\nlogs: {Failed: {event: orders.failed, level: error}}\ngenerate: [{lang: dotnet, out: gen, package_id: Shop}]\n",
-		"src/Billing/observability/contract.yaml": "service: shop\nlogs: {Failed: {event: billing.failed, level: error}}\ngenerate: [{lang: dotnet, out: gen, package_id: Shop}]\n",
+		"src/Orders/observability/contract.yaml":  "service: shop\nlogs: {Failed: {event: orders.failed, level: error}}\ngenerate: [{lang: dotnet, out: gen}]\n",
+		"src/Billing/observability/contract.yaml": "service: shop\nlogs: {Failed: {event: billing.failed, level: error}}\ngenerate: [{lang: dotnet, out: gen}]\n",
 	})
 	for _, feature := range []string{"Orders", "Billing"} {
 		dir := filepath.Join(root, "src", feature, "observability")

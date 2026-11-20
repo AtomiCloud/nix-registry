@@ -104,6 +104,7 @@ if [ -n "${OBS_GEN_BINARY:-}" ]; then
   cat >"$d/Signals.csproj" <<'XML'
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <PackageId>$(AssemblyName)</PackageId>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
@@ -118,7 +119,7 @@ XML
     cat >"$d/$feature/observability/contract.yaml" <<YAML
 service: shop
 logs: {Failed: {event: shop.${feature,,}.failed, level: error}}
-generate: [{lang: dotnet, out: gen}]
+generate: [{lang: dotnet, out: gen, package_id: Shop}]
 YAML
   done
   cat >"$d/Program.cs" <<'CS'

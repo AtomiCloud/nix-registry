@@ -31,8 +31,101 @@ func PackageIdentity(root string, target contract.Target) (string, error) {
 
 func packageIdentityLocation(root string, target contract.Target) (string, string, error) {
 	if id := strings.TrimSpace(target.PackageID); id != "" {
-		return id, "", nil
+		base, err := owningProject(root, target)
+		return id, base, err
 	}
+	file, dir, err := packageManifest(root, target)
+	if err != nil {
+		return "", "", err
+	}
+	fail := func(err error) (string, string, error) {
+		return "", "", fmt.Errorf("generate %s out: %q: package identity: %w (or set package_id:)", target.Lang, target.Out, err)
+	}
+	b, e := os.ReadFile(file)
+	if e != nil {
+		return fail(e)
+	}
+	name := filepath.Base(file)
+	var id string
+	switch target.Lang {
+	case "go":
+		match := regexp.MustCompile(`(?m)^\s*module\s+("[^"\n]*"|[^\s]+)`).FindSubmatch(b)
+		if len(match) > 1 {
+			id = string(match[1])
+			if strings.HasPrefix(id, "\"") {
+				id, e = strconv.Unquote(id)
+			}
+		}
+	case "bun":
+		var m struct {
+			Name string `json:"name"`
+		}
+		e = json.Unmarshal(b, &m)
+		id = m.Name
+	case "dart":
+		var m struct {
+			Name string `yaml:"name"`
+		}
+		e = yaml.Unmarshal(b, &m)
+		id = m.Name
+	case "dotnet":
+		var m struct {
+			Groups []struct {
+				PackageID    string `xml:"PackageId"`
+				AssemblyName string `xml:"AssemblyName"`
+			} `xml:"PropertyGroup"`
+		}
+		e = xml.Unmarshal(b, &m)
+		for _, g := range m.Groups {
+			if literalMSBuild(g.PackageID) != "" {
+				id = literalMSBuild(g.PackageID)
+				break
+			}
+		}
+		if id == "" {
+			for _, g := range m.Groups {
+				if literalMSBuild(g.AssemblyName) != "" {
+					id = literalMSBuild(g.AssemblyName)
+					break
+				}
+			}
+		}
+		if id == "" {
+			id = strings.TrimSuffix(name, ".csproj")
+		}
+	}
+	if e != nil {
+		return fail(fmt.Errorf("%s: %w", file, e))
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return fail(fmt.Errorf("%s has no package identity", file))
+	}
+	return id, dir, nil
+}
+
+// owningProject locates a manifest without interpreting its identity properties.
+// An override still works when a build supplies the manifest later.
+func owningProject(root string, target contract.Target) (string, error) {
+	_, dir, _ := packageManifest(root, target)
+	if dir != "" {
+		return dir, nil
+	}
+	if git := GitRoot(root); git != "" {
+		return resolvedPath(git)
+	}
+	return resolvedPath(root)
+}
+
+func literalMSBuild(value string) string {
+	value = strings.TrimSpace(value)
+	if strings.Contains(value, "$(") || strings.Contains(value, "@(") || strings.Contains(value, "%(") {
+		return ""
+	}
+	return value
+}
+
+func packageManifest(root string, target contract.Target) (string, string, error) {
 	start, err := filepath.Abs(filepath.Join(root, filepath.FromSlash(target.Out)))
 	if err != nil {
 		return "", "", err
@@ -69,7 +162,7 @@ func packageIdentityLocation(root string, target contract.Target) (string, strin
 				return fail(e)
 			}
 			if len(matches) > 1 {
-				return fail(fmt.Errorf("multiple .csproj manifests in %s", dir))
+				return "", dir, fmt.Errorf("multiple .csproj manifests in %s", dir)
 			}
 			if len(matches) == 1 {
 				name = filepath.Base(matches[0])
@@ -77,67 +170,9 @@ func packageIdentityLocation(root string, target contract.Target) (string, strin
 		}
 		if name != "" {
 			file := filepath.Join(dir, name)
-			b, e := os.ReadFile(file)
+			_, e := os.Stat(file)
 			if e == nil {
-				var id string
-				switch target.Lang {
-				case "go":
-					match := regexp.MustCompile(`(?m)^\s*module\s+("[^"\n]*"|[^\s]+)`).FindSubmatch(b)
-					if len(match) > 1 {
-						id = string(match[1])
-						if strings.HasPrefix(id, "\"") {
-							id, e = strconv.Unquote(id)
-						}
-					}
-				case "bun":
-					var m struct {
-						Name string `json:"name"`
-					}
-					e = json.Unmarshal(b, &m)
-					id = m.Name
-				case "dart":
-					var m struct {
-						Name string `yaml:"name"`
-					}
-					e = yaml.Unmarshal(b, &m)
-					id = m.Name
-				case "dotnet":
-					var m struct {
-						Groups []struct {
-							PackageID    string `xml:"PackageId"`
-							AssemblyName string `xml:"AssemblyName"`
-						} `xml:"PropertyGroup"`
-					}
-					e = xml.Unmarshal(b, &m)
-					for _, g := range m.Groups {
-						if g.PackageID != "" {
-							id = g.PackageID
-							break
-						}
-					}
-					if id == "" {
-						for _, g := range m.Groups {
-							if g.AssemblyName != "" {
-								id = g.AssemblyName
-								break
-							}
-						}
-					}
-					if id == "" {
-						id = strings.TrimSuffix(name, ".csproj")
-					}
-					if strings.Contains(id, "$(") {
-						e = fmt.Errorf("%s uses an unevaluated MSBuild property", file)
-					}
-				}
-				if e != nil {
-					return fail(fmt.Errorf("%s: %w", file, e))
-				}
-				id = strings.TrimSpace(id)
-				if id == "" {
-					return fail(fmt.Errorf("%s has no package identity", file))
-				}
-				return id, dir, nil
+				return file, dir, nil
 			}
 			if !os.IsNotExist(e) {
 				return fail(e)
@@ -150,19 +185,13 @@ func packageIdentityLocation(root string, target contract.Target) (string, strin
 	return fail(fmt.Errorf("no manifest from %s through project boundary %s", start, boundary))
 }
 
-// RegistrationIdentity is independent of Git when a manifest supplies the identity.
-// Explicit package_id uses the repository root, or the project root outside Git.
+// RegistrationIdentity uses the owning manifest folder with or without Git.
+// An explicit package_id changes the identity value, not its project boundary.
 func RegistrationIdentity(obsDir string, target contract.Target) (string, error) {
 	root := Root(obsDir)
 	id, base, err := packageIdentityLocation(root, target)
 	if err != nil {
 		return "", err
-	}
-	if base == "" {
-		base = GitRoot(root)
-		if base == "" {
-			base = root
-		}
 	}
 	base, err = resolvedPath(base)
 	if err != nil {

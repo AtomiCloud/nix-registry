@@ -747,9 +747,10 @@ an app can make its own carrier in Go (exported constructors) and Dart (`extends
    at compile time (internal constructors, friend access for Signals only).
 2. A run-time guard in all four checks signals against a merged view of the registered contract tables.
    Each generated contract registers its own table set and hash. Its id is
-   `<package identity>:<contract path relative to the identity manifest's folder>`, so adding or
-   removing `.git` does not change ids. A `package_id:` override instead uses the Git root, or the
-   project root outside Git, as the path base. Headers retain their source-path ownership marker.
+   `<package identity>:<contract path relative to the identity manifest's folder>`. With that manifest, adding or
+   removing `.git` does not change ids. A `package_id:` override uses the same owning manifest's
+   folder as the path base (or the Git root, then project folder, when no manifest is available).
+   Headers retain their source-path ownership marker.
    Go's generated `init()` calls `obs.Register`; Bun's generated `signals.ts` calls `register(...)`
    when it loads; Dart's generated `installSignals()` calls `DurianSignalPort.install`; .NET wiring
    calls `Port.Install(SignalTables.Contract, SignalTables.Metrics, SignalTables.EventLevels, SignalTables.Spans)`.
@@ -836,14 +837,16 @@ missing tail) and compared across all contracts. Aliases to the same generated f
 
 Each `generate:` target gets its package identity from the nearest language manifest at or above `out:`:
 Go's `go.mod` module path, Bun's `package.json` name, Dart's `pubspec.yaml` name, or .NET's `.csproj`
-`PackageId`, then `AssemblyName`, then project filename. This keeps two libraries that both ship
+literal `PackageId`, then literal `AssemblyName`, then project filename; unevaluated MSBuild expressions
+such as `$(AssemblyName)` fall through to the next choice. This keeps two libraries that both ship
 `observability/contract.yaml` distinct. A missing manifest/identity fails generation naming the target;
 multiple .NET projects at the same level need an explicit `package_id:`. Optional `package_id:` overrides
-manifest discovery (and can resolve computed MSBuild properties). It is the package's stable identity,
+the identity value; locating the owning project remains independent of parsing that value.
+It is the package's stable identity,
 not the feature name or the generated namespace. Manifest edits change generated registration too;
 `obs gen --check` detects that drift even when the contract hash stays the same.
 The walk follows the resolved `out:` directory's ancestors and stops at the resolved Git root.
-Without `.git`, it continues upward as in 0.5, so a manifest above the project can be picked up.
+Without `.git`, it walks up without a bound, so a manifest above the project can be picked up.
 Use `package_id:` to pin the identity outside Git or when the owning manifest is unavailable.
 
 Each `generate:` target accepts optional `interfaces:` to override its dependency import. The merged-port
@@ -865,6 +868,8 @@ manifest's folder, so a source export compiles with the same defaults as its Git
 This lets two features of the same service compile in one assembly without editing a shared namespace.
 Namespaces must be dotted C# identifiers without whitespace around dots; invalid spellings name the
 `namespace:` key and contract. A leading `@` is canonicalized per segment when comparing namespaces.
+Generation and checks also refuse two contracts with the same registration id, naming both owners
+relative to their shared owning root. This catches override collisions before boot registration.
 `obs gen` (including `--check`) and `obs check` refuse two targets that resolve to the same .NET
 namespace (`generate-namespace-clash`) or the same `out:` folder in any language (`generate-out-clash`).
 Both contract paths are named. These clashes are across contracts: one contract may still generate

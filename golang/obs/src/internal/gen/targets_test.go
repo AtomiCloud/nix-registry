@@ -11,6 +11,9 @@ import (
 
 func TestOutputTargetClashesAcrossLanguages(t *testing.T) {
 	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
 	for _, lang := range []string{"go", "bun", "dotnet", "dart"} {
 		t.Run(lang, func(t *testing.T) {
 			a := &contract.Contract{File: filepath.Join(root, "Orders/observability/contract.yaml"), Service: "shop", Generate: []contract.Target{{Lang: "go", Out: "gen"}}}

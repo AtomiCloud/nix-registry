@@ -44,8 +44,7 @@ func dotnetContractPath(c *contract.Contract) string {
 			if target.Lang != "dotnet" {
 				continue
 			}
-			target.PackageID = ""
-			if _, root, err := packageIdentityLocation(Root(filepath.Dir(c.File)), target); err == nil {
+			if root, err := owningProject(Root(filepath.Dir(c.File)), target); err == nil {
 				source, err := resolvedPath(c.File)
 				if err != nil {
 					continue
@@ -85,6 +84,9 @@ func DotnetNamespaceForContracts(c *contract.Contract, namespace string, cs []*c
 	dir := path.Dir(dotnetContractPath(c))
 	contracts, candidates := 0, 0
 	for _, other := range cs {
+		if other != c && !ValidGenerateConfig(other) {
+			continue
+		}
 		if other.Service == c.Service && (other == c || hasDotnetTarget(other)) {
 			contracts++
 			if dotnetRootCandidate(other) {
@@ -114,6 +116,7 @@ func signalFilename(lang string) string {
 // TargetClashes compares resolved folders and every full generated destination
 // across contracts. A single contract retains shared-folder/different-file support.
 func TargetClashes(cs []*contract.Contract) []string {
+	names := targetContractNames(cs)
 	type owner struct {
 		file, lang string
 		c          *contract.Contract
@@ -121,10 +124,12 @@ func TargetClashes(cs []*contract.Contract) []string {
 	folders := map[string]owner{}
 	files := map[string]owner{}
 	namespaces := map[string]owner{}
+	identities := map[string]owner{}
+	reportedIDs := map[string]bool{}
 	badFolders := map[string]bool{}
 	var issues []string
 	checkFile := func(c *contract.Contract, lang, name string) {
-		current := owner{ContractPath(c), lang, c}
+		current := owner{names[c], lang, c}
 		destination, err := generatedDestination(name)
 		if err != nil {
 			issues = append(issues, fmt.Sprintf("[generate-file] contract %s: %v", current.file, err))
@@ -143,7 +148,22 @@ func TargetClashes(cs []*contract.Contract) []string {
 			checkFile(c, "", filepath.Join(filepath.Dir(c.File), file))
 		}
 		for index, target := range c.Generate {
-			current := owner{ContractPath(c), target.Lang, c}
+			current := owner{names[c], target.Lang, c}
+			if err := checkOut(Root(filepath.Dir(c.File)), GitRoot(filepath.Dir(c.File)), target.Lang, target.Out); err != nil {
+				issues = append(issues, fmt.Sprintf("[generate-out] contract %s: %v", current.file, err))
+				continue
+			}
+			if id, err := RegistrationIdentity(filepath.Dir(c.File), target); err == nil {
+				if previous, exists := identities[id]; exists && previous.c != c {
+					key := id + "\x00" + current.file
+					if !reportedIDs[key] {
+						issues = append(issues, fmt.Sprintf("[generate-id-clash] contract %s and contract %s resolve to the same registration id %q; use distinct package_id: values or owning projects", previous.file, current.file, id))
+						reportedIDs[key] = true
+					}
+				} else {
+					identities[id] = current
+				}
+			}
 			written := filepath.Join(Root(filepath.Dir(c.File)), filepath.FromSlash(target.Out))
 			destination, err := resolvedPath(written)
 			if err != nil {

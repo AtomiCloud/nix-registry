@@ -19,6 +19,8 @@ func TestPackageIdentity(t *testing.T) {
 		{"dotnet", "Library.csproj", `<Project><PropertyGroup><PackageId>Example.Library</PackageId><AssemblyName>Ignored</AssemblyName></PropertyGroup></Project>`, "Example.Library"},
 		{"dotnet", "Library.csproj", `<Project><PropertyGroup><AssemblyName>Example.Assembly</AssemblyName></PropertyGroup></Project>`, "Example.Assembly"},
 		{"dotnet", "Library.csproj", `<Project/>`, "Library"},
+		{"dotnet", "Library.csproj", `<Project><PropertyGroup><PackageId>$(AssemblyName)</PackageId><AssemblyName>Example.Assembly</AssemblyName></PropertyGroup></Project>`, "Example.Assembly"},
+		{"dotnet", "Library.csproj", `<Project><PropertyGroup><PackageId>$(AssemblyName)</PackageId><AssemblyName>$(MSBuildProjectName)</AssemblyName></PropertyGroup></Project>`, "Library"},
 	} {
 		t.Run(tc.lang+"/"+tc.id, func(t *testing.T) {
 			root := t.TempDir()
@@ -94,6 +96,41 @@ func TestPackageIdentityOverride(t *testing.T) {
 		if o.Lang != "" && !strings.Contains(string(o.Content), "example.com/override:observability/contract.yaml") {
 			t.Fatalf("override absent: %s", o.Content)
 		}
+	}
+}
+
+func TestOverrideUsesOwningManifestWithoutParsingIdentity(t *testing.T) {
+	for _, tc := range []struct{ lang, file, body string }{
+		{"go", "go.mod", "not a module\n"},
+		{"bun", "package.json", "{"},
+		{"dart", "pubspec.yaml", "name: [broken"},
+		{"dotnet", "Shop.csproj", "<Project><PropertyGroup><PackageId>$(AssemblyName)</PackageId></PropertyGroup></Project>"},
+	} {
+		t.Run(tc.lang, func(t *testing.T) {
+			root := t.TempDir()
+			project := filepath.Join(root, "App")
+			obsDir := filepath.Join(project, "Orders/observability")
+			if err := os.MkdirAll(obsDir, 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(project, tc.file), []byte(tc.body), 0644); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(obsDir, "contract.yaml"), []byte("service: shop\n"), 0644); err != nil {
+				t.Fatal(err)
+			}
+			for _, git := range []bool{false, true} {
+				if git {
+					if err := os.Mkdir(filepath.Join(root, ".git"), 0755); err != nil {
+						t.Fatal(err)
+					}
+				}
+				id, err := gen.RegistrationIdentity(obsDir, contract.Target{Lang: tc.lang, Out: "gen", PackageID: "explicit"})
+				if err != nil || id != "explicit:Orders/observability/contract.yaml" {
+					t.Errorf("git=%v: %q %v", git, id, err)
+				}
+			}
+		})
 	}
 }
 

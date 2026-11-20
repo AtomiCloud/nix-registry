@@ -142,7 +142,7 @@ func TestGenerationResolvedOutputCollision(t *testing.T) {
 }
 
 func TestGenerationIgnoresInvalidSiblings(t *testing.T) {
-	for _, bad := range []string{"service: [broken]\n", "service: broken\nmetrics: {bad: {kind: nonsense}}\n", "service: broken\ngenerate: [{lang: dotnet, out: gen, package_id: Broken, namespace: Shop . Signals}]\n"} {
+	for _, bad := range []string{"service: [broken]\n", "service: broken\nmetrics: {bad: {kind: nonsense}}\n", "service: broken\ngenerate: [{lang: dotnet, out: gen, package_id: Broken, namespace: Shop . Signals}]\n", "service: valid\ngenerate: [{lang: dotnet, out: ../../outside, package_id: Broken}]\n"} {
 		root := repo(t, map[string]string{
 			"go.mod":                             "module example.com/valid\n\ngo 1.24\n",
 			"observability/contract.yaml":        "service: valid\nlogs: {Failed: {event: valid.failed, level: error}}\ngenerate: [{lang: go, out: gen}]\n",
@@ -162,9 +162,9 @@ func TestGenerationIgnoresInvalidSiblings(t *testing.T) {
 
 func TestGitlessDotnetFeatureNamespaces(t *testing.T) {
 	root := repo(t, map[string]string{
-		"Shop.csproj":                         "<Project/>",
-		"Orders/observability/contract.yaml":  "service: shop\ngenerate: [{lang: dotnet, out: gen}]\n",
-		"Friends/observability/contract.yaml": "service: shop\ngenerate: [{lang: dotnet, out: gen}]\n",
+		"Shop.csproj":                         "<Project><PropertyGroup><PackageId>$(AssemblyName)</PackageId></PropertyGroup></Project>",
+		"Orders/observability/contract.yaml":  "service: shop\ngenerate: [{lang: dotnet, out: gen, package_id: Shop}]\n",
+		"Friends/observability/contract.yaml": "service: shop\ngenerate: [{lang: dotnet, out: gen, package_id: Shop}]\n",
 	})
 	if err := os.RemoveAll(filepath.Join(root, ".git")); err != nil {
 		t.Fatal(err)
@@ -184,6 +184,9 @@ func TestGitlessDotnetFeatureNamespaces(t *testing.T) {
 			if err != nil || !strings.Contains(string(body), "namespace Shop."+feature+".Signals;") {
 				t.Errorf("withGit=%v %s: %v %s", withGit, feature, err, body)
 			}
+			if !strings.Contains(string(body), "Shop:"+feature+"/observability/contract.yaml") {
+				t.Errorf("withGit=%v %s lacks owning-project-relative override id", withGit, feature)
+			}
 		}
 	}
 }
@@ -198,8 +201,52 @@ func TestGitlessGenerationTargetClashes(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, cmd := range []string{"gen", "check"} {
-		if rc, out := obs(cmd, "--dir", filepath.Join(root, "Orders/observability")); rc == 0 || !strings.Contains(out, "generate-namespace-clash") {
+		if rc, out := obs(cmd, "--dir", filepath.Join(root, "Orders/observability")); rc == 0 || !strings.Contains(out, "generate-namespace-clash") || !strings.Contains(out, "Orders/observability/contract.yaml") || !strings.Contains(out, "Friends/observability/contract.yaml") {
 			t.Errorf("%s must retain true clashes outside Git: rc=%d %s", cmd, rc, out)
+		}
+	}
+}
+
+func TestInvalidSiblingTargetDoesNotAffectNamespace(t *testing.T) {
+	root := repo(t, map[string]string{
+		"Shop.csproj":                        "<Project/>",
+		"Orders/observability/contract.yaml": "service: shop\ngenerate: [{lang: dotnet, out: gen, package_id: Shop}]\n",
+		"Broken/observability/contract.yaml": "service: shop\ngenerate: [{lang: dotnet, out: ../../outside, package_id: Shop}]\n",
+	})
+	for _, git := range []bool{true, false} {
+		if !git {
+			if err := os.RemoveAll(filepath.Join(root, ".git")); err != nil {
+				t.Fatal(err)
+			}
+		}
+		dir := filepath.Join(root, "Orders/observability")
+		if rc, out := obs("gen", "--dir", dir); rc != 0 {
+			t.Fatal(out)
+		}
+		body, err := os.ReadFile(filepath.Join(root, "Orders/gen/Signals.g.cs"))
+		if err != nil || !strings.Contains(string(body), "namespace Shop.Signals;") {
+			t.Errorf("git=%v invalid sibling changed sole-contract namespace: %v %s", git, err, body)
+		}
+		if rc, out := obs("gen", "--check", "--dir", dir); rc != 0 {
+			t.Fatal(out)
+		}
+		if rc, out := obs("check", "--dir", dir); rc == 0 || !strings.Contains(out, "Broken/observability/contract.yaml") || !strings.Contains(out, "../../outside") {
+			t.Errorf("git=%v check accepted invalid target: rc=%d %s", git, rc, out)
+		}
+	}
+}
+
+func TestGenerationRejectsDuplicateRegistrationIDsWithoutManifest(t *testing.T) {
+	root := repo(t, map[string]string{
+		"observability/contract.yaml":         "service: root\ngenerate: [{lang: dotnet, out: gen, package_id: Shared}]\n",
+		"Feature/observability/contract.yaml": "service: feature\ngenerate: [{lang: dotnet, out: gen, package_id: Shared}]\n",
+	})
+	if err := os.RemoveAll(filepath.Join(root, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	for _, cmd := range []string{"gen", "check"} {
+		if rc, out := obs(cmd, "--dir", filepath.Join(root, "observability")); rc == 0 || !strings.Contains(out, "generate-id-clash") || !strings.Contains(out, "Feature/observability/contract.yaml") || !strings.Contains(out, "Shared:observability/contract.yaml") {
+			t.Errorf("%s must refuse both owners of one registration id: rc=%d %s", cmd, rc, out)
 		}
 	}
 }

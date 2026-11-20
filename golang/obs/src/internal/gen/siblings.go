@@ -22,9 +22,7 @@ func TargetContractPaths(c *contract.Contract) ([]string, error) {
 	}
 	roots := map[string]bool{}
 	for _, target := range c.Generate {
-		// An override pins identity but should not hide an available project boundary.
-		target.PackageID = ""
-		_, root, err := packageIdentityLocation(Root(dir), target)
+		root, err := owningProject(Root(dir), target)
 		if err == nil {
 			roots[root] = true
 		}
@@ -71,12 +69,55 @@ func TargetContractPaths(c *contract.Contract) ([]string, error) {
 // ValidGenerateConfig complements Contract.Validate for generator-owned syntax.
 // Generation ignores malformed siblings; obs check still diagnoses each one.
 func ValidGenerateConfig(c *contract.Contract) bool {
+	return len(generateConfigIssues(c)) == 0
+}
+
+func generateConfigIssues(c *contract.Contract) []string {
+	var issues []string
+	root := Root(filepath.Dir(c.File))
 	for _, target := range c.Generate {
+		if err := checkOut(root, GitRoot(root), target.Lang, target.Out); err != nil {
+			issues = append(issues, err.Error())
+		}
 		if target.Lang == "dotnet" && target.Module != "" {
 			if _, err := CanonicalDotnetNamespace(target.Module); err != nil {
-				return false
+				issues = append(issues, err.Error())
 			}
 		}
 	}
-	return true
+	return issues
+}
+
+// targetContractNames names every participant from their shared owning root.
+func targetContractNames(cs []*contract.Contract) map[*contract.Contract]string {
+	shared := ""
+	for _, c := range cs {
+		root := GitRoot(filepath.Dir(c.File))
+		if root == "" {
+			root = Root(filepath.Dir(c.File))
+			if len(c.Generate) > 0 {
+				if project, err := owningProject(root, c.Generate[0]); err == nil {
+					root = project
+				}
+			}
+		}
+		if shared == "" {
+			shared = root
+		}
+		for !within(shared, root) && filepath.Dir(shared) != shared {
+			shared = filepath.Dir(shared)
+		}
+	}
+	names := map[*contract.Contract]string{}
+	for _, c := range cs {
+		source, err := resolvedPath(c.File)
+		if err == nil {
+			if relative, err := filepath.Rel(shared, source); err == nil {
+				names[c] = filepath.ToSlash(relative)
+				continue
+			}
+		}
+		names[c] = ContractPath(c)
+	}
+	return names
 }
