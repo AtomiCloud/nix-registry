@@ -1,0 +1,29 @@
+{
+  "scenario": "shape",
+  "now_unix": 1795033018,
+  "sandbox": "obs look --keep on tests/fixtures/live-recorded, sandbox livesrec, port base 24000, obs dev built from origin/obs-regroup-look 3f87272",
+  "exchanges": [
+    {
+      "method": "GET",
+      "path": "/api/v1/query_range",
+      "query": "end=1795033018\u0026query=sum%28rate%28checkout_requests_total%7B%22durian.cloud.service%22%3D%22checkout%22%7D%5B300s%5D%29%29\u0026start=1794428218\u0026step=300s",
+      "status": 200,
+      "json": {
+        "status": "success",
+        "data": {
+          "resultType": "matrix",
+          "result": [
+            {
+              "metric": {},
+              "values": [[1795032900, "1.7875"]]
+            }
+          ]
+        },
+        "stats": {
+          "seriesFetched": "2",
+          "executionTimeMsec": 2
+        }
+      }
+    }
+  ]
+}

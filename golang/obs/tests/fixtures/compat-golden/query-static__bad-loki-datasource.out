@@ -1,0 +1,7 @@
+args: query --static --dir bad-loki-datasource/observability --seed shared-seed.yaml --base 1700000000
+exit: 1
+--- stdout
+FAIL alerts/failed/critical.yaml rule failed-critical query A: [loki-datasource] datasource "loki" (type "loki") is a Loki-type datasource: logs are LogsQL on VictoriaLogs, so a dashboard or alert query on Loki is refused
+FAIL dashboards/logs.json panel 7 "Checkout logs" target A: [loki-datasource] datasource "loki" (type "loki") is a Loki-type datasource: logs are LogsQL on VictoriaLogs, so a dashboard or alert query on Loki is refused
+obs query --static: FAILED: 2 queries (2 loki), 2 failures, 0 warnings
+--- stderr

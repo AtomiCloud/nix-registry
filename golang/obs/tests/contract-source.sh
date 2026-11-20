@@ -203,9 +203,10 @@ run check --dir "$work/repo/apps/hub/observability"
 expect 0 'metric hub.jobs (counter)' 'metric kube_pod_status_phase (gauge)' 'contract apps/cluster/observability/contract.yaml'
 echo "PASS contract-source: obs check reads every contract.yaml of the repository and prints each"
 run check --dir "$work/repo/apps/hub/observability" --contracts none
-expect 0 'metric hub.jobs (counter)'
-absent 'kube_pod_status_phase'
-echo "PASS contract-source: --contracts none reads this folder's contract only"
+# obs check also runs the query rules now: with --contracts none the dashboard's metric of the cluster contract is red, as in obs query --static below.
+expect 1 'metric hub.jobs (counter)' '[contract-undeclared-metric]' 'kube_pod_status_phase'
+absent 'metric kube_pod_status_phase (gauge)'
+echo "PASS contract-source: --contracts none reads this folder's contract only (its limits; the dashboard query is red)"
 run query --static --dir "$work/repo/apps/hub/observability"
 expect 0 'obs query --static: ok'
 run query --static --dir "$work/repo/apps/hub/observability" --contracts none

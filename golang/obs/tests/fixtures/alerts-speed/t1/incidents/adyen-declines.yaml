@@ -7,3 +7,4 @@ expect:
   quiet: [traces-errors-rate]
   fire_within: 30m
   resolve_within: 20m
+disturbance: 'declined cards are not failures: proves the error alerts stay quiet'

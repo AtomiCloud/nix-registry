@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AtomiCloud/obs/internal/alerts"
 	"github.com/AtomiCloud/obs/internal/files"
 	"github.com/AtomiCloud/obs/internal/seed"
 )
@@ -23,11 +24,14 @@ const LabelKey = "obs.sandbox"
 
 // Config is one sandbox run.
 type Config struct {
-	Project  string // the label value; names derive from it
-	Dir      string // the observability folder (dashboards, seed)
-	SeedPath string // default <Dir>/seed.yaml
-	PortBase int    // 0: the components' own ports (3000, 8428, ...); else base+offset
-	Reseed   bool   // load the seed again even when a sandbox with a seed is already up
+	Project        string // the label value; names derive from it
+	Dir            string // the observability folder (dashboards, seed)
+	SeedPath       string // default <Dir>/seed.yaml
+	PortBase       int    // 0: the components' own ports (3000, 8428, ...); else base+offset
+	Reseed         bool   // load the seed again even when a sandbox with a seed is already up
+	ApplyIncidents bool   // obs look: apply incident changes and provision rules/markers
+	LiveIncident   bool   // default look: make the latest incident current
+	SeedBase       int64  // explicit seed start (unix seconds), 0: automatic
 	// Components are the images to run (see Resolve); nil runs the pins.
 	Components []Component
 	Timeout    time.Duration
@@ -40,6 +44,7 @@ type Config struct {
 	StateDir string
 	// HostURL overrides where obs reaches a component from the host (tests).
 	HostURL func(Component) string
+	dataset *seed.Dataset // current setup's exact snapshot, for the native-state forecast
 }
 
 // Info is what a running sandbox tells its users.
@@ -51,8 +56,21 @@ type Info struct {
 	From int64 `json:"from_ms"`
 	To   int64 `json:"to_ms"`
 	// Datasources maps a kind (metrics, logs, traces, profiles) to the Grafana datasource uids.
-	Datasources map[string][]string `json:"datasources"`
-	Reused      bool                `json:"reused"`
+	Datasources         map[string][]string `json:"datasources"`
+	Reused              bool                `json:"reused"`
+	Incidents           []IncidentInfo      `json:"incidents,omitempty"`
+	TracesSeeded        bool                `json:"traces_seeded,omitempty"`
+	ProfilesSeeded      bool                `json:"profiles_seeded,omitempty"`
+	IncidentSeed        bool                `json:"incident_seed,omitempty"`
+	SeedIncomplete      bool                `json:"seed_incomplete,omitempty"`
+	LiveIncident        string              `json:"live_incident,omitempty"`
+	Replay              []ReplayTransition  `json:"alert_replay,omitempty"`
+	AlertStatePanels    map[string]int64    `json:"alert_state_panels,omitempty"`
+	AnnotatedDashboards []string            `json:"annotated_dashboards,omitempty"`
+	LiveRules           []NativeRuleWindow  `json:"live_rules,omitempty"`
+	// rulesKey identifies the rule set LiveRules was computed for; a retained look with other rules drops
+	// them. It lives in the state file only (see state.go), never in the JSON of obs look.
+	rulesKey string
 }
 
 var nameRe = regexp.MustCompile(`[^a-z0-9]+`)
@@ -225,6 +243,36 @@ live_store:
   max_block_duration: 5m
 `
 
+const lookTempoConfig = `server:
+  http_listen_port: 3200
+distributor:
+  max_attribute_bytes: 16384
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+      ingestion_time_range_slack: 720h
+    local:
+      path: /var/tempo/blocks
+live_store:
+  wal:
+    path: /var/tempo/live-store
+    ingestion_time_range_slack: 720h
+  max_trace_idle: 1s
+  max_trace_live: 2s
+  max_block_duration: 5m
+query_frontend:
+  query_end_cutoff: 0s
+`
+
 // mount is one named volume of a component.
 type mount struct{ Name, Path string }
 
@@ -249,6 +297,9 @@ func (c *Config) createArgs(k Component) []string {
 	a = append(a, c.labelArgs(k.Name)...)
 	a = append(a, "--network", Prefix(c.Project),
 		"-p", fmt.Sprintf("127.0.0.1:%d:%d", hostPort(c.PortBase, k), k.Port))
+	if k.Name == "tempo" && c.ApplyIncidents {
+		a = append(a, "-p", fmt.Sprintf("127.0.0.1:%d:4318", hostPort(c.PortBase, otlpComponent)))
+	}
 	for _, v := range c.volumes(k) {
 		a = append(a, "-v", v.Name+":"+v.Path)
 	}
@@ -261,6 +312,9 @@ func (c *Config) createArgs(k Component) []string {
 			"GF_INSTALL_PLUGINS=" + PluginID + " " + PluginVersion,
 		} {
 			a = append(a, "-e", e)
+		}
+		if c.ApplyIncidents {
+			a = append(a, "-e", "GF_FEATURE_TOGGLES_ENABLE=tempoAlerting")
 		}
 	}
 	a = append(a, k.Ref())
@@ -291,6 +345,11 @@ func (c *Config) createArgs(k Component) []string {
 // where everything is. A pin mismatch is an error and starts nothing.
 func Up(ctx context.Context, cfg Config) (*Info, error) {
 	cfg.defaults()
+	unlock, err := lockProject(cfg)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
 	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
 	set, err := files.Load(cfg.Dir)
@@ -301,11 +360,34 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 	if err != nil {
 		return nil, fmt.Errorf("container runtime: %w", err)
 	}
+	if st := readState(cfg); st != nil && st.SeedIncomplete {
+		// An earlier load stopped part way (say Tempo failed after metrics and logs went in): those stores hold
+		// part of a seed whose window is gone. Loading again would stack a second window on top of it.
+		fmt.Fprintf(cfg.Out, "the earlier seed load did not finish: removing the stores of project %s (only resources labelled %s=%s) to load the seed again\n", cfg.Project, LabelKey, cfg.Project)
+		if err := down(ctx, cfg); err != nil {
+			return nil, fmt.Errorf("clearing the part-loaded seed: %w", err)
+		}
+		have = map[string]existing{}
+	}
 	if err := checkExisting(&cfg, have); err != nil {
 		return nil, err
 	}
 	if err := cfg.checkRelabel(ctx, have); err != nil {
 		return nil, err
+	}
+	recreated := false
+	if cfg.ApplyIncidents {
+		if err := cfg.checkLookReceiver(ctx, have); err != nil {
+			return nil, err
+		}
+		previous := readState(cfg)
+		if previous != nil && previous.From != 0 && (cfg.Reseed || (cfg.LiveIncident && cfg.SeedBase == 0 && liveSnapshotExpired(previous, cfg.Now()))) {
+			if err := down(ctx, cfg); err != nil {
+				return nil, fmt.Errorf("refreshing look snapshot: %w", err)
+			}
+			have = map[string]existing{}
+			recreated = true
+		}
 	}
 	created := false
 	if _, err := cfg.Runner.Run(ctx, "network", "inspect", Prefix(cfg.Project)); err != nil {
@@ -345,7 +427,11 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 			return nil, err
 		}
 		if k.Name == "tempo" {
-			if err := copyIn(ctx, cfg.Runner, name, "/etc/tempo.yaml", tempoConfig); err != nil {
+			config := tempoConfig
+			if cfg.ApplyIncidents {
+				config = lookTempoConfig
+			}
+			if err := copyIn(ctx, cfg.Runner, name, "/etc/tempo.yaml", config); err != nil {
 				return nil, err
 			}
 		}
@@ -373,7 +459,7 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 	}
 
 	st := readState(cfg)
-	dss := Datasources(set, cfg.Project)
+	dss := datasources(set, cfg.Project, cfg.ApplyIncidents)
 	info.Datasources = map[string][]string{}
 	for _, d := range dss {
 		info.Datasources[d.Kind] = append(info.Datasources[d.Kind], d.UID)
@@ -381,19 +467,107 @@ func Up(ctx context.Context, cfg Config) (*Info, error) {
 	if err := Provision(ctx, cfg.HTTP, info.Grafana, dss); err != nil {
 		return nil, err
 	}
-	n, err := ImportDashboards(ctx, cfg.HTTP, info.Grafana, set)
+	dashProject := ""
+	if cfg.ApplyIncidents {
+		dashProject = cfg.Project
+	}
+	n, err := importDashboards(ctx, cfg.HTTP, info.Grafana, set, dashProject)
 	if err != nil {
 		return nil, err
 	}
 	fmt.Fprintf(cfg.Out, "loaded %d dashboard(s) into Grafana\n", n)
 
-	if st != nil && !created && !cfg.Reseed && st.From != 0 {
+	seedReused := st != nil && !created && !cfg.Reseed && st.From != 0
+	if seedReused && cfg.ApplyIncidents && !st.IncidentSeed {
+		return nil, fmt.Errorf("sandbox contains a baseline seed from sandbox up; run `obs sandbox down --project %s` then `obs look --keep` to apply incidents without mixing datasets", cfg.Project)
+	}
+	if seedReused {
 		info.From, info.To = st.From, st.To
+		info.Incidents, info.IncidentSeed = st.Incidents, st.IncidentSeed
+		info.LiveIncident, info.Replay = st.LiveIncident, st.Replay
+		info.AnnotatedDashboards = append([]string(nil), st.AnnotatedDashboards...)
+		info.LiveRules, info.rulesKey = st.LiveRules, st.rulesKey
+		if key := rulesKeyOf(set); key != st.rulesKey {
+			// The checkout's rules are not the ones the forecast was computed for (a group removed, a pending
+			// period or a query changed): that forecast would describe rules Grafana no longer runs.
+			info.LiveRules, info.rulesKey = nil, key
+		}
+		if cfg.SeedBase != 0 && st.From != cfg.SeedBase*1000 {
+			return nil, fmt.Errorf("sandbox has another seed base; run `obs sandbox down --project %s` first", cfg.Project)
+		}
+		for _, inc := range info.Incidents {
+			if inc.Name == info.LiveIncident && cfg.Now().UnixMilli() >= inc.To {
+				info.LiveIncident, info.LiveRules = "", nil // together: a forecast belongs to a current incident
+			}
+		}
+		info.TracesSeeded, info.ProfilesSeeded = st.TracesSeeded, st.ProfilesSeeded
 		fmt.Fprintf(cfg.Out, "seed already loaded (kept; --reseed loads it again)\n")
 	} else if err := loadSeed(ctx, &cfg, info); err != nil {
 		return nil, err
 	}
-	writeState(cfg, info)
+	if cfg.ApplyIncidents {
+		if err := ProvisionAlerts(ctx, cfg.HTTP, info.Grafana, cfg.Project, set); err != nil {
+			return nil, err
+		}
+		if cfg.dataset != nil && info.LiveIncident != "" && len(set.Rules) > 0 {
+			p := cfg.SeedPath
+			if p == "" {
+				p = filepath.Join(cfg.Dir, "seed.yaml")
+			}
+			for _, inc := range info.Incidents {
+				if inc.Name == info.LiveIncident {
+					info.rulesKey = rulesKeyOf(set)
+					info.LiveRules, err = nativeForecast(cfg.Dir, p, set, cfg.dataset, cfg.Now().UTC().Truncate(time.Second), inc.Fire)
+					if err != nil {
+						return nil, fmt.Errorf("live alert forecast: %w", err)
+					}
+				}
+			}
+		}
+		var uids []string
+		info.AlertStatePanels = map[string]int64{}
+		for _, d := range set.Dashboards {
+			b, err := os.ReadFile(filepath.Join(set.Dir, filepath.FromSlash(d.File)))
+			if err != nil {
+				return nil, err
+			}
+			var raw struct{ UID string }
+			if err := json.Unmarshal(b, &raw); err != nil {
+				return nil, err
+			}
+			uids = append(uids, DashboardUID(d.File, raw.UID))
+			if len(set.Rules) > 0 {
+				var m map[string]any
+				_ = json.Unmarshal(b, &m)
+				info.AlertStatePanels[DashboardUID(d.File, raw.UID)] = addAlertStatePanel(m, cfg.Project)
+			}
+		}
+		annotated := map[string]bool{}
+		for _, uid := range info.AnnotatedDashboards {
+			annotated[uid] = true
+		}
+		for _, uid := range uids {
+			if annotated[uid] {
+				continue
+			}
+			if err := AnnotateIncidents(ctx, cfg.HTTP, info.Grafana, []string{uid}, info.Incidents); err != nil {
+				return nil, err
+			}
+			if err := AnnotateReplay(ctx, cfg.HTTP, info.Grafana, []string{uid}, info.Replay); err != nil {
+				return nil, err
+			}
+			info.AnnotatedDashboards = append(info.AnnotatedDashboards, uid)
+		}
+	}
+	// Setup takes time (uploads, provisioning): the incident window may have closed meanwhile. Then it is
+	// not current; the incident list stays as historical guidance.
+	if info.LiveIncident != "" && liveSnapshotExpired(info, cfg.Now()) {
+		info.LiveIncident, info.LiveRules = "", nil
+	}
+	_ = writeState(cfg, info) // a failed write leaves the earlier mark: the next run clears the stores, never the other way
+	if recreated {
+		fmt.Fprintf(cfg.Out, "recreated the old look stack for project %s (only resources labelled %s=%s)\n", cfg.Project, LabelKey, cfg.Project)
+	}
 	return info, nil
 }
 
@@ -410,20 +584,93 @@ func loadSeed(ctx context.Context, cfg *Config, info *Info) error {
 	if err != nil {
 		return err
 	}
-	// The time line ends now (rounded down to the minute), so a dashboard's last-hours view has data.
-	to := cfg.Now().UTC().Truncate(time.Minute)
-	from := to.Add(-sd.Duration())
-	ds, err := seed.Build(sd, from)
+	var incidents []seed.Incident
+	if cfg.ApplyIncidents {
+		incidents, err = seed.LoadIncidents(sd, cfg.Dir)
+		if err != nil {
+			return err
+		}
+	}
+	set, err := files.Load(cfg.Dir)
 	if err != nil {
 		return err
 	}
-	fmt.Fprintf(cfg.Out, "loading the seed (%s of data)\n", sd.Length)
+	from, to, live, err := seedWindow(sd, incidents, set, cfg.Now(), cfg.SeedBase, cfg.LiveIncident)
+	if err != nil {
+		return err
+	}
+	info.LiveIncident = live
+	for _, incident := range incidents {
+		at, _ := time.ParseDuration(incident.Window.Start)
+		duration, _ := time.ParseDuration(incident.Window.Duration)
+		info.Incidents = append(info.Incidents, IncidentInfo{Name: incident.Name, Story: incident.Story,
+			From: from.Add(at).UnixMilli(), To: from.Add(at + duration).UnixMilli(), Fire: incident.Expect.Fire, Quiet: incident.Expect.Quiet})
+	}
+	ds, err := seed.BuildIncidents(sd, from, incidents)
+	if err != nil {
+		return err
+	}
+	if cfg.ApplyIncidents {
+		clipDataset(ds, to)
+	}
+	if cfg.ApplyIncidents && len(set.Rules) > 0 {
+		runs, recorded, err := alerts.ReplayDataset(cfg.Dir, p, ds)
+		if err != nil {
+			return fmt.Errorf("alert replay: %w", err)
+		}
+		for j, sr := range recorded {
+			ds.Series[fmt.Sprintf("obs-look-recording/%d", j)] = sr
+		}
+		if len(incidents) < 2 {
+			name := "baseline"
+			if len(incidents) == 1 {
+				name = incidents[0].Name
+			}
+			info.Replay = append(info.Replay, replayTransitions(name, runs)...)
+		} else {
+			for _, inc := range incidents {
+				isolated, err := seed.BuildIncident(sd, from, &inc)
+				if err != nil {
+					return err
+				}
+				clipDataset(isolated, to)
+				replay, _, err := alerts.ReplayDataset(cfg.Dir, p, isolated)
+				if err != nil {
+					return fmt.Errorf("incident %s replay: %w", inc.Name, err)
+				}
+				info.Replay = append(info.Replay, replayTransitions(inc.Name, replay)...)
+			}
+		}
+	}
+	// From here the stores take data: until the load completes (Up's final state write) the seed is marked
+	// incomplete, so a failure leaves a record that the next run clears the stores first.
+	if err := writeState(*cfg, &Info{Project: cfg.Project, Grafana: info.Grafana, URLs: info.URLs, SeedIncomplete: true}); err != nil {
+		return fmt.Errorf("cannot record that the seed load begins (%s), so nothing was loaded: %w", stateFile(*cfg), err)
+	}
+	if live != "" {
+		fmt.Fprintf(cfg.Out, "loading the seed prefix (%s of data; %s is live)\n", to.Sub(from), live)
+	} else {
+		fmt.Fprintf(cfg.Out, "loading the seed (%s of data)\n", sd.Length)
+	}
 	if err := LoadSeed(ctx, cfg.HTTP, info.URLs["vm"], info.URLs["vl"], ds); err != nil {
 		return err
 	}
+	if cfg.ApplyIncidents {
+		if err := LoadTraces(ctx, cfg.HTTP, cfg.HostURL(otlpComponent), ds); err != nil {
+			return fmt.Errorf("loading traces: %w", err)
+		}
+		if err := LoadProfiles(ctx, cfg.HTTP, info.URLs["pyroscope"], sd, ds); err != nil {
+			return fmt.Errorf("loading profiles: %w", err)
+		}
+		info.TracesSeeded, info.ProfilesSeeded = len(ds.Traces) > 0, true
+	}
+	info.IncidentSeed = cfg.ApplyIncidents
 	info.From, info.To = from.UnixMilli(), to.UnixMilli()
+	cfg.dataset = ds
 	return nil
 }
+
+var otlpComponent = Component{Name: "otlp", Port: 4318, Offset: 5}
 
 // checkDeclaredVolumes refuses an image that declares a VOLUME the pin list does not know:
 // that path would become an anonymous volume no label finds. It guards a pin bump.
@@ -471,6 +718,16 @@ func copyIn(ctx context.Context, r Runner, container, dest, content string) erro
 // double-checked by name. It never prunes and touches nothing else.
 func Down(ctx context.Context, cfg Config) error {
 	cfg.defaults()
+	unlock, err := lockProject(cfg)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return down(ctx, cfg)
+}
+
+// down removes the project's resources; the caller holds the project lock.
+func down(ctx context.Context, cfg Config) error {
 	prefix := Prefix(cfg.Project)
 	var firstErr error
 	rm := func(kind string, listArgs []string, rmArgs ...string) {
@@ -502,7 +759,10 @@ func Down(ctx context.Context, cfg Config) error {
 	rm("container", []string{"ps", "-a", "--filter", label, "--format", "{{.Names}}"}, "rm", "-f", "-v")
 	rm("network", []string{"network", "ls", "--filter", label, "--format", "{{.Name}}"}, "network", "rm")
 	rm("volume", []string{"volume", "ls", "--filter", label, "--format", "{{.Name}}"}, "volume", "rm")
-	removeState(cfg)
+	if firstErr == nil {
+		// A removal that failed leaves the state (and a seed-incomplete mark in it): the stores may still be there.
+		removeState(cfg)
+	}
 	return firstErr
 }
 

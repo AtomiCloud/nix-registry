@@ -65,7 +65,11 @@ type fakeRunner struct {
 	// imageVolumes is what `image inspect --format ...Volumes` answers (default: none declared).
 	imageVolumes string
 	// vmArgs is what `inspect --format {{json .Args}}` answers for the vm container (default: it has -relabelConfig).
-	vmArgs string
+	vmArgs        string
+	tempoBindings string
+	tempoFiles    []string
+	// failVolumeRm makes `volume rm` fail (a runtime error while a project is removed).
+	failVolumeRm bool
 }
 
 func (f *fakeRunner) Run(_ context.Context, args ...string) (string, error) {
@@ -79,7 +83,37 @@ func (f *fakeRunner) Run(_ context.Context, args ...string) (string, error) {
 		}
 		return "null", nil
 	case args[0] == "ps":
+		if args[len(args)-1] == "{{.Names}}" {
+			var names []string
+			for _, ln := range strings.Fields(f.ps) {
+				names = append(names, strings.Split(ln, "|")[0])
+			}
+			return strings.Join(names, "\n"), nil
+		}
 		return f.ps, nil
+	case args[0] == "cp" && len(args) == 3 && strings.HasSuffix(args[2], ":/etc/tempo.yaml"):
+		b, err := os.ReadFile(args[1])
+		if err != nil {
+			return "", err
+		}
+		f.tempoFiles = append(f.tempoFiles, string(b))
+	case args[0] == "rm":
+		var keep []string
+		for _, ln := range strings.Fields(f.ps) {
+			if strings.Split(ln, "|")[0] != args[len(args)-1] {
+				keep = append(keep, ln)
+			}
+		}
+		f.ps = strings.Join(keep, "\n")
+	case args[0] == "volume" && args[1] == "rm" && f.failVolumeRm:
+		return "", fmt.Errorf("volume is in use")
+	case args[0] == "network" && args[1] == "rm":
+		f.networkExists = false
+	case args[0] == "inspect" && len(args) > 2 && args[2] == "{{json .HostConfig.PortBindings}}":
+		if f.tempoBindings != "" {
+			return f.tempoBindings, nil
+		}
+		return `{"4318/tcp":[{"HostIp":"127.0.0.1","HostPort":"18305"}]}`, nil
 	case args[0] == "inspect" && len(args) > 2 && args[2] == "{{json .Args}}":
 		if f.vmArgs != "" {
 			return f.vmArgs, nil
@@ -156,7 +190,7 @@ func TestEveryCreateIsLabelledNamedAndPinned(t *testing.T) {
 
 func TestUpRefusesAContainerWithAnotherImageTag(t *testing.T) {
 	fr := &fakeRunner{ps: "obs-sandbox-demo-vm|victoriametrics/victoria-metrics:v1.111.0|running\n"}
-	_, err := Up(context.Background(), Config{Project: "demo", Dir: project(t), Runner: fr})
+	_, err := Up(context.Background(), Config{Project: "demo", Dir: project(t), Runner: fr, StateDir: t.TempDir()})
 	if err == nil || !strings.Contains(err.Error(), "refusing") || !strings.Contains(err.Error(), "v1.111.0") || !strings.Contains(err.Error(), "v1.156.0") {
 		t.Fatalf("want a refusal naming both tags, got %v", err)
 	}
@@ -212,13 +246,26 @@ func TestDownRemovesOnlyItsOwnAndNeverPrunes(t *testing.T) {
 // stackServer answers every endpoint of the five components on one server.
 type stackServer struct {
 	*httptest.Server
-	mu       sync.Mutex
-	vmBody   string
-	vlBodies []string
-	vlQuery  string
-	dsPosts  []map[string]any
-	dashes   []map[string]any
-	versions map[string]string // overrides: vm, vl, grafana, plugin, tempo
+	mu           sync.Mutex
+	vmBody       string
+	vlBodies     []string
+	vlQuery      string
+	dsPosts      []map[string]any
+	dashes       []map[string]any
+	versions     map[string]string // overrides: vm, vl, grafana, plugin, tempo
+	annotations  []map[string]any
+	groups       []map[string]any
+	groupMethods []string
+	groupRoutes  []string
+	traces       []map[string]any
+	profileLoads int
+	// existingRules is what Grafana lists as already provisioned (GET alert-rules); deletes are the rule-group
+	// DELETE routes it received; failTraces makes the Tempo receiver answer 500; onGroup runs on every
+	// provisioning write (a test clock that setup advances).
+	existingRules []map[string]any
+	deletes       []string
+	failTraces    bool
+	onGroup       func()
 }
 
 func newStackServer(t *testing.T) *stackServer {
@@ -227,6 +274,60 @@ func newStackServer(t *testing.T) *stackServer {
 	ok := func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, "OK") }
 	mux.HandleFunc("/health", ok)
 	mux.HandleFunc("/ready", ok)
+	mux.HandleFunc("/ingest", func(w http.ResponseWriter, _ *http.Request) {
+		s.mu.Lock()
+		s.profileLoads++
+		s.mu.Unlock()
+		fmt.Fprint(w, "OK")
+	})
+	mux.HandleFunc("/api/folders", ok)
+	mux.HandleFunc("/api/folders/", ok)
+	mux.HandleFunc("/api/v1/provisioning/alert-rules", func(w http.ResponseWriter, r *http.Request) {
+		s.mu.Lock()
+		rules := append([]map[string]any{}, s.existingRules...)
+		s.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(rules)
+	})
+	mux.HandleFunc("/api/v1/provisioning/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			s.mu.Lock()
+			s.deletes = append(s.deletes, r.URL.EscapedPath())
+			s.mu.Unlock()
+			w.WriteHeader(204)
+			return
+		}
+		if s.onGroup != nil {
+			s.onGroup()
+		}
+		var m map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&m)
+		s.mu.Lock()
+		s.groups = append(s.groups, m)
+		s.groupMethods = append(s.groupMethods, r.Method)
+		s.groupRoutes = append(s.groupRoutes, r.URL.EscapedPath())
+		s.mu.Unlock()
+		fmt.Fprint(w, `{}`)
+	})
+	mux.HandleFunc("/api/annotations", func(w http.ResponseWriter, r *http.Request) {
+		var m map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&m)
+		s.mu.Lock()
+		s.annotations = append(s.annotations, m)
+		s.mu.Unlock()
+		fmt.Fprint(w, `{}`)
+	})
+	mux.HandleFunc("/v1/traces", func(w http.ResponseWriter, r *http.Request) {
+		if s.failTraces {
+			w.WriteHeader(500)
+			return
+		}
+		var m map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&m)
+		s.mu.Lock()
+		s.traces = append(s.traces, m)
+		s.mu.Unlock()
+		fmt.Fprint(w, `{}`)
+	})
 	mux.HandleFunc("/api/health", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, `{"version":%q}`, s.versions["grafana"])
 	})

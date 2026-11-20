@@ -28,7 +28,7 @@ type Query struct {
 	// Alerts: the rule's relative time range in seconds ("from" of relativeTimeRange).
 	RangeSecs int64
 	// ToSecs is the "to" of relativeTimeRange: the window ends this many seconds before the evaluation.
-	ToSecs int64
+	ToSecs    int64
 	QueryType string // the model's queryType (stats, instant, range ...)
 	// Dashboards.
 	Dash          *Dashboard
@@ -154,6 +154,7 @@ type alertRule struct {
 	ExecErrState                string            `yaml:"execErrState"`
 	MissingSeriesEvalsToResolve int               `yaml:"missingSeriesEvalsToResolve"`
 	Labels                      map[string]string `yaml:"labels"`
+	Annotations                 map[string]string `yaml:"annotations"`
 	Record                      *struct {
 		Metric string `yaml:"metric"`
 		From   string `yaml:"from"`

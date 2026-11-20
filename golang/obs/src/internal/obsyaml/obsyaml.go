@@ -54,6 +54,10 @@ type File struct {
 	Frontend  *tempo.Frontend    // thresholds.traces over Tempo's defaults
 	MaxPoints int                // thresholds.metrics.max_points_per_series
 	Profiles  profile.Tolerances // thresholds.profiles
+
+	// sections are the top-level blocks another command owns and validates (obs live:
+	// targets, estimates). They are kept as YAML nodes, with their line numbers.
+	sections map[string]*yaml.Node
 }
 
 // Versions are the versions in obs.yaml; an empty string / nil means the key is absent.
@@ -162,6 +166,7 @@ func Parse(path string, b []byte) (*File, error) {
 	if root.Kind != yaml.MappingNode {
 		return nil, fail(root.Line, "want a mapping with the keys versions and thresholds")
 	}
+	f.sections = takeSections(root)
 	if err := checkKeys(root, schema, "", fail); err != nil {
 		return nil, err
 	}
@@ -327,6 +332,40 @@ func checkKeys(n *yaml.Node, sch map[string]any, prefix string, fail func(int, s
 		}
 	}
 	return nil
+}
+
+// ownedSections are the top-level keys `obs live` reads and validates itself (targets: where
+// the live stores are, estimates: expected log and trace volume). Every other command only
+// has to let them pass.
+var ownedSections = []string{"targets", "estimates"}
+
+// takeSections removes the owned sections from root and returns them by key.
+func takeSections(root *yaml.Node) map[string]*yaml.Node {
+	out := map[string]*yaml.Node{}
+	kept := root.Content[:0:0]
+	for i := 0; i+1 < len(root.Content); i += 2 {
+		k, v := root.Content[i], root.Content[i+1]
+		owned := false
+		for _, s := range ownedSections {
+			if k.Value == s {
+				out[s], owned = v, true
+			}
+		}
+		if !owned {
+			kept = append(kept, k, v)
+		}
+	}
+	root.Content = kept
+	return out
+}
+
+// Section is a top-level block that obs live owns (targets, estimates), or nil when the file
+// does not write it. A nil File has none. The caller validates it and names the line.
+func (f *File) Section(name string) *yaml.Node {
+	if f == nil {
+		return nil
+	}
+	return f.sections[name]
 }
 
 // isNull tells an empty YAML value (nothing after the colon, ~ or null).

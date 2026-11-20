@@ -8,13 +8,13 @@
 # One static Go binary (`go` = Go 1.27.4 from golang/obs/go.nix, see there). The licence and
 # notice files of every linked module ship in share/licenses/obs. AGPL-3.0-only (golang/obs/LICENSE).
 let
-  version = "0.4.0";
+  version = "0.5.0";
 
   obs = (nixpkgs.buildGoModule.override { inherit go; }) {
     pname = "obs";
     inherit version;
     src = ./src;
-    vendorHash = "sha256-ACp8jGlQeIfUSfcJllZ5nSE2RTOJyNyZLSfcxsTtkkc=";
+    vendorHash = "sha256-VXDtpfHM8n6be7mWld4GzS3T1Ndl4UMHYgMcaq/uRdk=";
     env.CGO_ENABLED = "0";
     env.OBS_REQUIRE_LLVM = "1";
     nativeCheckInputs = [ nixpkgs.llvmPackages.llvm ];

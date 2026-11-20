@@ -362,3 +362,79 @@ func TestTraceAndProfilePanelsAreExpectedEmpty(t *testing.T) {
 		t.Errorf("prompt differs from %s (run go test ./internal/look -update to rewrite it)\n--- got ---\n%s", golden, got2)
 	}
 }
+
+func TestSeededPanelsIncidentsAndKeepPrompt(t *testing.T) {
+	dir, cl := project(t)
+	if err := os.WriteFile(filepath.Join(dir, "dashboards", "traces.json"), []byte(tracesDash), 0644); err != nil {
+		t.Fatal(err)
+	}
+	info := *testInfo
+	info.TracesSeeded, info.ProfilesSeeded = true, true
+	info.Incidents = []sandbox.IncidentInfo{{Name: "payment-spike", From: info.From + 60000, To: info.From + 120000, Fire: []string{"payment-errors"}, Quiet: []string{"latency"}}}
+	p := Setup(context.Background(), Options{Dir: dir, Checklist: cl, Keep: true, Files: []string{"dashboards/traces.json"}}, fakeUp(&info, nil))
+	for _, panel := range p.Dashboards[0].Panels {
+		if panel.ExpectedEmpty != "" {
+			t.Errorf("seeded panel still expected empty: %+v", panel)
+		}
+	}
+	for _, want := range []string{"payment-spike", "payment-errors", "latency", "--keep", "leaves the stack running"} {
+		if !strings.Contains(p.Prompt, want) {
+			t.Errorf("prompt lacks %s: %s", want, p.Prompt)
+		}
+	}
+}
+
+func TestLiveRulePromptHasScreenshotTimesAndNormalControl(t *testing.T) {
+	dir, cl := project(t)
+	info := *testInfo
+	at := time.Date(2026, 11, 18, 20, 0, 0, 0, time.UTC)
+	info.LiveIncident = "spike"
+	info.Incidents = []sandbox.IncidentInfo{{Name: "spike", From: info.From, To: info.To, Fire: []string{"pending"}, Quiet: []string{"control"}}}
+	info.LiveRules = []sandbox.NativeRuleWindow{{UID: "pending", Expected: "Firing", ProvisionedAt: at.UnixMilli(), For: "1m0s", Interval: "10s", FiringAt: at.Add(70 * time.Second).UnixMilli(), HoldUntil: at.Add(5 * time.Minute).UnixMilli(), Supported: true}, {UID: "control", Expected: "Normal", ProvisionedAt: at.UnixMilli(), For: "0s", Interval: "10s", Supported: true}}
+	p := Setup(context.Background(), Options{Dir: dir, Checklist: cl, Files: []string{"dashboards/overview.json"}}, fakeUp(&info, nil))
+	for _, want := range []string{"live rule pending: provisioned 2026-11-18T20:00:00Z", "expected Firing by about 2026-11-18T20:01:10Z", "hold Firing until 2026-11-18T20:05:00Z", "live rule control: expected Normal"} {
+		if !strings.Contains(p.Prompt, want) {
+			t.Errorf("live prompt lacks %q", want)
+		}
+	}
+}
+
+// GPT re-review of PR 133: the Firing time is the scheduled tick (Grafana staggers dispatch inside a tick), so
+// the prompt calls it an estimate, prints the rounding it really uses, and says to wait for the panel.
+func TestLiveRulePromptCallsTheFiringTimeAnEstimateAndWaitsForThePanel(t *testing.T) {
+	dir, cl := project(t)
+	info := *testInfo
+	at := time.Date(2026, 11, 18, 20, 0, 0, 0, time.UTC)
+	info.LiveIncident = "spike"
+	info.Incidents = []sandbox.IncidentInfo{{Name: "spike", From: info.From, To: info.To, Fire: []string{"pending"}}}
+	info.LiveRules = []sandbox.NativeRuleWindow{{UID: "pending", Expected: "Firing", ProvisionedAt: at.UnixMilli(), For: "15s", Interval: "10s", FiringAt: at.Add(30 * time.Second).UnixMilli(), HoldUntil: at.Add(5 * time.Minute).UnixMilli(), Supported: true}}
+	p := Setup(context.Background(), Options{Dir: dir, Checklist: cl, Files: []string{"dashboards/overview.json"}}, fakeUp(&info, nil))
+	for _, want := range []string{"scheduled estimate", "rounded up to whole intervals", "reload the same URL"} {
+		if !strings.Contains(p.Prompt, want) {
+			t.Errorf("live prompt lacks %q:\n%s", want, p.Prompt)
+		}
+	}
+	if strings.Contains(p.Prompt, "= provisioned + for 15s + interval 10s") {
+		t.Errorf("the prompt still prints an equation that gives 25s beside the 30s time:\n%s", p.Prompt)
+	}
+}
+
+// GPT review of PR 133 @657ee85: Grafana's alert-list panel does not poll (it refetches on dashboard refresh
+// events, and the fixture board has auto-refresh off), so the prompt tells the agent to reload the URL.
+func TestLiveRulePromptSaysToReloadAndWhatToRecordWhenFiringIsNeverSeen(t *testing.T) {
+	dir, cl := project(t)
+	info := *testInfo
+	at := time.Date(2026, 11, 18, 20, 0, 0, 0, time.UTC)
+	info.LiveIncident = "spike"
+	info.Incidents = []sandbox.IncidentInfo{{Name: "spike", From: info.From, To: info.To, Fire: []string{"pending"}}}
+	info.LiveRules = []sandbox.NativeRuleWindow{{UID: "pending", Expected: "Firing", ProvisionedAt: at.UnixMilli(), For: "15s", Interval: "10s", FiringAt: at.Add(30 * time.Second).UnixMilli(), HoldUntil: at.Add(5 * time.Minute).UnixMilli(), Supported: true}}
+	p := Setup(context.Background(), Options{Dir: dir, Checklist: cl, Files: []string{"dashboards/overview.json"}}, fakeUp(&info, nil))
+	for _, want := range []string{"does not poll", "only refetches when the dashboard refreshes", "unless the board sets its own auto-refresh", "reload the same URL", "every 10s", "until 2026-11-18T20:05:00Z", "Firing was never seen", "record the state you observed"} {
+		if !strings.Contains(p.Prompt, want) {
+			t.Errorf("live prompt lacks %q", want)
+		}
+	}
+	if strings.Contains(p.Prompt, "until the alert-state panel shows Firing for") || strings.Contains(p.Prompt, "auto-refresh off") {
+		t.Errorf("the prompt still waits on a panel that does not refresh itself, or claims the board has auto-refresh off")
+	}
+}

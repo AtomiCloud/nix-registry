@@ -12,25 +12,27 @@ linked module ship in `share/licenses/obs`. Design: `concepts/observability.md` 
 
 ## Available commands
 
-| Command                                     | What it does                                                                                                                                  |
-| ------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `obs gen`                                   | Writes bounded types, event constants, `contract/events.json` and the aggregation file for bun, go, dotnet and dart from the contract.        |
-| `obs gen --check`                           | Regenerates into a temp folder and diffs; fails on a hand edit or a stale generate.                                                           |
-| `obs check`                                 | Checks the contract rules, worst-case metric series, budgets and log stream count; prints the embedded evaluator versions and checks `obs.yaml`. |
-| `obs query --static`                        | Parses every MetricsQL, LogsQL and TraceQL query in the alerts and dashboards with the real parsers and applies the rules below.              |
-| `obs query --live`                          | Loads the seed into the embedded VictoriaMetrics, VictoriaLogs and Tempo and runs every alert and dashboard query; each must return rows.     |
-| `obs alerts`                                | Evaluates every alert at every minute of the seed and each incident; must fire inside incident windows and stay quiet outside them.           |
-| `obs links`                                 | Checks trace → logs, metric → traces and backend span → profile links on the seed.                                                            |
-| `obs assert`                                | Checks real metric series counts, labels and values from an e2e series export against the contract.                                           |
-| `obs profile summarize\|baseline\|compare`  | Summarizes CPU profiles, builds a median baseline and compares function and span shares against it.                                           |
-| `obs store move <store>`                    | Runs the single → scaled store move steps in order, none skipped, with `--dry-run` and `--rollback`.                                          |
-| `obs sandbox up`                            | Starts, stops or inspects (`down`, `status`) the local stack for people; no check needs it.                                                   |
-| `obs look`                                  | Sets up the sandbox with the changed dashboards and prints the screenshot review prompt for the calling agent; never fails CI.                |
-| `obs scrape`                                | Scrapes an app's own metrics into the sandbox.                                                                                                |
-| `obs symbols put\|decode`                   | The symbol store: stores debug symbol files by build id and decodes a stack trace with them.                                                  |
-| `obs size`                                  | The sizing command: traffic cores, memory, series and storage per day for a given load.                                                       |
-| `obs engines --check-chart <dir>`           | Compares the engine versions in a Helm chart folder with the pins; exit 1 on any drift. See [obs engines](#obs-engines---check-chart).        |
-| `obs version`                               | The obs version and every engine pin.                                                                                                         |
+| Command                                    | What it does                                                                                                                                                                     |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `obs gen`                                  | Writes bounded types, event constants, `contract/events.json` and the aggregation file for bun, go, dotnet and dart from the contract.                                           |
+| `obs gen --check`                          | Regenerates into a temp folder and diffs; fails on a hand edit or a stale generate.                                                                                              |
+| `obs check`                                | The static check in one run: contract limits (worst-case series, budgets, log streams), the evaluator versions against `obs.yaml`, and every query rule of `obs query --static`. |
+| `obs test`                                 | The seed-based check in one run: `obs query --live` + `obs alerts` + `obs links`, and every incident is caught by at least one alert.                                            |
+| `obs query --static`                       | (Part of `obs check`; unchanged.) Parses every MetricsQL, LogsQL and TraceQL query in the alerts and dashboards with the real parsers and applies the rules below.               |
+| `obs query --live`                         | (Part of `obs test`; unchanged.) Loads the seed into the embedded VictoriaMetrics, VictoriaLogs and Tempo and runs every alert and dashboard query; each must return rows.       |
+| `obs alerts`                               | (Part of `obs test`; unchanged.) Evaluates every alert at every minute of the seed and each incident; must fire inside incident windows and stay quiet outside them.             |
+| `obs links`                                | (Part of `obs test`; unchanged.) Checks trace → logs, metric → traces and backend span → profile links on the seed.                                                              |
+| `obs assert`                               | Checks real metric series counts, labels and values from an e2e series export against the contract.                                                                              |
+| `obs profile summarize\|baseline\|compare` | Summarizes CPU profiles, builds a median baseline and compares function and span shares against it.                                                                              |
+| `obs store move <store>`                   | Runs the single → scaled store move steps in order, none skipped, with `--dry-run` and `--rollback`.                                                                             |
+| `obs sandbox up`                           | Starts, stops or inspects (`down`, `status`) the local stack for people; no check needs it.                                                                                      |
+| `obs look`                                 | Sets up the sandbox with the changed dashboards and prints the screenshot review prompt for the calling agent; never fails CI.                                                   |
+| `obs scrape`                               | Scrapes an app's own metrics into the sandbox.                                                                                                                                   |
+| `obs live usage\|shape\|incidents\|look` | Reads a running stack (the local sandbox, dev, stage or prod; read-only) and compares it with the repo: usage vs contract budgets, the shape of real data vs the seed, fired alerts vs incident files and runbooks, the dashboards already there. See [obs live](#obs-live-read-a-running-stack-and-compare-it-with-the-repo). |
+| `obs symbols put\|decode`                  | The symbol store: stores debug symbol files by build id and decodes a stack trace with them.                                                                                     |
+| `obs size`                                 | The sizing command: traffic cores, memory, series and storage per day for a given load.                                                                                          |
+| `obs engines --check-chart <dir>`          | Compares the engine versions in a Helm chart folder with the pins; exit 1 on any drift. See [obs engines](#obs-engines---check-chart).                                           |
+| `obs version`                              | The obs version and every engine pin.                                                                                                                                            |
 
 Not tested items are collected in [Not tested](#not-tested), at the end of this file.
 
@@ -69,12 +71,14 @@ obs alerts [--dir observability] [--seed seed.yaml] [--base unix] [--out results
             [--workers n] [--steps steps.json] [--recorded recorded.json]
 obs assert --series FILE [--dir observability] [--pods n] [--unknown warn|fail|ignore]
 obs profile summarize|baseline|compare   (obs profile help)
-obs check [--dir observability] [--pods n] [--landscapes n] [--contracts auto|none]
+obs check [--dir observability] [--pods n] [--landscapes n] [--names] [--event-rule auto|on|off] [--vl-settings victorialogs-settings.yaml] [--tempo-config tempo.yaml] [--contracts auto|none]
+obs test  [--dir observability] [--seed seed.yaml] [--base unix] [--names] [--event-rule auto|on|off] [--vl-settings victorialogs-settings.yaml] [--tempo-config tempo.yaml]
+          [--contracts auto|none] [--workers n] [--out results.json] [--steps steps.json] [--recorded recorded.json]
 obs gen [--check] [--dir observability] [--lang go,dotnet,dart,bun]
 obs sandbox up [--dir observability] [--seed seed.yaml] [--project name] [--port-base n] [--runtime docker|podman] [--reseed]
 obs sandbox down|status [--dir observability] [--project name] [--runtime docker|podman]
 obs scrape --target <url> [--label name=value] [--interval 15s] [--once] [--job name] [--vm-url url] [--dir observability] [--project name]
-obs look   [--base origin/main] [--all] [--json] [--file dashboards/x.json] [--checklist file.md] [--out obs-look] [--width 1600] [--height 1000]
+obs look   [--base origin/main] [--all] [--json] [--keep] [--seed-base unix] [--file dashboards/x.json] [--checklist file.md] [--out obs-look] [--width 1600] [--height 1000]
          [--dir observability] [--seed seed.yaml] [--project name] [--port-base n] [--runtime docker|podman] [--reseed]
 obs links [--dir observability] [--seed seed.yaml] [--base unix]
 obs version
@@ -99,7 +103,7 @@ the file, the rule or panel, the rule id in `[brackets]` and the offending name 
   are not queries and are skipped. A flat authoring file (`title/datasource/expr`) is refused
   with a pointer to the CR. More than one YAML document in a file is refused.
 - **`dashboards/**/\*.json`**: dashboard JSON. Panels (also inside collapsed rows), `targets[].expr`,
-`templating.list`, `time.from/to` are read. Annotation queries are not checked.
+  `templating.list`, `time.from/to` are read. Annotation queries are not checked.
 - **`seed.yaml`** (`--live` only; `--seed` overrides the path): see below.
 - **`contract.yaml`**: the contract (see "The contract" below); its presence switches on the contract name checks and the event rule.
 
@@ -223,17 +227,48 @@ logs: # which log event each metric event writes
 
 `incidents:` names files in `incidents/` that `obs alerts` plays (see `obs alerts`). `traces:` defines the seed's traces (see `obs links`); they drive `obs query --live` (Tempo) and `obs links`.
 
+### Seed shape: level, trend, cycle, spikes, gaps and noise
+
+`traffic.settings` opts into the same five parts that `obs live shape` describes.
+The old `shape: flat` and `shape: daily_wave` keep their byte-identical datasets.
+With settings, `level.typical` is the request rate; `traffic.requests` remains required
+for compatibility. These example numbers match the live-shape comparison example:
+
+```yaml
+length: 168h
+random_seed: 42
+traffic:
+  requests: 40/s
+  settings:
+    level: {min: 2, typical: 40, max: 310} # requests/second before each series' share
+    trend: {change_per_day: 0.03} # +3% of typical per day, linear
+    cycle: {daily_amplitude: 0.25, peak_hour: 20, weekend_factor: 0.6}
+    spikes: {count: 4, size: 6} # four one-minute spikes, at least 6 times typical
+    gaps: {count: 2, length: 11m} # two gaps, 11 minutes in total
+    noise: 0.15 # independent uniform +/-15% of typical each second
+```
+
+The daily cycle peaks at 20:00 UTC; the optional weekend factor makes Saturdays and
+Sundays 40% lower. Trend and cycle are applied before noise and spikes; the result is
+clamped to min/max. Gaps omit metric samples and requests (including their logs and
+traces). Incident changes apply after the traffic shape, so they can exceed its bounds.
+Spike/gap positions and noise are deterministic from `random_seed`; they do not use the
+host's random generator. Validation names `seed.yaml:line` and the bad setting.
+The example is illustrative: use smaller rates or series shares for CI, especially
+when generating a week of logs/traces. A gap can overlap a spike; no traffic is emitted
+inside a gap.
+
 ### Label spelling per store (concept §2.1)
 
 A name is spelled the way its store keeps it. obs seeds, checks and queries every store in that spelling, so a
 dashboard or alert written to the standard returns rows on an obs seed and on the real stack alike.
 
-| Store           | Label spelling                                         | Query example                                                         |
-| --------------- | ------------------------------------------------------ | --------------------------------------------------------------------- |
-| VictoriaMetrics | dots kept, quoted (metric NAMES still use `_`)         | `checkout_charges_total{"durian.cloud.service"="checkout"}`           |
-| VictoriaLogs    | dots kept, as sent; quoted                             | `_stream:{"durian.cloud.landscape"="fixture-dev"}`                          |
-| Tempo           | dots, as sent                                          | `{resource.durian.cloud.landscape="fixture-dev"}`                           |
-| Pyroscope       | underscores only (a dotted name is dropped)            | `{durian_cloud_service="checkout", service_name="checkout"}`          |
+| Store           | Label spelling                                 | Query example                                                |
+| --------------- | ---------------------------------------------- | ------------------------------------------------------------ |
+| VictoriaMetrics | dots kept, quoted (metric NAMES still use `_`) | `checkout_charges_total{"durian.cloud.service"="checkout"}`  |
+| VictoriaLogs    | dots kept, as sent; quoted                     | `_stream:{"durian.cloud.landscape"="fixture-dev"}`           |
+| Tempo           | dots, as sent                                  | `{resource.durian.cloud.landscape="fixture-dev"}`            |
+| Pyroscope       | underscores only (a dotted name is dropped)    | `{durian_cloud_service="checkout", service_name="checkout"}` |
 
 - The underscore form of a dotted VictoriaMetrics label (`durian_cloud_service`, `payment_provider`) selects
   nothing. `obs query --static` fails it with `contract-undeclared-label` and names the dotted spelling to write;
@@ -383,10 +418,23 @@ a folder in one never looks for company; outside a Git repository only `--dir`'s
 ## `obs check`
 
 ```text
-obs check [--dir observability] [--pods n] [--landscapes n] [--contracts auto|none]
+obs check [--dir observability] [--pods n] [--landscapes n] [--names] [--event-rule auto|on|off]
+          [--vl-settings victorialogs-settings.yaml] [--tempo-config tempo.yaml] [--contracts auto|none]
 ```
 
-Prints the worst-case series per metric (the product of its label sizes, times buckets + 2 for a
+`obs check` is the whole static check in one run and one summary. It runs three things:
+
+1. **limits** (the contract rules below);
+2. **versions**: the evaluator versions this obs embeds, against `observability/obs.yaml`;
+3. **queries**: everything `obs query --static` does ([the rules](#obs-query---static-the-rules)): every alert and dashboard query parsed by the embedded engines and checked against the contract. `--vl-settings`, `--tempo-config`, `--event-rule`, `--contracts` and `--names` mean what they mean there. A folder with no alert and no dashboard is fine (the `[empty]` rule belongs to `obs query --static`); a folder with no `contract.yaml` skips the limits with a note and still checks the queries. Each query finding keeps its rule id.
+
+It exits 1 when any half fails and prints one summary line at the end, for example
+`obs check: ok: 1 metrics, 3 log events, 0 spans, 2 types, contract hash 754fae475354; queries: 7 queries (3 logs, 4 metrics), 0 failures, 0 warnings`
+or `obs check: FAILED: 1 contract failures in <file>; 2 query failures`. A contract problem is printed once, not again by the query half.
+
+**Speed (MEASURED, 18 Nov 2026, x86_64 Linux, one run each):** `obs check` takes 21 ms on `tests/fixtures/good` (4 h seed fixture, 7 queries) and 23 ms on `tests/fixtures/alerts-speed/n1`; `obs gen --check` takes 36 ms. Gen plus check stay far under 1 second; the check never reads the seed, so the seed length does not matter for it.
+
+The contract part prints the worst-case series per metric (the product of its label sizes, times buckets + 2 for a
 histogram: 14 for the default 12 buckets), the worst case times `--pods` for a `per_pod` metric, the
 log stream count (modules x `--landscapes`, times any declared stream label; log events add no
 streams) and `events=[...]`. It fails (exit 1, `FAIL <file> <yaml path>: [rule] ...`) on:
@@ -402,7 +450,94 @@ streams) and `events=[...]`. It fails (exit 1, `FAIL <file> <yaml path>: [rule] 
 
 The after-start pod-key check of §4.1 is not here (it needs a running store: `obs assert`).
 
-`obs check` also prints the evaluator versions this binary embeds and fails when `observability/obs.yaml` names a store version they do not match: see [`obs.yaml`](#obsyaml-the-versions-and-thresholds-a-repo-targets).
+The versions half prints the evaluator versions this binary embeds and fails when `observability/obs.yaml` names a store version they do not match: see [`obs.yaml`](#obsyaml-the-versions-and-thresholds-a-repo-targets).
+
+## `obs test`
+
+```text
+obs test [--dir observability] [--seed seed.yaml] [--base unix] [--names] [--event-rule auto|on|off]
+         [--vl-settings victorialogs-settings.yaml] [--tempo-config tempo.yaml] [--contracts auto|none]
+         [--workers n] [--out results.json] [--steps steps.json] [--recorded recorded.json]
+```
+
+`obs test` is everything that needs the seed, in one run and one summary. It runs, in this order:
+
+| Part        | Same as                    | What fails it                                                                                  |
+| ----------- | -------------------------- | ---------------------------------------------------------------------------------------------- |
+| `queries`   | `obs query --live`         | an alert or dashboard query that does not return rows on the seed, and every static query rule |
+| `alerts`    | `obs alerts`               | an alert that does not fire inside its incident, or fires outside it                           |
+| `links`     | `obs links`                | a trace, log, metric or profile link that does not resolve on the seed                         |
+| `incidents` | new, `[incident-uncaught]` | an incident no alert catches                                                                   |
+
+**`obs test` turns off the `[empty]` rule of `obs query --live`** (a folder with no alert and no dashboard is red there). Why: `obs test` is also the run that
+tells a repository with incidents and no alert yet which incident is uncaught, so a folder with nothing to query is a finding of the
+`incidents` part (`[incident-uncaught]`), not an input error of the `queries` part. `obs check` does the same for the same reason.
+
+The flags mean what they mean on the old commands (`--dir`, `--seed`, `--base`, `--names`, `--event-rule`,
+`--contracts`, `--vl-settings`, `--tempo-config`, `--workers`, `--out`, `--steps`, `--recorded`). `--event-rule` reaches both the
+`queries` and the `alerts` part: with `--event-rule off` a log alert that names no contract event is accepted in both (`obs alerts` itself has no such flag and keeps
+the rule on whenever the folder has a contract). `--contracts none` also reaches both parts: the `alerts` part then reads only `--dir`'s contract too, so an invalid or clashing contract elsewhere in the repository cannot fail an isolated run (`obs alerts` has no such flag and keeps reading them). Each part prints its own
+findings as the old command does, then one total per part and one last line:
+
+```text
+obs test: queries: ok: 7 queries (3 logs, 4 metrics), 0 failures, 0 warnings
+obs test: alerts: ok: 1 alerts (0 recording rules), 2 runs, 2 expectations, 0 failed
+obs test: links: skipped: the seed has no traces and nothing declares or queries any (no contract span, no TraceQL query), so there is no trace, log or profile link to follow
+obs test: incidents: ok: 1 incidents, 1 caught, 0 uncaught
+obs test: ok
+```
+
+Exit 0 when every part passes, 1 when a part failed, 2 on a usage or input error. A part that fails does not
+stop the next one. `obs.yaml` is gated first, as in `obs query` and `obs alerts`: a version it names that the embedded
+evaluators do not match fails the run before any part. The `obs alerts` part still prints its own result line
+(`obs alerts: alerts=...`). The `links` part is skipped, with a line saying so, only when nothing could be linked: the seed has no traces **and**
+the contract declares no span **and** no query is TraceQL. A contract that declares spans (or a TraceQL query) with a seed that has no traces
+is a finding of `obs links` (`[seed] no traces in seed.traces`), so `obs test` runs the part and is red as `obs links` is. A folder
+with no alert rule has nothing for `obs alerts` to run (a note, not the exit 2 of the old command), so its incidents are all uncaught.
+
+### Every incident is caught by at least one alert (`[incident-uncaught]`)
+
+An incident in `incidents/<name>.yaml` (the files the seed names under `incidents:`) must be caught by an alert.
+**Caught** means the expectations `obs alerts` already judges: at least one alert listed in the incident's `expect.fire`
+passed its fire verdict, that is it fired inside the incident window (within `fire_within`, and not outside the window
+plus `resolve_within`). An incident is **uncaught** when
+
+- `expect.fire` is empty (only quiet alerts, or none; `obs test` also accepts `expect: {}` here and reports it, where `obs alerts` still refuses the file with exit 2), or
+- no alert in `expect.fire` passed its fire expectation: the line says `no alert passed its fire expectation` and names each alert with its failed
+  condition as `obs alerts` printed it (`quiet`, `fired before the incident window`, or `fired at +12m0s, firing 29 min; firing outside window [10m0s,25m0s) at +25m0s` for an
+  alert that fired inside the window and resolved late), or
+- the folder has no alert rule at all.
+
+An alert that fires without being listed is not a catch: it already fails as an unexpected fire in the `alerts` part. The line names the
+incident file, the incident and its window:
+
+```text
+FAIL incidents/slow-burn.yaml incident slow-burn window [10m0s,20m0s): [incident-uncaught] expect.fire is empty: no alert is expected to fire in this window; add the alert that should catch it to expect.fire
+```
+
+The flow when a real incident was missed (written as a pull request, no capture command): add `incidents/<name>.yaml` (the story,
+the window, the change, `expect`), list it under `incidents:` in `seed.yaml` and run `obs test`: it is red with `[incident-uncaught]`.
+Add the alert that would have caught it and list its uid in `expect.fire` (also in every other incident the alert fires in:
+an unlisted alert is expected quiet): `obs test` is green. `tests/check-test.sh` runs exactly this flow.
+
+An incident that is deliberately not covered by any alert (a slowdown no alert should page for, a trickle that proves the alerts stay quiet) is
+red under this rule unless it says so. Mark the incident file with `disturbance: "<reason>"` (the reason is required, an empty one is an error naming file and line). A
+marked incident is left out of `[incident-uncaught]` and printed as a note, and the totals count it apart:
+
+```text
+note: [disturbance] incidents/slow-burn.yaml slow-burn: a trickle of errors: proves the error alert stays quiet
+obs test: incidents: ok: 3 incidents, 2 caught, 0 uncaught, 1 disturbance(s)
+```
+
+An incident **without** the marker and with no catching alert stays red (owner pick, agenda A371: every incident is caught by at least one alert; the marker is
+the one way to say an incident is not one). `obs alerts` ignores the field: its output is unchanged. The quiet-only incidents of `tests/fixtures/alerts-speed/n1` and `t1` carry it.
+`n1` is the green `obs test` example. `t1` is an alerts speed fixture (input of the speed benchmark), not an `obs test` example: it has traces with no logs and no profile, so its `links` part is red by construction (its `incidents` part is green).
+The marker is for quiet-only incidents. An incident that lists `expect.fire` and carries `disturbance:` is an error naming file and line (exit 2: "disturbance is only for incidents with no fire expectation"), and the reason is checked after YAML merges (`<<:`), so a merged empty reason is an error too.
+
+**Speed (MEASURED, 18 Nov 2026, x86_64 Linux, a shared box, two runs each, all four parts):** `obs test` takes 0.09 s on `tests/fixtures/test/good`
+(40 min seed, one alert), 1.1 s and 1.3 s on `alerts-speed/n1` with its 4 h seed and 3.3 s and 3.2 s with its 24 h seed
+(3 incidents, 1 alert, 2 queries, links skipped; green). It is not under 1 second on the 4 h or the 24 h seed. A solo run of `obs alerts` alone took 0.77 s
+and `obs query --live` alone 2.0 s on the 24 h seed in an earlier measurement (each builds the seed again; not re-measured on this box).
 
 ## `obs.yaml`: the versions and thresholds a repo targets
 
@@ -462,7 +597,7 @@ evaluators embedded in this obs:
 - `pyroscope` has no embedded evaluator, but obs runs it as a sandbox image, and the sandbox refuses a
   version whose image digest `pins.json` does not record. So a Pyroscope version with no known image
   fails the same way (exit 1, `FAIL <obs.yaml> versions.pyroscope: obs.yaml wants 2.5.0, this obs embeds
-  2.4.3 (sandbox image of Pyroscope: no known image digest, known: 2.4.3)`), in `obs check`, `obs query`
+2.4.3 (sandbox image of Pyroscope: no known image digest, known: 2.4.3)`), in `obs check`, `obs query`
   and `obs alerts` alike. `alloy` has no evaluator and no image: a different version is a `note` and exit 0.
 - An empty section (`versions:` or `thresholds:` with every child commented out) names nothing: it
   counts as absent, not as an error.
@@ -587,7 +722,7 @@ metrics:
   `obs gen` skips every one of them.
 - **Upgrading:** after this release, `obs gen --check` fails `[gen-missing] contract/keep.yaml` in every folder with a contract until
   `obs gen` has been run once (the keep-list is a new generated file); commit the file it writes.
-- The always-kept names (`up`, `scrape_*`), collecting every `apps/*/observability/contract/keep.yaml` and the vminsert relabel rule are the platform's; see *Not tested*.
+- The always-kept names (`up`, `scrape_*`), collecting every `apps/*/observability/contract/keep.yaml` and the vminsert relabel rule are the platform's; see _Not tested_.
 
 **Each language compiles and runs against a stub written from the goal; NOT TESTED against the real library.**
 `tests/typecheck/<lang>/stub/` holds a minimal assumed interfaces API with just enough body to run the
@@ -709,6 +844,58 @@ kept and quoted (`{"payment.provider"="stripe"}`, `by ("payment.provider")`); th
 `contract-undeclared-label` and the finding names the dotted spelling (a pod key in either spelling is
 `contract-pod-label`). Other log fields are free-form (§6): not judged.
 
+## Migrating from 0.4 to 0.5
+
+All 0.4 commands and flags remain available. For the 58 cases in `tests/compat.sh`, `obs query --static`, `obs query --live`,
+`obs alerts` and `obs links` match 0.4 stdout, stderr and exit codes byte for byte (golden files captured from the 0.4 binary).
+`obs assert` and `obs scrape` keep their stdout and exit codes and add one `note:` line on stderr naming `obs live usage`.
+`obs check` changes as listed below. `obs profile` and `obs store move` are unchanged. 0.5 adds the grouped commands:
+
+| In 0.4                                        | In 0.5 |
+| --------------------------------------------- | ------ |
+| `obs query --static`                          | `obs check`: contract limits, evaluator versions and static query rules. See below for the empty-folder and reporting differences. |
+| `obs query --live`, `obs alerts`, `obs links` | `obs test`: runs seeded query checks, alert evaluation when rules exist, and link checks when traces are present, declared or queried. It also checks named incidents for a passing `expect.fire` verdict. |
+| `obs sandbox up`                              | For a dashboard review, `obs look --keep` starts or reuses a compatible sandbox and tells the reviewer to leave it running. Use `obs sandbox up` for a stack without a dashboard review. |
+| `obs assert`                                  | Use `obs assert` to check a saved series export. Use `obs live usage` to inspect a running store, with a recent time window, contract-service filtering by default, and live budget checks. |
+
+`obs scrape` still writes to the sandbox by default and accepts `--vm-url`. To inspect recent sandbox samples for the contract service,
+run `obs live usage --target local` against that same sandbox project.
+
+What is new in `obs look` and `obs live` for a caller:
+
+- After selecting a dashboard, a successful `obs look` setup provisions the supplied rules in a sandbox Grafana folder, adds a native
+  alert-state panel (`Sandbox alert state (Grafana live)`) when rules exist, and marks each loaded incident with a region annotation on the
+  sandbox dashboards.
+- A newly loaded default seed places the latest-ending named incident over the snapshot time when that window exceeds the longest `for:`
+  duration plus two evaluation intervals among its expected-firing rules. Pass a nonzero `--seed-base` whose seed ends by the current time for
+  historical replay.
+- When the current incident has a forecast, the prompt treats `expect.fire` rules as expected Firing and the other alert rules as expected
+  Normal, including quiet-only disturbances. It prints a predicted screenshot window only for a supported Firing forecast. The forecast covers
+  up to ten minutes, and the panel shows the state Grafana actually reports (see _`obs look`_).
+- At a fixed start time, an unchanged 0.4-compatible seed without `traffic.settings` generates the same baseline data. A seed can opt into
+  `traffic.settings` (level, trend, cycle, spikes, gaps and noise, see _Seed shape_). A successful look seed load adds synthetic Pyroscope
+  profiles and sends Tempo traces when the loaded snapshot contains spans.
+- `obs live` is read-only. It resolves `--target` from `targets:` in `obs.yaml`, with a local sandbox fallback. `obs live usage` also reads
+  optional `estimates:`. obs 0.4 commands that load `obs.yaml` reject either key, so upgrade those readers before adding the blocks (see
+  _`obs live`_).
+
+What is new in `obs check` and `obs test` for a caller:
+
+- `obs check` runs the same static query rules as `obs query --static` and adds limits and version checks. It skips the `[empty]` rule for a
+  folder with no alerts or dashboards, reports contract failures in the contract checks, and can report query findings alongside a version
+  mismatch. Keep `obs query --static` if CI relies on its `[empty]` failure or its own command output. It takes `--names`, `--event-rule`,
+  `--vl-settings`, `--tempo-config` (new) next to `--contracts`.
+- With a valid local contract, `--contracts none` restricts metric lookup to that contract and its platform metrics; an explicit metric
+  declared only by another contract fails. With a valid local contract and `--contracts auto` (the default), obs includes the other regular
+  `observability/contract.yaml` files found by discovery below the Git root, outside ignored and fixture directories.
+- For an existing folder with no `contract.yaml`, `obs check` prints a note, skips limits and still checks queries (0.4 exited 2). On success it
+  prints `obs check: ok: <contract status>; queries: <query totals>`. The contract status is the counts and hash when a contract exists, or
+  `no contract.yaml, limits not checked` when it is absent. Exit-1 summaries use `obs check: FAILED:` and list the failed checks. Usage and input
+  errors can end earlier with exit 2 and a diagnostic.
+- For judged incidents, `obs test` reports `[incident-uncaught]` unless at least one alert listed in `expect.fire` passes its fire verdict. An
+  incident with a nonblank `disturbance:` reason and no fire expectations is exempt from this coverage rule. Other alert, query and link checks
+  still apply (see _Every incident is caught by at least one alert_).
+
 ## Migrating from 0.3 to 0.4
 
 - `obs gen` now also writes `contract/keep.yaml` (the collector keep-list) next to the other generated files. After
@@ -736,13 +923,13 @@ This is a correction to the standard, not a flag or exit-code change, so it ship
 alert or TraceQL query written with the underscore spelling of a dotted label now fails, once, with the fix in
 the message:
 
-| Where it fails                    | The message names                                                                          | Fix                                                |
-| --------------------------------- | ------------------------------------------------------------------------------------------ | -------------------------------------------------- |
-| `obs query --static`, a selector  | `[contract-undeclared-label] label "durian_cloud_service" ... write "durian.cloud.service"` | `{"durian.cloud.service"="checkout"}`              |
-| `obs query --static`, a grouping  | the same finding for the `by (...)` / `on (...)` label                                     | `by ("durian.cloud.service")`                      |
-| `obs query --static`, a variable  | `variable $provider: [contract-undeclared-label] label_values reads label "payment_provider"` | `label_values(checkout_charges_total, payment.provider)` |
-| `obs query --live`                | with a contract: the same `[contract-undeclared-label]` finding, once; with no contract: `[label-spelling] VictoriaMetrics keeps a label's dots: label "x_y" is stored as "x.y"` | write the dotted name, quoted in a selector        |
-| TraceQL attribute                 | `[traceql-attribute] undeclared attribute span.payment_provider (Tempo keeps the dots: write "payment.provider")` | `span.payment.provider`                            |
+| Where it fails                   | The message names                                                                                                                                                                | Fix                                                      |
+| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| `obs query --static`, a selector | `[contract-undeclared-label] label "durian_cloud_service" ... write "durian.cloud.service"`                                                                                      | `{"durian.cloud.service"="checkout"}`                    |
+| `obs query --static`, a grouping | the same finding for the `by (...)` / `on (...)` label                                                                                                                           | `by ("durian.cloud.service")`                            |
+| `obs query --static`, a variable | `variable $provider: [contract-undeclared-label] label_values reads label "payment_provider"`                                                                                    | `label_values(checkout_charges_total, payment.provider)` |
+| `obs query --live`               | with a contract: the same `[contract-undeclared-label]` finding, once; with no contract: `[label-spelling] VictoriaMetrics keeps a label's dots: label "x_y" is stored as "x.y"` | write the dotted name, quoted in a selector              |
+| TraceQL attribute                | `[traceql-attribute] undeclared attribute span.payment_provider (Tempo keeps the dots: write "payment.provider")`                                                                | `span.payment.provider`                                  |
 
 - A pod key on a per_pod or platform metric is a label too: `k8s_pod_name` fails the same way, naming `k8s.pod.name`.
 - Pyroscope labels do not change: they stay underscores.
@@ -772,7 +959,9 @@ obs sandbox status [--dir observability] [--project name]
 
 `up` starts five containers (docker, or podman when docker is not there; `--runtime` or
 `$OBS_CONTAINER_RUNTIME` chooses) and loads them: the repo's dashboards into Grafana, the seed into
-VictoriaMetrics and VictoriaLogs. No check depends on it; it is for looking at the data.
+VictoriaMetrics and VictoriaLogs. This legacy command keeps its 0.4 ports, container
+configuration, loaders and output. `obs look` additionally seeds Tempo and Pyroscope
+(below). No check depends on a sandbox; it is for looking at the data.
 
 | Container       | Image                                                     | Host port (default) |
 | --------------- | --------------------------------------------------------- | ------------------- |
@@ -803,19 +992,26 @@ VictoriaMetrics and VictoriaLogs. No check depends on it; it is for looking at t
   `-storage.maxDailySeries`/`-maxHourlySeries` have no value in §10.4, Pyroscope's retention and raft names
   are for the cluster, S3 backends and resource requests do not exist on a laptop).
 - **Ports** are bound to `127.0.0.1` only. `--port-base 18300` moves Grafana to 18300 and the others to
-  18301 to 18304 when the defaults are taken.
+  18301 to 18304 when the defaults are taken. `obs look` additionally publishes
+  Tempo's OTLP/HTTP receiver at 4318 by default, or base+5 (18305 here). Reserve six
+  consecutive ports for look: a second sandbox at base+5 would clash with that receiver.
 - **Data.** The seed's time line ends now, so a "last hours" view has data. Grafana is open to an anonymous
   viewer (admin/admin for the API). The datasource uids are the ones the dashboards name (`fixture-metrics`
   and so on); a kind no dashboard names gets `obs-metrics`, `obs-logs`, `obs-traces`, `obs-profiles`.
   A second `up` reuses the running stack, loads the dashboards again and keeps the seed (`--reseed` loads it
-  again). The seed's `traces` are not loaded into the sandbox's Tempo (they are used by `obs query --live` and `obs links`).
+  again). With `obs look`, Tempo receives OTLP/HTTP JSON with the seed's original trace/span IDs, attributes,
+  status and parent links; the log-to-trace IDs stay the same. Pyroscope receives three
+  deterministic CPU pprofs per service/span name across the seed window: stacks are
+  `main -> obs.seed.work -> <span name>`, with 10/20/30 ms CPU samples and `span_name`
+  labels. Without traces the synthetic span is `obs.seed.work`. These are illustrative
+  profiles, not measured application performance. A partial-success span rejection fails setup.
 - `up` needs the network the first time (image pulls; Grafana downloads the datasource plugin).
 
 ## `obs look`: dashboard screenshots, reviewed by the calling agent
 
 ```text
 obs look [--base origin/main] [--all] [--file dashboards/x.json] [--checklist docs/standards/grafana-dashboards/index.md]
-         [--out obs-look] [--width 1600] [--height 1000] [--json] [sandbox flags]
+         [--out obs-look] [--width 1600] [--height 1000] [--json] [--keep] [--seed-base unix] [sandbox flags]
 ```
 
 `obs look` is the setup and a prompt; it calls no LLM, reads no key, spends nothing and posts nothing
@@ -829,14 +1025,54 @@ obs look [--base origin/main] [--all] [--file dashboards/x.json] [--checklist do
    filled: a datasource variable is resolved against the sandbox's datasources first (a saved uid is kept only
    when the sandbox has it); the others take the dashboard's own current value, the first option, the first
    value on the seed, or All), the viewport and the path to save the screenshot, plus one URL per panel.
-   Panels whose datasources are all Tempo or Pyroscope are listed as "expected empty in the sandbox; mark C1 n/a"
-   (the sandbox loads no traces or profiles), so the reviewer does not fail the No-data item for them;
+   Panels are marked "expected empty" only when their signal has no loaded seed;
 4. prints the items of the visual checklist (the bullets under the "Visual checklist" heading of the
    `--checklist` file) and the layout of the one pull request comment the agent writes: the images and a
    verdict (pass, fail, unclear) with one line of evidence per item.
 
 The agent opens each URL in a browser, takes the screenshots, judges them and posts the comment. `--json`
 prints the same content (`ok`, `error`, `warnings`, `sandbox`, `dashboards`, `checklist`, `prompt`).
+
+`look` applies every named incident's changes using the same generator as `obs alerts`,
+on the displayed seed timeline. Overlapping incidents compose in definition order.
+It provisions the original alert queries, intervals, pending/recovery durations and
+NoData/Error handling into a sandbox-only Grafana folder, and adds a region annotation
+for each incident on each dashboard. The built-in annotation query is enabled, and a
+`Sandbox alert state (Grafana live)` panel shows native Firing, Pending and Normal state
+from Grafana, including inactive rules. The prompt names the marker and expected states
+per dashboard.
+
+By default the latest incident window covers now and opened at least `for:` plus two
+evaluation intervals earlier. Only the seed prefix through now is loaded; future samples
+and log rows are removed, and spans crossing now are shortened. `--seed-base <unix
+seconds>` instead keeps an explicit historical timeline; `--base` remains the git ref
+used to find changed dashboards. A seed with no incidents has no expected incident Firing.
+
+Grafana starts pending timers when its scheduler begins evaluating, so the prompt lists
+each live rule's provision time, expected Firing time (a scheduled estimate: `provisioned + for` rounded up to whole evaluation intervals `+ one interval`: for 15s at 10s it is 30s, for 1m at 10s it is 70s; Grafana staggers its evaluations inside each interval, so the real change can come a few seconds later; the alert-state panel does not poll (it only refetches when the dashboard refreshes; obs does not set a dashboard's refresh, so a board without its own auto-refresh never does), so the prompt tells the agent to reload the same URL every interval (unless the board sets its own auto-refresh) from the estimate until the printed hold time, screenshot the first load that shows Firing, and if Firing was never seen record the state it observed on each reload as the finding),
+and the predicted window before the fixed snapshot ages out. The prediction uses the
+same existing evaluator/state machine, projecting at most ten minutes without pushing
+future data. A snapshot that cannot hold the condition through the pending duration is
+called out as a finding. The calling agent screenshots during the listed window and
+checks Grafana's actual state; `obs look` does not wait for pending timers.
+
+Historical state-change annotations explicitly say `replay (computed by obs)` and name
+the incident scenario. Each incident is evaluated independently by the existing `obs alerts`
+state machine, even when incident windows overlap; a simultaneous change cannot erase another
+scenario's firing history. The stores hold the composed timeline and its recording samples;
+the native-state forecast uses that actual composed snapshot. Replay is not Grafana's own historical state. Incident
+marker text labels declared expectations separately. Grafana's historic `/api/v1/eval`
+can also inspect the real condition at an incident time.
+
+The stack stays up for the calling agent's browser after the command exits. By default
+the prompt asks that agent to stop it after review. `--keep` instead asks the agent to
+leave it running for a person; the prompt includes the exact cleanup command. `sandbox
+up|down|status` remain available. When reusing a baseline-only seed from `sandbox up`,
+`look` asks for `sandbox down` first, so baseline and incident logs cannot be mixed.
+Stacks started by `sandbox up` or an older obs, without the published Tempo receiver, get a recreate-first
+diagnostic. A repeated default look on an expired live snapshot recreates only that
+project's labelled containers, volumes and network and says it did so; it never prunes
+or touches another project. So does a look after a seed load that stopped part way (say Tempo failed after the metrics and logs went in): that load is recorded as incomplete (written before anything is uploaded; a look that cannot write it stops, and the record stays until the stores are removed) and the next look clears the stores before loading again; a completed snapshot is reused. That record lives in the cache folder, so a look with a different cache folder cannot see it: after a part-way load, retry with the same cache folder, or run `obs sandbox down` for that project first. `obs sandbox down` must name the same project and the same `--runtime` as the failed look: a look that used Podman is cleaned up with `--runtime podman` even when Docker is the default, because a down with the other runtime does not see its containers or volumes. One setup or removal of a project runs at a time: `obs look`, `obs sandbox up` and `obs sandbox down` take one lock per project in one fixed place, `/tmp/obs-sandbox-<project>.lock` (read from no environment variable, so the same for every cache folder and TMPDIR; obs creates no folder and changes no permissions there, and opens the lock without following a symlink, without blocking, and only as a regular file), and a second one for the same project while the first runs is refused at once with an error naming the lock, so it never removes stores a running load is writing to. Different projects run side by side. A lock file another user created is locked read-only; if the lock cannot be taken at all, obs refuses before touching any container. A reused snapshot keeps its Firing forecast only while the checkout's rules are the ones it was computed for; after a rule changed, the forecast is dropped (Grafana's own state is still shown). A retained stack's sandbox folder is reconciled on every look: rule groups of an earlier checkout that the checkout no longer has are deleted (all of them when it has no rule left), groups in any other folder are left alone. If the live incident window ended while the setup ran, or before a reused snapshot was reached, the look does not call it current (no live incident, no forecast) and keeps the incident list as historical guidance. Explicit `--seed-base` historical snapshots remain reusable.
 
 **Always exit 0**: a failed setup (no runtime, a pin mismatch, git cannot find the base), a bad flag and
 `--help` print what failed (or the usage) and `ok: false` in JSON, and never fail the CI job that calls it.
@@ -857,17 +1093,147 @@ them into `durian.cloud.*`; the sandbox VictoriaMetrics has the same labelmap, s
 scrapes once and exits 1 when it failed; otherwise it runs until Ctrl-C and keeps going after a failed
 scrape.
 
+## `obs live`: read a running stack and compare it with the repo
+
+`obs live usage|shape|incidents|look --target local|dev|stage|prod` pulls numbers from a running
+stack (the local sandbox, or a real cluster) and compares them with what the repo declares. obs
+pulls and compares; the calling LLM (or a person) judges. `--json` prints the same content for an
+LLM, the default is a table.
+
+**Read-only guarantee.** obs live sends only `GET`. Its direct request paths are `/api/v1/query`, `query_range`, `series` (VictoriaMetrics),
+`/select/logsql/stats_query` (VictoriaLogs), `/api/metrics/query_range` (Tempo), and
+Grafana's `/api/health`, `/api/search`, `/api/annotations`. A redirect is followed only within the same scheme, host and target path
+prefix, and only to a path the guard allows, so an allowed redirect can reach a few more read endpoints (such as `status/tsdb`). The guard
+would also let a `POST` through to the store query paths, never anywhere else. Every request goes through one guard
+(`internal/live/client.go`, `ReadOnly`) that refuses any other method or path before the network is
+touched. The guard checks the URL as it will be sent (not only the path argument): the target address must be
+a plain `http://` or `https://` address with no user name, password, query string or fragment, and the client
+runs the guard again on every redirect hop and refuses a hop that leaves the target's host (Go would forward
+custom headers such as `X-Scope-OrgID` to another host). The Go tests run every command against fake stores that
+record each request and assert, against a list of allowed methods and paths the test writes out itself (not
+derived from the guard), that nothing else arrived. obs installs nothing into a real cluster: dashboards get
+there only through the platform chart.
+
+### Targets in `obs.yaml`
+
+```yaml
+targets:
+  prod:
+    metrics: https://vm.prod.example # VictoriaMetrics or Prometheus query API
+    logs: https://vl.prod.example # VictoriaLogs
+    traces: https://tempo.prod.example # Tempo
+    grafana: https://grafana.prod.example
+    headers: # request headers; the file names the ENVIRONMENT VARIABLE, never the value
+      Authorization: OBS_PROD_AUTHORIZATION # the variable holds the whole value, e.g. "Bearer ..."
+      X-Scope-OrgID: OBS_PROD_ORG
+
+estimates: # optional: expected log and trace volume (the contract only holds series budgets)
+  logs: { lines_per_min: 600, bytes_per_min: 120000 }
+  traces: { spans_per_min: 3000, bytes_per_min: 900000 }
+```
+
+- A target name is anything (`local`, `dev`, `stage`, `prod`, `eu-prod`); each store URL is optional, a command that needs a missing one says which key to set.
+- A header value that is not a bare environment variable name (a token written into the file) is refused, naming the key and never printing the value. A name that looks like a credential (it starts like a token: `glsa_`, `glc_`, `ghp_`, `github_pat_`, `AKIA`, `eyJ`, and so on) or is longer than 64 characters is refused the same way, because such a string passes for a variable name and would otherwise be echoed in "variable X is not set". A variable that is not set is an error naming file, line and header; the error never prints the variable name either, because a supplied value that passes the heuristic could still be a secret. A redirect refused by the client says "redirect refused" and the host at most, never the Location's path or query.
+- A store URL with a user name or password (`https://user:pass@host`, which Go turns into Basic Auth), a query string or a fragment is refused, naming the key and not repeating the URL. A path prefix (a Grafana under `/grafana`) is fine.
+- `--target local` needs no entry: it reads the running sandbox (`--project name` picks which; the ports it holds), else the default sandbox addresses (`127.0.0.1` ports 8428, 9428, 3200, 3000). A key written under `targets.local` wins.
+- `obs check`, `obs query` and the other commands load a file with these two blocks without complaint; only `obs live` reads them. `estimates:` fills the "vs contract estimates" column; without it the column says "no estimate".
+
+### `obs live usage`
+
+Active time series (ATS) and data points per minute (DPM) per metric, against the contract's worst case
+and budget; log lines/min, message bytes/min and streams; spans/min and bytes/min. It replaces `obs assert`
+and `obs scrape` as the recommended command (`assert` keeps working, with one stderr note).
+
+- **It reuses `obs assert`.** The series are read once (`/api/v1/series`, the series with a sample in `--window`) and counted by the code behind `obs assert` (`internal/assert`): per `durian.cloud.landscape`, a histogram's `_bucket`, `_sum` and `_count` together, a per-pod metric up to worst case x `--pods`. The budget is per landscape, so a store holding two landscapes is compared one landscape at a time (the row shows the fullest and lists each). `assert`'s label checks run too and show under FINDINGS: a label that is not in the contract, a pod label on a metric that is not `per_pod`, a value outside its type. `obs assert` keeps its stdout and exit codes; it adds one `note:` line on stderr naming `obs live usage`.
+- **Both thresholds, for series and for points/min.** Each row shows the series and the points/min next to the worst case and the budget of each (a metric without a budget is compared with its worst case). Points/min are measured over `--window` (default 5m): the worst case times 60 / the contract's aggregation interval is the worst-case rate, the budget times the same is the budget rate. A row above the worst case but inside the budget says "above worst case"; above the budget (series or points/min) says "OVER BUDGET" and why.
+- **Rows are ranked by the larger of the two deviations** (series / limit and points/min / limit, limit = budget else worst case): over budget first, then metrics that are not in the contract (the fullest first), then above the worst case, then the rest, platform metrics last. `--top N` keeps the first N, `--over-only` hides the rows that are fine.
+- **An undeclared metric has no budget.** `--unknown fail` (the default) counts every series of a metric that is neither in the contract nor in `platform_metrics` as over budget (exit 1); `warn` shows it and exits 0; `ignore` hides it.
+- Only the contract's service is counted (`"durian.cloud.service"="<service>"`); `--all-services` counts the whole target. Point the target at one landscape's store: the budget is per landscape.
+- **The points/min query runs on Prometheus and on VictoriaMetrics.** `count_over_time` drops the metric name in both, and `keep_metric_names` is MetricsQL only (Prometheus rejects it), so obs sends one query per stored metric name: `sum by ("durian.cloud.landscape") (count_over_time({__name__="<name>","durian.cloud.service"="<service>"}[<window>]))`. The Go tests parse every query with the Prometheus parser and with MetricsQL. A name whose query fails says so on its row; if every name fails the command exits 2.
+- Logs come from VictoriaLogs `stats_query` (`count()`, `sum_len(_msg)`, `count_uniq(_stream_id)`); lines and bytes are compared with the `estimates:` of the service and the streams with the contract's worst case **only for the service's own read**. The log streams are read per landscape (`stats by ("durian.cloud.landscape")`) and the fullest landscape is compared with the worst case of one landscape (its modules), like the series budget; lines and bytes are summed. With `--all-services` the whole target is counted and nothing is compared with a service's figure.
+- Spans/min come from Tempo's TraceQL metrics endpoint when it answers (this needs Tempo's local-blocks processor), filtered to the service. Tempo's own counters in the metrics store (`tempo_distributor_spans_received_total`, `..._bytes_received_total`) cover every service, so they are read only with `--all-services`, and are never compared with a service's estimate; for one service, when Tempo's metrics endpoint does not answer, spans/min and bytes/min say "not available for one service" and print no number. The row names its source, or why it is not available.
+- **Exit 1** when a row is over its budget, an undeclared metric is found (default), a label check of `assert` fails (a label outside the contract that varies, a pod label on a metric without `per_pod`, a value outside its type), or the log streams of a landscape are over the worst case; the last line says so. A series count above the worst case but inside the budget is reported as a FINDING (`series-over-worst-case`, the row says "above worst case") and does not fail the run: only the budget and the label checks do. 2 on a usage or input error, including a target that cannot be reached.
+
+### `obs live shape`
+
+Per contract metric over `--window` (default 7d, step `--step`, default 5m): the real data and the seed side by
+side, in five parts plus noise, as `seed.ShapeSettings`. It never fails: the
+LLM reads the two columns and judges if the seed is realistic.
+
+| Part   | Field                                                                  | Meaning                                                                                               |
+| ------ | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| level  | `level.min`, `typical`, `max`                                          | lowest, median and highest value                                                                      |
+| trend  | `trend.change_per_day`                                                 | least-squares change per day as a fraction of typical (0.03 is up 3 % a day); needs 2 days            |
+| cycle  | `cycle.daily_amplitude`, `peak_hour`, `weekend_factor`                 | half the peak-to-trough of the average hour of day over the mean; UTC peak hour (the first harmonic of the sample timestamps, to a tenth of an hour); weekend / weekday (7 days) |
+| spikes | `spikes.count`, `size`                                                 | separate upward jumps far above that hour's typical value; the biggest as a multiple of typical       |
+| gaps   | `gaps.count`, `length`                                                 | runs of two or more steps with no data (and data that stopped early); total missing time              |
+| noise  | `noise`                                                                | the wiggle left after the hour shape, as a fraction of typical                                        |
+
+- **Timing.** The peak hour comes from the samples' own timestamps (a cosine that peaks at 20:00 UTC sampled every 5 minutes from :04 reports 20, not the clock hour 19 whose samples sit on one side of it). Gaps are counted before the first sample and after the last one as well as between samples: both window bounds are passed, so a 6 hour window on a store that holds 4 hours says "1 gap, 2h". What a window can show is judged on the window asked for: trend and daily cycle need 2 days, the weekly part 7 days, and the samples of a 7 day window at a step span 7 days minus one step, so the test is span >= window - 2 steps (a 7 day window with 3 days of data shows no weekly part).
+- The metric is read as one number: a counter as the summed rate per second, a histogram as the summed rate of its observations (`_count`), a gauge as its summed value. The same query runs on the real store and on the seed.
+- The seed column is the seed generator's own data (`seed.Build`) run through the embedded VictoriaMetrics with the same query, over the seed's length: a seed of 4 h cannot show a trend or a daily cycle, and the cell says so (`n/a`). Both columns are the same Go type, `seed.ShapeSettings` (the five parts a seed's `traffic.settings` is written with, plus the flags for what a short window cannot show), so a measured column can be pasted into a seed and read back with the same names; a test pins that the real and the seed column are one type.
+
+### `obs live incidents`
+
+Firing observations (or the grouped ALERTS firing list) on the target in `--since` (default 7d) plus windows you name with `--window from..to`
+(RFC 3339, `2026-11-10`, `2026-11-10T14:30`, unix seconds or `-6h..-2h`; repeatable), compared with the repo's
+incident files, alert rules and runbooks.
+
+- **Source, and why.** Grafana's alert state history (`/api/annotations?type=alert`) when the target has a `grafana:` URL: Grafana-managed rules can publish transitions there when annotation history is enabled; publication is asynchronous and history can be retained or kept on another backend. These rules do not write an `ALERTS` series (only a vmalert-style ruler does). Without a Grafana URL, or when Grafana refuses, the `ALERTS{alertstate="firing"}` series in the metrics store is used; the output says which and why.
+- **State and identity.** Rules are identified by explicit UID or Grafana's numeric `alertId`; numeric IDs are reconciled with explicit UID evidence across titles. A repo title match requires a unique title in both the source (the history, or on the `ALERTS` fallback the fired alerts: another fired alert with the same title, counting every title a fired alert was seen under, blocks it) and the repo, with no conflicting UID evidence. `Recovering` stays firing. Optional lossless `labels`/`data.labels` maps allow spans to be reconstructed from returned transitions and merged per rule, but cannot prove history is complete. If an entry's previous state disagrees with the reconstructed state, its span becomes unknown and only the direct firing observation is reported, with real observation timestamps. [Grafana 13.3.0's annotation source](https://github.com/grafana/grafana/blob/v13.3.0/pkg/services/ngalert/state/historian/annotation.go) supplies lossy label tags (colons normalized and long tags omitted), so its tag-only history reports firing observations with **unknown spans**, duration and firing count. Annotation text is not parsed as an identity.
+- **Named windows: observations, never a miss verdict on any source.** The history is read from 7 days before the requested range through now. Each named window reports `caught` only when firing was directly observed in it, or `not_seen` with a reason; reconstructed spans do not decide window coverage. Grafana writes annotations asynchronously; history can be elsewhere or off, retained, or inaccessible. An empty answer means `no alert state history returned; cannot tell quiet from history not kept in annotations`. A response reaching the 10,000-entry limit is incomplete. Grafana 13.3's tag-only history proves firing observations with unknown spans, and even lossless history cannot prove a miss. The `ALERTS` fallback keeps the lookback-wide firing list grouped by alert name and rule UID. For entries seen in that grouped list, `first`/`last` are query evaluation times, labeled `time_source: query_evaluation`; they are not exact firing timestamps or named-window evidence. A rule found only in raw samples has `time_source: raw_sample` and raw first/last sample times. Only named windows read underlying samples, in chunks of at most one hour, through `GET /api/v1/query` with an `ALERTS{alertstate="firing"}[duration]` range selector ([pinned VictoriaMetrics source](https://github.com/VictoriaMetrics/VictoriaMetrics/blob/v1.156.0/app/vmselect/prometheus/prometheus.go#L825)), preserving millisecond sample timestamps. It never treats carried-forward `query_range` evaluation timestamps as firing times. These raw samples are observations with unknown continuous spans, duration and firing count; JSON preserves them under `observations`. For a completed window, a chunk whose 2xx response exceeds the 64 MiB response limit leaves that window `not_seen` with reason `raw ALERTS samples too large to read`, while the report still exits 0. An oversized non-2xx response is not that case: it is an HTTP error, and the report fails (exit 2). With no named windows, no raw samples are read. The fallback can report firing samples but cannot see Grafana-managed firing, so an empty fallback is also `not_seen`, never a miss. obs makes no current-state GET. A future-ending window is `not_yet_observable`; text shows only that status and any partial pre-cutoff evidence, and JSON puts that evidence in `partial_fired` rather than `fired`. If a later raw chunk exceeds the response limit, the future window keeps verified firing from earlier chunks in `partial_fired` and shows both the cutoff and size reasons.
+- **Spans: `span_open` and `longest_ns`.** Each instance span is first clipped to the report window (start inclusive, the cutoff exclusive) and an empty one is dropped, so a firing exactly at the cutoff is no span. A firing and its resolution in the same instant also leave no span for that instance. For a rule whose spans are known (not reported as unknown): when no span survives for the rule at all, `firings` and `longest_ns` stay 0, `first` and `last` are the earliest and latest firing observations, and the text says the firing was observed but no span of nonzero length was measured; when spans survive, the rule totals are calculated from those spans as described below. The remaining firings of one rule on several instances (label sets) are merged into one union of time per rule, and `firings` counts the merged spans. `span_open` is true when ANY instance span in the window has a firing with no resolution in history (open): its end is only inferred to the cutoff, so its duration is unknown, even when a closed span of another instance ends at the same cutoff. `longest_ns` is the longest measured single-instance span, one with both the firing and the resolution seen in history, clipped to the window and computed on its own, never from the merged union whose end may be inferred. A span whose start was not seen (the first history entry for an instance already has a firing previous state; retention may have dropped the real start) begins at that first observed entry's own time, not at the read start, and it is not measured. The report says the alert was already firing when the window began only when a returned entry shows firing before the window (for example `Alerting -> Recovering` at 14:20 for a window from 14:30); an unseen start alone never does. `longest_ns` is 0 when no span has both transitions seen; the firing observation still counts, so a named window is still `caught` (text: `longest closed span` appears only for an open rule and only when it is above 0).
+- **Same text, different identity.** A ruler UID and an alert name are different keys even with the same text. Every fired identity gets its own display ID in `fired[].id`, `windows[].fired`, `partial_fired` and the text. An alert with a ruler UID keeps its plain ID; a name-only alert keeps its plain name unless it collides with another fired alert's ID. On a collision it is shown as `alertname:<name>`, and if that equals another display ID too, as `alertname:<name>#<n>` with the smallest `n` of 2 or more that is unique (assigned in sorted order, so it is deterministic). Without a collision the display ID is unchanged.
+- **fired-but-no-incident:** firing was observed and no incident file lists the rule under `expect.fire`. **incident-not-alerted:** repo incident-file configuration gaps only (no declared catching rule or only unknown rule references); live windows never populate this field. **alert-without-runbook:** a rule with no `runbook_url` annotation (marked when firing was observed).
+- **No capture command or suggested incident entries.** The report lists observations and repo configuration gaps; it produces no missed-window verdict or suggested `incident.yaml` entry on any path. An LLM can use the observations to write an incident and its alert by hand in a pull request, then run `obs test`.
+- **Exit codes:** 0 when a report is produced, including empty, incomplete and not-yet-observable windows. There is no exit 1 for unobserved firing on any source. Exit 2 means invalid flags/input/configuration, or a source read failure that prevents producing the report.
+
+### `obs live look`
+
+Lists the dashboards the target's Grafana already has, with addresses (last 6 hours of real data) and the visual
+checklist prompt, like `obs look`. It installs nothing. A dashboard that is not deployed yet is checked with `obs look` on the seed, or by
+deploying the chart to the local cluster and using `--target local`. Exits 0 always.
+
+### Migration rows
+
+| 0.4                  | 0.5                                                                                                                     |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| `obs assert`         | `obs live usage --target local\|dev\|stage\|prod`: reads the series counts from the store itself; `assert` still works |
+| `obs scrape`         | still feeds the sandbox; read what it stored with `obs live usage --target local`                                       |
+
+The two old commands print one note on stderr naming the new one; their stdout is unchanged.
+
+### What was measured
+
+- **MEASURED** (Go tests, `internal/live`): every command against fake HTTP stores that record each request and assert it against an allowlist of methods and paths the test writes out itself; the read-only guard, redirect hops and target URLs; the targets and token rules; every shape part on synthetic series (peak hour, leading and trailing gaps, the weekly part); incident matching on a temp repo folder, including an alert that fired before the window; every metrics query parsed by Prometheus and by MetricsQL.
+- **MEASURED** (recorded responses, `internal/live/testdata/recorded/*.json`): the real answers of a local sandbox (VictoriaMetrics v1.156.0, VictoriaLogs v1.54.0, Tempo 3.1.1, Grafana 13.3.0), recorded for the API reads of usage, usage with `--all-services`, shape, incidents and look listed in those fixture files; the incident recording contains only `/api/annotations?type=alert`, not a current-state rules/alerts GET, replayed by `recorded_cmd_test.go`. The sandbox was set up by `obs look --keep` of part B (`origin/obs-regroup-look`) on `tests/fixtures/live-recorded` (the `look-seeded` fixture: a seed with traces and a live incident that makes `payment-errors` fire in Grafana), so the recorded Grafana state history holds a real Normal -> Alerting change, and Tempo answered the TraceQL metrics query. Then `obs sandbox down`. The recordings were made before the fixture seed gained `traffic.settings` (level, daily cycle, noise): the recorded real column is the older flat seed, the seed column is computed from the current `seed.yaml` at test time, so the two columns differ on purpose (as real data and a seed do). Recording again makes the real column follow the settings.
+- **MEASURED** (one real run of the built binary against that sandbox, 18 Nov 2026): `obs live usage|shape|incidents|look --target local`. The numbers it printed: 2 series in landscape `fixture` against a worst case of 2 and a budget of 4; 13.2 points/min against 4 (worst case) and 8 (budget): **OVER BUDGET, exit 1** (the sandbox seed writes a point every 15 s and the contract's 30 s interval allows 4 a minute per two series, plus the incident's extra samples); logs 120 lines/min and 1 stream; 416 spans/min from Tempo's metrics endpoint; shape of the real series against the seed side by side, with the 7 day window's missing first 167h55m counted as one gap; the then-built incidents command listed `payment-errors` (2 firings) and `payment-pending` (1), both expected by the `payment-spike` incident and both without a runbook; look listed the one dashboard. Those historical firing counts are not claims about the current command: replaying the saved tag-only response now reports one observed `payment-errors` firing transition with unknown spans and no definite duration or firing count; `payment-pending` is only Pending in that recording.
+- **NOT TESTED**: `dev`, `stage` and `prod` (no access); see *Not tested*.
+
+### Recording the fixtures
+
+The recorded files are replayed without a network. To record them again (after a query changed: a request that is not in the file fails the test and names it): build `obs` from `origin/obs-regroup-look`, make a git repo of `tests/fixtures/live-recorded`, run `obs look --dir . --all --keep --reseed --project livesrec --port-base 24000` there (docker; hold the heavy lock, at most 10 minutes), wait for the alert to fire (`payment-errors`: about 10 seconds after the load), then
+
+```sh
+OBS_LIVE_RECORD='metrics=http://127.0.0.1:24001,logs=http://127.0.0.1:24002,traces=http://127.0.0.1:24003,grafana=http://127.0.0.1:24000' \
+  go test ./internal/live -run TestRecorded
+obs sandbox down --dir . --project livesrec --runtime docker
+```
+
+Each test starts four proxies in front of the real stores, runs its command through them with the clock it saves (`now_unix`), and writes the exchanges to `testdata/recorded/<scenario>.json`. Update the numbers the replay tests assert after recording again. The firing time in `TestRecordedIncidents` is checked exactly on replay; while recording it only has to match the firing observation and lie inside the report window, so a fresh recording passes, and its new instant is then set as `recordedFirstFiring`.
+
+
 ## Engines and pins
 
-| Signal   | Engine or reference                                         | Version                          |
-| -------- | ----------------------------------------------------------- | -------------------------------- |
-| metrics  | VictoriaMetrics (`metricsql`, storage and evaluator)        | v1.156.0                         |
-| logs     | VictoriaLogs `lib/logstorage`                               | v1.54.0, tag commit `6433dae5`   |
-| traces   | Tempo (TraceQL parser, evaluator and frontend rules)        | 3.1.1, tag commit `9db7df79d2af` |
-| alerts   | Grafana (alert math and state machine, ported)              | 13.3.0, tag commit `752e3462`    |
-| profiles | Pyroscope (reference: sandbox and parity only, not linked)  | 2.4.3                            |
-| agent    | Grafana Alloy (reference: pin only, no image is run)        | v1.21.3                          |
-| logs UI  | VictoriaLogs Grafana datasource (reference, parity only)    | v0.34.0                          |
+| Signal   | Engine or reference                                        | Version                          |
+| -------- | ---------------------------------------------------------- | -------------------------------- |
+| metrics  | VictoriaMetrics (`metricsql`, storage and evaluator)       | v1.156.0                         |
+| logs     | VictoriaLogs `lib/logstorage`                              | v1.54.0, tag commit `6433dae5`   |
+| traces   | Tempo (TraceQL parser, evaluator and frontend rules)       | 3.1.1, tag commit `9db7df79d2af` |
+| alerts   | Grafana (alert math and state machine, ported)             | 13.3.0, tag commit `752e3462`    |
+| profiles | Pyroscope (reference: sandbox and parity only, not linked) | 2.4.3                            |
+| agent    | Grafana Alloy (reference: pin only, no image is run)       | v1.21.3                          |
+| logs UI  | VictoriaLogs Grafana datasource (reference, parity only)   | v0.34.0                          |
 
 The first four are engines linked into the binary; the last three are references only.
 `obs version` prints every pin, with `engine` or `reference` in front of it, and
@@ -1186,6 +1552,10 @@ not touched. obs builds with `golang/obs/go.nix`: Go 1.27.4 from the narrow `nix
     `bad-event-missing`, `bad-no-rows` (a metric the seed does not hold), `bad-drifted-field`
     (`severity` for `severity_text`), `bad-dashboard-label`; `ok-rollup-no-window` is green with a warning.
     Each fixture's `expect` file lists what its output must contain.
+
+- `tests/check-test.sh` (run by `tests/run.sh`): `obs check` on every static fixture (same rule and token as `obs query --static`), its flags, an over-budget contract and a broken query red in one run with one summary, an
+  `obs.yaml` mismatch, a folder with no contract; `obs test` green on `tests/fixtures/test/good` and `links/good`, each part red (queries, alerts, links, incidents), the incident flow (red `[incident-uncaught]`, then green after the alert is added),
+  and a folder with no alert. It starts with `tests/compat.sh`. To refresh the golden files (only with the 0.4 binary): `tests/compat.sh <obs-0.4> --capture`.
 
 ## Parity with the real stores (local run)
 
@@ -1684,6 +2054,7 @@ verify mode (both paths, compared), like `OBS_VERIFY_FAST`.
 
 ### Fixture sets (`tests/fixtures/alerts-speed/`)
 
+- Only `n1` is an `obs test` example (green as a whole). `t1` and `t20` are alerts speed fixtures: their `links` part is red by construction (traces without logs or profiles), so do not read them as obs test examples.
 - `n1`, `n20`, `n200`, `n1000`: each has `alerts/` (GrafanaAlertRuleGroup CRs),
   `incidents/` (3 incidents), `contract.yaml`, `seed.4h.yaml` and `seed.24h.yaml`.
   The runner copies one seed to `seed.yaml`.
@@ -2086,6 +2457,10 @@ Tempo: trace-to-logs 2, metric-to-traces 2, span-to-profile 2) and `TestParityPr
 
 ## Not tested
 
+- Cross-architecture byte equality of histogram `_sum` floats: arm64's fused multiply-add already made
+  these differ from amd64 in 0.4. The original full byte goldens run on amd64; the portable legacy
+  goldens pin counter, log and histogram bucket/count bytes on every architecture.
+
 Everything in this tool that no test, measurement or real run has proven, in one place. Each
 item says what is missing; the section it came from has the detail. Everything not listed here
 is MEASURED (a test or a run in this repository) or FROM SOURCE (read in the pinned upstream
@@ -2093,6 +2468,12 @@ source) where its section says so.
 
 **Commands and builds**
 
+- **`obs live` on dev, stage and prod.** No access to any of them; only the local sandbox was read for real (and recorded). The edge cases (two landscapes, a label outside the type, a failing query, an alert that fired before the window, redirects) are tested on hand-written payloads in the shapes the sandbox recorded. Not run against a real remote store: auth headers from the environment on a real gateway, and a very large metrics store (the points/min queries are one `count_over_time` per stored metric name and the series read is one `/api/v1/series` call; a store with more series than its `-search.maxSeries` answers an error, which obs reports as exit 2).
+- **`obs live incidents`: what the recording does not hold.** The recorded Grafana state history holds a real Normal -> Pending and Normal -> Alerting change; its tag-only payload now proves a firing observation, with unknown spans. Optional lossless label maps, Alerting -> Normal, Recovering, overlapping instances, absent transitions, title/ID collisions, future windows and capped responses are tested on synthetic payloads. There is no current-state GET in the command or the incident recording. The `ALERTS` grouped list and raw range-selector path (a vmalert-style ruler) are tested on fake stores only, including bounded per-window reads, responses exceeding 64 MiB, merged chunk evidence and a carried-forward evaluation point that must not count as firing inside a later window.
+- **`obs live usage` on a Prometheus server.** The points/min and series queries are parsed by the Prometheus PromQL parser (v0.315.1) and by MetricsQL in the Go tests, and recorded from VictoriaMetrics; no Prometheus server was run.
+- **`obs live usage` with Tempo's own counters.** The sandbox's VictoriaMetrics does not scrape Tempo, so the `--all-services` bytes/min path was recorded as "no tempo_distributor_bytes_received_total"; the case where the counters exist is tested on a fake store only.
+- **`obs look` on a retained stack (one real docker run, 19 Nov 2026, Grafana 13.3.0).** MEASURED: with `--seed-base`, a second look that adds a rule group leaves both groups in the sandbox folder, a third without it deletes only the removed one, a fourth with no rule left deletes the last (read back from `/api/v1/provisioning/alert-rules`). MEASURED: a look whose seed load failed after the metrics and logs went in (Pyroscope stopped while the profiles loaded; the mark `seed_incomplete` was in the state file) was followed by a look that removed the stores, loaded one new window (no sample older than the new window) and cleared the mark; a third look reused the completed snapshot. NOT TESTED for real: the same failure with Tempo (the code path is the same, the failing store differs); a live incident window that closes while a real setup runs (tested with a fake clock only).
+- **`obs live look`** lists dashboards on the local sandbox only; no screenshots are taken by obs (the calling agent takes them).
 - **Live label-spelling check on MetricsQL result labels.** `obs query --live` models which query-made labels
   survive a query (aggregations, binary operations, `group_left`/`group_right`, scalar sides, set operators) for the
   forms checked against the embedded engine in `src/internal/check/engine_controls_test.go`; other forms may be
@@ -2100,9 +2481,13 @@ source) where its section says so.
 - `obs engines --check-chart` wired into a consumer's CI: the real chart's location in the chart registry is not specified, so the command is tested only on fixture charts ([obs engines --check-chart](#obs-engines---check-chart)). Chart pins in the nightly parity job are in the same position.
 - `obs engines --check-chart` does not check a component whose image the values never set (it uses the chart default), and reads only the image paths listed under its section.
 - `obs engines --check-chart` reads `Chart.yaml` and `values.yaml` only: an engine image set in a template or in another values file is not read, and a digest is compared with the recorded image digest, not resolved against a registry.
-- `obs sandbox up` on aarch64 and macOS, and with podman (the box that ran it has docker only); Tempo and Pyroscope take no data from the seed yet ([`obs sandbox`](#obs-sandbox-the-local-stack-for-people)).
+- `obs sandbox up` on aarch64 and macOS, and with podman (the box that ran it has docker only) ([`obs sandbox`](#obs-sandbox-the-local-stack-for-people)).
+- Actual screenshots of the sandbox's incident markers, alert state and trace/profile panels: the calling LLM must capture and judge them; obs only prepares the stack and prompt.
 - `obs look` with a pull request on GitHub: the agent posts the comment; obs only prints the prompt ([`obs look`](#obs-look-dashboard-screenshots-reviewed-by-the-calling-agent)).
 - aarch64 and macOS builds run in CI; only x86_64 Linux was run by hand.
+
+- `obs test` and `obs check` on a real repository's observability folder and in a consumer's CI: only the fixtures ran. `obs test` was not timed on a 24 h seed with traces or with many alerts.
+- The old commands print no note naming the new commands (a stderr line was allowed; it was left out so that a script capturing both streams sees byte-identical output).
 
 **Source entries and the keep-list**
 

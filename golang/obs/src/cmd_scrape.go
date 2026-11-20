@@ -28,6 +28,7 @@ func (m *multiFlag) String() string     { return strings.Join(*m, ",") }
 func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
 
 func runScrape(args []string, stdout, stderr io.Writer) int {
+	fmt.Fprintln(stderr, "note: obs scrape only feeds the sandbox; obs live usage --target local reads what it stored and compares it with the contract")
 	fs := flag.NewFlagSet("obs scrape", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var targets, labels multiFlag

@@ -220,20 +220,25 @@ logs:
 incidents: [stripe-outage, checkout-slow, adyen-declines]
 `
 
-// incidentDefs are the three prototype incidents; expect lists are filled per set by Incidents.
-var incidentDefs = []struct {
+type incidentDef struct {
 	name, head  string
 	fire, quiet []string // base alert ids (rule uid: slug-file)
 	within      string
-}{
+	// disturbance is the reason printed when no alert of a set fires for the incident: it is then a deliberate
+	// non-incident disturbance (it proves the alerts stay quiet), which `obs test` leaves out of [incident-uncaught].
+	disturbance string
+}
+
+// incidentDefs are the three prototype incidents; expect lists are filled per set by Incidents.
+var incidentDefs = []incidentDef{
 	{"stripe-outage", "story: Stripe returns 502 for 40% of charges for 30 minutes.\nwindow: { start: 90m, duration: 30m }\nchange:\n  - { metric: checkout.charges, where: { payment.provider: stripe, outcome: error }, rate: 1.2/s }\n",
-		[]string{"charge-errors-critical", "charge-errors-warning", "charge-errors-ratio", "charge-errors-increase", "charge-errors-by-provider", "charge-errors-no-window", "metricsql-with-template", "mixed-errors-or-latency", "logs-error-rate", "logs-failed-count", "logs-failed-json", "logs-failed-by-provider"}, nil, "30m"},
+		[]string{"charge-errors-critical", "charge-errors-warning", "charge-errors-ratio", "charge-errors-increase", "charge-errors-by-provider", "charge-errors-no-window", "metricsql-with-template", "mixed-errors-or-latency", "logs-error-rate", "logs-failed-count", "logs-failed-json", "logs-failed-by-provider"}, nil, "30m", ""},
 	{"checkout-slow", "story: The charge route gets 6x slower for 40 minutes.\nwindow: { start: 150m, duration: 40m }\nchange:\n  - { metric: http.server.request.duration, where: { http.route: /charge }, latency_x: 6 }\n",
 		[]string{"latency-p95-warning", "latency-p95-critical", "latency-avg", "mixed-errors-or-latency"},
-		[]string{"charge-errors-critical", "charge-errors-warning", "charge-errors-ratio", "logs-failed-count", "logs-error-rate", "declines-adyen-logs", "traffic-low"}, "30m"},
+		[]string{"charge-errors-critical", "charge-errors-warning", "charge-errors-ratio", "logs-failed-count", "logs-error-rate", "declines-adyen-logs", "traffic-low"}, "30m", "the charge route slows down without any error: proves the error alerts stay quiet"},
 	{"adyen-declines", "story: Adyen declines a burst of cards for 20 minutes.\nwindow: { start: 60m, duration: 20m }\nchange:\n  - { metric: checkout.charges, where: { payment.provider: adyen, outcome: declined }, rate: 0.8/s }\n",
 		[]string{"declines-adyen-logs", "declines-adyen-metric", "logs-slow-unwrap"},
-		[]string{"charge-errors-critical", "charge-errors-ratio", "latency-p95-warning", "traffic-low"}, "30m"},
+		[]string{"charge-errors-critical", "charge-errors-ratio", "latency-p95-warning", "traffic-low"}, "30m", "declined cards are not failures: proves the error alerts stay quiet"},
 }
 
 // Incidents returns the incident files of a set of n alerts, naming alerts by rule uid. Every repeated alert (v2-...)
@@ -257,9 +262,17 @@ func Incidents(n int) map[string]string {
 				}
 			}
 		}
-		out[d.name] = fmt.Sprintf("%sexpect:\n  fire: [%s]\n  quiet: [%s]\n  fire_within: %s\n  resolve_within: 20m\n", d.head, strings.Join(fire, ", "), strings.Join(quiet, ", "), d.within)
+		out[d.name] = fmt.Sprintf("%sexpect:\n  fire: [%s]\n  quiet: [%s]\n  fire_within: %s\n  resolve_within: 20m\n", d.head, strings.Join(fire, ", "), strings.Join(quiet, ", "), d.within) + d.marker(fire)
 	}
 	return out
+}
+
+// marker is the disturbance line of an incident no alert of its set is expected to fire for ("" otherwise).
+func (d incidentDef) marker(fire []string) string {
+	if len(fire) > 0 || d.disturbance == "" {
+		return ""
+	}
+	return fmt.Sprintf("disturbance: '%s'\n", d.disturbance)
 }
 
 func contains(l []string, s string) bool {

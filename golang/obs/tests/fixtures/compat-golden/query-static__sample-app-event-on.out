@@ -1,0 +1,7 @@
+args: query --static --dir sample-app/observability --event-rule on
+exit: 1
+--- stdout
+obs query: sample-app/observability/obs.yaml: versions match the evaluators embedded in this obs; thresholds applied: logs, metrics, traces, profiles
+FAIL alerts/crash-logs/warning.yaml rule crash-logs-warning query A: [logsql-alert-needs-event] a log alert must filter on the event field "durian.cloud/event" (exact :=, phrase, prefix, negated, regex :~ or in(...)); contract.yaml is present
+obs query --static: FAILED: 6 queries (3 logs, 3 metrics), 1 failures, 0 warnings
+--- stderr

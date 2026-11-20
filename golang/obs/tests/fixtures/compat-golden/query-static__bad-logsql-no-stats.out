@@ -1,0 +1,7 @@
+args: query --static --dir bad-logsql-no-stats/observability --seed shared-seed.yaml --base 1700000000
+exit: 1
+--- stdout
+FAIL alerts/failed/critical.yaml rule failed-critical query A: [logsql-alert-needs-stats] a LogsQL alert query is a `stats` query (the datasource calls /select/logsql/stats_query): missing `| stats ...` pipe in the query [{"durian.cloud.service"="checkout"} _time:5m "durian.cloud/event":="checkout.charge.failed"]
+note alerts/failed/critical.yaml rule failed-critical query A: [event-rule] event rule skipped: no contract.yaml
+obs query --static: FAILED: 1 queries (1 logs), 1 failures, 0 warnings
+--- stderr

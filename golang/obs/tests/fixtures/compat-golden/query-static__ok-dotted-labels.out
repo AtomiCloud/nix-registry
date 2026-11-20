@@ -1,0 +1,5 @@
+args: query --static --dir ok-dotted-labels/observability --seed shared-seed.yaml --base 1700000000
+exit: 0
+--- stdout
+obs query --static: ok: 2 queries (2 metrics), 0 failures, 0 warnings
+--- stderr

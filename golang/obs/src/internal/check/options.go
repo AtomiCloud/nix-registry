@@ -34,8 +34,10 @@ type Options struct {
 	// NoOtherContracts turns off reading the repository's other observability/contract.yaml files
 	// (--contracts none). By default every one is read, so a dashboard may use a metric another contract declares.
 	NoOtherContracts bool
-	SpanAttributes   SpanAttributeNames
-	Out              io.Writer
+	// AllowEmpty accepts a folder with no alert and no dashboard (the "empty" rule is off): `obs check` runs the query rules on whatever the folder has.
+	AllowEmpty     bool
+	SpanAttributes SpanAttributeNames
+	Out            io.Writer
 }
 
 func (o *Options) contractPath() string { return filepath.Join(o.Dir, "contract.yaml") }

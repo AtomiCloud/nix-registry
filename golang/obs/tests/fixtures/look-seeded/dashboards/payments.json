@@ -1,0 +1,35 @@
+{
+  "uid": "look-payments",
+  "title": "Seeded payments",
+  "schemaVersion": 41,
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Request rate",
+      "type": "timeseries",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "look-metrics" },
+      "targets": [
+        { "refId": "A", "expr": "sum by(outcome)(rate(checkout_requests_total[1m]))", "legendFormat": "{{outcome}}" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps" } }
+    },
+    {
+      "id": 2,
+      "title": "Failed payment logs",
+      "type": "logs",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "victoriametrics-logs-datasource", "uid": "look-logs" },
+      "targets": [{ "refId": "A", "expr": "\"durian.cloud/event\":=checkout.failed", "queryType": "raw" }]
+    },
+    {
+      "id": 3,
+      "title": "Payment traces",
+      "type": "table",
+      "gridPos": { "x": 0, "y": 8, "w": 24, "h": 8 },
+      "datasource": { "type": "tempo", "uid": "look-traces" },
+      "targets": [{ "refId": "A", "queryType": "traceql", "query": "{resource.service.name = \"checkout\"}" }]
+    }
+  ]
+}

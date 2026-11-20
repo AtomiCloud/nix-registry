@@ -1,0 +1,7 @@
+args: query --static --dir bad-contract-undeclared-stream-field/observability --seed shared-seed.yaml --base 1700000000
+exit: 1
+--- stdout
+FAIL alerts/undeclared-stream-field/critical.yaml rule failed-logs-warning query A: [contract-undeclared-stream-field] stream field "durian.cloud.servise" is not a stream field: the stream fields are the where-from set (durian.cloud.landscape, .platform, .service, .module, service.name, service.namespace, deployment.environment.name, k8s.namespace.name); did you mean "durian.cloud.service"?
+note alerts/undeclared-stream-field/critical.yaml rule failed-logs-warning query A: [event-rule] events=[checkout.charge.failed]
+obs query --static: FAILED: 1 queries (1 logs), 1 failures, 0 warnings
+--- stderr

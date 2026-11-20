@@ -1,0 +1,10 @@
+# Targets for the recorded live fixtures: the local sandbox that `obs look --keep` starts with
+# --port-base 24000 (see the README, "Recording the fixtures").
+targets:
+  local:
+    metrics: http://127.0.0.1:24428
+    logs: http://127.0.0.1:24429
+    traces: http://127.0.0.1:24200
+    grafana: http://127.0.0.1:24000
+estimates:
+  logs: { lines_per_min: 60 }
