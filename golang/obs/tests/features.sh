@@ -534,8 +534,25 @@ if command -v git >/dev/null 2>&1; then
     check "unreadable folder inside alerts/ that is NOT ignored: a failure naming it" 1 'cannot read' 'alerts/build'
     chmod 755 "$FB/alerts/build"
   fi
-  # the selected folder's own ignored copy is pinned by TestSelectedFoldersIgnoredCopyIsNotARepoClash (internal/alerts): the
-  # local parser still runs such a copy as a rule of its own (0.5 behaviour), so no end-to-end row can stay green on it
+  # the selected folder's own ignored copy, with the normal RELATIVE --dir: no false repo clash from obs alerts / obs test
+  # (the copy carries another feature's uid and never fires, so the local run stays green on it, as in 0.5)
+  repo "selected" i nfctag-errors friend-errors friend.invites ""
+  rm -rf "${R:?}/.git"
+  git -C "$R" init -q
+  mkdir -p "$FB/alerts/build"
+  cp -r "$FB/alerts/errors" "$FB/alerts/build/errors"
+  sed -i -e 's/friend-errors/nfctag-errors/' -e 's/> 0.5/> 100000/' "$FB/alerts/build/errors/warning.yaml"
+  printf 'build/\n' >"$R/.gitignore"
+  here0=$PWD
+  cd "$R"
+  run alerts --dir observability/friend --base "$base"
+  check "ignored copy inside the selected folder, relative --dir: obs alerts is green" 0
+  run test --dir observability/friend --base "$base"
+  check "ignored copy inside the selected folder, relative --dir: obs test is green" 0
+  printf '' >"$R/.gitignore"
+  run alerts --dir observability/friend --base "$base"
+  check "the same copy not ignored, relative --dir: obs alerts is [rule-id-clash] (the control)" 2 '[rule-id-clash]'
+  cd "$here0"
 fi
 if command -v git >/dev/null 2>&1; then
   # an alert slug folder named vendor is not pruned: the same uid under alerts/vendor/ in two features clashes

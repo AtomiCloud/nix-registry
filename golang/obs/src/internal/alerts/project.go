@@ -321,8 +321,12 @@ func RepoRuleIDs(p *Project) error {
 	}
 	var mine []ruleids.Rule
 	mineFiles := map[string]bool{}
+	absDir, err := filepath.Abs(p.Dir) // the prune set is by absolute path: --dir observability/friend is the normal form
+	if err != nil {
+		return err
+	}
 	for _, a := range append(append([]Alert(nil), p.Alerts...), p.Records...) {
-		if skip.Skips(p.Dir, filepath.Join(p.Dir, a.File)) {
+		if skip.Skips(absDir, filepath.Join(absDir, a.File)) {
 			continue // an ignored or nested-repository copy inside this folder: not a definition (the local parser is unchanged)
 		}
 		file := contract.RelPath(filepath.Join(p.Dir, a.File))
