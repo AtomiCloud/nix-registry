@@ -251,7 +251,7 @@ func (l *loaded) docProblems(f *Final) (probs, flags []Problem, err error) {
 				}
 				retired := true
 				for _, fe := range in {
-					use.mark(fe, matched)
+					use.mark(fe, sp.name)
 					nsHit[fe.NS.Namespace] = true
 					if !fe.Retired {
 						retired = false
@@ -267,7 +267,7 @@ func (l *loaded) docProblems(f *Final) (probs, flags []Problem, err error) {
 			for _, a := range avoid.scanSpans(s.Text) {
 				inside := false
 				for _, sp := range spans {
-					if sp.start <= a.start && a.end <= sp.end && sp.end-sp.start > a.end-a.start {
+					if sp.start <= a.start && a.end <= sp.end && (sp.end-sp.start > a.end-a.start || !sp.plural) {
 						inside = true
 						break
 					}

@@ -448,16 +448,74 @@ func TestPluralMatching(t *testing.T) {
 	}
 }
 
-// The exact name beats a plural of a shorter name at the same end, and a plural needs a word edge.
-func TestPluralExactAndEdge(t *testing.T) {
+// plural writes the plural endings as English does: -es only after s, x, z, ch, sh; -s after the
+// rest; -ies after a consonant and y. So goes and does are not plurals of Go and Do.
+func TestPluralEnglishEndings(t *testing.T) {
 	dir := fixture(t, "docs/clean")
 	writeTree(t, dir, map[string]string{
-		"docs/domain/extra/UL.yaml":  "namespace: example.org/cooking/extra\npremise: Made-up example; plurals\nlanguage:\n  Box:\n    desc: A closed container.\n",
-		"docs/domain/extra2/UL.yaml": "namespace: example.org/cooking/extra2\npremise: Made-up example; plurals\nlanguage:\n  Boxes:\n    desc: A named set of containers.\n",
-		"docs/a.md":                  "---\ntitle: A\nnamespaces: [example.org/cooking/extra]\n---\n\nBoxes and Boxed and Boxs and a Box.\n",
+		"docs/domain/extra/UL.yaml": "namespace: example.org/cooking/extra\npremise: Made-up example; plurals\nlanguage:\n  Go:\n    desc: A language.\n  Do:\n    desc: An act.\n  Box:\n    desc: A closed container.\n  Church:\n    desc: A building.\n  Day:\n    desc: One turn of the sun.\n",
+		"docs/a.md":                 "---\ntitle: A\nnamespaces: [example.org/cooking/kitchen]\n---\n\nIt goes on and does more. Boxs, Churchs and Dayes are not plurals.\n",
+	})
+	if code, out, errs := docsCheck(t, dir); code != 0 || out != "" {
+		t.Fatalf("exit %d\n%s%s", code, out, errs)
+	}
+	rewrite(t, dir, "docs/a.md", "It goes on and does more. Boxs, Churchs and Dayes are not plurals.", "Gos, Boxes, Churches and Days.")
+	code, out, _ := docsCheck(t, dir)
+	for _, w := range []string{"Gos", "Boxes", "Churches", "Days"} {
+		if !strings.Contains(out, fmt.Sprintf("UL402 %q is a UL word of example.org/cooking/extra", w)) {
+			t.Fatalf("%s is a plural of a word: exit %d\n%s", w, code, out)
+		}
+	}
+}
+
+// A plural needs a word edge after its ending, so Planset is not Plan plus s.
+func TestPluralNeedsWordEdge(t *testing.T) {
+	dir := fixture(t, "docs/clean")
+	writeTree(t, dir, map[string]string{
+		"docs/domain/extra/UL.yaml": "namespace: example.org/cooking/extra\npremise: Made-up example; plurals\nlanguage:\n  Plan:\n    desc: A list of steps.\n",
+		"docs/a.md":                 "---\ntitle: A\nnamespaces: [example.org/cooking/kitchen]\n---\n\nPlanset and Plans.\n",
 	})
 	code, out, errs := docsCheck(t, dir)
-	if code != 1 || strings.Count(out, "\n") != 1 || !strings.Contains(out, "docs/a.md:6: UL402 \"Boxes\" is a UL word of example.org/cooking/extra2; add it to namespaces") {
-		t.Fatalf("Boxes is the word Boxes, not the plural of Box; Boxed and Boxs are neither: exit %d\n%s%s", code, out, errs)
+	if code != 1 || strings.Count(out, "\n") != 1 || !strings.Contains(out, "docs/a.md:6: UL402 \"Plans\" is a UL word of example.org/cooking/extra") {
+		t.Fatalf("exit %d\n%s%s", code, out, errs)
+	}
+}
+
+// The exact name beats a plural of a shorter name at the same end; between two plurals the longer
+// name wins; an exact word is not refused as the plural of an avoided word.
+func TestPluralTiesAndAvoid(t *testing.T) {
+	dir := fixture(t, "docs/clean")
+	writeTree(t, dir, map[string]string{
+		"docs/domain/extra/UL.yaml":  "namespace: example.org/cooking/extra\npremise: Made-up example; plurals\nlanguage:\n  Box:\n    desc: A closed container.\n  Bus:\n    desc: A vehicle.\n  Comment:\n    desc: A remark.\n    avoid: [note]\n",
+		"docs/domain/extra2/UL.yaml": "namespace: example.org/cooking/extra2\npremise: Made-up example; plurals\nlanguage:\n  Boxes:\n    desc: A named set of containers.\n  Buse:\n    desc: A made-up word.\n  Notes:\n    desc: A page of remarks.\n",
+		"docs/a.md":                  "---\ntitle: A\nnamespaces: [example.org/cooking/extra2]\n---\n\nBoxes, buses and Notes.\n",
+	})
+	if code, out, errs := docsCheck(t, dir); code != 0 || out != "" {
+		t.Fatalf("Boxes is the word Boxes, buses is Buse plus s (the longer name), Notes is the word: exit %d\n%s%s", code, out, errs)
+	}
+	rewrite(t, dir, "docs/a.md", "namespaces: [example.org/cooking/extra2]", "namespaces: [example.org/cooking/kitchen]")
+	code, out, _ := docsCheck(t, dir)
+	if code != 1 || strings.Count(out, "\n") != 3 ||
+		!strings.Contains(out, "UL402 \"Boxes\" is a UL word of example.org/cooking/extra2;") ||
+		!strings.Contains(out, "UL402 \"buses\" is a UL word of example.org/cooking/extra2;") ||
+		!strings.Contains(out, "UL402 \"Notes\" is a UL word of example.org/cooking/extra2;") {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+	// the bare avoided word is refused; Notes (the exact word) is not the plural of it
+	rewrite(t, dir, "docs/a.md", "namespaces: [example.org/cooking/kitchen]", "namespaces: [example.org/cooking/extra2]")
+	rewrite(t, dir, "docs/a.md", "Boxes, buses and Notes.", "A note and two Notes.")
+	if code, out, _ := docsCheck(t, dir); code != 1 || strings.Count(out, "\n") != 1 || !strings.Contains(out, "docs/a.md:6: UL403 avoided word \"note\"; write \"Comment\"") {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+}
+
+// English mode: a source that writes a word in the plural is met by a translation that keeps the
+// English word in the singular (the name the source used is the word, not its ending).
+func TestPluralEnglishModeKeepsName(t *testing.T) {
+	dir := fixture(t, "docs/clean")
+	stripTranslations(t, dir)
+	rewrite(t, dir, clnSrc, "> A conflict resolver settles two recipes. Several conflict resolvers can take part.", "> Several conflict resolvers can take part.")
+	if code, out, errs := docsCheck(t, dir, "--translations", "english"); code != 0 {
+		t.Fatalf("exit %d\n%s%s", code, out, errs)
 	}
 }

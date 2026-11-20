@@ -341,15 +341,22 @@ func (f *Final) computeMentions() {
 	}
 }
 
-// span is one whole-word name found in a text: rune offsets [start, end).
+// span is one whole-word name found in a text: rune offsets [start, end). name is the name as
+// defined (lower case, without a plural ending); plural says the text wrote it with one.
 type span struct {
 	start, end int
+	name       string
+	plural     bool
 	ents       []*FEntry
 }
 
-// scanSpans finds the longest whole-word name at each position, with where it sits. A name
-// also matches with a plural ending: -s, -es, or -ies for a name that ends in y (so
-// "conflict resolvers" is the name "conflict resolver"). At the same end, the exact name wins.
+func isVowel(r rune) bool { return strings.ContainsRune("aeiou", r) }
+
+// scanSpans finds the longest whole-word name at each position, with where it sits. A name also
+// matches with a plural ending as English writes it: -es after a name that ends in s, x, z, ch
+// or sh, -ies for a name that ends in a consonant and y, -s after any other name (so "conflict
+// resolvers" is the name "conflict resolver"). The longest match wins; at the same end the exact
+// name beats a plural, and between two plurals the longer name wins.
 func (t *trie) scanSpans(s string) []span {
 	rs := foldRunes(s)
 	var out []span
@@ -371,11 +378,18 @@ func (t *trie) scanSpans(s string) []span {
 		}
 		n := t
 		best := -1
+		bestName, bestPlural := "", false
 		var bestEnts []*FEntry
+		take := func(end int, name string, plural bool, ents []*FEntry) {
+			if end > best || (end == best && (!plural || bestPlural)) {
+				best, bestName, bestPlural, bestEnts = end, name, plural, ents
+			}
+		}
 		for j := i; j < len(rs); j++ {
-			if j > i { // n is the node after rs[i..j-1]: a name ending in y that goes on as "ies"
-				if c := n.next['y']; c != nil && len(c.ents) > 0 && hasAt(j, "ies") && j+3 > best {
-					best, bestEnts = j+3, c.ents
+			// n is the node after rs[i..j-1]: a name that ends in a consonant and y, written as "ies"
+			if j > i && !isVowel(rs[j-1]) {
+				if c := n.next['y']; c != nil && len(c.ents) > 0 && hasAt(j, "ies") {
+					take(j+3, string(rs[i:j])+"y", true, c.ents)
 				}
 			}
 			n = n.next[rs[j]]
@@ -385,23 +399,26 @@ func (t *trie) scanSpans(s string) []span {
 			if len(n.ents) == 0 {
 				continue
 			}
+			last := rs[j]
+			two := ""
+			if j > i {
+				two = string(rs[j-1 : j+1])
+			}
 			switch {
 			case atEnd(j + 1):
-				if j+1 >= best {
-					best, bestEnts = j+1, n.ents
+				take(j+1, string(rs[i:j+1]), false, n.ents)
+			case last == 's' || last == 'x' || last == 'z' || two == "ch" || two == "sh":
+				if hasAt(j+1, "es") {
+					take(j+3, string(rs[i:j+1]), true, n.ents)
 				}
-			case hasAt(j+1, "s"):
-				if j+2 > best {
-					best, bestEnts = j+2, n.ents
-				}
-			case hasAt(j+1, "es"):
-				if j+3 > best {
-					best, bestEnts = j+3, n.ents
+			default:
+				if hasAt(j+1, "s") {
+					take(j+2, string(rs[i:j+1]), true, n.ents)
 				}
 			}
 		}
 		if best > 0 {
-			out = append(out, span{i, best, bestEnts})
+			out = append(out, span{i, best, bestName, bestPlural, bestEnts})
 			i = best
 		} else {
 			i++
