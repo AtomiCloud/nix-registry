@@ -176,6 +176,20 @@ for layout in i ii; do
   check "[$label] obs test names both files of a rule uid clash" 2 '[rule-id-clash]' "$rel_a" "$rel_b"
   run test --dir "$FB" --base "$base" --contracts none
   check "[$label] obs test --contracts none reads this folder only: no rule uid clash" 0 'obs test: ok'
+  # a clash between A and B fails the repository gate (obs check, from any folder) but not a third folder's own runs
+  case "$layout" in i) FC=$R/observability/billing ;; ii) FC=$R/App/Modules/Billing/observability ;; esac
+  feature "$FC" billing billing.charged billing-errors ""
+  run check --dir "$FC"
+  check "[$label] obs check is the repository gate: a clash between two other features fails it from a third" 1 '[rule-id-clash]' "$rel_a" "$rel_b" 'alert rule id clashes across the repository'
+  run alerts --dir "$FC" --base "$base"
+  check "[$label] obs alerts judges its own folder: a clash between A and B does not fail C" 0
+  absent '[rule-id-clash]' || bad "[$label] obs alerts on C printed a clash it is not part of"
+  run test --dir "$FC" --base "$base"
+  check "[$label] obs test judges its own folder: a clash between A and B does not fail C" 0 'obs test: ok'
+  run alerts --dir "$FA" --base "$base"
+  check "[$label] obs alerts on a folder in the clash fails" 2 '[rule-id-clash]' "$rel_a" "$rel_b"
+  run test --dir "$FA" --base "$base"
+  check "[$label] obs test on a folder in the clash fails" 2 '[rule-id-clash]' "$rel_a" "$rel_b"
   repo "ids-ok-$layout" "$layout" nfctag-errors friend-errors friend.invites ""
   run alerts --dir "$FB" --base "$base"
   check "[$label] distinct rule uids: obs alerts is green" 0
@@ -289,6 +303,15 @@ sed -i 's/^service: nfctag/service: root/; s/nfctag.scans/root.scans/' "$R/obser
 rootalert 'sum(rate(friend_invites_total[1m]))'
 run check --dir "$R/observability"
 check "root folder with its own contract: reads the features' metrics (as in 0.5)" 0 'obs check: ok'
+
+# ---- a Git root that is itself named observability: its feature folders are found and rule-id scanned ----------
+R=$work/rootobs/observability
+rm -rf "${work:?}/rootobs"
+mkdir -p "$R/.git"
+feature "$R/nfctag" nfctag nfctag.scans errors-warning ""
+feature "$R/friend" friend friend.invites errors-warning ""
+run check --dir "$R/friend"
+check "root named observability: the other feature's contract is read and the rule uid clash is red" 1 '(service nfctag, read with this one)' '[rule-id-clash]' 'friend/alerts/errors/warning.yaml' 'nfctag/alerts/errors/warning.yaml'
 
 echo "features.sh: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

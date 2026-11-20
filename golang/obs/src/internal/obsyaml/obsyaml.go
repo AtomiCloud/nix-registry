@@ -156,33 +156,45 @@ func Load(dir string) (*File, error) {
 }
 
 // enclosing is the obs.yaml of the nearest observability folder above dir (dir's own folder excluded),
-// as a path in the spelling of dir (relative when dir is), or "" when none has one. The search stops at the
-// Git root. Only folders named observability count: a folder without an obs.yaml of its own reads
-// that folder's, never an unrelated parent's.
+// as a path in the spelling of dir (relative when dir is), or "" when none has one. Only the repository is
+// searched: dir's Git root (dir itself or the nearest ancestor holding .git) is the last folder looked at, and
+// outside a Git repository nothing is read. Only folders named observability count: a folder without an obs.yaml
+// of its own reads that folder's, never an unrelated parent's.
 func enclosing(dir string) string {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return ""
 	}
-	for d := filepath.Dir(abs); ; d = filepath.Dir(d) {
-		if filepath.Base(d) == "observability" {
-			p := filepath.Join(d, FileName)
-			if st, err := os.Stat(p); err == nil && st.Mode().IsRegular() {
-				if filepath.IsAbs(dir) {
-					return p
-				}
-				if wd, err := os.Getwd(); err == nil {
-					if rel, err := filepath.Rel(wd, p); err == nil {
-						return rel
-					}
-				}
-				return p
-			}
+	root := ""
+	for d := abs; ; d = filepath.Dir(d) {
+		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+			root = d
+			break
 		}
-		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil || filepath.Dir(d) == d {
-			return ""
+		if filepath.Dir(d) == d {
+			return "" // no Git repository: no folder above is this repository's
 		}
 	}
+	for d := abs; d != root; {
+		d = filepath.Dir(d)
+		if filepath.Base(d) != "observability" {
+			continue
+		}
+		p := filepath.Join(d, FileName)
+		if st, err := os.Stat(p); err != nil || !st.Mode().IsRegular() {
+			continue
+		}
+		if filepath.IsAbs(dir) {
+			return p
+		}
+		if wd, err := os.Getwd(); err == nil {
+			if rel, err := filepath.Rel(wd, p); err == nil {
+				return rel
+			}
+		}
+		return p
+	}
+	return ""
 }
 
 // Parse parses the bytes of an obs.yaml read from path.

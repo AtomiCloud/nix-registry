@@ -71,3 +71,40 @@ func TestEnclosingStopsAtGitRoot(t *testing.T) {
 		t.Fatalf("an obs.yaml above the Git root was read: %+v %v", f, err)
 	}
 }
+
+// Only the repository is searched: a repository nested under a folder named observability does not read that
+// folder's obs.yaml, from its root or from below it, and outside any Git repository nothing is read.
+func TestEnclosingNeverLeavesTheRepository(t *testing.T) {
+	outer := t.TempDir()
+	put(t, filepath.Join(outer, "observability", "obs.yaml"), matching)
+	repo := filepath.Join(outer, "observability", "repo")
+	put(t, filepath.Join(repo, ".git", "HEAD"), "ref")
+	put(t, filepath.Join(repo, "contract.yaml"), "service: s\n")
+	put(t, filepath.Join(repo, "friend", "contract.yaml"), "service: s\n")
+	for _, d := range []string{repo, filepath.Join(repo, "friend")} {
+		if f, err := Load(d); err != nil || f != nil {
+			t.Fatalf("Load(%s) read an obs.yaml outside the repository: %+v %v", d, f, err)
+		}
+	}
+	// a .git that is a file (a worktree) is a Git root too
+	wt := filepath.Join(outer, "observability", "wt")
+	put(t, filepath.Join(wt, ".git"), "gitdir: elsewhere")
+	if f, err := Load(wt); err != nil || f != nil {
+		t.Fatalf("a worktree root read an obs.yaml outside it: %+v %v", f, err)
+	}
+	// no repository at all: no folder above is this repository's
+	bare := t.TempDir()
+	put(t, filepath.Join(bare, "observability", "obs.yaml"), matching)
+	put(t, filepath.Join(bare, "observability", "friend", "contract.yaml"), "service: s\n")
+	if f, err := Load(filepath.Join(bare, "observability", "friend")); err != nil || f != nil {
+		t.Fatalf("outside a Git repository: %+v %v", f, err)
+	}
+	// the Git root itself named observability: its obs.yaml is the repository's, for a feature below it
+	root := filepath.Join(t.TempDir(), "observability")
+	put(t, filepath.Join(root, ".git", "HEAD"), "ref")
+	put(t, filepath.Join(root, "obs.yaml"), matching)
+	put(t, filepath.Join(root, "friend", "contract.yaml"), "service: s\n")
+	if f, err := Load(filepath.Join(root, "friend")); err != nil || f == nil || !f.Inherited || f.Path != filepath.Join(root, "obs.yaml") {
+		t.Fatalf("a root named observability: %+v %v", f, err)
+	}
+}

@@ -72,3 +72,35 @@ func TestServiceStreamCount(t *testing.T) {
 		t.Fatalf("one with no module, one with a: %d, want 2", got)
 	}
 }
+
+// A Git root that is itself named observability: every folder below it is below an observability folder, so its
+// feature children are discovered and listed (the shared helper both Discover and Folders use).
+func TestRootNamedObservability(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "observability")
+	write(t, filepath.Join(root, ".git", "HEAD"), "ref")
+	own := write(t, filepath.Join(root, "friend", "contract.yaml"), bDoc)
+	other := write(t, filepath.Join(root, "nfctag", "contract.yaml"), aDoc)
+	write(t, filepath.Join(root, "fixtures", "x", "contract.yaml"), "service: x\n")
+	write(t, filepath.Join(root, "nfctag", "alerts", "s", "c.yaml"), "x: 1\n")
+	got, err := Discover(filepath.Dir(own))
+	if err != nil || !reflect.DeepEqual(got, []string{other}) {
+		t.Fatalf("Discover = %v, %v; want [%s]", got, err, other)
+	}
+	fs, err := Folders(filepath.Dir(own))
+	if err != nil || !reflect.DeepEqual(fs, []string{filepath.Dir(own), filepath.Dir(other)}) {
+		t.Fatalf("Folders = %v, %v", fs, err)
+	}
+	for dir, want := range map[string]bool{
+		root:                          true,
+		filepath.Join(root, "a", "b"): true,
+	} {
+		if belowObservability(root, dir) != want {
+			t.Fatalf("belowObservability(%s) != %v", dir, want)
+		}
+	}
+	// a root with another name: a folder outside observability/ is not below one
+	plain := t.TempDir()
+	if belowObservability(plain, filepath.Join(plain, "docs")) || !belowObservability(plain, filepath.Join(plain, "x", "observability")) {
+		t.Fatal("belowObservability on a root with another name")
+	}
+}

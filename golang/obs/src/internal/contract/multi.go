@@ -68,10 +68,11 @@ func Discover(dir string) ([]string, error) {
 }
 
 // belowObservability is true when dir is a folder named observability or any folder below one (between
-// the Git root and dir): the places a contract.yaml belongs to a repository's observability.
+// the Git root and dir, the root itself included): the places a contract.yaml belongs to a repository's
+// observability. A Git root that is itself named observability makes every folder below it one.
 func belowObservability(root, dir string) bool {
-	if filepath.Base(dir) == "observability" {
-		return true // also the Git root's own folder, as obs 0.5 read it
+	if filepath.Base(dir) == "observability" || filepath.Base(root) == "observability" {
+		return true
 	}
 	rel, err := filepath.Rel(root, dir)
 	if err != nil {

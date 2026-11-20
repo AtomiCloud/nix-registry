@@ -81,3 +81,16 @@ func TestFindLimitsToMyFiles(t *testing.T) {
 		t.Fatalf("mine=d.yaml: %v", got)
 	}
 }
+
+// A Git root named observability: the folders of its features are scanned like any others.
+func TestAllInARootNamedObservability(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "observability")
+	put(t, filepath.Join(root, ".git", "HEAD"), "ref")
+	a := filepath.Join(root, "nfctag")
+	put(t, filepath.Join(a, "alerts", "e", "warning.yaml"), alertDoc("errors-warning"))
+	put(t, filepath.Join(root, "friend", "alerts", "e", "warning.yaml"), alertDoc("errors-warning"))
+	cs, err := All(a)
+	if err != nil || len(cs) != 1 {
+		t.Fatalf("clashes = %v, %v; want one", cs, err)
+	}
+}
