@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"html"
+	"io"
 	"maps"
 	"os"
 	"os/exec"
@@ -143,13 +145,13 @@ func runDhBatch(dh, root string, pages []string) (map[string]*dhDoc, []Problem, 
 			if err := dec.Decode(d); err != nil {
 				return nil, nil, fmt.Errorf("dh json printed fewer pages than it was given, or something that is not a page (%s): %v", p, err)
 			}
-			if d.AST != 1 {
+			if d.AST != 1 || d.Source == "" {
 				return nil, nil, fmt.Errorf("dh json printed something that is not a page for %s (no \"ast\": 1)", p)
 			}
 			docs[p] = d
 		}
-		if dec.More() {
-			return nil, nil, fmt.Errorf("dh json printed more pages than it was given")
+		if err := dec.Decode(new(json.RawMessage)); err != io.EOF {
+			return nil, nil, fmt.Errorf("dh json printed more than the pages it was given")
 		}
 		break
 	}
@@ -186,7 +188,7 @@ func dhSegs(d *dhDoc, rel string) ([]Seg, []Problem) {
 	if d.Banner != nil {
 		var sb segBuilder
 		inlineText(d.Banner.Text, &sb, 1)
-		r.add(&sb, 1, 20)
+		r.add(&sb, 1, frontMatterEnd(lines))
 	}
 	r.blocks(d.Blocks, len(lines))
 	return r.segs, append(probs, r.probs...)
@@ -365,6 +367,9 @@ func walkTextKeys(v any, key string, f func(string)) {
 		}
 	case map[string]any:
 		for k, y := range x {
+			if k == "let" {
+				continue // named expressions: data, whatever their keys are called
+			}
 			walkTextKeys(y, k, f)
 		}
 	}
@@ -414,7 +419,7 @@ func inlineText(in []mdInline, sb *segBuilder, line int) {
 	for _, x := range in {
 		switch x.T {
 		case "text":
-			sb.add(x.V, line)
+			sb.add(html.UnescapeString(x.V), line)
 		case "strong", "em", "del", "link", "coderef":
 			inlineText(x.C, sb, line)
 		case "br":
@@ -468,4 +473,17 @@ func outputViaFile(cmd *exec.Cmd) ([]byte, error) {
 		return nil, err
 	}
 	return os.ReadFile(f.Name())
+}
+
+// frontMatterEnd is the line of the closing --- of the front matter (1 when there is none).
+func frontMatterEnd(lines []string) int {
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return 1
+	}
+	for i := 1; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == "---" {
+			return i + 1
+		}
+	}
+	return len(lines)
 }

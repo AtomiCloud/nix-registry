@@ -33,6 +33,9 @@ func mermaidSegs(src string, first int) []Seg {
 		if kind == "flow" && skipFlow.MatchString(t) {
 			continue // styling and click directives hold no label
 		}
+		if kind == "seq" && seqSkip.MatchString(t) {
+			continue
+		}
 		// quoted labels: "text"
 		rest := t
 		for _, m := range quotedRe.FindAllStringSubmatch(t, -1) {
@@ -66,11 +69,18 @@ func mermaidSegs(src string, first int) []Seg {
 				}
 			}
 		case "seq":
+			if seqSkip.MatchString(rest) {
+				continue
+			}
 			if m := participantRe.FindStringSubmatch(rest); m != nil {
 				add(m[2], line)
 			} else if m := noteRe.FindStringSubmatch(rest); m != nil {
 				add(m[1], line)
 			} else if m := messageRe.FindStringSubmatch(rest); m != nil {
+				add(m[1], line)
+			}
+		case "other":
+			if m := relationRe.FindStringSubmatch(rest); m != nil {
 				add(m[1], line)
 			}
 		case "state":
@@ -116,6 +126,8 @@ var (
 	messageRe     = regexp.MustCompile(`^\s*[^\s:]+\s*(?:-->>|->>|-->|->|--x|-x|--\)|-\))[+-]?\s*[^\s:]+\s*:\s*(.+)$`)
 	stateEdgeRe   = regexp.MustCompile(`^\s*[^\s:]+\s*-->\s*[^\s:]+\s*:\s*(.+)$`)
 	stateDescRe   = regexp.MustCompile(`^\s*[A-Za-z0-9_\-]+\s*:\s*(.+)$`)
+	relationRe    = regexp.MustCompile(`^\s*\S+\s*(?:<\|--|\*--|o--|-->|\.\.>|\.\.\|>|--|\.\.)\s*\S+\s*:\s*(.+)$`)
+	seqSkip       = regexp.MustCompile(`(?i)^\s*(links?|properties|details)\b`)
 	stateNoteRe   = regexp.MustCompile(`(?i)^\s*note\s+(?:left of|right of)\s+\S+\s*:\s*(.+)$`)
 	inlineEdgeRes = []*regexp.Regexp{
 		regexp.MustCompile(`--\s+([^->|]+?)\s+-->`),

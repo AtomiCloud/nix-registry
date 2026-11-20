@@ -151,7 +151,7 @@ func TestDhRepeatedProseAndBanner(t *testing.T) {
 // What dh prints is checked: an object that is not a page, or too few or too many pages, is
 // exit 2, never a page silently cleared.
 func TestDhOutputValidated(t *testing.T) {
-	for name, rec := range map[string]string{"empty object": "{}", "no pages": "", "two pages": "{\"ast\":1}{\"ast\":1}"} {
+	for name, rec := range map[string]string{"empty object": "{}", "no pages": "", "two pages": "{\"ast\":1,\"source\":\"x\"}{\"ast\":1,\"source\":\"x\"}", "only ast": "{\"ast\":1}", "stray bracket": "{\"ast\":1,\"source\":\"x\"}}"} {
 		dir := fixture(t, "dh/repeat")
 		rp := filepath.Join(dir, "docs/domain/kitchen/implementation/repeat.dh.md.dhjson")
 		if err := os.WriteFile(rp, []byte(rec), 0o644); err != nil {
@@ -173,5 +173,30 @@ func TestDhRelativePath(t *testing.T) {
 	code, _, errs := te.ul("check", "--root", dir, "--dh", "./"+filepath.Base(bin))
 	if code != 1 {
 		t.Fatalf("exit %d: %s", code, errs)
+	}
+}
+
+// Part data is not prose even under a key called label (a chart's named expressions), the banner
+// is read wherever the front matter ends, and an entity in rich prose is the letter it stands for.
+func TestDhDataEntityAndBanner(t *testing.T) {
+	dir := fixture(t, "dh/data")
+	probs, _, _ := checkLines(t, newEnv(t, dir), dir)
+	const page = "docs/domain/kitchen/implementation/data.dh.md"
+	want := []string{page + ":14: UL403", page + ":16: UL403"} // the banner; the entity paragraph (a line is found by its text, and the source spells the word differently, so it names the start of its block)
+	if strings.Join(probs, "|") != strings.Join(want, "|") {
+		t.Fatalf("got %v\nwant %v", probs, want)
+	}
+}
+
+// A page whose front matter is not YAML still goes to dh, which refuses it with its line.
+func TestDhUnreadableFrontMatter(t *testing.T) {
+	dir := fixture(t, "dh/repeat")
+	writeTree(t, dir, map[string]string{
+		"docs/b.dh.md":       "---\nnamespaces: [unclosed\n---\n\n```terminal\n$ x\n```\n",
+		"docs/b.dh.md.dherr": "docs/b.dh.md:2: the front matter is not valid YAML: close the list with ]\n",
+	})
+	probs, _, code := checkLines(t, newEnv(t, dir), dir)
+	if code != 1 || !strings.Contains(strings.Join(probs, " "), "docs/b.dh.md:2: UL410") {
+		t.Fatalf("exit %d: %v", code, probs)
 	}
 }

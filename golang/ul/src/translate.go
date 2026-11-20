@@ -28,7 +28,7 @@ func (l *loaded) translationProblems(f *Final, pages []*page, uses map[string]*p
 		}
 		srcRel := path.Clean(path.Join(path.Dir(t.rel), t.tr.source))
 		use := uses[srcRel]
-		if use == nil {
+		if use == nil || !strings.HasSuffix(srcRel, ".md") {
 			probs = append(probs, Problem{Code: "UL503", File: t.rel, Line: max(t.tr.line, 1),
 				Message: fmt.Sprintf("the source %s is not a page under docs/ with a namespaces list", t.tr.source)})
 			continue

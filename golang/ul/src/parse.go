@@ -314,7 +314,7 @@ func (p *parser) allowedExtra() string {
 }
 
 // langRe is the shape of a language code: a BCP 47 tag such as es, pt or zh-Hans.
-var langRe = regexp.MustCompile(`(?i)^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$`)
+var langRe = regexp.MustCompile(`(?i)^[a-z]{2,3}(-[a-z]{4})?(-([a-z]{2}|[0-9]{3}))?$`)
 
 // translations reads the translations field: a mapping of language code to one fixed term
 // (UL110 refuses anything else).
@@ -328,7 +328,13 @@ func (p *parser) translations(word string, n *yaml.Node) []Translation {
 		return nil
 	}
 	var out []Translation
+	seenLang := map[string]bool{}
 	for _, kv := range p.pairs(n, word+": translations") {
+		if seenLang[strings.ToLower(kv.key)] {
+			p.add("UL110", kv.knode.Line, "%s: translations: %q repeats a language that is already there (tags match ignoring case)", word, kv.key)
+			continue
+		}
+		seenLang[strings.ToLower(kv.key)] = true
 		if !langRe.MatchString(kv.key) {
 			p.add("UL110", kv.knode.Line, "%s: translations: %q is not a language code such as es, pt or zh-Hans", word, kv.key)
 			continue

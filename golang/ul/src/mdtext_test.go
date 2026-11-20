@@ -41,6 +41,8 @@ func TestMermaidLabels(t *testing.T) {
 		{"seq", "sequenceDiagram\n  participant A as Alice the cook\n  A->>B: Hello there\n  Note over A,B: A note text\n", "Alice the cook | Hello there | A note text"},
 		{"state", "stateDiagram-v2\n  [*] --> Still\n  Still --> Moving : go now\n  Moving : the moving state\n", "go now | the moving state"},
 		{"pie", "pie title Pets\n  \"Dogs\" : 386\n", "Dogs"},
+		{"class", "classDiagram\n  Animal <|-- Duck : is a\n  Animal --> Food : eats\n", "is a | eats"},
+		{"seq links", "sequenceDiagram\n  participant A\n  links A: {\"Dashboard\": \"https://x.test/griddle\"}\n  A->>B: Hi\n", "Hi"},
 	}
 	for _, c := range cases {
 		var parts []string

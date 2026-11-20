@@ -89,7 +89,7 @@ func readFrontMatter(fm []byte) (p page, ok bool) {
 // loadPages reads the doc pages: front matter first, then the prose of each page (Markdown
 // with CommonMark here, .dh.md through dh).
 func (l *loaded) loadPages() (pages []*page, probs []Problem, err error) {
-	var dhRels []string
+	var dhRels, probe []string
 	byRel := map[string]*page{}
 	for _, rel := range l.scan.Docs {
 		i18n := strings.HasPrefix(rel, i18nDir)
@@ -104,6 +104,9 @@ func (l *loaded) loadPages() (pages []*page, probs []Problem, err error) {
 		fm, body, bodyLine := splitFrontMatter(data)
 		p, ok := readFrontMatter(fm)
 		if !ok {
+			if len(fm) > 0 && strings.HasSuffix(rel, ".dh.md") && !frontMatterParses(fm) {
+				probe = append(probe, rel) // dh refuses it, with its line
+			}
 			continue
 		}
 		p.rel, p.i18n = rel, i18n
@@ -118,8 +121,8 @@ func (l *loaded) loadPages() (pages []*page, probs []Problem, err error) {
 		pages = append(pages, &pg)
 		byRel[rel] = &pg
 	}
-	if len(dhRels) > 0 {
-		docs, dprobs, derr := runDh(l.opts.dh, l.root, dhRels)
+	if len(dhRels)+len(probe) > 0 {
+		docs, dprobs, derr := runDh(l.opts.dh, l.root, append(slices.Clone(dhRels), probe...))
 		if derr != nil {
 			return nil, nil, derr
 		}
@@ -418,11 +421,20 @@ func introSegs(v *yaml.Node) []Seg {
 	if v.Style&yaml.LiteralStyle == 0 {
 		return []Seg{plainSeg(v.Value, v.Line)}
 	}
-	var out []Seg
+	var sb segBuilder
 	for i, l := range strings.Split(v.Value, "\n") {
 		if strings.TrimSpace(l) != "" {
-			out = append(out, plainSeg(l, v.Line+1+i))
+			sb.space()
+			sb.add(l, v.Line+1+i)
 		}
 	}
-	return out
+	if s, ok := sb.seg(); ok {
+		return []Seg{s}
+	}
+	return nil
+}
+
+func frontMatterParses(fm []byte) bool {
+	var n yaml.Node
+	return yaml.Unmarshal(fm, &n) == nil
 }

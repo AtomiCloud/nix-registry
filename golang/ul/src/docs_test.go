@@ -267,7 +267,7 @@ func TestUnusedNamespaceFlag(t *testing.T) {
 	dir := cleanWith(t, map[string]string{
 		"docs/a.md":               "---\ntitle: A\nnamespaces: [example.org/cooking/kitchen, example.org/cooking/pantry]\n---\n\nThe Frying pan here, nothing of the pantry.\n",
 		"docs/domain/std/UL.yaml": "namespace: example.org/engineering/standards/std\npremise: A standard\nlanguage:\n  Rule:\n    desc: A rule.\n",
-		"docs/b.md":               "---\ntitle: B\nnamespaces: [example.org/engineering/standards/std]\n---\n\nNo rule words.\n",
+		"docs/b.md":               "---\ntitle: B\nnamespaces: [example.org/engineering/standards/std]\n---\n\nNothing here.\n",
 	})
 	code, out, errs := docsCheck(t, dir)
 	if code != 0 || out != "" {
@@ -359,6 +359,33 @@ func TestConceptOrderIndependent(t *testing.T) {
 	// the pantry defines its own Fry pan; the kitchen's alias is also Fry pan
 	code, out, _ := docsCheck(t, dir)
 	if code != 1 || !strings.Contains(out, "docs/b.md:3: UL409") {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+}
+
+func TestTranslationTagRules(t *testing.T) {
+	for _, tag := range []string{"en-12", "ES", "english", "zh-Hans-CN-x"} {
+		want := tag == "ES"
+		dir := t.TempDir()
+		writeTree(t, dir, map[string]string{"UL.yaml": "namespace: example.org/a/b\npremise: P\nlanguage:\n  Oven:\n    desc: A box.\n    translations:\n      " + tag + ": horno\n"})
+		code, out, _ := docsCheck(t, dir)
+		if (code == 0) != want {
+			t.Errorf("tag %s: exit %d (accepted %v, want %v)\n%s", tag, code, code == 0, want, out)
+		}
+	}
+	dir := t.TempDir()
+	writeTree(t, dir, map[string]string{"UL.yaml": "namespace: example.org/a/b\npremise: P\nlanguage:\n  Oven:\n    desc: A box.\n    translations:\n      es: horno\n      ES: forno\n"})
+	if code, out, _ := docsCheck(t, dir); code != 1 || !strings.Contains(out, "UL110") || !strings.Contains(out, "repeats a language") {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+}
+
+// The source of a translation is a page, never the overview file of a context.
+func TestTranslationSourceIsAPage(t *testing.T) {
+	dir := fixture(t, "docs/clean")
+	writeTree(t, dir, map[string]string{"docs/domain/kitchen/overview.yaml": "intro: The Oven.\n"})
+	rewrite(t, dir, clnTr, "source: ../../../../../domain/kitchen/model/frying-pan.md", "source: ../../../../../domain/kitchen/overview.yaml")
+	if code, out, _ := docsCheck(t, dir); code != 1 || !strings.Contains(out, "UL503") {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
 }

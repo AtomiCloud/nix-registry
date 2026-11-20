@@ -1,0 +1,124 @@
+{
+  "ast": 1,
+  "format": 8,
+  "source": "---\ntitle: Data\nconcept: data\ndescription: Part data that is not prose, and an entity in prose.\nnamespaces:\n  - example.org/cooking/kitchen\ntype: algorithm\ncode:\n  - shop/src/a.ts#a\n  - shop/src/b.ts#b\n  - shop/src/c.ts#c\nbanner:\n  kind: info\n  text: A banner with a griddle.\n---\n\nAn entity: a gr&#105;ddle.\n\n```chart\nkind: line\ntitle: Chart title\nlet: { griddle: \"range(1, 4)\", label: griddle }\nx: { label: n, values: [1, 2, 3] }\ny: { label: count }\nseries:\n  - name: Counts\n    data: [1, 2, 3]\n```\n",
+  "path": "testdata/dh/data/docs/domain/kitchen/implementation/data.dh.md",
+  "frontMatter": {
+    "title": "Data",
+    "concept": "data",
+    "description": "Part data that is not prose, and an entity in prose.",
+    "namespaces": [
+      "example.org/cooking/kitchen"
+    ],
+    "type": "algorithm",
+    "code": [
+      "shop/src/a.ts#a",
+      "shop/src/b.ts#b",
+      "shop/src/c.ts#c"
+    ],
+    "banner": {
+      "kind": "info",
+      "text": "A banner with a griddle."
+    }
+  },
+  "title": "Data",
+  "banner": {
+    "kind": "info",
+    "text": [
+      {
+        "t": "text",
+        "v": "A banner with a griddle."
+      }
+    ]
+  },
+  "blocks": [
+    {
+      "type": "markdown",
+      "line": 16,
+      "md": [
+        {
+          "t": "p",
+          "c": [
+            {
+              "t": "text",
+              "v": "An entity: a gr&#105;ddle."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "chart",
+      "id": null,
+      "line": 19,
+      "attrs": {},
+      "llm": "```chart\nkind: line\ntitle: Chart title\nlet: { griddle: \"range(1, 4)\", label: griddle }\nx: { label: n, values: [1, 2, 3] }\ny: { label: count }\nseries:\n  - name: Counts\n    data: [1, 2, 3]\n```",
+      "llmKind": "data",
+      "chart": {
+        "kind": "line",
+        "title": "Chart title",
+        "let": {
+          "griddle": "range(1, 4)",
+          "label": "griddle"
+        },
+        "x": {
+          "label": "n",
+          "values": [
+            1,
+            2,
+            3
+          ]
+        },
+        "y": {
+          "label": "count"
+        },
+        "series": [
+          {
+            "name": "Counts",
+            "data": [
+              1,
+              2,
+              3
+            ]
+          }
+        ]
+      },
+      "controls": [],
+      "initial": {
+        "x": [
+          1,
+          2,
+          3
+        ],
+        "series": [
+          {
+            "name": "Counts",
+            "data": [
+              1,
+              2,
+              3
+            ]
+          }
+        ],
+        "vars": {
+          "griddle": [
+            1,
+            2,
+            3,
+            4
+          ],
+          "label": [
+            1,
+            2,
+            3,
+            4
+          ]
+        }
+      }
+    }
+  ],
+  "headings": [],
+  "problems": [],
+  "highlighted": false,
+  "llm": "---\ntitle: Data\nconcept: data\ndescription: Part data that is not prose, and an entity in prose.\nnamespaces:\n  - example.org/cooking/kitchen\ntype: algorithm\nbanner:\n  kind: info\n  text: A banner with a griddle.\nsource: testdata/dh/data/docs/domain/kitchen/implementation/data.dh.md\n---\n<!-- Made by dh llm from the source; nobody edits this file. -->\n\nAn entity: a gr&#105;ddle.\n\n```chart\nkind: line\ntitle: Chart title\nlet: { griddle: \"range(1, 4)\", label: griddle }\nx: { label: n, values: [1, 2, 3] }\ny: { label: count }\nseries:\n  - name: Counts\n    data: [1, 2, 3]\n```\n"
+}
