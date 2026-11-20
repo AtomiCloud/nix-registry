@@ -326,3 +326,16 @@ func TestGenerationPreflightHonorsSelectedLanguages(t *testing.T) {
 		t.Errorf("check must validate every target: rc=%d %s", rc, out)
 	}
 }
+
+func TestSelectedGenerationRetainsSiblingNamespaceContext(t *testing.T) {
+	root := repo(t, map[string]string{
+		"go.mod":                             "module example.com/selected\ngo 1.24\n",
+		"Shop.csproj":                        "<Project/>",
+		"observability/contract.yaml":        "service: shop\ngenerate: [{lang: go, out: gen/go}, {lang: dotnet, out: gen/dotnet}]\n",
+		"Orders/observability/contract.yaml": "service: shop\ngenerate: [{lang: dotnet, out: gen}]\n",
+		"Other/observability/contract.yaml":  "service: other\ngenerate: [{lang: dotnet, out: gen, namespace: Shop.Orders.Signals}]\n",
+	})
+	if rc, out := obs("gen", "--lang", "go", "--dir", filepath.Join(root, "observability")); rc == 0 || !strings.Contains(out, "generate-namespace-clash") || !strings.Contains(out, "Orders/observability/contract.yaml") || !strings.Contains(out, "Other/observability/contract.yaml") {
+		t.Errorf("selected gen must retain the full namespace context for valid siblings: rc=%d %s", rc, out)
+	}
+}

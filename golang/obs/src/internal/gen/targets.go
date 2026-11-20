@@ -110,6 +110,16 @@ func signalFilename(lang string) string {
 // TargetClashes compares resolved folders and every full generated destination
 // across contracts. A single contract retains shared-folder/different-file support.
 func TargetClashes(cs []*contract.Contract) []string {
+	return TargetClashesForLanguages(cs, nil, nil)
+}
+
+// TargetClashesForLanguages selects primary targets without dropping the full
+// contract context needed to compute valid siblings' default namespaces.
+func TargetClashesForLanguages(cs []*contract.Contract, primary *contract.Contract, langs []string) []string {
+	want := map[string]bool{}
+	for _, lang := range langs {
+		want[lang] = true
+	}
 	names := targetContractNames(cs)
 	type owner struct {
 		file, lang string
@@ -142,6 +152,9 @@ func TargetClashes(cs []*contract.Contract) []string {
 			checkFile(c, "", filepath.Join(filepath.Dir(c.File), file))
 		}
 		for index, target := range c.Generate {
+			if c == primary && len(want) > 0 && !want[target.Lang] {
+				continue
+			}
 			current := owner{names[c], target.Lang, c}
 			if err := CheckInterfaces(target.Lang, target.Interfaces); err != nil {
 				issues = append(issues, fmt.Sprintf("[generate-interfaces] contract %s: %v", current.file, err))

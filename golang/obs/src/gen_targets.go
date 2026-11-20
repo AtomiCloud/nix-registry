@@ -8,16 +8,6 @@ import (
 // generationTargetIssues is separate from discovery so every command shares the
 // same target resolution while contract discovery can grow with repository layouts.
 func generationTargetIssues(primary *contract.Contract, langs []string) ([]string, error) {
-	if len(langs) > 0 {
-		selected := *primary
-		selected.Generate = nil
-		for _, target := range primary.Generate {
-			if contains(langs, target.Lang) {
-				selected.Generate = append(selected.Generate, target)
-			}
-		}
-		primary = &selected
-	}
 	paths, err := gen.TargetContractPaths(primary)
 	if err != nil {
 		return nil, err
@@ -33,5 +23,5 @@ func generationTargetIssues(primary *contract.Contract, langs []string) ([]strin
 		}
 		contracts = append(contracts, other)
 	}
-	return gen.TargetClashes(contracts), nil
+	return gen.TargetClashesForLanguages(contracts, primary, langs), nil
 }
