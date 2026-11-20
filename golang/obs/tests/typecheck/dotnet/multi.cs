@@ -24,6 +24,14 @@ switch (scenario)
         Check(Port.Install(Shop.Orders.Signals.SignalTables.Contract, Shop.Orders.Signals.SignalTables.Metrics, Shop.Orders.Signals.SignalTables.EventLevels, Shop.Orders.Signals.SignalTables.Spans).IsSuccess, "default orders namespace");
         Check(Port.Install(Shop.Friends.Signals.SignalTables.Contract, Shop.Friends.Signals.SignalTables.Metrics, Shop.Friends.Signals.SignalTables.EventLevels, Shop.Friends.Signals.SignalTables.Spans).IsSuccess, "default friends namespace");
         Check(Log.Error(Shop.Orders.Signals.Events.Failed).IsSuccess && Log.Error(Shop.Friends.Signals.Events.Failed).IsSuccess, "both same-service features emit"); break;
+    case "refused-metric":
+    case "refused-event":
+    case "refused-span":
+        var refusedSignal = scenario == "refused-metric" ? Port.Add(CheckoutSignals.Names.CheckoutInvoices, null!) : scenario == "refused-event" ? Log.Error(null!) : Port.StartSpan(CheckoutSignals.Spans.CheckoutQueueConsume, null!);
+        Check(!refusedSignal.IsSuccess, "first signal refused");
+        Check(Port.Install(new("boot-extra:contract.yaml", "x"), new Dictionary<string, DurianSignalMetricInfo>(), new Dictionary<string, string> { { "boot.extra", "error" } }, new Dictionary<string, DurianSignalSpanInfo>()).IsSuccess, "refused signal must leave registration open");
+        Check(Log.Error(CheckoutSignals.Events.ChargeFailed).IsSuccess, "real signal after boot registration");
+        Check(Port.Dropped.GetValueOrDefault("register") == 0 && Port.Dropped.GetValueOrDefault("poisoned") == 0, "no poison after refused signal"); break;
     case "merged":
         Check(Log.Error(CheckoutSignals.Events.ChargeFailed).IsSuccess, "checkout event"); Check(Log.Error(BillingSignals.Events.ChargeFailed).IsSuccess, "billing event");
         Check(Port.Add(CheckoutSignals.Names.CheckoutInvoices, new CheckoutSignals.CheckoutInvoicesLabels(DurianSignalDate<CheckoutSignals.BillingDaySpec>.Of(new DateOnly(2026, 11, 17)), CheckoutSignals.Provider.Stripe)).IsSuccess, "checkout metric");
@@ -46,7 +54,7 @@ switch (scenario)
         var forged = (Event<ErrorLevel>)typeof(Event<ErrorLevel>).GetConstructor(System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance, [typeof(string)])!.Invoke(["forged.fresh"]);
         Check(Log.Error(forged).IsSuccess, "fresh forgery admitted: lint only"); break;
 }
-if (!new[] { "merged", "repeat", "fresh-forgery", "default-features" }.Contains(scenario))
+if (!new[] { "merged", "repeat", "fresh-forgery", "default-features" }.Contains(scenario) && !scenario.StartsWith("refused-", StringComparison.Ordinal))
 {
     var r = Port.Install(contract, metrics, events, spans); Check(!r.IsSuccess, "registration accepted");
     if (scenario.StartsWith("duplicate", StringComparison.Ordinal) || scenario == "cross-kind") Check(r.Error.Contains("checkout.Signals:observability/contract.yaml", StringComparison.Ordinal) && r.Error.Contains("other:contract.yaml", StringComparison.Ordinal), r.Error);

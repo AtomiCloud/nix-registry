@@ -46,6 +46,49 @@ void main(List<String> args) {
     spans: spans,
   );
   switch (scenario) {
+    case 'refused-metric':
+    case 'refused-event':
+    case 'refused-span':
+      Result<bool> refused;
+      if (scenario == 'refused-metric') {
+        refused = DurianSignalPort.add(
+          checkout.checkoutCharges,
+          const checkout.CheckoutChargeDurationLabels(
+            provider: checkout.Provider.stripe,
+            outcome: checkout.Outcome.ok,
+          ),
+        );
+      } else if (scenario == 'refused-event') {
+        refused = error(const ForgedEvent());
+      } else {
+        refused = DurianSignalPort.startSpan<DurianSignalLabels>(
+          checkout.checkoutQueueConsumeSpan,
+          const checkout.CheckoutChargeDurationLabels(
+            provider: checkout.Provider.stripe,
+            outcome: checkout.Outcome.ok,
+          ),
+        );
+      }
+      check(refused is DurianSignalErr<bool>, 'first signal refused');
+      check(
+        DurianSignalPort.install(
+          contract: 'boot-extra:contract.yaml',
+          hash: 'x',
+          metrics: {},
+          events: {'boot.extra': 'error'},
+          spans: {},
+        ) is DurianSignalOk<DurianSignalPort>,
+        'refused signal must leave registration open',
+      );
+      check(
+        error(checkout.chargeFailedEvent) is DurianSignalOk<bool>,
+        'real signal after boot registration',
+      );
+      check(
+        port.dropped['register'] == 0 && port.dropped['poisoned'] == 0,
+        'no poison after refused signal',
+      );
+      break;
     case 'merged':
       check(
         error(checkout.chargeFailedEvent) is DurianSignalOk<bool>,
@@ -155,7 +198,8 @@ void main(List<String> args) {
       );
       break;
   }
-  if (!['merged', 'repeat', 'fresh-forgery'].contains(scenario)) {
+  if (!['merged', 'repeat', 'fresh-forgery'].contains(scenario) &&
+      !scenario.startsWith('refused-')) {
     final r = install();
     check(r is DurianSignalErr<DurianSignalPort>, 'registration accepted');
     if (r is DurianSignalErr<DurianSignalPort> &&

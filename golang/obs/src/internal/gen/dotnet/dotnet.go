@@ -23,6 +23,9 @@ func (generator) Lang() string { return "dotnet" }
 // Files returns Signals.g.cs.
 func (generator) Files(c *contract.Contract, o gen.Options) ([]gen.File, error) {
 	ns := gen.DotnetNamespace(c, o.Namespace)
+	if _, err := gen.CanonicalDotnetNamespace(ns); err != nil {
+		return nil, fmt.Errorf("%s: %w", gen.ContractPath(c), err)
+	}
 	interfaces := o.Interfaces
 	if interfaces == "" {
 		interfaces = "AtomiCloud.Diene.Interfaces"

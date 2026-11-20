@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
-	"strings"
 
 	"github.com/AtomiCloud/obs/internal/contract"
 )
@@ -40,24 +39,29 @@ func DotnetNamespace(c *contract.Contract, namespace string) string {
 // TargetClashes checks the resolved destinations of all contracts, independently
 // of which feature is being generated. No manifest reads or generation is needed.
 func TargetClashes(cs []*contract.Contract) []string {
-	type owner struct{ file, lang string }
+	type owner struct {
+		file, lang string
+		contract   *contract.Contract
+	}
 	outputs := map[string]owner{}
 	namespaces := map[string]owner{}
 	var issues []string
 	for _, c := range cs {
-		for _, target := range c.Generate {
-			current := owner{ContractPath(c), target.Lang}
+		for index, target := range c.Generate {
+			current := owner{ContractPath(c), target.Lang, c}
 			destination := resolve(filepath.Join(Root(filepath.Dir(c.File)), filepath.FromSlash(target.Out)))
-			if previous, exists := outputs[destination]; exists {
+			if previous, exists := outputs[destination]; exists && previous.contract != c {
 				issues = append(issues, fmt.Sprintf("[generate-out-clash] contract %s (%s) and contract %s (%s) resolve to the same out: folder %s", previous.file, previous.lang, current.file, current.lang, contract.RelPath(filepath.Join(destination, "."))))
 			} else {
 				outputs[destination] = current
 			}
 			if target.Lang == "dotnet" {
-				ns := DotnetNamespace(c, target.Module)
-				// Escaped C# identifiers name the same namespace as their unescaped spelling.
-				ns = strings.ReplaceAll(ns, "@", "")
-				if previous, exists := namespaces[ns]; exists {
+				ns, err := CanonicalDotnetNamespace(DotnetNamespace(c, target.Module))
+				if err != nil {
+					issues = append(issues, fmt.Sprintf("[generate-namespace] contract %s generate[%d].%v", current.file, index, err))
+					continue
+				}
+				if previous, exists := namespaces[ns]; exists && previous.contract != c {
 					issues = append(issues, fmt.Sprintf("[generate-namespace-clash] contract %s and contract %s resolve to the same .NET namespace %s", previous.file, current.file, ns))
 				} else {
 					namespaces[ns] = current

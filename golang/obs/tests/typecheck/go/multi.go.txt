@@ -20,6 +20,20 @@ func main() {
 	scenario := os.Args[1]
 	t := obs.DurianSignalTables{Contract: "example.com/checkout:observability/contract.yaml", Hash: "sha256:HASH", Metrics: signals.MetricTable, Events: signals.EventTable, Spans: signals.SpanTable}
 	switch scenario {
+	case "refused-metric", "refused-event", "refused-span":
+		var refused error
+		switch scenario {
+		case "refused-metric":
+			refused = obs.Add(context.Background(), obs.NewCounter[struct{}]("not.in.contract"), struct{}{})
+		case "refused-event":
+			refused = obs.Error(context.Background(), obs.NewEvent[obs.ErrorLevel]("not.in.contract"))
+		case "refused-span":
+			refused = obs.StartSpan(context.Background(), obs.NewSpan[struct{}]("checkout.queue.consume", "consumer"), struct{}{})
+		}
+		check(refused != nil, "first signal must be refused")
+		check(obs.Register(obs.DurianSignalTables{Contract: "boot-extra:contract.yaml", Hash: "x", Events: map[string]string{"boot.extra": "error"}}) == nil, "refused signal must leave registration open")
+		check(obs.Error(context.Background(), signals.ChargeFailed) == nil, "real signal after boot registration")
+		check(obs.Dropped("register") == 0 && obs.Dropped("poisoned") == 0, "no poison after refused signal")
 	case "merged":
 		check(obs.Error(context.Background(), signals.ChargeFailed) == nil, "checkout event")
 		check(obs.Error(context.Background(), billing.ChargeFailed) == nil, "billing event")
@@ -68,7 +82,7 @@ func main() {
 		check(obs.Register(t) == nil, "fresh names admitted before first signal")
 		check(obs.Error(context.Background(), obs.NewEvent[obs.ErrorLevel]("forged.fresh")) == nil, "fresh forgery admitted: lint only")
 	}
-	if scenario != "merged" && scenario != "repeat" && scenario != "fresh-forgery" {
+	if scenario != "merged" && scenario != "repeat" && scenario != "fresh-forgery" && !strings.HasPrefix(scenario, "refused-") {
 		err := obs.Register(t)
 		check(err != nil, "registration accepted")
 		if strings.HasPrefix(scenario, "duplicate") || scenario == "cross-kind" {

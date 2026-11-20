@@ -133,9 +133,14 @@ exports.tracer = given => {
   return {
     run: (name, attributes, fn) => {
       if (poisoned) counts.poisoned += 1;
-      else if (own(table, name)) closed = true;
       const keys = !poisoned && own(table, name) ? table[name].keys : [];
-      for (const k of Object.keys(attributes)) if (!keys.includes(k)) counts.unknown_key += 1;
+      let valid = !poisoned && own(table, name);
+      for (const k of Object.keys(attributes))
+        if (!keys.includes(k)) {
+          counts.unknown_key += 1;
+          valid = false;
+        }
+      if (valid) closed = true;
       return fn({ set: () => ok(undefined), end: () => ok(undefined) });
     },
   };

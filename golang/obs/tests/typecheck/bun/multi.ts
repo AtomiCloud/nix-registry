@@ -16,6 +16,35 @@ let table: { contract: string; hash: string; metrics: unknown; events: EventTabl
 const real = logger(checkout.eventTable),
   other = logger(billing.eventTable);
 switch (scenario) {
+  case 'refused-metric':
+  case 'refused-event':
+  case 'refused-span': {
+    if (scenario === 'refused-metric')
+      check(
+        !metrics<checkout.MetricLabels>(checkout.metricTable).counter(
+          'not.in.contract' as typeof checkout.CheckoutInvoices,
+          { billing_day: '2026-11-17' as checkout.BillingDay, provider: 'stripe' },
+        ).ok,
+        'first metric refused',
+      );
+    if (scenario === 'refused-event')
+      check(!real.error({ name: 'not.in.contract', level: 'error' }).ok, 'first event refused');
+    if (scenario === 'refused-span') {
+      const attrs = { order_id: 'o', unexpected: 'x' };
+      tracer<checkout.SpanAttrs>(checkout.spanTable).run(checkout.CheckoutQueueConsume, attrs, () => ({
+        ok: true,
+        value: undefined,
+      }));
+      check(dropped('unknown_key') === 1, 'first span refused');
+    }
+    check(
+      register({ contract: 'boot-extra:contract.yaml', hash: 'x', events: { 'boot.extra': 'error' } }).ok,
+      'refused signal must leave registration open',
+    );
+    check(real.error(checkout.ChargeFailed).ok, 'real signal after boot registration');
+    check(dropped('register') === 0 && dropped('poisoned') === 0, 'no poison after refused signal');
+    break;
+  }
   case 'merged':
     check(real.error(checkout.ChargeFailed).ok, 'checkout event');
     check(other.error(billing.ChargeFailed).ok, 'billing event');
@@ -108,7 +137,7 @@ switch (scenario) {
     break;
   }
 }
-if (!['merged', 'repeat', 'fresh-forgery'].includes(scenario)) {
+if (!['merged', 'repeat', 'fresh-forgery'].includes(scenario) && !scenario.startsWith('refused-')) {
   const r = register(table);
   check(!r.ok, 'registration accepted');
   if (!r.ok && (scenario.startsWith('duplicate') || scenario === 'cross-kind'))

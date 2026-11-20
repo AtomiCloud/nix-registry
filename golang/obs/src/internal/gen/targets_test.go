@@ -40,3 +40,29 @@ func TestOutputTargetClashesAcrossLanguages(t *testing.T) {
 		t.Fatalf("symlink output alias must clash: %v", got)
 	}
 }
+
+func TestDotnetNamespaceSpelling(t *testing.T) {
+	for _, valid := range []string{"Shop.Signals", "Shop.@Signals", "@class.Signals", "Shop.Σήματα"} {
+		canonical, err := gen.CanonicalDotnetNamespace(valid)
+		if err != nil {
+			t.Errorf("valid %q: %v", valid, err)
+		}
+		if valid == "Shop.@Signals" && canonical != "Shop.Signals" {
+			t.Errorf("escaped canonical namespace = %q", canonical)
+		}
+	}
+	for _, invalid := range []string{"Shop . Signals", "Shop..Signals", "Shop.@", "Shop.@@Signals", "Shop.class", "Shop.9Signals", "Shop.Signals; class Injected {}"} {
+		if _, err := gen.CanonicalDotnetNamespace(invalid); err == nil {
+			t.Errorf("invalid namespace accepted: %q", invalid)
+		}
+	}
+	c := &contract.Contract{File: "observability/contract.yaml", Service: "shop"}
+	if _, err := gen.Generate("dotnet", c, gen.Options{Namespace: "Shop . Signals"}); err == nil || !strings.Contains(err.Error(), "namespace:") || !strings.Contains(err.Error(), "observability/contract.yaml") {
+		t.Fatalf("direct generation must name key and contract: %v", err)
+	}
+	a := &contract.Contract{File: "Orders/observability/contract.yaml", Generate: []contract.Target{{Lang: "dotnet", Out: "orders", Module: "Shop.Signals"}}}
+	b := &contract.Contract{File: "Friends/observability/contract.yaml", Generate: []contract.Target{{Lang: "dotnet", Out: "friends", Module: "Shop.@Signals"}}}
+	if got := gen.TargetClashes([]*contract.Contract{a, b}); len(got) != 1 || !strings.Contains(got[0], "generate-namespace-clash") {
+		t.Fatalf("canonical namespace collision: %v", got)
+	}
+}
