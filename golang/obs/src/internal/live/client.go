@@ -170,12 +170,14 @@ func (c *Client) Get(ctx context.Context, base, path string, q url.Values) ([]by
 		}
 		return nil, fmt.Errorf("GET %s%s: reading the response: %v", base, path, safeDoError(err))
 	}
-	if len(b) > maxBody {
-		return nil, fmt.Errorf("GET %s%s: %w", base, path, errResponseTooLarge)
-	}
 	if resp.StatusCode/100 != 2 {
+		// A failure stays an HTTP failure even when its body is over the limit (storeText prints
+		// no text of that size); the size sentinel is only for a 2xx answer.
 		body := c.storeText(string(b))
 		return nil, fmt.Errorf("GET %s%s: HTTP %d: %s", base, path, resp.StatusCode, body)
+	}
+	if len(b) > maxBody {
+		return nil, fmt.Errorf("GET %s%s: %w", base, path, errResponseTooLarge)
 	}
 	return b, nil
 }

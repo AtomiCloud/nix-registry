@@ -2,6 +2,7 @@ package live
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -121,8 +122,8 @@ func TestRecordedIncidents(t *testing.T) {
 	if f.ID != "payment-errors" || f.Firings != 0 || f.Longest != 0 || !f.SpanUnknown || len(f.Observations) != 1 || !f.InRepo || f.Incident != "payment-spike" || f.StartedBeforeWindow {
 		t.Fatalf("%+v", f)
 	}
-	if !f.First.Equal(time.Unix(1795032990, 0).UTC()) {
-		t.Fatalf("first firing: %v", f.First)
+	if err := checkFirstFiring(f, h.Now, time.Hour, os.Getenv("OBS_LIVE_RECORD") != ""); err != nil {
+		t.Fatal(err)
 	}
 	if len(res.FiredNoIncident) != 0 || len(res.IncidentNotAlerted) != 0 {
 		t.Fatalf("payment-spike expects payment-errors and it fired: %+v / %+v", res.FiredNoIncident, res.IncidentNotAlerted)
@@ -134,6 +135,28 @@ func TestRecordedIncidents(t *testing.T) {
 	if strings.Join(noRun, ",") != "payment-errors,payment-pending,payment-safety" {
 		t.Fatalf("alert-without-runbook: %v", noRun)
 	}
+}
+
+// recordedFirstFiring is the instant the committed fixture's firing was recorded at.
+var recordedFirstFiring = time.Unix(1795032990, 0).UTC()
+
+// checkFirstFiring checks the reported time of the one firing. Replay knows the exact instant.
+// A fresh recording has a new one, so there it must match the firing observation and lie inside
+// the report window (since before now).
+func checkFirstFiring(f FiredAlert, now time.Time, since time.Duration, recording bool) error {
+	if !recording {
+		if !f.First.Equal(recordedFirstFiring) {
+			return fmt.Errorf("first firing: %v, the fixture recorded %v", f.First, recordedFirstFiring)
+		}
+		return nil
+	}
+	if len(f.Observations) != 1 || !f.First.Equal(f.Observations[0].At) {
+		return fmt.Errorf("first firing %v must equal the firing observation: %+v", f.First, f.Observations)
+	}
+	if f.First.Before(now.Add(-since)) || f.First.After(now) {
+		return fmt.Errorf("first firing %v lies outside the report window %v..%v", f.First, now.Add(-since), now)
+	}
+	return nil
 }
 
 func TestRecordedLook(t *testing.T) {
@@ -169,5 +192,33 @@ func TestRecordedUsageAllServices(t *testing.T) {
 	near(t, "spans/min", tr.SpansPerMin, (2.433333333333333+2.2666666666666666+2.433333333333333+6+6.2)/5*60, 1e-9)
 	if !tr.SpansAvailable || tr.SpansRatio != 0 || tr.BytesAvailable || !strings.Contains(tr.BytesNote, "no tempo_distributor_bytes_received_total") {
 		t.Fatalf("Tempo's own counters are not in the sandbox's VictoriaMetrics: %+v", tr)
+	}
+}
+
+// The firing time check: replay keeps the exact instant; a fresh recording has a new instant and
+// is checked against its own observation and the report window.
+func TestCheckFirstFiringAcceptsAFreshRecordingOnly(t *testing.T) {
+	now := time.Date(2027, 1, 5, 9, 0, 0, 0, time.UTC)
+	fresh := now.Add(-20 * time.Minute)
+	f := FiredAlert{First: fresh, Observations: []FiringObservation{{At: fresh}}}
+	if err := checkFirstFiring(f, now, time.Hour, true); err != nil {
+		t.Fatalf("a fresh recording with a new timestamp must pass: %v", err)
+	}
+	if err := checkFirstFiring(f, now, time.Hour, false); err == nil {
+		t.Fatal("replay must keep the exact timestamp check")
+	}
+	old := FiredAlert{First: recordedFirstFiring, Observations: []FiringObservation{{At: recordedFirstFiring}}}
+	if err := checkFirstFiring(old, recordedFirstFiring.Add(10*time.Minute), time.Hour, false); err != nil {
+		t.Fatalf("replay of the committed instant passes: %v", err)
+	}
+	for name, bad := range map[string]FiredAlert{
+		"does not match the observation": {First: fresh, Observations: []FiringObservation{{At: fresh.Add(time.Minute)}}},
+		"before the window":              {First: now.Add(-2 * time.Hour), Observations: []FiringObservation{{At: now.Add(-2 * time.Hour)}}},
+		"after the report time":          {First: now.Add(time.Minute), Observations: []FiringObservation{{At: now.Add(time.Minute)}}},
+		"no observation":                 {First: fresh},
+	} {
+		if err := checkFirstFiring(bad, now, time.Hour, true); err == nil {
+			t.Errorf("recording: a time that %s must fail", name)
+		}
 	}
 }

@@ -27,7 +27,16 @@ type IncidentOptions struct {
 	Now     func() time.Time
 }
 
-type interval struct{ From, To time.Time }
+// interval is one span of firing. open: the history shows it start and never end, so To is only the
+// cutoff it is inferred to, not a measured end.
+type interval struct {
+	From, To time.Time
+	open     bool
+	// inferredStart: the history shows this span end but not start; From is only where the read began.
+	inferredStart bool
+	// early: the span began before the report window (before clipping).
+	early bool
+}
 
 // FiredAlert is an alert that fired on the target in the window.
 type FiredAlert struct {
@@ -45,10 +54,12 @@ type FiredAlert struct {
 	GrafanaAlertID      int64               `json:"grafana_alert_id,omitempty"`
 	IDSource            string              `json:"id_source,omitempty"`
 	SpanUnknown         bool                `json:"span_unknown,omitempty"`
+	SpanOpen            bool                `json:"span_open,omitempty"`
 	TimeSource          string              `json:"time_source,omitempty"`
 	Observations        []FiringObservation `json:"observations,omitempty"`
 	ruleUID             string
 	spans               []interval
+	key                 string
 }
 
 // FiringObservation proves firing at a transition, without assuming a continuous span.
@@ -264,7 +275,7 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 			if coverage.Incomplete {
 				start = at // missing earlier transitions cannot establish firing back to readFrom
 			}
-			open[inst] = &interval{From: start}
+			open[inst] = &interval{From: start, inferredStart: true}
 		}
 		seen[inst] = true
 		lastState[inst] = a.NewState
@@ -280,7 +291,7 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 	}
 	for inst, iv := range open {
 		if iv != nil {
-			iv.To = to
+			iv.To, iv.open = to, true
 			spans[inst.Rule] = append(spans[inst.Rule], *iv)
 		}
 	}
@@ -289,29 +300,56 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 		if len(observations[key]) == 0 {
 			continue
 		} // no direct firing evidence in the report window
-		for _, iv := range mergeIntervals(ss) {
-			if !iv.To.After(from) || !iv.From.Before(to) {
-				continue // over before the window began, or after it ended
+		// Clip every instance span to the report window [from, to) and drop the empty ones BEFORE
+		// merging: a span at or past the exclusive cutoff neither merges nor sets span_open.
+		var clipped []interval
+		for _, iv := range ss {
+			if iv.From.Before(from) {
+				iv.early = true
+				iv.From = from
 			}
+			if iv.To.After(to) {
+				iv.To = to
+			}
+			if !iv.To.After(iv.From) {
+				continue // over before the window began, or starting at or after its end
+			}
+			clipped = append(clipped, iv)
+		}
+		// The longest MEASURED span: one instance with BOTH transitions observed in history. It never
+		// comes from the merged union (whose end may only be inferred to the cutoff) nor from a span
+		// whose start was synthesized at the history read start.
+		var longest time.Duration
+		for _, iv := range clipped {
+			if iv.open || iv.inferredStart {
+				continue
+			}
+			if d := iv.To.Sub(iv.From); d > longest {
+				longest = d
+			}
+		}
+		for _, iv := range mergeIntervals(clipped) {
 			f := out[key]
 			if f == nil {
 				r := coverage.Rules[key]
 				f = &FiredAlert{ID: key, Title: r.Title, GrafanaAlertID: r.AlertID, IDSource: r.Source, ruleUID: r.UID, SpanUnknown: ambiguous[key] || coverage.Incomplete}
 				out[key] = f
 			}
-			if iv.From.Before(from) {
+			if iv.early {
 				f.StartedBeforeWindow = true
-				iv.From = from
-			}
-			if iv.To.After(to) {
-				iv.To = to
 			}
 			f.Firings++
+			if iv.open {
+				f.SpanOpen = true
+			}
 			if f.First.IsZero() || iv.From.Before(f.First) {
 				f.First = iv.From
 			}
 			f.Last = iv.From
 			f.spans = append(f.spans, iv)
+		}
+		if f := out[key]; f != nil {
+			f.Longest = longest
 		}
 	}
 	for key, obs := range observations {
@@ -326,15 +364,19 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 			f.spans = nil
 			f.Firings = 0
 			f.Longest = 0
+			f.SpanOpen = false
 			f.StartedBeforeWindow = false
 			f.First = time.Time{}
 			f.Last = time.Time{}
 		}
+		// With no span to time it (unknown spans, or a firing and its resolution in one instant so no
+		// span survives the clip), first and last come from the observations themselves.
+		fromObs := f.SpanUnknown || len(f.spans) == 0
 		for _, o := range obs {
-			if f.SpanUnknown && (f.First.IsZero() || o.At.Before(f.First)) {
+			if fromObs && (f.First.IsZero() || o.At.Before(f.First)) {
 				f.First = o.At
 			}
-			if f.SpanUnknown && o.At.After(f.Last) {
+			if fromObs && o.At.After(f.Last) {
 				f.Last = o.At
 			}
 		}
@@ -342,16 +384,23 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 	return out, coverage, nil
 }
 
-// mergeIntervals unions the firing spans of all instances of one rule, in time order.
+// mergeIntervals unions the firing spans of all instances of one rule, in time order. A merged span
+// is open when ANY span folded into it is open, including one whose inferred end equals a closed
+// span's end at the cutoff: merging never loses that evidence.
 func mergeIntervals(spans []interval) []interval {
 	sort.Slice(spans, func(i, j int) bool { return spans[i].From.Before(spans[j].From) })
 	var merged []interval
 	for _, span := range spans {
 		if len(merged) == 0 || span.From.After(merged[len(merged)-1].To) {
 			merged = append(merged, span)
-		} else if span.To.After(merged[len(merged)-1].To) {
-			merged[len(merged)-1].To = span.To
+			continue
 		}
+		last := &merged[len(merged)-1]
+		if span.To.After(last.To) {
+			last.To = span.To
+		}
+		last.open = last.open || span.open
+		last.early = last.early || span.early
 	}
 	return merged
 }
@@ -369,13 +418,18 @@ func fromAlertsSeries(ctx context.Context, c *Client, t *Target, from, to time.T
 	}
 	out := map[string]*FiredAlert{}
 	alert := func(labels map[string]string) *FiredAlert {
-		key, source := labels["grafana_rule_uid"], "ruler_uid"
-		if key == "" {
-			key, source = labels["alertname"], "alertname"
+		// A ruler UID and an alert name are different kinds of key: the same text in the two fields
+		// is two alerts. The display ID is kept apart from the grouping key.
+		id, key, source := labels["grafana_rule_uid"], "", "ruler_uid"
+		if id != "" {
+			key = "uid:" + id
+		} else {
+			id, source = labels["alertname"], "alertname"
+			key = "name:" + id
 		}
 		f := out[key]
 		if f == nil {
-			f = &FiredAlert{ID: key, Title: labels["alertname"], ruleUID: labels["grafana_rule_uid"], IDSource: source, SpanUnknown: true, TimeSource: "query_evaluation"}
+			f = &FiredAlert{ID: id, Title: labels["alertname"], ruleUID: labels["grafana_rule_uid"], IDSource: source, SpanUnknown: true, TimeSource: "query_evaluation"}
 			out[key] = f
 		}
 		return f
@@ -601,9 +655,13 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 		f := fired[k]
 		match := matchedHistory[k]
 		if coverage == nil {
-			if _, ok := byID[f.ID]; ok {
-				match = f.ID
-			} else if f.ruleUID == "" && len(byTitle[f.Title]) == 1 {
+			// f.ID is a display text (an alert name when the row has no UID): only an explicit UID
+			// matches a repository UID; without one, a unique title is the only match.
+			if f.ruleUID != "" {
+				if _, ok := byID[f.ruleUID]; ok {
+					match = f.ruleUID
+				}
+			} else if len(byTitle[f.Title]) == 1 {
 				match = byTitle[f.Title][0].ID
 			}
 		}
@@ -617,14 +675,15 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 			}
 			firedRule[r.ID] = true
 		}
-		for _, s := range f.spans {
-			if d := s.To.Sub(s.From); d > f.Longest {
-				f.Longest = d
-			}
+		if f.InRepo {
+			f.Incident = covered[f.ID]
+		} else {
+			f.Incident = covered[f.ruleUID] // an explicit UID the repo has no rule for; never a display name
 		}
-		f.Incident = covered[f.ID]
+		f.key = k
 		res.Fired = append(res.Fired, *f)
 	}
+	assignDisplayIDs(res.Fired)
 	sort.SliceStable(res.Fired, func(i, j int) bool { return res.Fired[i].ID < res.Fired[j].ID })
 	for _, f := range res.Fired {
 		if f.Incident == "" {
@@ -707,6 +766,39 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 	return res, nil
 }
 
+// assignDisplayIDs gives every fired identity a distinct display ID, in the order of res.Fired (sorted by
+// grouping key, so the result is deterministic). An alert keyed by a ruler UID keeps its plain ID. A
+// name-only alert keeps its plain name unless it collides with another fired alert's plain ID; then it
+// becomes alertname:<name>, and when that equals any other final display ID, alertname:<name>#<n> with
+// the smallest n >= 2 that is unique. Without a collision the IDs are unchanged.
+func assignDisplayIDs(fired []FiredAlert) {
+	plain := map[string]int{}
+	for _, f := range fired {
+		plain[f.ID]++
+	}
+	renamable := func(f *FiredAlert) bool {
+		return f.ruleUID == "" && f.Title != "" && plain[f.ID] > 1 && (f.IDSource == "alertname" || f.IDSource == "repo_title")
+	}
+	final := map[string]bool{}
+	for i := range fired {
+		if !renamable(&fired[i]) {
+			final[fired[i].ID] = true
+		}
+	}
+	for i := range fired {
+		f := &fired[i]
+		if !renamable(f) {
+			continue
+		}
+		id := "alertname:" + f.Title
+		for n := 2; final[id]; n++ {
+			id = "alertname:" + f.Title + "#" + strconv.Itoa(n)
+		}
+		f.ID = id
+		final[id] = true
+	}
+}
+
 // Print writes the text for people. It writes no file.
 func (r *IncidentsResult) Print(w io.Writer) {
 	fmt.Fprintf(w, "obs live incidents: target %s, %s to %s (UTC)\n", r.Target, r.From.Format(time.RFC3339), r.To.Format(time.RFC3339))
@@ -733,6 +825,22 @@ func (r *IncidentsResult) Print(w io.Writer) {
 		}
 		if f.SpanUnknown {
 			fmt.Fprintf(w, "  %s: firing observed, first %s; spans, duration and firing count unknown%s\n", f.ID, f.First.Format(time.RFC3339), repo)
+			continue
+		}
+		if f.Firings == 0 && !f.First.IsZero() {
+			fmt.Fprintf(w, "  %s: firing observed, first %s; no span of nonzero length in history, so no firing count or duration is measured%s\n", f.ID, f.First.Format(time.RFC3339), repo)
+			continue
+		}
+		if f.SpanOpen {
+			longest := ""
+			if f.Longest > 0 {
+				longest = fmt.Sprintf("; longest closed span %s", f.Longest.Round(time.Second))
+			}
+			fmt.Fprintf(w, "  %s: %d firing(s), first %s; the last span has no resolution in history (open, inferred to the cutoff; its duration is unknown)%s%s%s\n", f.ID, f.Firings, f.First.Format(time.RFC3339), longest, early, repo)
+			continue
+		}
+		if f.Longest == 0 {
+			fmt.Fprintf(w, "  %s: %d firing(s), first %s; no span with both transitions in history, so no duration is measured%s%s\n", f.ID, f.Firings, f.First.Format(time.RFC3339), early, repo)
 			continue
 		}
 		fmt.Fprintf(w, "  %s: %d firing(s), first %s, longest %s in the window%s%s\n", f.ID, f.Firings, f.First.Format(time.RFC3339), f.Longest.Round(time.Second), early, repo)
