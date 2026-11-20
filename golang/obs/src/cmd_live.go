@@ -26,7 +26,7 @@ const liveUsage = `usage:
   obs live look       --target <name> [--dir observability] [--match text] [--checklist file.md] [--out obs-look] [--json]
 
 --target is local, dev, stage, prod, or any name under targets: in <dir>/obs.yaml (local needs no entry:
-it uses the running sandbox, else the sandbox addresses). obs live only reads: GET and POST to the
+it uses the running sandbox, else the sandbox addresses). obs live only reads: GET to the
 stores' query endpoints, never a write. Exit: usage 1 when a metric is over budget (series or
 points/min), an undeclared metric is found or a label check of assert fails; shape, incidents
 and look exit 0 (the LLM judges; look never fails); 2 on a usage or input error.
@@ -121,7 +121,7 @@ func printJSON(stdout io.Writer, v any) {
 }
 
 func readOnlyNote(stderr io.Writer, cmd string, t *live.Target) {
-	fmt.Fprintf(stderr, "%s: target %s (read-only: only GET and POST to query endpoints)\n", cmd, t.Name)
+	fmt.Fprintf(stderr, "%s: target %s (read-only: only GET to query endpoints)\n", cmd, t.Name)
 }
 
 func runLiveUsage(args []string, stdout, stderr io.Writer) int {
