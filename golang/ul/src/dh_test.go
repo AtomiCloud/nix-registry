@@ -71,9 +71,9 @@ func readAll(t *testing.T, p string) string {
 	return string(b)
 }
 
-// A dh that prints no texts for an animation is read through its captions and its
-// double-quoted strings; the unquoted say and note texts are not read.
-func TestDhAnimationFallback(t *testing.T) {
+// A dh that prints no texts for an animation (before 0.2.0) is refused for that page, never read
+// in part.
+func TestDhAnimationNeedsTexts(t *testing.T) {
 	dir := fixture(t, "dh/parts")
 	rec := filepath.Join(dir, "docs/domain/kitchen/implementation/parts.dh.md.dhjson")
 	var doc map[string]any
@@ -92,13 +92,13 @@ func TestDhAnimationFallback(t *testing.T) {
 	}
 	probs, _, _ := checkLines(t, newEnv(t, dir), dir)
 	got := strings.Join(probs, " ")
-	for _, l := range []int{63, 66} {
-		if !strings.Contains(got, fmt.Sprintf("parts.dh.md:%d: UL403", l)) {
-			t.Errorf("fallback missed line %d: %s", l, got)
-		}
+	if !strings.Contains(got, "parts.dh.md:62: UL410") {
+		t.Errorf("an animation without texts must be refused: %s", got)
 	}
-	if strings.Contains(got, "parts.dh.md:69:") {
-		t.Errorf("fallback read an unquoted note: %s", got)
+	for _, l := range []int{63, 66, 69} {
+		if strings.Contains(got, fmt.Sprintf("parts.dh.md:%d: UL403", l)) {
+			t.Errorf("the animation text was read without texts (line %d)", l)
+		}
 	}
 }
 

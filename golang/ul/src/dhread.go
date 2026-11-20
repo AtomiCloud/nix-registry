@@ -21,9 +21,8 @@ import (
 // titles and text of containers and parts, and the author's :::llm texts. Part names,
 // attributes, ids and data are never read.
 //
-// An animation block may carry `texts`: the strings dh's own scene compiler reads as labels,
-// captions, say and note texts. A dh that prints them is read in full; without them ul reads the
-// captions and the double-quoted strings.
+// An animation block carries `texts` (dh 0.2.0): the strings dh's own scene compiler reads as
+// labels, captions, say and note texts. A page with an animation and no `texts` is refused (UL410).
 
 type dhProblem struct {
 	Line    int    `json:"line"`
@@ -337,15 +336,13 @@ func (r *dhReader) block(b dhBlock, to int) {
 			walkTextKeys(v, "", func(s string) { r.text(s, b.Line, to) })
 		}
 	case "animation":
-		if b.Texts != nil {
-			for _, t := range *b.Texts {
-				r.text(t, b.Line, to)
-			}
+		if b.Texts == nil {
+			r.probs = append(r.probs, Problem{Code: "UL410", File: r.rel, Line: max(b.Line, 1), Message: "dh json gave no texts for this animation; use dh 0.2.0 or newer (ul reads the labels and captions from texts)"})
 			break
 		}
-		// A dh without texts: read the captions and the double-quoted strings. The say and note
-		// texts without quotes are not read (a dh that prints texts gives them all).
-		r.animationFallback(b, to)
+		for _, t := range *b.Texts {
+			r.text(t, b.Line, to)
+		}
 	}
 }
 
@@ -431,31 +428,6 @@ func inlineText(in []mdInline, sb *segBuilder, line int) {
 
 // pageName is the path dh sees for a page (slash-separated, relative to the root).
 func pageName(rel string) string { return filepath.ToSlash(rel) }
-
-var quotedText = regexp.MustCompile(`"([^"\n]+)"`)
-
-// animationFallback is the read of an animation block without texts.
-func (r *dhReader) animationFallback(b dhBlock, to int) {
-	var a struct {
-		Head  string `json:"head"`
-		Steps []struct {
-			Title string `json:"title"`
-			Raw   string `json:"raw"`
-		} `json:"steps"`
-	}
-	if json.Unmarshal(b.Anim, &a) != nil {
-		return
-	}
-	for _, m := range quotedText.FindAllStringSubmatch(a.Head, -1) {
-		r.text(m[1], b.Line, to)
-	}
-	for _, s := range a.Steps {
-		r.text(s.Title, b.Line, to)
-		for _, m := range quotedText.FindAllStringSubmatch(s.Raw, -1) {
-			r.text(m[1], b.Line, to)
-		}
-	}
-}
 
 // frontMatterEnd is the line of the closing --- of the front matter (1 when there is none).
 func frontMatterEnd(lines []string) int {
