@@ -189,12 +189,22 @@ func (s *Set) readAlert(rel string, b []byte) {
 	dec := yaml.NewDecoder(bytes.NewReader(b))
 	var d alertDoc
 	if err := dec.Decode(&d); err != nil {
-		s.Problems = append(s.Problems, Problem{File: rel, Msg: "not valid YAML: " + err.Error()})
+		// A file that reads as a flat tier file (top-level tier keys, no kind) says so with a rule id, so
+		// the commands that skip unreadable files (obs live incidents) stop on it instead.
+		rule := ""
+		if looksFlat(b) {
+			rule = "flat-alert-yaml"
+		}
+		s.Problems = append(s.Problems, Problem{File: rel, Rule: rule, Msg: "not valid YAML: " + err.Error()})
 		return
 	}
 	var extra yaml.Node
 	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
-		s.Problems = append(s.Problems, Problem{File: rel, Msg: "more than one YAML document: one GrafanaAlertRuleGroup CR per file"})
+		rule, msg := "", "more than one YAML document: one GrafanaAlertRuleGroup CR per file"
+		if looksFlat(b) {
+			rule, msg = "flat-alert-documents", "more than one YAML document: a tier file is one flat map"
+		}
+		s.Problems = append(s.Problems, Problem{File: rel, Rule: rule, Msg: msg})
 		return
 	}
 	if d.Kind == "" && d.APIVersion == "" {

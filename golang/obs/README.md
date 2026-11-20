@@ -904,11 +904,12 @@ table, its structural checks, and the "no severity field" rule):
 | `flat-alert-field-missing`, `-field-type`  | a required field (`title`, `datasource`, `expr`, `for`, `summary`, `description`) missing, empty or not a string |
 | `flat-alert-field-unknown`                 | a key outside the table (`severity` gets its own message: the file name is the severity)                  |
 | `flat-alert-title-length`                  | `title` over 48 characters                                                                               |
-| `flat-alert-title-emoji`                   | `title` holds an emoji (the chart adds the severity emoji from the file name, so it would show twice)    |
+| `flat-alert-title-emoji`                   | `title` holds an emoji: a code point from U+1F000 up, a Basic Multilingual Plane `Emoji_Presentation` one (✅ ⭐ ❌), or any character followed by U+FE0F or U+20E3 (⚠️ ℹ️ keycaps). The chart adds the severity emoji from the file name, so it would show twice. Text symbols (`→ ↑ ▲ ™`) are fine |
 | `flat-alert-datasource`                    | `datasource` is not `metrics` or `logs`                                                                  |
-| `flat-alert-for`                           | `for` is not a duration (`0m`, `10m`, `2h`, `1d`), or is negative; the same check `obs alerts` and `obs sandbox` use  |
+| `flat-alert-for`                           | `for` is not what Prometheus's `model.ParseDuration` accepts (Grafana reads it with that): `1d12h`, `10m`, `0`, `1y` (365d) pass; `1.5m`, `1M`, `10`, `-5m` do not |
 | `flat-alert-bool`                          | PromQL `bool` modifier in `expr`, read from the parse tree (the standard: let the comparison filter)       |
-| `flat-alert-landscape`                     | `expr` has a label matcher (metrics) or field filter (logs, also in `_stream:{...}`) on `landscape` or `durian.cloud.landscape`; read from the parsed query, so the word in a quoted message, a label value or a metric name is fine |
+| `flat-alert-landscape`                     | `expr` has a label matcher (metrics) or field filter (logs, also in `_stream:{...}`) on `landscape` or `durian.cloud.landscape`; read from the parsed query, so the word in a quoted message, a label value or a metric name is fine. Logs: also inside a stats conditional (`count() if ("durian.cloud.landscape":=x)`), a `filter` pipe before the stats, and a nested source (`in(...)` subquery) |
+| `flat-alert-yaml`, `flat-alert-documents`      | a file that reads as a tier file (top-level tier keys, no `kind`) is not valid YAML, or holds a second document; `obs live incidents` stops on it (exit 2) |
 | `flat-alert-panel`                         | `panel` is present but not an integer (`panel: null`, an empty `panel:`, a string, a float or a bool); leave the key out for none |
 | `flat-alert-identity`                      | platform or service unknown (above)                                                                      |
 | `flat-alert-uid-length`                    | the uid is over 40 characters (Grafana's limit)                                                          |
@@ -927,7 +928,8 @@ Not checked here: that `panel` is a panel id of `dashboards/overview.json`, and 
   changes from exit 1 to the new result: the file is checked as the rule the chart renders, and exits 0 when it is valid.
   A flat file with a rule broken, or with no platform or service to name its uid, is still exit 1 with a `flat-alert-*` rule id.
 - `obs.yaml` has two new optional top-level keys, `platform:` and `service:`. An obs.yaml without them reads as before.
-- A rule's `for` and `keepFiringFor` are judged by one function: Grafana's units (`d`, `w`, `y` too) pass in a flat file, in `obs alerts` and in `obs sandbox`. In 0.5 `obs alerts` refused `for: 1d` in a CR; it now evaluates it.
+- A rule's `for` and `keepFiringFor`: a flat file is held to Prometheus's `model.ParseDuration` exactly (`1d12h`, `1y` = 365d; `1.5m` refused). `obs alerts` and `obs sandbox` read a CR's with that **or** Go's `time.ParseDuration` (what 0.5 accepted, e.g. `1.5m`), so no CR that passed 0.5 fails now and `for: 1d` in a CR, which 0.5 refused, is now evaluated.
+- A flat-looking tier file that is not valid YAML, or has a second document, stops `obs live incidents` with exit 2 and the file and finding (0.5 skipped unreadable files); a CR file that does not parse keeps 0.5's behaviour.
 - `tests/compat.sh` still holds 58 goldens. ONE changed: `query-static__bad-flat-alert.out` pinned the refusal, so it is
   now `query-static__ok-flat-alert.out` (the fixture `bad-flat-alert` became `ok-flat-alert`, a valid flat fixture, regenerated from the 0.6 binary).
   Every other golden is byte-identical to 0.5.

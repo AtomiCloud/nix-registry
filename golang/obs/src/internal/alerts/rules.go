@@ -187,10 +187,10 @@ func compileRule(a *Alert) (*cRule, error) {
 		r.missingN = int64(a.MissingSeriesEvalsToResolve)
 	}
 	var err error
-	if r.forD, err = files.ParseFor(orDefault(a.For, "0s")); err != nil {
+	if r.forD, err = files.ParseRuleDuration(orDefault(a.For, "0s")); err != nil {
 		return nil, err
 	}
-	if r.keepD, err = files.ParseFor(orDefault(a.KeepFiringFor, "0s")); err != nil {
+	if r.keepD, err = files.ParseRuleDuration(orDefault(a.KeepFiringFor, "0s")); err != nil {
 		return nil, err
 	}
 	if r.interval, err = time.ParseDuration(orDefault(a.Interval, "1m")); err != nil {

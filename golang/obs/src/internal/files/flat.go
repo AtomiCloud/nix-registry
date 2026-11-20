@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -86,7 +87,13 @@ func landscapeUse(datasource, expr string) string {
 		if err != nil {
 			return ""
 		}
+		// The main filter, and also the filters inside stats conditionals (count() if (...)), filter pipes
+		// and nested sources (in(...) subqueries, union, join).
 		filters, _, _ := q.Fields()
+		if inner, err := q.FilterFields(); err == nil {
+			filters = append(filters, inner...)
+		}
+		sort.Strings(filters)
 		for _, f := range filters {
 			if isLandscapeName(strings.TrimPrefix(f, "_stream:")) {
 				return f + " filter"
@@ -113,22 +120,35 @@ func boolModifier(expr string) bool {
 	return found
 }
 
-// emojiRanges are the code points of emoji and pictographs, plus the joiner and the variation
-// selector that make a symbol render as one. The chart adds 🚨, ⚠️ or ℹ️ from the file name, so a
-// title that carries its own shows it twice.
-var emojiRanges = [][2]rune{
-	{0x1F000, 0x1FAFF}, {0x2600, 0x27BF}, {0x2300, 0x23FF}, {0x2B00, 0x2BFF}, {0x25A0, 0x25FF},
-	{0x2190, 0x21FF}, {0x2934, 0x2935}, {0x3030, 0x3030}, {0x303D, 0x303D}, {0x3297, 0x3299},
-	{0x203C, 0x203C}, {0x2049, 0x2049}, {0x2122, 0x2122}, {0x2139, 0x2139}, {0x24C2, 0x24C2},
-	{0xFE0F, 0xFE0F}, {0x200D, 0x200D}, {0xE0020, 0xE007F},
+// bmpEmoji are the Basic Multilingual Plane code points with the Unicode property Emoji_Presentation
+// (they render as an emoji without a variation selector). Plain symbols such as → ↑ ▲ ™ are not here.
+var bmpEmoji = [][2]rune{
+	{0x231A, 0x231B}, {0x23E9, 0x23EC}, {0x23F0, 0x23F0}, {0x23F3, 0x23F3}, {0x25FD, 0x25FE},
+	{0x2614, 0x2615}, {0x2648, 0x2653}, {0x267F, 0x267F}, {0x2693, 0x2693}, {0x26A1, 0x26A1},
+	{0x26AA, 0x26AB}, {0x26BD, 0x26BE}, {0x26C4, 0x26C5}, {0x26CE, 0x26CE}, {0x26D4, 0x26D4},
+	{0x26EA, 0x26EA}, {0x26F2, 0x26F3}, {0x26F5, 0x26F5}, {0x26FA, 0x26FA}, {0x26FD, 0x26FD},
+	{0x2705, 0x2705}, {0x270A, 0x270B}, {0x2728, 0x2728}, {0x274C, 0x274C}, {0x274E, 0x274E},
+	{0x2753, 0x2755}, {0x2757, 0x2757}, {0x2795, 0x2797}, {0x27B0, 0x27B0}, {0x27BF, 0x27BF},
+	{0x2B1B, 0x2B1C}, {0x2B50, 0x2B50}, {0x2B55, 0x2B55},
 }
 
+// emojiIn returns the first emoji of a title: a code point from U+1F000 up, a BMP Emoji_Presentation
+// code point, or any character followed by U+FE0F (emoji presentation) or U+20E3 (keycap). The chart
+// adds 🚨, ⚠️ or ℹ️ from the file name, so a title that carries its own shows it twice. Plain text
+// symbols (→ ↑ ▲ ™) are fine in a title.
 func emojiIn(title string) (rune, bool) {
-	for _, r := range title {
-		for _, rg := range emojiRanges {
+	rs := []rune(title)
+	for i, r := range rs {
+		if r >= 0x1F000 {
+			return r, true
+		}
+		for _, rg := range bmpEmoji {
 			if r >= rg[0] && r <= rg[1] {
 				return r, true
 			}
+		}
+		if i+1 < len(rs) && (rs[i+1] == 0xFE0F || rs[i+1] == 0x20E3) {
+			return r, true
 		}
 	}
 	return 0, false
@@ -325,4 +345,15 @@ func (p Problem) Text() string {
 		return p.Msg
 	}
 	return "[" + p.Rule + "] " + p.Msg
+}
+
+var (
+	flatKeyLine = regexp.MustCompile(`(?m)^(title|datasource|expr|for|summary|description|panel)[ \t]*:`)
+	crKeyLine   = regexp.MustCompile(`(?m)^(kind|apiVersion|spec|metadata)[ \t]*:`)
+)
+
+// looksFlat tells, from the text alone, a file that is meant to be a flat tier file but does not parse:
+// a top-level tier key and no top-level CR key. (A parsed file is judged by isFlat on its keys.)
+func looksFlat(b []byte) bool {
+	return flatKeyLine.Match(b) && !crKeyLine.Match(b)
 }

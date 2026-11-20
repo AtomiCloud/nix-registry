@@ -94,3 +94,22 @@ func TestLiveIncidentsSiblingRunbookCountsForAFlatRule(t *testing.T) {
 		t.Fatalf("with alerts/retry-queue/runbook.md the rule has a runbook: %v", ids)
 	}
 }
+
+// An unreadable flat tier (bad YAML, a second document) stops the command with file and finding; a CR
+// file that does not parse keeps 0.5's behaviour.
+func TestLiveIncidentsUnreadableFlatTierExitsTwo(t *testing.T) {
+	for name, c := range map[string]struct{ body, rule string }{
+		"unclosed value": {flatLiveTier + "summary2: 'unclosed\n", "[flat-alert-yaml]"},
+		"two documents":  {flatLiveTier + "---\ntitle: again\n", "[flat-alert-documents]"},
+	} {
+		_, run := flatLiveDir(t, c.body, nil)
+		rc, out, stderr := run()
+		if rc != 2 || !strings.Contains(stderr, "alerts/retry-queue/critical.yaml") || !strings.Contains(stderr, c.rule) {
+			t.Errorf("%s: exit %d, want 2 naming the file and %s:\n%s\n%s", name, rc, c.rule, stderr, out)
+		}
+	}
+	_, run := flatLiveDir(t, "apiVersion: v1\nkind: GrafanaAlertRuleGroup\nspec: 'unclosed\n", nil)
+	if rc, _, stderr := run(); rc != 0 {
+		t.Errorf("a CR that does not parse keeps 0.5's behaviour (exit 0), got %d: %s", rc, stderr)
+	}
+}

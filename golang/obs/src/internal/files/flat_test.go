@@ -174,6 +174,12 @@ func TestFlatTierFindings(t *testing.T) {
 		{"logs landscape field filter", "alerts/q/critical.yaml", logsFlat("landscape:raichu"), "flat-alert-landscape", "landscape"},
 		{"logs landscape dotted field filter", "alerts/q/critical.yaml", logsFlat("\"durian.cloud.landscape\":raichu"), "flat-alert-landscape", "durian.cloud.landscape"},
 		{"logs landscape stream selector", "alerts/q/critical.yaml", logsFlat("_stream:{landscape=\"raichu\"}"), "flat-alert-landscape", "landscape"},
+		{"logs landscape in a stats conditional", "alerts/q/critical.yaml", logsFlatStats("count() if (\"durian.cloud.landscape\":=raichu) as hits"), "flat-alert-landscape", "landscape"},
+		{"logs landscape plain field in a stats conditional", "alerts/q/critical.yaml", logsFlatStats("count() if (landscape:raichu) as hits"), "flat-alert-landscape", "landscape"},
+		{"logs landscape in a filter pipe", "alerts/q/critical.yaml", strings.Replace(logsFlat(""), "| stats", "| filter landscape:raichu | stats", 1), "flat-alert-landscape", "landscape"},
+		{"logs landscape in a nested source", "alerts/q/critical.yaml", logsFlat("trace_id:in(_time:5m landscape:raichu | fields trace_id)"), "flat-alert-landscape", "landscape"},
+		{"unclosed YAML value", "alerts/q/critical.yaml", retryQueueFlat + "summary2: 'unclosed\n", "flat-alert-yaml", "not valid YAML"},
+		{"second YAML document", "alerts/q/critical.yaml", retryQueueFlat + "---\ntitle: again\n", "flat-alert-documents", "more than one YAML document"},
 		{"uid over 40", "alerts/a-very-long-slug-name-here/critical.yaml", retryQueueFlat, "flat-alert-uid-length", "tracker-zinc-a-very-long-slug-name-here-critical"},
 	}
 	for _, c := range cases {
@@ -259,7 +265,7 @@ func TestFlatLandscapeLookAlikesAreNotSelectors(t *testing.T) {
 // for is judged by one function everywhere (flat files, obs alerts, the sandbox): 1d is a duration
 // Grafana accepts, so it passes here as it does there.
 func TestFlatForUsesTheSharedDuration(t *testing.T) {
-	for v, ok := range map[string]bool{"0m": true, "10m": true, "1d": true, "1w": true, "2h30m": true, "90s": true, "soon": false, "": false, "-5m": false, "1.5d": false, "10": false} {
+	for v, ok := range map[string]bool{"0m": true, "10m": true, "1d": true, "1w": true, "2h30m": true, "90s": true, "1d12h": true, "1y": true, "soon": false, "": false, "-5m": false, "1.5d": false, "1.5m": false, "1M": false, "10": false} {
 		_, err := ParseFor(v)
 		if (err == nil) != ok {
 			t.Errorf("ParseFor(%q) = %v, want ok=%v", v, err, ok)
@@ -272,5 +278,67 @@ func TestFlatForUsesTheSharedDuration(t *testing.T) {
 	}
 	if d, err := ParseFor(""); err == nil {
 		t.Errorf("empty for: %v", d)
+	}
+}
+
+// Only emoji are refused in a title: plain text symbols stay, and a symbol is an emoji when it is a
+// code point from U+1F000 up, a BMP Emoji_Presentation one, or is followed by U+FE0F or U+20E3.
+func TestFlatTitleEmojiVersusTextSymbols(t *testing.T) {
+	ok := []string{"Latency → high", "p99 ↑", "Queue ▲", "Logto™ down", "Replica lag ↑", "Disk ✔ clean", "Rate ≥ 5%", "Temp 90° high", "Cost $5 over"}
+	bad := []string{"🚨 Alert", "Disk full 🔥", "⚠️ Warning", "ℹ️ Info", "✅ Done", "⭐ Star", "⌛ Wait", "Queue ❌", "Phone ☎️ down", "1" + string(rune(0x20E3)) + " first"}
+	title := func(v string) *Set {
+		body := strings.Replace(retryQueueFlat, "title: Retry queue saturated", "title: '"+v+"'", 1)
+		return flatDir(t, "alerts/q/critical.yaml", body)
+	}
+	for _, v := range ok {
+		if s := title(v); len(s.Problems) != 0 || len(s.Rules) != 1 {
+			t.Errorf("title %q is plain text and must pass: %+v", v, s.Problems)
+		}
+	}
+	for _, v := range bad {
+		s := title(v)
+		found := false
+		for _, p := range s.Problems {
+			found = found || p.Rule == "flat-alert-title-emoji"
+		}
+		if !found || len(s.Rules) != 0 {
+			t.Errorf("title %q holds an emoji and must be refused: %+v", v, s.Problems)
+		}
+	}
+}
+
+// logsFlatStats is a logs tier file whose stats function is the given text.
+func logsFlatStats(fn string) string {
+	return "title: Disk corrupted\ndatasource: logs\nexpr: |\n  _stream:{\"durian.cloud.service\"=\"zinc\"} \"durian.cloud/event\":=disk.corrupted | stats " + fn + " | filter hits:>0\nfor: 0m\nsummary: s\ndescription: d\n"
+}
+
+func TestFlatLandscapeLookAlikesInStatsAndSubqueries(t *testing.T) {
+	for name, body := range map[string]string{
+		"another field in a stats conditional": logsFlatStats("count() if (landscape_name:raichu) as hits"),
+		"a quoted message in a conditional":    logsFlatStats(`count() if ("landscape:raichu") as hits`),
+		"grouping by landscape is no selector": logsFlatStats("count() as hits by (landscape)"),
+		"a subquery on another field":          logsFlat("trace_id:in(_time:5m region:eu | fields trace_id)"),
+	} {
+		s := flatDir(t, "alerts/q/critical.yaml", body)
+		if len(s.Problems) != 0 || len(s.Rules) != 1 {
+			t.Errorf("%s: %+v", name, s.Problems)
+		}
+	}
+}
+
+// A file that does not parse but reads as a flat tier file gets a flat rule id; a CR file that does not
+// parse keeps 0.5's rule-less message.
+func TestUnreadableFlatFileIsClassified(t *testing.T) {
+	s := flatDir(t, "alerts/q/critical.yaml", "title: x\nexpr: 'unclosed\n")
+	if len(s.Problems) != 1 || s.Problems[0].Rule != "flat-alert-yaml" {
+		t.Fatalf("%+v", s.Problems)
+	}
+	s = flatDir(t, "alerts/q/critical.yaml", "apiVersion: v1\nkind: GrafanaAlertRuleGroup\nspec: 'unclosed\n")
+	if len(s.Problems) != 1 || s.Problems[0].Rule != "" {
+		t.Fatalf("a CR keeps 0.5's behaviour: %+v", s.Problems)
+	}
+	s = flatDir(t, "alerts/q/critical.yaml", cr+"---\nkind: Other\n")
+	if len(s.Problems) != 1 || s.Problems[0].Rule != "" {
+		t.Fatalf("a two-document CR keeps 0.5's behaviour: %+v", s.Problems)
 	}
 }
