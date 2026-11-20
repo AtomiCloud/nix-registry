@@ -18,6 +18,7 @@ fx="$here/fixtures/gen/good/gen/bun/src/signals"
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 cp "$fx/signals.ts" "$work/signals.ts"
+cp "$here/fixtures/gen/billing/gen/bun/src/signals/signals.ts" "$work/billing.ts"
 cp "$g"/*.ts "$work/"
 obs_setup_stub bun "$work"
 cd "$work"
@@ -74,4 +75,19 @@ while read -r f token; do
     fail=1
   fi
 done <"$g/forge-expect"
+sed "s|sha256:HASH|$(obs_port_hash signals.ts)|" multi.ts >multi.tmp
+mv multi.tmp multi.ts
+if "$TSC" "${emit[@]}" signals.ts billing.ts multi.ts >out.txt 2>&1; then
+  # shellcheck disable=SC2154 # obs_port_cases is supplied by stubs.bash
+  for scenario in "${obs_port_cases[@]}"; do
+    if out=$("$NODE" out/multi.js "$scenario" 2>&1); then echo "$out"; else
+      echo "FAIL multi $scenario: $out"
+      fail=1
+    fi
+  done
+else
+  echo "FAIL multi compile"
+  cat out.txt
+  fail=1
+fi
 exit $fail

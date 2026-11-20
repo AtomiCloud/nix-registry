@@ -79,7 +79,11 @@ func Plan(c *contract.Contract, obsDir string, langs []string) ([]Output, error)
 		if err := checkOut(root, git, t.Lang, t.Out); err != nil {
 			return nil, err
 		}
-		fs, err := Generate(t.Lang, own, Options{Package: t.Package, Namespace: t.Module, Interfaces: t.Interfaces})
+		packageID, err := PackageIdentity(root, t)
+		if err != nil {
+			return nil, err
+		}
+		fs, err := Generate(t.Lang, own, Options{Package: t.Package, Namespace: t.Module, Interfaces: t.Interfaces, PackageID: packageID})
 		if err != nil {
 			return nil, err
 		}

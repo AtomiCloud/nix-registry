@@ -30,7 +30,7 @@ func (generator) Files(c *contract.Contract, o gen.Options) ([]gen.File, error) 
 	if interfaces == "" {
 		interfaces = "github.com/ProtoDurian/diene.go-interfaces/obs"
 	}
-	w := &writer{c: c, interfaces: interfaces, declared: map[string]string{}}
+	w := &writer{c: c, interfaces: interfaces, packageID: o.PackageID, declared: map[string]string{}}
 	src := w.render(pkg)
 	if w.err != nil {
 		return nil, w.err
@@ -46,6 +46,7 @@ type writer struct {
 	bytes.Buffer
 	c          *contract.Contract
 	interfaces string
+	packageID  string
 	declared   map[string]string // identifier -> what declared it
 	err        error
 }
@@ -159,10 +160,9 @@ func (w *writer) render(pkg string) string {
 		w.f("\t%q: {Kind: %q, Keys: %s},\n", n, spanKind(s), strList(s.AttrOrder))
 	}
 	w.f("}\n")
-	w.f("\n// init registers the tables with the port, once per process. Any competing registration (earlier or later)\n")
-	w.f("// poisons the port: it then refuses every signal until restart. The port refuses names, kinds, levels,\n")
-	w.f("// label types, keys and values not in the tables.\n")
-	w.f("func init() {\n\t_ = obs.Register(obs.DurianSignalTables{Metrics: MetricTable, Events: EventTable, Spans: SpanTable})\n}\n")
+	w.f("\n// init merges this contract's tables at boot, before the first signal.\n")
+	w.f("// Duplicate names, changed contracts and late registration poison the port until restart.\n")
+	w.f("func init() {\n\t_ = obs.Register(obs.DurianSignalTables{Contract: %q, Hash: %q, Metrics: MetricTable, Events: EventTable, Spans: SpanTable})\n}\n", gen.RegistrationID(c, gen.Options{PackageID: w.packageID}), "sha256:"+c.Hash)
 	return w.String()
 }
 

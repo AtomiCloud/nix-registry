@@ -29,7 +29,7 @@ func (generator) Files(c *contract.Contract, o gen.Options) ([]gen.File, error) 
 	if !regexp.MustCompile(`^[a-z][a-z0-9_]*$`).MatchString(interfaces) {
 		return nil, fmt.Errorf("interfaces %q must be a Dart package name", interfaces)
 	}
-	g := &emitter{c: c, pkg: o.Package, interfaces: interfaces, declared: map[string]string{}}
+	g := &emitter{c: c, pkg: o.Package, packageID: o.PackageID, interfaces: interfaces, declared: map[string]string{}}
 	if err := g.plan(); err != nil {
 		return nil, err
 	}
@@ -39,6 +39,7 @@ func (generator) Files(c *contract.Contract, o gen.Options) ([]gen.File, error) 
 type emitter struct {
 	c          *contract.Contract
 	pkg        string
+	packageID  string
 	interfaces string
 	declared   map[string]string // top-level identifier -> what declared it
 
@@ -652,12 +653,16 @@ func (g *emitter) render() string {
 	}
 	x.mapLit("const eventTable = <String, String>", evs)
 	x.blank()
-	x.line("/// Builds the telemetry port from this contract's tables, once per process (call it at")
-	x.line("/// start-up). Any other install, earlier or later, poisons the port: it refuses every")
-	x.line("/// signal until restart.")
-	x.line("Result<DurianSignalPort> installSignals() =>")
-	x.line("    DurianSignalPort.install(metrics: metricTable, events: eventTable);")
-
+	x.line("/// Merges this contract's tables at boot, before the first signal.")
+	x.line("/// Duplicate names, changed contracts and late installs poison the port.")
+	x.line("Result<DurianSignalPort> installSignals() => DurianSignalPort.install(")
+	x.line("  contract: %s,", dq(gen.RegistrationID(c, gen.Options{PackageID: g.packageID})))
+	x.line("  hash:")
+	x.line("      %s,", dq("sha256:"+c.Hash))
+	x.line("  metrics: metricTable,")
+	x.line("  events: eventTable,")
+	x.line("  spans: spanTable,")
+	x.line(");")
 	x.blank()
 	x.line("// ---- spans ----")
 	for _, s := range c.SpanOrder {

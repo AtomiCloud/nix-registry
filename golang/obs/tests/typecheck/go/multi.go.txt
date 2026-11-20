@@ -1,0 +1,44 @@
+package main
+
+import (
+ "context"
+ "fmt"
+ "os"
+ "strings"
+ "time"
+ "example.com/app/signals"
+ billing "example.com/app/billing"
+ obs "github.com/ProtoDurian/diene.go-interfaces/obs"
+)
+func check(ok bool, why any){if !ok{panic(why)}}
+func main(){
+ scenario:=os.Args[1]
+ t:=obs.DurianSignalTables{Contract:"example.com/checkout:observability/contract.yaml",Hash:"sha256:HASH",Metrics:signals.MetricTable,Events:signals.EventTable,Spans:signals.SpanTable}
+ switch scenario {
+ case "merged":
+  check(obs.Error(context.Background(),signals.ChargeFailed)==nil,"checkout event")
+  check(obs.Error(context.Background(),billing.ChargeFailed)==nil,"billing event")
+  check(obs.Add(context.Background(),signals.CheckoutInvoices,signals.CheckoutInvoicesLabels{BillingDay:signals.NewBillingDay(time.Date(2026,11,17,0,0,0,0,time.UTC)),Provider:signals.ProviderStripe})==nil,"checkout metric")
+  check(obs.Add(context.Background(),billing.BillingCharges,billing.BillingChargesLabels{Provider:billing.ProviderStripe})==nil,"billing metric")
+ case "repeat": check(obs.Register(t)==nil,"same id/hash/content must be no-op")
+ case "changed-hash":t.Hash="changed"
+ case "changed-table":t.Events=map[string]string{"other.event":"error"}
+ case "duplicate-metric":t.Contract="other:contract.yaml";t.Metrics=map[string]obs.DurianSignalMetricInfo{"checkout.charges":{Kind:"counter"}};t.Events=nil;t.Spans=nil
+ case "duplicate-event":t.Contract="other:contract.yaml";t.Metrics=nil;t.Events=map[string]string{"checkout.charge.failed":"error"};t.Spans=nil
+ case "duplicate-span":t.Contract="other:contract.yaml";t.Metrics=nil;t.Events=nil;t.Spans=map[string]obs.DurianSignalSpanInfo{"checkout.charge":{}}
+ case "cross-kind":t.Contract="other:contract.yaml";t.Metrics=nil;t.Events=map[string]string{"checkout.charge":"error"};t.Spans=nil
+ case "late":check(obs.Error(context.Background(),billing.ChargeFailed)==nil,"first signal");t.Contract="late:contract.yaml";t.Metrics=nil;t.Events=nil;t.Spans=nil
+ case "fresh-forgery":
+  t=obs.DurianSignalTables{Contract:"forged:contract.yaml",Hash:"forged",Events:map[string]string{"forged.fresh":"error"}}
+  check(obs.Register(t)==nil,"fresh names admitted before first signal")
+  check(obs.Error(context.Background(),obs.NewEvent[obs.ErrorLevel]("forged.fresh"))==nil,"fresh forgery admitted: lint only")
+ }
+ if scenario!="merged" && scenario!="repeat" && scenario!="fresh-forgery" {
+  err:=obs.Register(t);check(err!=nil,"registration accepted")
+  if strings.HasPrefix(scenario,"duplicate") || scenario=="cross-kind" {check(strings.Contains(err.Error(),"example.com/checkout:observability/contract.yaml")&&strings.Contains(err.Error(),"other:contract.yaml"),err)}
+  check(obs.Error(context.Background(),signals.ChargeFailed)!=nil,"must poison checkout")
+  check(obs.Error(context.Background(),billing.ChargeFailed)!=nil,"must poison billing")
+  check(obs.Dropped("register")==1&&obs.Dropped("poisoned")==2,"counts")
+ }
+ fmt.Println("PASS multi",scenario)
+}

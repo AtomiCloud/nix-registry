@@ -87,6 +87,7 @@ for n in d1 d2; do
   rm -rf "${work:?}/$n"
   mkdir -p "$work/$n/observability"
   cp "$fx/gen/good/observability/contract.yaml" "$work/$n/observability/"
+  cp "$fx/gen/good/"{go.mod,package.json,pubspec.yaml,Signals.csproj} "$work/$n/"
   run gen --dir "$work/$n/observability" "${genlang[@]}"
 done
 diff -r "$work/d1" "$work/d2" >/dev/null && ok "obs gen is deterministic: two runs write identical files" || bad "obs gen output differs between runs"

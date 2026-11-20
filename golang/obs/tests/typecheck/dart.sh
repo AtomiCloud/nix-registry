@@ -76,4 +76,14 @@ while read -r f token; do
   fi
   rm -f "$d/bin/forge.dart"
 done <"$g/forge-expect"
+mkdir -p "$d/lib/src/billing"
+cp "$here/fixtures/gen/billing/gen/dart/lib/src/signals/signals.g.dart" "$d/lib/src/billing/"
+sed "s|sha256:HASH|$(obs_port_hash "$d/lib/src/signals/signals.g.dart")|" "$g/multi.dart" >"$d/bin/multi.dart"
+# shellcheck disable=SC2154 # obs_port_cases is supplied by stubs.bash
+for scenario in "${obs_port_cases[@]}"; do
+  if out=$(cd "$d" && "$DART" run bin/multi.dart "$scenario" 2>&1); then echo "$out"; else
+    echo "FAIL multi $scenario: $out"
+    fail=1
+  fi
+done
 exit $fail

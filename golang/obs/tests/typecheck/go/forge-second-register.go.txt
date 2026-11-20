@@ -15,7 +15,8 @@ type Free struct {
 }
 
 func main() {
-	err := obs.Register(obs.DurianSignalTables{
+	_ = obs.Error(context.Background(), obs.NewEvent[obs.ErrorLevel]("checkout.charge.failed"))
+ err := obs.Register(obs.DurianSignalTables{
 		Metrics: map[string]obs.DurianSignalMetricInfo{"app.free": {Kind: "counter", Keys: []string{"user_id"}, Labels: Free{}}},
 		Events:  map[string]string{"app.made.up": "error"},
 	})

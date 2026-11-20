@@ -62,7 +62,7 @@ if out=$(build "$d/App/App.csproj") && run=$("$DOTNET" "$d/App/bin/Debug/net10.0
   grep -q 'label shard=3 valid=True' <<<"$run" &&
   grep -q 'checkout.charges checkout.charge.failed error 2026-11-17 provider,outcome,shard,hour' <<<"$run" &&
   grep -q 'client default-valid=False' <<<"$run" &&
-  grep -q 'guard: dropped.unknown_event: event "checkout.charge.failed" is not in the generated event table' <<<"$run" &&
+  grep -q 'guard: dropped.unknown_event: event "not.in.contract" is not in the generated event table' <<<"$run" &&
   grep -q 'guard-value: dropped.unknown_value: metric "checkout.charges" label provider value "visa" is not one of \[stripe adyen paypal\]' <<<"$run"; then
   echo "PASS good.cs builds, runs: valid calls Ok, nothing dropped, default/null! refused, a reflection-made value refused, the port refuses what its tables lack"
 else
@@ -79,4 +79,18 @@ while read -r f token; do
     fail=1
   fi
 done <"$g/expect"
+cp "$here/fixtures/gen/billing/gen/dotnet/Signals/Signals.g.cs" "$d/Signals/Billing.g.cs"
+cp "$g/multi.cs" "$d/App/Program.cs"
+if out=$(build "$d/App/App.csproj"); then
+  # shellcheck disable=SC2154 # obs_port_cases is supplied by stubs.bash
+  for scenario in "${obs_port_cases[@]}" early-real-forgery; do
+    if out=$("$DOTNET" "$d/App/bin/Debug/net10.0/App.dll" "$scenario" 2>&1); then echo "$out"; else
+      echo "FAIL multi $scenario: $out"
+      fail=1
+    fi
+  done
+else
+  echo "FAIL multi build: $out"
+  fail=1
+fi
 exit $fail

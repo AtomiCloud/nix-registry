@@ -10,8 +10,16 @@ final class ForgedEvent extends Event<ErrorLevel> {
 
 void main() {
   final port = (installSignals() as DurianSignalOk<DurianSignalPort>).value;
-  final second = DurianSignalPort.install(metrics: const {}, events: const {'app.made.up': 'error'});
-  print('result: ${second is DurianSignalErr<DurianSignalPort> ? second.error : 'ok'}');
+  error(chargeFailedEvent);
+  final second = DurianSignalPort.install(
+    contract: 'forged:observability/contract.yaml',
+    hash: 'sha256:forged',
+    metrics: const {},
+    events: const {'app.made.up': 'error'},
+  );
+  print(
+    'result: ${second is DurianSignalErr<DurianSignalPort> ? second.error : 'ok'}',
+  );
   final ev = error(const ForgedEvent());
   final valid = error(chargeFailedEvent);
   if (second is! DurianSignalErr<DurianSignalPort> ||

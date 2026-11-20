@@ -33,7 +33,7 @@ func (generator) Files(c *contract.Contract, o gen.Options) ([]gen.File, error) 
 	if !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$`).MatchString(interfaces) {
 		return nil, fmt.Errorf("interfaces %q must be a C# namespace", interfaces)
 	}
-	g := &emitter{c: c, ns: ns, interfaces: interfaces, declared: map[string]string{}}
+	g := &emitter{c: c, ns: ns, interfaces: interfaces, packageID: o.PackageID, declared: map[string]string{}}
 	if err := g.plan(); err != nil {
 		return nil, err
 	}
@@ -44,6 +44,7 @@ type emitter struct {
 	c          *contract.Contract
 	ns         string
 	interfaces string
+	packageID  string
 	declared   map[string]string // top-level identifier -> what declared it
 
 	typeRef  map[string]string   // contract type -> the C# type of a label value
@@ -63,7 +64,7 @@ var baseTypes = []string{
 	"DurianSignalGauge", "DurianSignalSpan", "DurianSignalMetricInfo", "DurianSignalSpanInfo",
 	"DurianSignalLevelTrace", "DurianSignalLevelDebug", "DurianSignalLevelInfo",
 	"DurianSignalLevelWarn", "DurianSignalLevelError", "DurianSignalLevelFatal",
-	"Names", "Events", "Spans", "SignalTables", "Int", "Result", "Event",
+	"DurianSignalContract", "Names", "Events", "Spans", "SignalTables", "Int", "Result", "Event",
 	"TraceLevel", "DebugLevel", "InfoLevel", "WarnLevel", "ErrorLevel", "FatalLevel",
 }
 
@@ -341,6 +342,9 @@ func (g *emitter) render() string {
 	x.line("/// <summary>The data tables: allowed label keys per metric and span, every event name and its level.</summary>")
 	x.line("public static class SignalTables")
 	x.line("{")
+	x.line("    /// <summary>The package-qualified contract id and hash used at boot registration.</summary>")
+	x.line("    public static readonly DurianSignalContract Contract = new(%s, %s);", cs(gen.RegistrationID(c, gen.Options{PackageID: g.packageID})), cs("sha256:"+c.Hash))
+	x.blank()
 	x.line("    public static readonly IReadOnlyDictionary<string, DurianSignalMetricInfo> Metrics =")
 	x.line("        new Dictionary<string, DurianSignalMetricInfo>")
 	x.line("        {")
