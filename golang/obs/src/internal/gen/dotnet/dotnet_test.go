@@ -23,7 +23,7 @@ func TestGoldenStress(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.File = "observability/contract.yaml" // standalone fixture's logical repository root
-	fs, err := gen.Generate("dotnet", c, gen.Options{Namespace: "Pay.Signals"})
+	fs, err := gen.Generate("dotnet", c, gen.Options{PackageID: "pay.Signals", Namespace: "Pay.Signals"})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,0 +1,5 @@
+service: shop
+logs:
+  Failed: { event: shop.friends.failed, level: error }
+generate:
+  - { lang: dotnet, out: gen, package_id: Shop }

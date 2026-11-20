@@ -12,7 +12,7 @@ import (
 )
 
 func TestCheckOrphansAfterDroppingATarget(t *testing.T) {
-	c, err := contract.Parse("contract.yaml", []byte("service: s\ngenerate: [{lang: go, out: custom/go}, {lang: dart, out: old/dart}]\n"))
+	c, err := contract.Parse("contract.yaml", []byte("service: s\ngenerate: [{lang: go, package_id: example.com/test, out: custom/go}, {lang: dart, package_id: test, out: old/dart}]\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestCheckOrphansBelongToOneContract(t *testing.T) {
 		if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(file, []byte("service: "+service+"\ngenerate: [{lang: go, out: generated}]\n"), 0o644); err != nil {
+		if err := os.WriteFile(file, []byte("service: "+service+"\ngenerate: [{lang: go, package_id: example.com/test, out: generated}]\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 		c, err := contract.LoadValid(file)
@@ -136,7 +136,7 @@ func writeProject(t *testing.T, root, svc, out string) (*contract.Contract, stri
 	if err := os.MkdirAll(obsDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	body := "service: s\nlogs:\n  A: {event: s.a, level: info}\ngenerate: [{lang: bun, out: " + out + "}]\n"
+	body := "service: s\nlogs:\n  A: {event: s.a, level: info}\ngenerate: [{lang: bun, package_id: test, out: " + out + "}]\n"
 	if err := os.WriteFile(filepath.Join(obsDir, "contract.yaml"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}

@@ -79,7 +79,11 @@ func Plan(c *contract.Contract, obsDir string, langs []string) ([]Output, error)
 		if err := checkOut(root, git, t.Lang, t.Out); err != nil {
 			return nil, err
 		}
-		fs, err := Generate(t.Lang, own, Options{Package: t.Package, Namespace: t.Module, Interfaces: t.Interfaces})
+		contractID, err := RegistrationIdentity(obsDir, t)
+		if err != nil {
+			return nil, err
+		}
+		fs, err := Generate(t.Lang, own, Options{Package: t.Package, Namespace: t.Module, Interfaces: t.Interfaces, ContractID: contractID})
 		if err != nil {
 			return nil, err
 		}
@@ -92,6 +96,9 @@ func Plan(c *contract.Contract, obsDir string, langs []string) ([]Output, error)
 		if outs[i].Path == outs[i-1].Path {
 			return nil, fmt.Errorf("two outputs write %s", outs[i].Path)
 		}
+	}
+	if err := validateDestinations(root, outs); err != nil {
+		return nil, err
 	}
 	return outs, nil
 }
@@ -125,19 +132,10 @@ func within(base, p string) bool {
 
 // resolve follows symlinks in the longest existing prefix of p and appends the rest unchanged.
 func resolve(p string) string {
-	p = filepath.Clean(p)
-	rest := ""
-	for {
-		if r, err := filepath.EvalSymlinks(p); err == nil {
-			return filepath.Join(r, rest)
-		}
-		parent := filepath.Dir(p)
-		if parent == p {
-			return filepath.Join(p, rest)
-		}
-		rest = filepath.Join(filepath.Base(p), rest)
-		p = parent
+	if resolved, err := resolvedPath(p); err == nil {
+		return resolved
 	}
+	return filepath.Clean(p)
 }
 
 // Events is contract/events.json: the event names the log-alert check reads (concept 3.4, 11.1).
@@ -185,12 +183,18 @@ func LoadEvents(b []byte) ([]string, error) {
 
 // Write writes every output under root.
 func Write(root string, outs []Output) error {
+	if err := validateDestinations(root, outs); err != nil {
+		return err
+	}
 	for _, o := range outs {
-		p := filepath.Join(root, filepath.FromSlash(o.Path))
-		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		destination, err := generatedDestination(filepath.Join(root, filepath.FromSlash(o.Path)))
+		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(p, o.Content, 0o644); err != nil {
+		if err := os.MkdirAll(filepath.Dir(destination), 0755); err != nil {
+			return err
+		}
+		if err := os.WriteFile(destination, o.Content, 0644); err != nil {
 			return err
 		}
 	}
@@ -213,8 +217,10 @@ func Check(root string, outs []Output, c *contract.Contract, langs ...string) ([
 	}
 	var probs []string
 	planned := make(map[string]bool, len(outs))
+	plannedResolved := make(map[string]bool, len(outs))
 	for _, o := range outs {
 		planned[filepath.Join(root, filepath.FromSlash(o.Path))] = true
+		plannedResolved[resolve(filepath.Join(root, filepath.FromSlash(o.Path)))] = true
 		fresh, err := os.ReadFile(filepath.Join(tmp, filepath.FromSlash(o.Path)))
 		if err != nil {
 			return nil, err
@@ -278,6 +284,9 @@ func Check(root string, outs []Output, c *contract.Contract, langs ...string) ([
 		}
 		lang, known := extensions[filepath.Ext(p)]
 		if !known || (!all && !selected[lang]) {
+			return nil
+		}
+		if plannedResolved[resolve(p)] {
 			return nil
 		}
 		rel, err := filepath.Rel(root, p)

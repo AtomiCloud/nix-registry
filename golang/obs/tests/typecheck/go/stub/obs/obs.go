@@ -74,15 +74,17 @@ func (Event[L]) Level() string               { var l L; return l.Level() }
 
 // Error logs an error event. Every log call goes through logEvent: a refusal is returned and counted,
 // never thrown, and never changes the app's result.
-func Error(_ context.Context, ev Event[ErrorLevel], fields ...Field) error { return logEvent(ev, fields) }
-func Warn(_ context.Context, ev Event[WarnLevel], fields ...Field) error   { return logEvent(ev, fields) }
-func Info(_ context.Context, ev Event[InfoLevel], fields ...Field) error   { return logEvent(ev, fields) }
+func Error(_ context.Context, ev Event[ErrorLevel], fields ...Field) error {
+	return logEvent(ev, fields)
+}
+func Warn(_ context.Context, ev Event[WarnLevel], fields ...Field) error { return logEvent(ev, fields) }
+func Info(_ context.Context, ev Event[InfoLevel], fields ...Field) error { return logEvent(ev, fields) }
 
 func logEvent[L Level](ev Event[L], _ []Field) error {
 	mu.Lock()
 	defer mu.Unlock()
 	if poisoned {
-		return dropLocked("poisoned", "event %q: the port is poisoned (a second registration was refused); every signal is refused until restart", ev.name)
+		return dropLocked("poisoned", "event %q: the port is poisoned (an invalid registration was refused); every signal is refused until restart", ev.name)
 	}
 	if ev.name == "" {
 		return dropLocked("unknown_event", "unset event (zero Event{})")
@@ -94,6 +96,7 @@ func logEvent[L Level](ev Event[L], _ []Field) error {
 	if level != ev.Level() {
 		return dropLocked("unknown_event", "event %q is %s in the generated event table, not %s", ev.name, level, ev.Level())
 	}
+	closed = true
 	return nil
 }
 
@@ -143,7 +146,7 @@ func emit(kind, name string, labels any) (err error) {
 		}
 	}()
 	if poisoned {
-		return dropLocked("poisoned", "metric %q: the port is poisoned (a second registration was refused); every signal is refused until restart", name)
+		return dropLocked("poisoned", "metric %q: the port is poisoned (an invalid registration was refused); every signal is refused until restart", name)
 	}
 	if name == "" {
 		return dropLocked("unknown_metric", "unset metric name")
@@ -184,6 +187,7 @@ func emit(kind, name string, labels any) (err error) {
 			}
 		}
 	}
+	closed = true
 	return nil
 }
 
@@ -207,48 +211,76 @@ type DurianSignalSpanInfo struct {
 // DurianSignalTables is what a generated package registers from its init(): the metric table,
 // the event table (name -> level) and the span table.
 type DurianSignalTables struct {
-	Metrics map[string]DurianSignalMetricInfo
-	Events  map[string]string
-	Spans   map[string]DurianSignalSpanInfo
+	Contract, Hash string
+	Metrics        map[string]DurianSignalMetricInfo
+	Events         map[string]string
+	Spans          map[string]DurianSignalSpanInfo
 }
 
 var (
-	mu         sync.Mutex
-	registered bool
-	poisoned   bool
-	tables     = DurianSignalTables{Metrics: map[string]DurianSignalMetricInfo{}, Events: map[string]string{}, Spans: map[string]DurianSignalSpanInfo{}}
-	dropped    = map[string]int64{}
+	mu        sync.Mutex
+	closed    bool
+	contracts = map[string]DurianSignalTables{}
+	owners    = map[string]string{}
+	poisoned  bool
+	tables    = DurianSignalTables{Metrics: map[string]DurianSignalMetricInfo{}, Events: map[string]string{}, Spans: map[string]DurianSignalSpanInfo{}}
+	dropped   = map[string]int64{}
 )
 
-// Register installs the generated tables, once per process (the generated init() calls it; the lint rule
-// forbids calls anywhere else). Go cannot promise the generated init runs first: an independent app package
-// whose init registers a forged table can run earlier. So a second registration, whichever came first,
-// POISONS the port: it is refused and counted in dropped.register, and from then on every signal is
-// refused and counted in dropped.poisoned until restart. A forged first table is never used silently; it
-// becomes a loud telemetry failure, never an app failure. The tables are deep-copied, so writing to the
-// exported generated maps and slices later changes nothing.
+// Register merges a deep copy per contract before signals flow. Invalid registration
+// poisons every signal; identical id, hash and content is harmless before closure.
 func Register(t DurianSignalTables) error {
 	mu.Lock()
 	defer mu.Unlock()
-	if registered {
-		poisoned = true
-		return dropLocked("register", "the tables are already registered once in this process; the port is now poisoned and refuses every signal until restart")
+	refuse := func(why string, a ...any) error { poisoned = true; return dropLocked("register", why, a...) }
+	if poisoned {
+		return refuse("contract %q: the port is already poisoned", t.Contract)
 	}
-	registered = true
+	if closed {
+		return refuse("contract %q registered after the first signal", t.Contract)
+	}
+	if previous, ok := contracts[t.Contract]; ok {
+		if reflect.DeepEqual(previous, t) {
+			return nil
+		}
+		return refuse("contract %q reused with a different hash or table", t.Contract)
+	}
+	names := map[string]bool{}
+	for n := range t.Metrics {
+		names[n] = true
+	}
+	for n := range t.Events {
+		names[n] = true
+	}
+	for n := range t.Spans {
+		names[n] = true
+	}
+	for n := range names {
+		if owner, ok := owners[n]; ok {
+			return refuse("signal %q is owned by both contract %q and contract %q", n, owner, t.Contract)
+		}
+	}
+	copy := DurianSignalTables{Contract: t.Contract, Hash: t.Hash, Metrics: maps.Clone(t.Metrics), Events: maps.Clone(t.Events), Spans: maps.Clone(t.Spans)}
 	for k, m := range t.Metrics {
 		m.Keys = slices.Clone(m.Keys)
-		values := make(map[string][]string, len(m.Values))
+		values := maps.Clone(m.Values)
 		for lk, vs := range m.Values {
 			values[lk] = slices.Clone(vs)
 		}
 		m.Values = values
 		m.Ranges = maps.Clone(m.Ranges)
-		tables.Metrics[k] = m
+		copy.Metrics[k] = m
 	}
-	maps.Copy(tables.Events, t.Events)
 	for k, sp := range t.Spans {
 		sp.Keys = slices.Clone(sp.Keys)
-		tables.Spans[k] = sp
+		copy.Spans[k] = sp
+	}
+	contracts[t.Contract] = copy
+	maps.Copy(tables.Metrics, copy.Metrics)
+	maps.Copy(tables.Events, copy.Events)
+	maps.Copy(tables.Spans, copy.Spans)
+	for n := range names {
+		owners[n] = t.Contract
 	}
 	return nil
 }
@@ -264,4 +296,31 @@ func Dropped(reason string) int64 {
 func dropLocked(reason, format string, a ...any) error {
 	dropped[reason]++
 	return fmt.Errorf("dropped.%s: "+format, append([]any{reason}, a...)...)
+}
+
+// StartSpan is the fixture's assumed span-recording entrypoint. The carrier fixes
+// the attributes type; the installed table fixes its name, kind and wire keys.
+func StartSpan[A any](_ context.Context, span DurianSignalSpan[A], attrs A) error {
+	mu.Lock()
+	defer mu.Unlock()
+	if poisoned {
+		return dropLocked("poisoned", "span %q: the port is poisoned", span.name)
+	}
+	info, ok := tables.Spans[span.name]
+	if !ok || info.Kind != span.kind {
+		return dropLocked("unknown_span", "span %q: unknown name or kind", span.name)
+	}
+	typ := reflect.TypeOf(attrs)
+	if typ == nil || typ.Kind() != reflect.Struct {
+		return dropLocked("unknown_key", "span %q: attributes must be a struct", span.name)
+	}
+	keys := make([]string, typ.NumField())
+	for i := range keys {
+		keys[i] = typ.Field(i).Tag.Get("obs")
+	}
+	if !slices.Equal(keys, info.Keys) {
+		return dropLocked("unknown_key", "span %q: attributes %v are not its generated keys %v", span.name, keys, info.Keys)
+	}
+	closed = true
+	return nil
 }

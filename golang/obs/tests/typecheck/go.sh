@@ -53,4 +53,20 @@ while read -r f token; do
   fi
 done <"$g/forge-expect"
 rm -rf early
+mkdir -p billing
+cp "$here/fixtures/gen/billing/gen/go/signals/signals.go" billing/
+rm -f main.go # the previous fixture may have been copied read-only from the Nix store
+sed "s|sha256:HASH|$(obs_port_hash signals/signals.go)|" "$g/multi.go.txt" >main.go
+if out=$("$GO" build -o multi . 2>&1); then
+  # shellcheck disable=SC2154 # obs_port_cases is supplied by stubs.bash
+  for scenario in "${obs_port_cases[@]}"; do
+    if out=$(./multi "$scenario" 2>&1); then echo "$out"; else
+      echo "FAIL multi $scenario: $out"
+      fail=1
+    fi
+  done
+else
+  echo "FAIL multi build: $out"
+  fail=1
+fi
 exit $fail

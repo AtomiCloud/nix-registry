@@ -43,12 +43,16 @@ func Golden(t *testing.T, lang string) {
 	if target == nil {
 		t.Fatalf("fixture contract has no generate target for %s", lang)
 	}
-	files, err := gen.Generate(lang, c, gen.Options{Package: target.Package, Namespace: target.Module, Interfaces: target.Interfaces})
+	packageID, err := gen.PackageIdentity(root, *target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := gen.Generate(lang, c, gen.Options{PackageID: packageID, Package: target.Package, Namespace: target.Module, Interfaces: target.Interfaces})
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Determinism: a second run gives the same bytes.
-	again, _ := gen.Generate(lang, c, gen.Options{Package: target.Package, Namespace: target.Module, Interfaces: target.Interfaces})
+	again, _ := gen.Generate(lang, c, gen.Options{PackageID: packageID, Package: target.Package, Namespace: target.Module, Interfaces: target.Interfaces})
 	for i := range files {
 		if !bytes.Equal(files[i].Content, again[i].Content) {
 			t.Fatalf("%s: two runs differ", files[i].Path)

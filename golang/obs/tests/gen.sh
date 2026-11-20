@@ -87,6 +87,7 @@ for n in d1 d2; do
   rm -rf "${work:?}/$n"
   mkdir -p "$work/$n/observability"
   cp "$fx/gen/good/observability/contract.yaml" "$work/$n/observability/"
+  cp "$fx/gen/good/"{go.mod,package.json,pubspec.yaml,Signals.csproj} "$work/$n/"
   run gen --dir "$work/$n/observability" "${genlang[@]}"
 done
 diff -r "$work/d1" "$work/d2" >/dev/null && ok "obs gen is deterministic: two runs write identical files" || bad "obs gen output differs between runs"
@@ -107,7 +108,7 @@ for tc in "$here"/typecheck/*.sh; do
     echo "SKIP generated $lang code compile check: $tool not on PATH"
     continue
   fi
-  if bash "$tc" >"$work/tc-$lang.txt" 2>&1 && ! grep -q '^FAIL' "$work/tc-$lang.txt"; then
+  if OBS_GEN_BINARY="$OBS" bash "$tc" >"$work/tc-$lang.txt" 2>&1 && ! grep -q '^FAIL' "$work/tc-$lang.txt"; then
     ok "generated $lang code compiles and every planted bad consumer is red ($(grep -c '^PASS' "$work/tc-$lang.txt") checks)"
   else
     bad "generated $lang typecheck"

@@ -11,8 +11,8 @@
 //   - span attributes as the SpanAttrs map and spanTable (kind + allowed keys). Both are `type` aliases:
 //     an interface does not fit the Tracer index-signature constraint;
 //   - one name carrier (a string-literal constant) per metric and span;
-//   - one call that registers the tables with the port when the module loads (like Go's init): once per
-//     process, and any competing registration or table poisons the port.
+//   - one call that merges this contract's tables at boot, before signals flow;
+//     duplicate names, changed contracts and late registration poison the port.
 //
 // Shared event and large bounded value types are imported from the interfaces library. The output is
 // laid out the way biome formats it (2 spaces, double quotes, semicolons, trailing commas, width 100).
@@ -403,18 +403,18 @@ func renderWithOptions(c *contract.Contract, o gen.Options) (string, error) {
 			fmt.Fprintf(&b, "export const %s = %s as const;\n", id, q(sn))
 		}
 	}
-	var tables []string
+	tables := []member{{"contract", raw(q(gen.RegistrationID(c, o)))}, {"hash", raw(q("sha256:" + c.Hash))}}
 	if len(c.MetricOrder) > 0 {
-		tables = append(tables, "metrics: metricTable")
+		tables = append(tables, member{"metrics", raw("metricTable")})
 	}
 	if len(c.LogOrder) > 0 {
-		tables = append(tables, "events: eventTable")
+		tables = append(tables, member{"events", raw("eventTable")})
 	}
 	if len(c.SpanOrder) > 0 {
-		tables = append(tables, "spans: spanTable")
+		tables = append(tables, member{"spans", raw("spanTable")})
 	}
-	b.WriteString("\n// Registers the tables with the port when this module loads, once per process. Any competing\n")
-	b.WriteString("// registration, or a table that is not one of these, poisons the port until restart.\n")
-	render(&b, 0, "durianSignalRegister(", raw("{ "+strings.Join(tables, ", ")+" }"), ");")
+	b.WriteString("\n// Merges this contract's tables at boot; duplicate names, changed contracts and late\n")
+	b.WriteString("// registration poison the port until restart.\n")
+	render(&b, 0, "durianSignalRegister(", obj{members: tables}, ");")
 	return b.String(), nil
 }

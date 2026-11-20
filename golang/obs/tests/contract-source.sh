@@ -75,7 +75,7 @@ mkdir -p "$work/gen2/observability"
 cat >"$work/gen2/observability/contract.yaml" <<'YAML'
 service: mixed
 generate:
-  - { lang: go, out: gen/go }
+  - { lang: go, out: gen/go, package_id: example.com/mixed }
 types:
   pod: { kind: estimate, min: 1, max: 9, churn_per_day: 1 }
   lane: { kind: enum, values: [a, b] }

@@ -138,6 +138,36 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 				otherFails++
 			}
 		}
+		targetContracts := append([]*contract.Contract{c}, others...)
+		if *contracts == "auto" && gen.GitRoot(*dir) == "" {
+			// Generation-only sibling scope for source exports; metric/query
+			// discovery retains its existing repository semantics.
+			paths, err := gen.TargetContractPaths(c)
+			if err != nil {
+				fmt.Fprintf(stdout, "FAIL %v\n", err)
+				otherFails++
+			}
+			for _, file := range paths {
+				other, err := contract.Load(file)
+				if err != nil {
+					fmt.Fprintf(stdout, "FAIL %v\n", err)
+					otherFails++
+					continue
+				}
+				if issues := other.Validate(); len(issues) > 0 {
+					for _, issue := range issues {
+						fmt.Fprintf(stdout, "FAIL %s %s\n", file, issue)
+					}
+					otherFails += len(issues)
+					continue
+				}
+				targetContracts = append(targetContracts, other)
+			}
+		}
+		for _, issue := range gen.TargetClashes(targetContracts) {
+			fmt.Fprintf(stdout, "FAIL %s\n", issue)
+			otherFails++
+		}
 		if otherFails > 0 {
 			contractFails += otherFails
 			reasons = append(reasons, fmt.Sprintf("%d contract failures in the repository's other contracts or across contracts", otherFails))
