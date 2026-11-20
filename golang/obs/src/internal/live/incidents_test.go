@@ -1265,9 +1265,9 @@ func TestMergeIntervalsOpenIsTrueWhenAnyMergedSpanIsOpen(t *testing.T) {
 	}
 }
 
-// A span whose start was synthesized at the history read start (the first entry is Alerting -> Normal)
-// is not measured: longest_ns counts only spans with BOTH transitions observed. The firing itself was
-// observed, so the window is still caught.
+// A span whose start was not seen (the first entry is Alerting -> Normal) starts at that entry, so it is
+// empty and not measured: longest_ns counts only spans with BOTH transitions observed. The firing itself
+// was observed, so the window is still caught.
 func TestIncidentsSynthesizedStartIsNotMeasured(t *testing.T) {
 	dir := writeRepo(t)
 	now := t0.Add(time.Hour)
