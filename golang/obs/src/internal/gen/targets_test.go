@@ -66,3 +66,15 @@ func TestDotnetNamespaceSpelling(t *testing.T) {
 		t.Fatalf("canonical namespace collision: %v", got)
 	}
 }
+
+func TestDotnetNamespaceLeadingFormatCharacter(t *testing.T) {
+	for _, namespace := range []string{"Shop.\u200bSignals", "Shop.@\u200bSignals"} {
+		if _, err := gen.CanonicalDotnetNamespace(namespace); err == nil {
+			t.Errorf("leading U+200B accepted: %q", namespace)
+		}
+		c := &contract.Contract{File: "observability/contract.yaml", Service: "shop"}
+		if _, err := gen.Generate("dotnet", c, gen.Options{Namespace: namespace}); err == nil {
+			t.Errorf("generator accepted leading U+200B: %q", namespace)
+		}
+	}
+}

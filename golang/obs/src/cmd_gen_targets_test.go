@@ -93,3 +93,46 @@ func TestGenerationNamespaceValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestGenerationResolvedOutputCollision(t *testing.T) {
+	for _, sameFile := range []bool{true, false} {
+		name := "distinct filenames"
+		second := "{lang: dotnet, out: link}"
+		if sameFile {
+			name = "same physical file"
+			second = "{lang: go, out: link, package: b}"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := repo(t, map[string]string{
+				"go.mod":                      "module example.com/shared\n\ngo 1.24\n",
+				"Shared.csproj":               "<Project/>",
+				"observability/contract.yaml": "service: shared\ngenerate: [{lang: go, out: actual, package: a}, " + second + "]\n",
+			})
+			if err := os.Mkdir(filepath.Join(root, "actual"), 0755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink("actual", filepath.Join(root, "link")); err != nil {
+				t.Fatal(err)
+			}
+			dir := filepath.Join(root, "observability")
+			rc, out := obs("gen", "--dir", dir)
+			if sameFile {
+				if rc == 0 || !strings.Contains(out, "actual/signals.go") || !strings.Contains(out, "link/signals.go") {
+					t.Fatalf("same resolved file must be refused before writes: rc=%d %s", rc, out)
+				}
+				for _, file := range []string{"actual/signals.go", "observability/contract/events.json"} {
+					if _, err := os.Stat(filepath.Join(root, file)); !os.IsNotExist(err) {
+						t.Fatalf("refused gen wrote %s", file)
+					}
+				}
+			} else {
+				if rc != 0 {
+					t.Fatalf("distinct filenames through shared-folder alias: rc=%d %s", rc, out)
+				}
+				if rc, out := obs("gen", "--check", "--dir", dir); rc != 0 {
+					t.Fatalf("shared-folder alias --check: rc=%d %s", rc, out)
+				}
+			}
+		})
+	}
+}

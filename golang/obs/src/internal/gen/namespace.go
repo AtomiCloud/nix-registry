@@ -25,21 +25,24 @@ func CanonicalDotnetNamespace(namespace string) (string, error) {
 	for _, segment := range strings.Split(namespace, ".") {
 		escaped := strings.HasPrefix(segment, "@")
 		segment = strings.TrimPrefix(segment, "@")
+		if segment == "" {
+			return fail()
+		}
+		for index, r := range []rune(segment) {
+			letter := r == '_' || unicode.IsLetter(r) || unicode.Is(unicode.Nl, r)
+			rest := letter || unicode.IsDigit(r) || unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Mc, r) || unicode.Is(unicode.Pc, r) || unicode.Is(unicode.Cf, r)
+			if (index == 0 && !letter) || (index > 0 && !rest) {
+				return fail()
+			}
+		}
 		segment = strings.Map(func(r rune) rune {
 			if unicode.Is(unicode.Cf, r) {
 				return -1
 			}
 			return r
 		}, segment)
-		if segment == "" || (!escaped && csharpNamespaceKeywords[segment]) {
+		if !escaped && csharpNamespaceKeywords[segment] {
 			return fail()
-		}
-		for index, r := range []rune(segment) {
-			letter := r == '_' || unicode.IsLetter(r) || unicode.Is(unicode.Nl, r)
-			rest := letter || unicode.IsDigit(r) || unicode.Is(unicode.Mn, r) || unicode.Is(unicode.Mc, r) || unicode.Is(unicode.Pc, r)
-			if (index == 0 && !letter) || (index > 0 && !rest) {
-				return fail()
-			}
 		}
 		canonical = append(canonical, segment)
 	}

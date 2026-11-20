@@ -97,6 +97,14 @@ func Plan(c *contract.Contract, obsDir string, langs []string) ([]Output, error)
 			return nil, fmt.Errorf("two outputs write %s", outs[i].Path)
 		}
 	}
+	resolvedOutputs := make(map[string]string, len(outs))
+	for _, output := range outs {
+		resolved := resolve(filepath.Join(root, filepath.FromSlash(output.Path)))
+		if previous, exists := resolvedOutputs[resolved]; exists {
+			return nil, fmt.Errorf("two outputs write %s and %s: the same resolved file", previous, output.Path)
+		}
+		resolvedOutputs[resolved] = output.Path
+	}
 	return outs, nil
 }
 
@@ -217,8 +225,10 @@ func Check(root string, outs []Output, c *contract.Contract, langs ...string) ([
 	}
 	var probs []string
 	planned := make(map[string]bool, len(outs))
+	plannedResolved := make(map[string]bool, len(outs))
 	for _, o := range outs {
 		planned[filepath.Join(root, filepath.FromSlash(o.Path))] = true
+		plannedResolved[resolve(filepath.Join(root, filepath.FromSlash(o.Path)))] = true
 		fresh, err := os.ReadFile(filepath.Join(tmp, filepath.FromSlash(o.Path)))
 		if err != nil {
 			return nil, err
@@ -282,6 +292,9 @@ func Check(root string, outs []Output, c *contract.Contract, langs ...string) ([
 		}
 		lang, known := extensions[filepath.Ext(p)]
 		if !known || (!all && !selected[lang]) {
+			return nil
+		}
+		if plannedResolved[resolve(p)] {
 			return nil
 		}
 		rel, err := filepath.Rel(root, p)
