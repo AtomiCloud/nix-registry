@@ -12,6 +12,7 @@ import (
 )
 
 func TestDefaultFeatureNamespace(t *testing.T) {
+	t.Chdir(t.TempDir()) // pure generator inputs must also work outside a Git checkout
 	for _, tc := range []struct{ file, want string }{
 		{"observability/contract.yaml", "Shop.Signals"},
 		{"Orders/observability/contract.yaml", "Shop.Orders.Signals"},

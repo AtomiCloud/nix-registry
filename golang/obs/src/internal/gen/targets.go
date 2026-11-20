@@ -44,7 +44,9 @@ func dotnetContractPath(c *contract.Contract) string {
 			if target.Lang != "dotnet" {
 				continue
 			}
-			if root, err := owningProject(Root(filepath.Dir(c.File)), target); err == nil {
+			// Only an actual manifest changes the source path base. Synthetic
+			// contracts retain their supplied logical paths without a checkout.
+			if _, root, _ := packageManifest(Root(filepath.Dir(c.File)), target); root != "" {
 				source, err := resolvedPath(c.File)
 				if err != nil {
 					continue
