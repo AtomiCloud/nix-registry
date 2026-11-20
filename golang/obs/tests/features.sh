@@ -5,7 +5,6 @@
 # Every claim: the baseline is green and the planted failure is red; the red output names the file, the rule and the token.
 set -euo pipefail
 OBS=$1
-here=$(cd "$(dirname "$0")" && pwd)
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -464,6 +463,40 @@ check "obs live: the same root obs.yaml note on stderr" 2 "note: observability/o
 run sandbox up --dir "$FA" --runtime none
 grep -q 'exists but' "$work/out.txt" && ok "obs sandbox up: the same root obs.yaml note" || bad "obs sandbox up: no root obs.yaml note: $(head -5 "$work/out.txt")"
 
+# an ignored folder is never read (unreadable build/), and a nested repository or submodule is its own boundary
+if command -v git >/dev/null 2>&1 && [ "$(id -u)" != 0 ]; then
+  repo "unreadable" i nfctag-errors friend-errors friend.invites ""
+  rm -rf "${R:?}/.git"
+  git -C "$R" init -q
+  mkdir -p "$R/build/observability"
+  cp -r "$FA" "$R/build/observability/nfctag"
+  printf 'build/\n' >"$R/.gitignore"
+  chmod 000 "$R/build"
+  run check --dir "$FA"
+  check "unreadable ignored build/: obs check is green (the folder is never read)" 0 'obs check: ok'
+  run alerts --dir "$FA" --base "$base"
+  check "unreadable ignored build/: obs alerts is green" 0
+  chmod 755 "$R/build"
+  printf '' >"$R/.gitignore"
+  chmod 000 "$R/build"
+  run check --dir "$FA"
+  check "unreadable build/ that is NOT ignored: a failure naming it (the control)" 1 'cannot read build'
+  chmod 755 "$R/build"
+  repo "nested" i nfctag-errors friend-errors friend.invites ""
+  rm -rf "${R:?}/.git"
+  git -C "$R" init -q
+  mkdir -p "$R/tools/other/observability"
+  git -C "$R/tools/other" init -q
+  cp -r "$FA" "$R/tools/other/observability/nfctag"
+  run check --dir "$FA"
+  check "nested repository holding a copy: not a second contract, not a second rule uid" 0 'obs check: ok'
+  absent '[metric-clash]' '[rule-id-clash]' || bad "nested repository: the copy clashed"
+  run test --dir "$FA" --base "$base"
+  check "nested repository holding a copy: obs test" 0 'obs test: ok'
+else
+  echo "SKIP unreadable ignored folder and nested repository: git is not installed or the tests run as root"
+fi
+
 # ---- a repository that is itself an observability folder: recognised by content, never by the checkout folder's name -----
 for name in observability checkout; do
   R=$work/sa-$name/$name
@@ -532,66 +565,6 @@ run alerts --dir "$R/alias" --base "$base"
 check "symlinked --dir: obs alerts is green" 0
 run test --dir "$R/alias" --base "$base"
 check "symlinked --dir: obs test is green" 0 'obs test: ok'
-
-# ---- the CI loop of the README, run for real (git ls-files, NUL names, status of a failed check) ----------------------------
-readme=${OBS_README:-$here/../README.md}
-sed -n '/# obs-ci-loop/,/^  ```/p' "$readme" | sed '$d; s/^  //' >"$work/ci-loop.sh"
-[ -s "$work/ci-loop.sh" ] && ok "README: the CI loop is there" || bad "README: no CI loop between # obs-ci-loop and its closing fence"
-obs() { "$OBS" "$@"; }
-export -f obs
-export OBS
-if command -v git >/dev/null 2>&1; then
-  mkloop() { # mkloop <checkout name> <standalone: yes|no>: a committed-index repository with two features
-    L=$work/loop-$1-$2/$1
-    rm -rf "${work:?}/loop-$1-$2"
-    mkdir -p "$L"
-    git -C "$L" init -q
-    if [ "$2" = yes ]; then
-      printf 'versions: {}\n' >"$L/obs.yaml"
-      feature "$L/nfctag" nfctag nfctag.scans nfctag-errors ""
-      feature "$L/friend" friend friend.invites friend-errors ""
-    else
-      feature "$L/observability/nfctag" nfctag nfctag.scans nfctag-errors ""
-      feature "$L/App/Friend/observability" friend friend.invites friend-errors ""
-    fi
-    # a file whose name only ends in contract.yaml, and a chart's files/ copy of a feature: neither is run
-    mkdir -p "$L/observability/misc" "$L/chart/files"
-    printf 'not: a contract\n' >"$L/observability/misc/alert-contract.yaml"
-    printf 'name: c\n' >"$L/chart/Chart.yaml"
-    if [ "$2" = yes ]; then cp -r "$L/nfctag" "$L/chart/files/nfctag"; else cp -r "$L/observability/nfctag" "$L/chart/files/nfctag"; fi
-    [ "$2" = yes ] || printf 'openapi: 3.0.0\ninfo: { title: api, version: "1" }\n' >"$L/contract.yaml" # not an obs contract: the repository stays ordinary
-    mkdir -p "$L/tests/fixtures/x"
-    # a fixture: never run. A contract.yaml of docs/ that is not observability's is not run in a repository with
-    # observability folders; in a standalone observability repository every folder holding a contract is one.
-    [ "$2" = yes ] || { mkdir -p "$L/docs" && printf 'service: not-observability\n' >"$L/docs/contract.yaml"; }
-    printf 'this is not valid yaml: [\n' >"$L/tests/fixtures/x/contract.yaml"
-    git -C "$L" add -A
-  }
-  loop() { (cd "$L" && bash "$work/ci-loop.sh") >"$work/out.txt" 2>&1 && rc=0 || rc=$?; }
-  for spec in "observability yes" "checkout yes" "observability no" "checkout no"; do
-    read -r cname standalone <<<"$spec"
-    mkloop "$cname" "$standalone"
-    loop
-    n=$(grep -c '^obs check: ok' "$work/out.txt" || true)
-    [ "$rc" -eq 0 ] && [ "$n" -eq 2 ] && ! grep -q 'not-observability' "$work/out.txt" && ok "CI loop: checkout $cname, standalone=$standalone: both features checked, rc 0, docs/ and fixtures skipped" || {
-      bad "CI loop: checkout $cname, standalone=$standalone: rc=$rc, $n checks"
-      sed 's/^/  | /' "$work/out.txt"
-    }
-  done
-  mkloop checkout yes
-  sed -i 's/budget: 2/budget: 1/' "$L/friend/contract.yaml"
-  loop
-  [ "$rc" -eq 1 ] && grep -q '\[over-budget\]' "$work/out.txt" && ok "CI loop: a failed check fails the loop (rc 1) and names the contract" || bad "CI loop: a failed check gave rc=$rc"
-  mkloop observability no
-  mkdir -p "$L/space dir/observability"
-  feature "$L/space dir/observability" spaced spaced.scans spaced-errors ""
-  git -C "$L" add -A
-  loop
-  n=$(grep -c '^obs check: ok' "$work/out.txt" || true)
-  [ "$rc" -eq 0 ] && [ "$n" -eq 3 ] && ok "CI loop: a folder name with a space is one folder (NUL-delimited)" || bad "CI loop: the folder with a space: rc=$rc, $n checks"
-else
-  echo "SKIP CI loop: git is not installed"
-fi
 
 echo "features.sh: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

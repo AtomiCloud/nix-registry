@@ -43,6 +43,7 @@ func Discover(dir string) ([]string, error) {
 		return nil, nil
 	}
 	rootObs := rootIsObservability(root)
+	skip := newWalkSkip(root, abs)
 	var out []string
 	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -58,15 +59,12 @@ func Discover(dir string) ([]string, error) {
 			return fmt.Errorf("contract discovery: cannot read %s: %w", filepath.ToSlash(rel), cause)
 		}
 		if d.IsDir() {
-			if p != root && (skipDirs[d.Name()] || testDirs[d.Name()]) {
+			if skip.dir(p, d.Name()) {
 				return filepath.SkipDir
-			}
-			if copySubtree(abs, p, d.Name()) {
-				return filepath.SkipDir // a chart's copy of an observability folder is not a second one
 			}
 			return nil
 		}
-		if d.Name() == "contract.yaml" && p != own && d.Type().IsRegular() && !sameInfo(ownInfo, p) && belowObservability(root, filepath.Dir(p), rootObs, true) {
+		if d.Name() == "contract.yaml" && p != own && d.Type().IsRegular() && !sameInfo(ownInfo, p) && !skip.ignored[p] && belowObservability(root, filepath.Dir(p), rootObs, true) {
 			out = append(out, p)
 		}
 		return nil
@@ -75,41 +73,62 @@ func Discover(dir string) ([]string, error) {
 		return nil, err
 	}
 	sort.Strings(out)
-	return dropIgnored(root, abs, out, func(p string) string { return filepath.Dir(p) }), nil
+	skip.note(len(out))
+	return out, nil
 }
 
-// copySubtree is true for the folders a chart's copies of the observability folders live in: the files/ and the
-// templates/ of a folder that holds a Chart.yaml (Helm reads a chart's files from there, so the build step copies
-// the alerts and dashboards in). Discovery and the rule uid scan share it, so a copy is never a second contract or
-// a second definition of a rule uid. The selected folder (abs) and the folders above it are never copies.
-func copySubtree(abs, p, name string) bool {
-	if name != "files" && name != "templates" {
-		return false
-	}
-	if p == abs || strings.HasPrefix(abs, p+string(filepath.Separator)) {
-		return false
-	}
-	return isChart(filepath.Dir(p))
+// walkSkip is the one rule of which folders a walk of the repository never enters, shared by contract discovery and
+// the observability folder scan (so a copy is neither a second contract nor a second definition of a rule uid):
+//   - the dependency, tool and test folders (skipDirs, testDirs);
+//   - a folder git ignores, pruned on entry so it is never read (an unreadable ignored build/ cannot fail a run), from
+//     one call to git (ls-files --others --ignored --directory) made before the walk;
+//   - a nested Git repository or submodule (a folder with its own .git): its own boundary, not this repository's;
+//   - the files/ and templates/ of a folder that holds a Chart.yaml (a chart's copy of the alerts and dashboards).
+//
+// The selected folder (abs) and the folders above it are never skipped by the last three.
+type walkSkip struct {
+	root, abs string
+	ignored   map[string]bool // absolute paths of the folders and files git ignores
+	refused   bool            // git refused the repository for its ownership: nothing is known to be ignored
 }
 
-// dropIgnored removes from paths those whose folder (folderOf) git ignores, except the selected folder abs.
-func dropIgnored(root, abs string, paths []string, folderOf func(string) string) []string {
-	var folders []string
-	seen := map[string]bool{}
-	for _, p := range paths {
-		if f := folderOf(p); !seen[f] {
-			seen[f] = true
-			folders = append(folders, f)
-		}
+func newWalkSkip(root, abs string) *walkSkip {
+	ign, refused := ignoredPaths(root)
+	return &walkSkip{root: root, abs: abs, ignored: ign, refused: refused}
+}
+
+// note says, once, that ignored folders were not skipped because git refused the repository. It is said only when
+// the walk found folders other than the selected one (others > 0): a repository with one observability folder has
+// nothing that skipping could have changed, so it prints nothing new.
+func (w *walkSkip) note(others int) {
+	if !w.refused || others == 0 {
+		return
 	}
-	ign := ignoredBy(root, folders)
-	kept := paths[:0]
-	for _, p := range paths {
-		if f := folderOf(p); f == abs || !ign[f] {
-			kept = append(kept, p)
-		}
+	gitNote.Do(func() {
+		fmt.Fprintf(NoteWriter, "note: git refused to read %s (dubious ownership): folders git ignores are NOT skipped when obs counts observability folders, so an ignored copy of the alerts can clash; run: git config --global --add safe.directory %s\n", w.root, w.root)
+	})
+}
+
+func (w *walkSkip) dir(p, name string) bool {
+	if p == w.root {
+		return false
 	}
-	return kept
+	if skipDirs[name] || testDirs[name] {
+		return true
+	}
+	if p == w.abs || strings.HasPrefix(w.abs, p+string(filepath.Separator)) {
+		return false
+	}
+	if w.ignored[p] || hasGit(p) {
+		return true
+	}
+	return (name == "files" || name == "templates") && isChart(filepath.Dir(p))
+}
+
+// hasGit is true when folder p holds a .git (a directory, or the file of a submodule or a worktree).
+func hasGit(p string) bool {
+	_, err := os.Lstat(filepath.Join(p, ".git"))
+	return err == nil
 }
 
 // rootIsObservability is true when the Git root is itself an observability folder: a standalone observability
@@ -186,6 +205,7 @@ func Folders(dir string) ([]string, error) {
 		return nil, nil
 	}
 	rootObs := rootIsObservability(root)
+	skip := newWalkSkip(root, abs)
 	var out []string
 	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -203,11 +223,8 @@ func Folders(dir string) ([]string, error) {
 		if !d.IsDir() {
 			return nil
 		}
-		if p != root && (skipDirs[d.Name()] || testDirs[d.Name()]) {
+		if skip.dir(p, d.Name()) {
 			return filepath.SkipDir
-		}
-		if copySubtree(abs, p, d.Name()) {
-			return filepath.SkipDir // a chart's files are copies of what the repository's folders hold
 		}
 		st, serr := os.Stat(filepath.Join(p, "contract.yaml"))
 		hasContract := serr == nil && st.Mode().IsRegular()
@@ -225,7 +242,14 @@ func Folders(dir string) ([]string, error) {
 		return nil, err
 	}
 	sort.Strings(out)
-	return dropIgnored(root, abs, out, func(p string) string { return p }), nil
+	others := len(out)
+	for _, o := range out {
+		if o == abs {
+			others--
+		}
+	}
+	skip.note(others)
+	return out, nil
 }
 
 // isChart is true when folder p holds a Chart.yaml.
@@ -415,45 +439,34 @@ var NoteWriter io.Writer = os.Stderr
 
 var gitNote sync.Once
 
-// ignoredBy returns the folders git ignores (git check-ignore, run in the Git root), by path. Git missing, or
-// the root not a repository git can read, ignores nothing: obs then counts every folder, as it did before. When git
-// refuses the repository for its ownership (exit 128, "dubious ownership": a container CI running as another user
-// than the checkout's), one note says that ignored folders are not skipped: it must not fail silently.
-func ignoredBy(root string, folders []string) map[string]bool {
-	out := map[string]bool{}
-	if len(folders) == 0 {
-		return out
-	}
+// ignoredPaths returns the folders and files git ignores in the working tree of the Git root, by absolute path, from
+// one call: git ls-files --others --ignored --exclude-standard --directory (an ignored folder is listed once, as
+// itself, and is not read). Git missing, or the root not a repository git can read, ignores nothing: obs then
+// counts every folder, as it did before. When git refuses the repository for its ownership (exit 128, "dubious
+// ownership": a container CI running as another user than the checkout's), one note says that ignored folders are
+// not skipped: it must not fail silently (when it could matter: see walkSkip.note).
+func ignoredPaths(root string) (out map[string]bool, refused bool) {
+	out = map[string]bool{}
 	git, err := exec.LookPath("git")
 	if err != nil {
-		return out
+		return out, false
 	}
-	var in bytes.Buffer
-	for _, f := range folders {
-		rel, err := filepath.Rel(root, f)
-		if err != nil || rel == "." {
-			continue
-		}
-		in.WriteString(filepath.ToSlash(rel))
-		in.WriteByte(0)
-	}
-	cmd := exec.Command(git, "-C", root, "check-ignore", "-z", "--stdin")
-	cmd.Stdin = &in
+	cmd := exec.Command(git, "-C", root, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
-	b, err := cmd.Output() // exit 1 = nothing ignored; 128 = git cannot read the repository
+	b, err := cmd.Output()
 	var ee *exec.ExitError
 	if errors.As(err, &ee) && ee.ExitCode() == 128 && (strings.Contains(stderr.String(), "dubious ownership") || strings.Contains(stderr.String(), "safe.directory")) {
-		gitNote.Do(func() {
-			fmt.Fprintf(NoteWriter, "note: git refused to read %s (dubious ownership): folders git ignores are NOT skipped when obs counts observability folders, so an ignored copy of the alerts can clash; run: git config --global --add safe.directory %s\n", root, root)
-		})
-		return out
+		return out, true // the caller says so once, when it matters (walkSkip.note)
+	}
+	if err != nil {
+		return out, false // not a repository git can read (a fake .git), or any other failure: nothing is ignored
 	}
 	for _, rel := range strings.Split(string(b), "\x00") {
-		if rel != "" {
+		if rel = strings.TrimSuffix(rel, "/"); rel != "" {
 			out[filepath.Join(root, filepath.FromSlash(rel))] = true
 		}
 	}
-	return out
+	return out, false
 }

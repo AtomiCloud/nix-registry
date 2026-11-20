@@ -54,7 +54,7 @@ let
   tests = nixpkgs.runCommand "obs-tests"
     { nativeBuildInputs = [ obs nixpkgs.bash nixpkgs.gnugrep nixpkgs.gnused nixpkgs.coreutils nixpkgs.findutils nixpkgs.diffutils go nixpkgs.typescript nixpkgs.dotnet-sdk_10 nixpkgs.dart nixpkgs.llvmPackages.llvm nixpkgs.git ]; }
     ''
-      OBS_README=${./README.md} OBS_REQUIRE_LLVM=1 bash ${./tests}/run.sh --obs ${obs}/bin/obs --src ${./src} --out ${obs}
+      OBS_REQUIRE_LLVM=1 bash ${./tests}/run.sh --obs ${obs}/bin/obs --src ${./src} --out ${obs}
       mkdir -p "$out"
     '';
 

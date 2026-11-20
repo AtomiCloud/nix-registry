@@ -315,8 +315,9 @@ func TestRootIsObservabilityByContent(t *testing.T) {
 	}
 }
 
-// Git refusing the repository for its ownership must not fail silently: one note says ignored folders are not skipped.
-func TestIgnoredByNotesDubiousOwnership(t *testing.T) {
+// Git refusing the repository for its ownership must not fail silently: one note says ignored folders are not skipped,
+// but only when there is a folder besides the selected one that the skipping could have changed.
+func TestGitOwnershipRefusalIsNotedOnlyWhenItMatters(t *testing.T) {
 	dir := t.TempDir()
 	stub := filepath.Join(dir, "git")
 	if err := os.WriteFile(stub, []byte("#!/bin/sh\necho 'fatal: detected dubious ownership in repository at /x' >&2\nexit 128\n"), 0o755); err != nil {
@@ -326,13 +327,36 @@ func TestIgnoredByNotesDubiousOwnership(t *testing.T) {
 	var buf bytes.Buffer
 	old := NoteWriter
 	NoteWriter = &buf
-	gitNote = sync.Once{}
 	defer func() { NoteWriter = old }()
+	// a repository with one observability folder: nothing else is listed, so no note (a 0.5 repo prints nothing new)
+	one := t.TempDir()
+	write(t, filepath.Join(one, ".git", "HEAD"), "ref")
+	only := filepath.Dir(write(t, filepath.Join(one, "observability", "contract.yaml"), aDoc))
+	write(t, filepath.Join(one, "observability", "alerts", "e", "w.yaml"), "x: 1\n")
+	gitNote = sync.Once{}
+	for i := 0; i < 2; i++ {
+		if got, err := Discover(only); err != nil || len(got) != 0 {
+			t.Fatalf("Discover = %v, %v", got, err)
+		}
+		if got, err := Folders(only); err != nil || !reflect.DeepEqual(got, []string{only}) {
+			t.Fatalf("Folders = %v, %v", got, err)
+		}
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("a one-folder repository printed a note: %q", buf.String())
+	}
+	// two folders: the skipping could matter, so one note, however often the walks run
 	root := t.TempDir()
-	f := filepath.Join(root, "observability", "a")
+	write(t, filepath.Join(root, ".git", "HEAD"), "ref")
+	a := filepath.Dir(write(t, filepath.Join(root, "observability", "nfctag", "contract.yaml"), aDoc))
+	write(t, filepath.Join(root, "observability", "friend", "contract.yaml"), bDoc)
+	gitNote = sync.Once{}
 	for i := 0; i < 3; i++ {
-		if got := ignoredBy(root, []string{f}); len(got) != 0 {
-			t.Fatalf("ignoredBy = %v", got)
+		if _, err := Discover(a); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Folders(a); err != nil {
+			t.Fatal(err)
 		}
 	}
 	out := buf.String()
@@ -345,8 +369,96 @@ func TestIgnoredByNotesDubiousOwnership(t *testing.T) {
 	}
 	buf.Reset()
 	gitNote = sync.Once{}
-	ignoredBy(root, []string{f})
+	if _, err := Discover(a); err != nil {
+		t.Fatal(err)
+	}
 	if buf.Len() != 0 {
 		t.Fatalf("a repository that is not one printed a note: %q", buf.String())
+	}
+}
+
+func gitIn(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null", "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+}
+
+// An ignored folder is pruned on entry, never read: one that cannot be read does not fail the walk, in discovery or
+// in the folder scan.
+func TestUnreadableIgnoredFolderIsNeverRead(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root reads every folder")
+	}
+	root := t.TempDir()
+	gitIn(t, root, "init", "-q")
+	a := filepath.Dir(write(t, filepath.Join(root, "observability", "nfctag", "contract.yaml"), aDoc))
+	friend := write(t, filepath.Join(root, "observability", "friend", "contract.yaml"), bDoc)
+	write(t, filepath.Join(root, "build", "observability", "nfctag", "contract.yaml"), aDoc)
+	write(t, filepath.Join(root, ".gitignore"), "build/\n")
+	if err := os.Chmod(filepath.Join(root, "build"), 0); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(filepath.Join(root, "build"), 0o755)
+	got, err := Discover(a)
+	if err != nil || !reflect.DeepEqual(got, []string{friend}) {
+		t.Fatalf("Discover = %v, %v; want [%s] and no error for the unreadable ignored folder", got, err, friend)
+	}
+	fs, err := Folders(a)
+	if err != nil || !reflect.DeepEqual(fs, []string{filepath.Dir(friend), a}) {
+		t.Fatalf("Folders = %v, %v", fs, err)
+	}
+	// the control: the same folder, not ignored, is an error naming it
+	write(t, filepath.Join(root, ".gitignore"), "")
+	if _, err := Discover(a); err == nil || !strings.Contains(err.Error(), "build") {
+		t.Fatalf("an unreadable folder that is not ignored must be an error naming it: %v", err)
+	}
+}
+
+// A nested Git repository and a populated submodule are their own boundary: the walk does not enter them, and a copy
+// of an observability folder inside one is not a second contract.
+func TestNestedRepositoriesAndSubmodulesAreBoundaries(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	root := t.TempDir()
+	gitIn(t, root, "init", "-q")
+	a := filepath.Dir(write(t, filepath.Join(root, "observability", "nfctag", "contract.yaml"), aDoc))
+	friend := write(t, filepath.Join(root, "observability", "friend", "contract.yaml"), bDoc)
+	// an untracked nested repository holding a copy
+	nested := filepath.Join(root, "tools", "other")
+	gitIn(t, root, "init", "-q", nested)
+	write(t, filepath.Join(nested, "observability", "nfctag", "contract.yaml"), aDoc)
+	// a real submodule holding a copy
+	sub := t.TempDir()
+	gitIn(t, sub, "init", "-q")
+	write(t, filepath.Join(sub, "observability", "nfctag", "contract.yaml"), aDoc)
+	gitIn(t, sub, "add", "-A")
+	gitIn(t, sub, "commit", "-q", "-m", "x")
+	gitIn(t, root, "-c", "protocol.file.allow=always", "submodule", "add", "-q", sub, "vendor2/sub")
+	if !hasGit(filepath.Join(root, "vendor2", "sub")) {
+		t.Fatal("the submodule is not populated")
+	}
+	if _, err := os.Stat(filepath.Join(root, "vendor2", "sub", "observability", "nfctag", "contract.yaml")); err != nil {
+		t.Fatalf("the submodule copy is not there: %v", err)
+	}
+	got, err := Discover(a)
+	if err != nil || !reflect.DeepEqual(got, []string{friend}) {
+		t.Fatalf("Discover = %v, %v; want only [%s]", got, err, friend)
+	}
+	fs, err := Folders(a)
+	if err != nil || !reflect.DeepEqual(fs, []string{filepath.Dir(friend), a}) {
+		t.Fatalf("Folders = %v, %v", fs, err)
+	}
+	// a --dir inside the nested repository is its own repository: it sees its own contracts, not the outer ones
+	other := filepath.Join(nested, "observability", "nfctag")
+	got, err = Discover(other)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("Discover inside a nested repository = %v, %v", got, err)
 	}
 }
