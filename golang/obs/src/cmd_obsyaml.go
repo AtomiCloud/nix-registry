@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/AtomiCloud/obs/internal/obsyaml"
 	"github.com/AtomiCloud/obs/internal/pins"
@@ -20,7 +21,23 @@ func loadObsYaml(dir, cmd string, stderr io.Writer) (*obsyaml.File, bool) {
 		fmt.Fprintf(stderr, "%s: %v\n", cmd, err)
 		return nil, false
 	}
+	noteUnusedRoot(dir, f, cmd, stderr)
 	return f, true
+}
+
+var rootNoted sync.Once
+
+// noteUnusedRoot says once, on stderr, that the repository's root observability/obs.yaml exists and this run did not
+// read it: a folder reads its own obs.yaml, or the one of an enclosing observability folder, and never an unrelated
+// root file, so an app in a monorepo does not suddenly take the root's versions.
+func noteUnusedRoot(dir string, f *obsyaml.File, cmd string, stderr io.Writer) {
+	root := obsyaml.UnusedRootFile(dir, f)
+	if root == "" {
+		return
+	}
+	rootNoted.Do(func() {
+		fmt.Fprintf(stderr, "%s: note: %s exists but %s/%s does not exist, so it is not used: this obs uses its built-in versions and thresholds here; copy %s to %s/%s or add one\n", cmd, root, dir, obsyaml.FileName, root, dir, obsyaml.FileName)
+	})
 }
 
 // gateObsYaml is what `obs query` and `obs alerts` do with a loaded obs.yaml before any

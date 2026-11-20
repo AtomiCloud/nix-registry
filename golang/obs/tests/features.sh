@@ -5,6 +5,8 @@
 # Every claim: the baseline is green and the planted failure is red; the red output names the file, the rule and the token.
 set -euo pipefail
 OBS=$1
+here=$(cd "$(dirname "$0")" && pwd)
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 base=$(($(date +%s) - 86400))
@@ -304,14 +306,214 @@ rootalert 'sum(rate(friend_invites_total[1m]))'
 run check --dir "$R/observability"
 check "root folder with its own contract: reads the features' metrics (as in 0.5)" 0 'obs check: ok'
 
-# ---- a Git root that is itself named observability: its feature folders are found and rule-id scanned ----------
-R=$work/rootobs/observability
-rm -rf "${work:?}/rootobs"
+# ---- a service-wide alert in a folder with no contract, and a metric that is in no contract at all -----------------
+alertin() { # alertin <folder> <uid> <expr>: one alert in <folder>/alerts/overview
+  mkdir -p "$1/alerts/overview"
+  cat >"$1/alerts/overview/warning.yaml" <<YAML
+apiVersion: grafana.integreatly.org/v1beta1
+kind: GrafanaAlertRuleGroup
+metadata: { name: $2 }
+spec:
+  interval: 1m
+  rules:
+    - uid: $2
+      title: $2
+      condition: C
+      for: 1m
+      data:
+        - refId: A
+          datasourceUid: fixture-metrics
+          relativeTimeRange: { from: 60, to: 0 }
+          model:
+            datasource: { type: prometheus, uid: fixture-metrics }
+            expr: '$3'
+            instant: true
+            range: false
+        - { refId: C, datasourceUid: __expr__, model: { type: math, expression: \$A > 0.5 } }
+YAML
+}
+repo "lenient" i nfctag-errors friend-errors friend.invites ""
+alertin "$R/observability" overview-up 'sum(up{job="x"}) + count(kube_pod_status_phase{phase="Running"})'
+run check --dir "$R/observability"
+check "no contract: a metric in no contract (up, kube_*) is a note, not a failure" 0 'obs check: ok' 'contract-name-unknown' '"kube_pod_status_phase" is in none of the repository'"'"'s contracts'
+run query --static --dir "$R/observability"
+check "no contract: ... in obs query --static too" 0 'obs query --static: ok'
+alertin "$R/observability" overview-up 'sum(rate(nfctag_scan_total[1m]))'
+run check --dir "$R/observability"
+check "no contract: a near miss names the merged contract files, never a contract that does not exist" 1 '[contract-undeclared-metric]' 'observability/friend/contract.yaml, observability/nfctag/contract.yaml' 'did you mean "nfctag_scans_total"?'
+absent '(observability/contract.yaml)' || bad "no contract: the message names observability/contract.yaml"
+for expr in 'nfctag.scans_total' 'nfctag_scans' 'nfctag_scans_bytes'; do
+  alertin "$R/observability" overview-up "sum(rate(${expr}[1m]))"
+  run check --dir "$R/observability"
+  check "no contract: the slip $expr (a separator or a suffix) is a near miss" 1 '[contract-undeclared-metric]' 'did you mean "nfctag_scans_total"?'
+done
+# a contract-less app folder in a monorepo next to an app with a contract
+rm -rf "${work:?}/mono"
+mkdir -p "$work/mono/.git"
+feature "$work/mono/apps/a/observability" a a.reqs a-errors ""
+alertin "$work/mono/apps/b/observability" b-errors 'sum(rate(b_reqs_total{code="500"}[1m]))'
+run check --dir "$work/mono/apps/b/observability"
+check "monorepo: app b with no contract reading its own b_reqs_total stays green (as in 0.5)" 0 'obs check: ok' 'contract-name-unknown'
+alertin "$work/mono/apps/b/observability" b-errors 'sum(rate(a_reqs_total[1m]))'
+run check --dir "$work/mono/apps/b/observability"
+check "monorepo: app b reading a declared metric of app a passes" 0 'obs check: ok'
+alertin "$work/mono/apps/b/observability" b-errors 'sum(rate(a_reqs_totl[1m]))'
+run check --dir "$work/mono/apps/b/observability"
+check "monorepo: a typo of app a's declared metric is red" 1 '[contract-undeclared-metric]' 'did you mean "a_reqs_total"?' 'apps/a/observability/contract.yaml'
+
+# ---- copies of the alerts are not folders: a chart's files/ copy and a folder git ignores --------------------------------
+repo "chart" i nfctag-errors friend-errors friend.invites ""
+run check --dir "$FA"
+check "chart copy: baseline, two features with distinct rule uids" 0 'obs check: ok'
+mkdir -p "$R/chart/files/observability/nfctag"
+cp -r "$FA/alerts" "$R/chart/files/observability/nfctag/alerts"
+run check --dir "$FA"
+check "chart copy: with no Chart.yaml the copy is a second folder and the rule uid clashes (the control)" 1 '[rule-id-clash]' 'chart/files/observability/nfctag/alerts/errors/warning.yaml'
+printf 'apiVersion: v2\nname: c\nversion: 0.1.0\n' >"$R/chart/Chart.yaml"
+run check --dir "$FA"
+check "chart copy: below a folder holding a Chart.yaml the alerts copy is skipped" 0 'obs check: ok'
+absent '[rule-id-clash]' || bad "chart copy: the copy clashed"
+run alerts --dir "$FA" --base "$base"
+check "chart copy: obs alerts does not clash with the copy either" 0
+if command -v git >/dev/null 2>&1; then
+  repo "ignored" i nfctag-errors friend-errors friend.invites ""
+  rm -rf "${R:?}/.git"
+  git -C "$R" init -q
+  mkdir -p "$R/build/observability/nfctag"
+  cp -r "$FA/alerts" "$R/build/observability/nfctag/alerts"
+  run check --dir "$FA"
+  check "ignored copy: a copy in an untracked folder is a second folder (the control)" 1 '[rule-id-clash]' 'build/observability/nfctag/alerts/errors/warning.yaml'
+  printf 'build/\n' >"$R/.gitignore"
+  run check --dir "$FA"
+  check "ignored copy: a folder git ignores is skipped" 0 'obs check: ok'
+  run test --dir "$FA" --base "$base"
+  check "ignored copy: obs test does not clash with it" 0 'obs test: ok'
+else
+  echo "SKIP ignored copy: git is not installed"
+fi
+
+# ---- a repository that is itself an observability folder: recognised by content, never by the checkout folder's name -----
+for name in observability checkout; do
+  R=$work/sa-$name/$name
+  rm -rf "${work:?}/sa-$name"
+  mkdir -p "$R/.git"
+  printf 'versions:\n  victoriametrics: v1.156.0\n' >"$R/obs.yaml"
+  feature "$R/nfctag" nfctag nfctag.scans errors-warning ""
+  feature "$R/friend" friend friend.invites errors-warning ""
+  mkdir -p "$R/examples/demo/alerts/e"
+  cp "$R/friend/alerts/errors/warning.yaml" "$R/examples/demo/alerts/e/warning.yaml" # alerts only: not a folder of the repository
+  run check --dir "$R/friend"
+  check "standalone repository checked out as $name (obs.yaml at its top): features discovered, rule uid clash red" 1 '(service nfctag, read with this one)' '[rule-id-clash]' 'friend/alerts/errors/warning.yaml' 'nfctag/alerts/errors/warning.yaml' "obs.yaml $R/obs.yaml: every version it names matches (the enclosing observability folder"
+  absent 'examples/demo' || bad "standalone repository as $name: an examples/ folder with only alerts was counted"
+done
+R=$work/sa-none/observability
+rm -rf "${work:?}/sa-none"
 mkdir -p "$R/.git"
 feature "$R/nfctag" nfctag nfctag.scans errors-warning ""
 feature "$R/friend" friend friend.invites errors-warning ""
 run check --dir "$R/friend"
-check "root named observability: the other feature's contract is read and the rule uid clash is red" 1 '(service nfctag, read with this one)' '[rule-id-clash]' 'friend/alerts/errors/warning.yaml' 'nfctag/alerts/errors/warning.yaml'
+check "a checkout folder named observability with nothing at its top is not an observability folder (the name counts for nothing)" 0 'obs check: ok'
+absent '[rule-id-clash]' 'read with this one' || bad "checkout named observability with nothing at its top: its features were read"
+
+# ---- obs.yaml: layout (ii) and a monorepo's apps keep 0.5, with one note when the root's file is not used ----------------
+repo "note" ii nfctag-errors friend-errors friend.invites ""
+mkdir -p "$R/observability"
+printf 'versions:\n  victoriametrics: v1.156.0\n' >"$R/observability/obs.yaml"
+run check --dir "$FA"
+check "root obs.yaml: a <feature>/observability folder keeps 0.5 (built-in values) and one stderr note says the root file is not used" 0 'obs check: ok' 'not found: nothing to compare' 'note: observability/obs.yaml exists but '"$FA"'/obs.yaml does not exist, so it is not used' "copy observability/obs.yaml to $FA/obs.yaml or add one"
+n=$(grep -c 'observability/obs.yaml exists but' "$work/out.txt" || true)
+[ "$n" -eq 1 ] && ok "root obs.yaml: the note is printed once" || bad "root obs.yaml: the note was printed $n times"
+set +e
+"$OBS" check --dir "$FA" 2>"$work/err.txt" >"$work/outonly.txt"
+set -e
+grep -q 'exists but' "$work/err.txt" && ! grep -q 'exists but' "$work/outonly.txt" && ok "root obs.yaml: the note goes to stderr" || bad "root obs.yaml: the note is not on stderr alone"
+run alerts --dir "$FA" --base "$base"
+check "root obs.yaml: obs alerts says it too, once" 0 'exists but '
+printf 'versions:\n  victoriametrics: v1.156.0\n' >"$FA/obs.yaml"
+run check --dir "$FA"
+check "root obs.yaml: a folder with its own obs.yaml prints no note" 0 "obs.yaml $FA/obs.yaml: every version it names matches"
+absent 'exists but' || bad "root obs.yaml: a note was printed although the folder has its own obs.yaml"
+repo "note-i" i nfctag-errors friend-errors friend.invites ""
+printf 'versions:\n  victoriametrics: v1.156.0\n' >"$R/observability/obs.yaml"
+run check --dir "$FA"
+check "root obs.yaml: layout (i) inherits it, so there is no note" 0 'the enclosing observability folder'
+absent 'exists but' || bad "root obs.yaml: a note was printed although the file was used"
+# an inherited obs.yaml that is a symlink to a file outside the Git root is not read
+repo "link" i nfctag-errors friend-errors friend.invites ""
+printf 'versions:\n  victoriametrics: v1.150.0\n' >"$work/outside-obs.yaml"
+ln -s "$work/outside-obs.yaml" "$R/observability/obs.yaml"
+run check --dir "$FA"
+check "obs.yaml symlink to a file outside the Git root is not read (built-in values)" 0 'obs check: ok' 'not found: nothing to compare'
+absent 'v1.150.0' 'exists but' || bad "obs.yaml symlink leaving the repository was read or noted"
+rm -f "$R/observability/obs.yaml"
+cp "$work/outside-obs.yaml" "$R/observability/obs.yaml"
+run check --dir "$FA"
+check "obs.yaml: the same content as a file in the repository is read (the control)" 1 'v1.150.0'
+
+# ---- a symlinked --dir is the folder it points to --------------------------------------------------------------------------
+repo "alias" i nfctag-errors friend-errors friend.invites ""
+ln -s observability/nfctag "$R/alias"
+run check --dir "$R/alias"
+check "symlinked --dir: obs check is green and does not clash with itself" 0 'obs check: ok'
+absent '[metric-clash]' '[rule-id-clash]' || bad "symlinked --dir: obs check clashed with itself"
+run alerts --dir "$R/alias" --base "$base"
+check "symlinked --dir: obs alerts is green" 0
+run test --dir "$R/alias" --base "$base"
+check "symlinked --dir: obs test is green" 0 'obs test: ok'
+
+# ---- the CI loop of the README, run for real (git ls-files, NUL names, status of a failed check) ----------------------------
+readme=${OBS_README:-$here/../README.md}
+sed -n '/# obs-ci-loop/,/^  ```/p' "$readme" | sed '$d; s/^  //' >"$work/ci-loop.sh"
+[ -s "$work/ci-loop.sh" ] && ok "README: the CI loop is there" || bad "README: no CI loop between # obs-ci-loop and its closing fence"
+obs() { "$OBS" "$@"; }
+export -f obs
+export OBS
+if command -v git >/dev/null 2>&1; then
+  mkloop() { # mkloop <checkout name> <standalone: yes|no>: a committed-index repository with two features
+    L=$work/loop-$1-$2/$1
+    rm -rf "${work:?}/loop-$1-$2"
+    mkdir -p "$L"
+    git -C "$L" init -q
+    if [ "$2" = yes ]; then
+      printf 'versions: {}\n' >"$L/obs.yaml"
+      feature "$L/nfctag" nfctag nfctag.scans nfctag-errors ""
+      feature "$L/friend" friend friend.invites friend-errors ""
+    else
+      feature "$L/observability/nfctag" nfctag nfctag.scans nfctag-errors ""
+      feature "$L/App/Friend/observability" friend friend.invites friend-errors ""
+    fi
+    mkdir -p "$L/tests/fixtures/x"
+    # a fixture: never run. A contract.yaml of docs/ that is not observability's is not run in a repository with
+    # observability folders; in a standalone observability repository every folder holding a contract is one.
+    [ "$2" = yes ] || { mkdir -p "$L/docs" && printf 'service: not-observability\n' >"$L/docs/contract.yaml"; }
+    printf 'this is not valid yaml: [\n' >"$L/tests/fixtures/x/contract.yaml"
+    git -C "$L" add -A
+  }
+  loop() { (cd "$L" && bash "$work/ci-loop.sh") >"$work/out.txt" 2>&1 && rc=0 || rc=$?; }
+  for spec in "observability yes" "checkout yes" "observability no" "checkout no"; do
+    read -r cname standalone <<<"$spec"
+    mkloop "$cname" "$standalone"
+    loop
+    n=$(grep -c '^obs check: ok' "$work/out.txt" || true)
+    [ "$rc" -eq 0 ] && [ "$n" -eq 2 ] && ! grep -q 'not-observability' "$work/out.txt" && ok "CI loop: checkout $cname, standalone=$standalone: both features checked, rc 0, docs/ and fixtures skipped" || {
+      bad "CI loop: checkout $cname, standalone=$standalone: rc=$rc, $n checks"
+      sed 's/^/  | /' "$work/out.txt"
+    }
+  done
+  mkloop checkout yes
+  sed -i 's/budget: 2/budget: 1/' "$L/friend/contract.yaml"
+  loop
+  [ "$rc" -eq 1 ] && grep -q '\[over-budget\]' "$work/out.txt" && ok "CI loop: a failed check fails the loop (rc 1) and names the contract" || bad "CI loop: a failed check gave rc=$rc"
+  mkloop observability no
+  mkdir -p "$L/space dir/observability"
+  feature "$L/space dir/observability" spaced spaced.scans spaced-errors ""
+  git -C "$L" add -A
+  loop
+  n=$(grep -c '^obs check: ok' "$work/out.txt" || true)
+  [ "$rc" -eq 0 ] && [ "$n" -eq 3 ] && ok "CI loop: a folder name with a space is one folder (NUL-delimited)" || bad "CI loop: the folder with a space: rc=$rc, $n checks"
+else
+  echo "SKIP CI loop: git is not installed"
+fi
 
 echo "features.sh: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

@@ -51,7 +51,7 @@ func Others(dir string) ([]Rule, error) {
 	}
 	var out []Rule
 	for _, f := range folders {
-		if f == abs {
+		if f == abs || contract.SameFile(f, abs) { // a symlinked --dir is the same folder as its target
 			continue
 		}
 		rs, err := read(f)

@@ -99,12 +99,77 @@ func TestEnclosingNeverLeavesTheRepository(t *testing.T) {
 	if f, err := Load(filepath.Join(bare, "observability", "friend")); err != nil || f != nil {
 		t.Fatalf("outside a Git repository: %+v %v", f, err)
 	}
-	// the Git root itself named observability: its obs.yaml is the repository's, for a feature below it
-	root := filepath.Join(t.TempDir(), "observability")
+	// a standalone observability repository: obs.yaml at its top is the repository's, for a folder below it, and the
+	// name of the checkout folder makes no difference
+	for _, name := range []string{"observability", "checkout"} {
+		root := filepath.Join(t.TempDir(), name)
+		put(t, filepath.Join(root, ".git", "HEAD"), "ref")
+		put(t, filepath.Join(root, "obs.yaml"), matching)
+		put(t, filepath.Join(root, "friend", "contract.yaml"), "service: s\n")
+		if f, err := Load(filepath.Join(root, "friend")); err != nil || f == nil || !f.Inherited || f.Path != filepath.Join(root, "obs.yaml") {
+			t.Fatalf("[%s] a standalone repository: %+v %v", name, f, err)
+		}
+	}
+	// a checkout folder named observability with no obs.yaml anywhere: nothing to read
+	named := filepath.Join(t.TempDir(), "observability")
+	put(t, filepath.Join(named, ".git", "HEAD"), "ref")
+	put(t, filepath.Join(named, "friend", "contract.yaml"), "service: s\n")
+	if f, err := Load(filepath.Join(named, "friend")); err != nil || f != nil {
+		t.Fatalf("a checkout named observability: %+v %v", f, err)
+	}
+}
+
+// An obs.yaml that is a symlink to a file outside the Git root is not read (it is not the repository's); one that
+// points inside is.
+func TestEnclosingRefusesASymlinkLeavingTheRepository(t *testing.T) {
+	outside := t.TempDir()
+	put(t, filepath.Join(outside, "obs.yaml"), matching)
+	root := t.TempDir()
 	put(t, filepath.Join(root, ".git", "HEAD"), "ref")
-	put(t, filepath.Join(root, "obs.yaml"), matching)
-	put(t, filepath.Join(root, "friend", "contract.yaml"), "service: s\n")
-	if f, err := Load(filepath.Join(root, "friend")); err != nil || f == nil || !f.Inherited || f.Path != filepath.Join(root, "obs.yaml") {
-		t.Fatalf("a root named observability: %+v %v", f, err)
+	put(t, filepath.Join(root, "observability", "friend", "contract.yaml"), "service: s\n")
+	link := filepath.Join(root, "observability", "obs.yaml")
+	if err := os.Symlink(filepath.Join(outside, "obs.yaml"), link); err != nil {
+		t.Skip("no symlinks here")
+	}
+	feature := filepath.Join(root, "observability", "friend")
+	if f, err := Load(feature); err != nil || f != nil {
+		t.Fatalf("a symlink leaving the repository was read: %+v %v", f, err)
+	}
+	if got := UnusedRootFile(feature, nil); got != "" {
+		t.Fatalf("a root obs.yaml that leaves the repository is not a root file to name: %q", got)
+	}
+	// a symlink to a file inside the repository is the repository's
+	if err := os.Remove(link); err != nil {
+		t.Fatal(err)
+	}
+	put(t, filepath.Join(root, "shared", "obs.yaml"), matching)
+	if err := os.Symlink(filepath.Join(root, "shared", "obs.yaml"), link); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := Load(feature); err != nil || f == nil || !f.Inherited {
+		t.Fatalf("a symlink inside the repository: %+v %v", f, err)
+	}
+}
+
+func TestUnusedRootFile(t *testing.T) {
+	root := t.TempDir()
+	put(t, filepath.Join(root, ".git", "HEAD"), "ref")
+	put(t, filepath.Join(root, "observability", "obs.yaml"), matching)
+	app := filepath.Join(root, "apps", "x", "observability")
+	put(t, filepath.Join(app, "contract.yaml"), "service: s\n")
+	if f, err := Load(app); err != nil || f != nil {
+		t.Fatalf("an app folder must not read the root's obs.yaml: %+v %v", f, err)
+	}
+	if got := UnusedRootFile(app, nil); got != "observability/obs.yaml" {
+		t.Fatalf("UnusedRootFile = %q", got)
+	}
+	own := mustParse(t, matching)
+	if got := UnusedRootFile(app, own); got != "" {
+		t.Fatalf("a run that read an obs.yaml has nothing unused: %q", got)
+	}
+	bare := t.TempDir()
+	put(t, filepath.Join(bare, "observability", "obs.yaml"), matching)
+	if got := UnusedRootFile(filepath.Join(bare, "app"), nil); got != "" {
+		t.Fatalf("no Git repository: %q", got)
 	}
 }

@@ -187,6 +187,10 @@ func loadRepoNames(o *Options) (*contract.Contract, []string) {
 		return nil, problems
 	}
 	o.metricsOnly = true
+	o.repoFiles = nil
+	for _, oc := range others {
+		o.repoFiles = append(o.repoFiles, oc.Rel())
+	}
 	o.Contract = contract.Merge(&contract.Contract{File: o.contractPath()}, others)
 	return o.Contract, nil
 }

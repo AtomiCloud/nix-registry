@@ -82,15 +82,42 @@ func TestFindLimitsToMyFiles(t *testing.T) {
 	}
 }
 
-// A Git root named observability: the folders of its features are scanned like any others.
-func TestAllInARootNamedObservability(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "observability")
-	put(t, filepath.Join(root, ".git", "HEAD"), "ref")
-	a := filepath.Join(root, "nfctag")
-	put(t, filepath.Join(a, "alerts", "e", "warning.yaml"), alertDoc("errors-warning"))
-	put(t, filepath.Join(root, "friend", "alerts", "e", "warning.yaml"), alertDoc("errors-warning"))
-	cs, err := All(a)
-	if err != nil || len(cs) != 1 {
-		t.Fatalf("clashes = %v, %v; want one", cs, err)
+// A standalone observability repository (obs.yaml at its top) has its feature folders scanned, whatever its
+// checkout folder is called.
+func TestAllInAStandaloneRepo(t *testing.T) {
+	for _, name := range []string{"observability", "checkout"} {
+		root := filepath.Join(t.TempDir(), name)
+		put(t, filepath.Join(root, ".git", "HEAD"), "ref")
+		put(t, filepath.Join(root, "obs.yaml"), "versions: {}\n")
+		a := filepath.Join(root, "nfctag")
+		put(t, filepath.Join(a, "contract.yaml"), "service: a\n")
+		put(t, filepath.Join(a, "alerts", "e", "warning.yaml"), alertDoc("errors-warning"))
+		put(t, filepath.Join(root, "friend", "contract.yaml"), "service: b\n")
+		put(t, filepath.Join(root, "friend", "alerts", "e", "warning.yaml"), alertDoc("errors-warning"))
+		cs, err := All(a)
+		if err != nil || len(cs) != 1 {
+			t.Fatalf("[%s] clashes = %v, %v; want one", name, cs, err)
+		}
+	}
+}
+
+// A symlinked --dir is its target: its own rules are not clashes with themselves.
+func TestOthersSkipsTheSelectedFolderThroughASymlink(t *testing.T) {
+	a, b := repo(t, "errors-warning", "other-warning")
+	alias := filepath.Join(filepath.Dir(filepath.Dir(a)), "alias")
+	if err := os.Symlink(a, alias); err != nil {
+		t.Skip("no symlinks here")
+	}
+	others, err := Others(alias)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range others {
+		if strings.Contains(r.File, "observability/nfctag/") {
+			t.Fatalf("the selected folder came back as another folder: %v", others)
+		}
+	}
+	if len(others) != 1 || !strings.Contains(others[0].File, "Friend") {
+		t.Fatalf("others = %v, want only Friend's rule (%s)", others, b)
 	}
 }

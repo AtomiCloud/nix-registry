@@ -147,7 +147,11 @@ func staticMetrics(r *Report, q *files.Query, o Options, c *contract.Contract) {
 			"%s(...) has no [window]: the window then comes from the query step; write [5m] or similar", f)
 	}
 	if c != nil {
-		contractMetrics(r, q, e, c)
+		if o.metricsOnly {
+			contractMetricsIn(r, q, e, c, o.repoFiles)
+		} else {
+			contractMetrics(r, q, e, c)
+		}
 	}
 	if o.Names {
 		m, l := metricNames(e)
