@@ -132,8 +132,18 @@ if (!Port.Install(Orders.SignalTables.Contract, Orders.SignalTables.Metrics, Ord
     throw new Exception("both feature registrations must emit");
 Console.WriteLine("both features emitted");
 CS
-  for layout in export git; do
-    if [ "$layout" = git ]; then mkdir "$d/.git"; fi
+  for layout in export git adjacent-export adjacent-git; do
+    if [ "$layout" = adjacent-export ]; then
+      rmdir "$d/.git"
+      touch "$d/Shop.sln"
+      for feature in Orders Friends; do
+        cat >"$d/$feature/$feature.csproj" <<XML
+<Project><PropertyGroup><AssemblyName>Shop.$feature</AssemblyName></PropertyGroup></Project>
+XML
+        sed -i 's/, package_id: Shop//' "$d/$feature/observability/contract.yaml"
+      done
+    fi
+    if [ "$layout" = git ] || [ "$layout" = adjacent-git ]; then mkdir "$d/.git"; fi
     generated=true
     for feature in Orders Friends; do
       if ! out=$("$OBS_GEN_BINARY" gen --dir "$d/$feature/observability" 2>&1); then

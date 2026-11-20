@@ -6,7 +6,6 @@ package dart
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 	"unicode"
 
@@ -26,8 +25,8 @@ func (generator) Files(c *contract.Contract, o gen.Options) ([]gen.File, error) 
 	if interfaces == "" {
 		interfaces = "diene_interfaces"
 	}
-	if !regexp.MustCompile(`^[a-z][a-z0-9_]*$`).MatchString(interfaces) {
-		return nil, fmt.Errorf("interfaces %q must be a Dart package name", interfaces)
+	if err := gen.CheckInterfaces("dart", interfaces); err != nil {
+		return nil, err
 	}
 	g := &emitter{c: c, pkg: o.Package, packageID: o.PackageID, contractID: o.ContractID, interfaces: interfaces, declared: map[string]string{}}
 	if err := g.plan(); err != nil {

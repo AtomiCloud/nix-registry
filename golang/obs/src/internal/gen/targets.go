@@ -40,18 +40,10 @@ func dotnetRootCandidate(c *contract.Contract) bool {
 
 func dotnetContractPath(c *contract.Contract) string {
 	if GitRoot(filepath.Dir(c.File)) == "" {
-		for _, target := range c.Generate {
-			if target.Lang != "dotnet" {
-				continue
-			}
-			// Only an actual manifest changes the source path base. Synthetic
-			// contracts retain their supplied logical paths without a checkout.
-			if _, root, _ := packageManifest(Root(filepath.Dir(c.File)), target); root != "" {
-				source, err := resolvedPath(c.File)
-				if err != nil {
-					continue
-				}
-				if relative, err := filepath.Rel(root, source); err == nil {
+		// Synthetic contracts keep their supplied logical paths.
+		if _, err := os.Stat(c.File); err == nil {
+			if source, err := resolvedPath(c.File); err == nil {
+				if relative, err := filepath.Rel(topmostProjectRoot(filepath.Dir(c.File)), source); err == nil {
 					return filepath.ToSlash(relative)
 				}
 			}
@@ -151,6 +143,10 @@ func TargetClashes(cs []*contract.Contract) []string {
 		}
 		for index, target := range c.Generate {
 			current := owner{names[c], target.Lang, c}
+			if err := CheckInterfaces(target.Lang, target.Interfaces); err != nil {
+				issues = append(issues, fmt.Sprintf("[generate-interfaces] contract %s: %v", current.file, err))
+				continue
+			}
 			if err := checkOut(Root(filepath.Dir(c.File)), GitRoot(filepath.Dir(c.File)), target.Lang, target.Out); err != nil {
 				issues = append(issues, fmt.Sprintf("[generate-out] contract %s: %v", current.file, err))
 				continue

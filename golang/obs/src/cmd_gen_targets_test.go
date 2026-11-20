@@ -250,3 +250,62 @@ func TestGenerationRejectsDuplicateRegistrationIDsWithoutManifest(t *testing.T) 
 		}
 	}
 }
+
+func TestGitlessAdjacentProjectsUnderSolution(t *testing.T) {
+	root := repo(t, map[string]string{
+		"Shop.sln":                                "",
+		"App/Orders/Orders.csproj":                "<Project/>",
+		"App/Friends/Friends.csproj":              "<Project/>",
+		"App/Orders/observability/contract.yaml":  "service: shop\ngenerate: [{lang: dotnet, out: gen}]\n",
+		"App/Friends/observability/contract.yaml": "service: shop\ngenerate: [{lang: dotnet, out: gen}]\n",
+	})
+	if err := os.RemoveAll(filepath.Join(root, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	for _, git := range []bool{false, true} {
+		if git {
+			if err := os.Mkdir(filepath.Join(root, ".git"), 0755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, feature := range []string{"Orders", "Friends"} {
+			dir := filepath.Join(root, "App", feature, "observability")
+			if rc, out := obs("gen", "--dir", dir); rc != 0 {
+				t.Fatal(out)
+			}
+			body, err := os.ReadFile(filepath.Join(root, "App", feature, "gen/Signals.g.cs"))
+			if err != nil || !strings.Contains(string(body), "namespace Shop."+feature+".Signals;") {
+				t.Errorf("git=%v %s: %v %s", git, feature, err, body)
+			}
+		}
+	}
+}
+
+func TestInvalidSiblingInterfacesDoNotAffectNamespace(t *testing.T) {
+	root := repo(t, map[string]string{
+		"Shop.csproj":                        "<Project/>",
+		"Orders/observability/contract.yaml": "service: shop\ngenerate: [{lang: dotnet, out: gen}]\n",
+		"Broken/observability/contract.yaml": "service: shop\ngenerate: [{lang: dotnet, out: gen, interfaces: Bad-Interfaces}]\n",
+	})
+	dir := filepath.Join(root, "Orders/observability")
+	for _, git := range []bool{true, false} {
+		if !git {
+			if err := os.RemoveAll(filepath.Join(root, ".git")); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if rc, out := obs("gen", "--dir", dir); rc != 0 {
+			t.Fatal(out)
+		}
+		body, err := os.ReadFile(filepath.Join(root, "Orders/gen/Signals.g.cs"))
+		if err != nil || !strings.Contains(string(body), "namespace Shop.Signals;") {
+			t.Errorf("git=%v invalid sibling changed namespace: %v %s", git, err, body)
+		}
+		if rc, out := obs("check", "--dir", dir); rc == 0 || !strings.Contains(out, "Broken/observability/contract.yaml") || !strings.Contains(out, "interfaces") {
+			t.Errorf("git=%v check accepted invalid interfaces: rc=%d %s", git, rc, out)
+		}
+		if rc, out := obs("gen", "--dir", filepath.Join(root, "Broken/observability")); rc == 0 || !strings.Contains(out, "interfaces") {
+			t.Errorf("git=%v invalid primary accepted: rc=%d %s", git, rc, out)
+		}
+	}
+}

@@ -3,6 +3,7 @@ package gen
 import (
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 
@@ -10,7 +11,7 @@ import (
 )
 
 // TargetContractPaths keeps Git discovery shared with the other commands. A source
-// export instead scopes generation siblings to the manifests owning its targets.
+// export instead uses its topmost ancestor containing any project marker.
 func TargetContractPaths(c *contract.Contract) ([]string, error) {
 	dir := filepath.Dir(c.File)
 	if GitRoot(dir) != "" {
@@ -20,22 +21,9 @@ func TargetContractPaths(c *contract.Contract) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	roots := map[string]bool{}
-	for _, target := range c.Generate {
-		root, err := owningProject(Root(dir), target)
-		if err == nil {
-			roots[root] = true
-		}
-	}
-	if len(roots) == 0 {
-		root, err := resolvedPath(Root(dir))
-		if err != nil {
-			return nil, err
-		}
-		roots[root] = true
-	}
+	roots := []string{topmostProjectRoot(dir)}
 	paths := map[string]bool{}
-	for root := range roots {
+	for _, root := range roots {
 		err := filepath.WalkDir(root, func(file string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return fmt.Errorf("generation contract discovery: %s: %w", file, err)
@@ -76,6 +64,9 @@ func generateConfigIssues(c *contract.Contract) []string {
 	var issues []string
 	root := Root(filepath.Dir(c.File))
 	for _, target := range c.Generate {
+		if err := CheckInterfaces(target.Lang, target.Interfaces); err != nil {
+			issues = append(issues, err.Error())
+		}
 		if err := checkOut(root, GitRoot(root), target.Lang, target.Out); err != nil {
 			issues = append(issues, err.Error())
 		}
@@ -94,12 +85,7 @@ func targetContractNames(cs []*contract.Contract) map[*contract.Contract]string 
 	for _, c := range cs {
 		root := GitRoot(filepath.Dir(c.File))
 		if root == "" {
-			root = Root(filepath.Dir(c.File))
-			if len(c.Generate) > 0 {
-				if project, err := owningProject(root, c.Generate[0]); err == nil {
-					root = project
-				}
-			}
+			root = topmostProjectRoot(filepath.Dir(c.File))
 		}
 		if shared == "" {
 			shared = root
@@ -120,4 +106,39 @@ func targetContractNames(cs []*contract.Contract) map[*contract.Contract]string 
 		names[c] = ContractPath(c)
 	}
 	return names
+}
+
+// topmostProjectRoot is an export boundary, independent of language and identity.
+func topmostProjectRoot(dir string) string {
+	root := Root(dir)
+	start, err := resolvedPath(dir)
+	if err != nil {
+		return root
+	}
+	for folder := start; ; folder = filepath.Dir(folder) {
+		if hasProjectMarker(folder) {
+			root = folder
+		}
+		if filepath.Dir(folder) == folder {
+			break
+		}
+	}
+	return root
+}
+
+func hasProjectMarker(dir string) bool {
+	for _, name := range []string{"go.mod", "package.json", "pubspec.yaml"} {
+		if info, err := os.Stat(filepath.Join(dir, name)); err == nil && info.Mode().IsRegular() {
+			return true
+		}
+	}
+	for _, pattern := range []string{"*.sln", "*.csproj"} {
+		matches, _ := filepath.Glob(filepath.Join(dir, pattern))
+		for _, file := range matches {
+			if info, err := os.Stat(file); err == nil && info.Mode().IsRegular() {
+				return true
+			}
+		}
+	}
+	return false
 }

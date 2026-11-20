@@ -863,8 +863,11 @@ The rest use `<Service>.<Feature>.Signals`; with several root candidates all use
 Feature is the PascalCase folder in `<feature>/observability/` or `observability/<feature>/`
 (`Root` for a repository-root contract that needs disambiguation). A remaining namespace clash
 tells you to set `namespace:` on one target.
-Outside Git, these namespace and target-clash checks discover siblings only under the owning
-manifest's folder, so a source export compiles with the same defaults as its Git checkout.
+Outside Git, sibling scope for namespace, target-clash and registration-id checks is the topmost
+ancestor folder containing a project marker (`.sln`, `.csproj`, `go.mod`, `package.json` or
+`pubspec.yaml`). Defaults are computed over that topmost project folder, including adjacent feature
+projects under one solution. An export containing only part of a repository can have different
+defaults; set `namespace:` explicitly to pin them for such exports.
 This lets two features of the same service compile in one assembly without editing a shared namespace.
 Namespaces must be dotted C# identifiers without whitespace around dots; invalid spellings name the
 `namespace:` key and contract. A leading `@` is canonicalized per segment when comparing namespaces.
@@ -919,7 +922,8 @@ feature before any signal; a hand-kept list or late/lazy registration does not s
 A service's sole .NET contract keeps its old namespace default. Multiple contracts use the root-candidate
 and feature namespace rules above. Remove any cross-contract namespace or output-folder collision reported by `obs gen`
 or `obs check`; explicitly choosing one namespace for two contracts is refused too.
-Generation skips siblings whose contract or generate configuration is invalid; `obs check` reports them.
+Generation skips siblings whose contract or generate configuration is invalid (including `out:` and
+`interfaces:`); `obs check` reports them.
 If a 0.5 repository has a symlink at a generated-file path, replace that link with the real generated
 file before regenerating. Directory aliases within the allowed root may remain.
 

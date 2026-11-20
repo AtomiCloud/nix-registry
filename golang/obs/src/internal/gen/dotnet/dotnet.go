@@ -6,7 +6,6 @@ package dotnet
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 	"unicode"
 
@@ -30,8 +29,8 @@ func (generator) Files(c *contract.Contract, o gen.Options) ([]gen.File, error) 
 	if interfaces == "" {
 		interfaces = "AtomiCloud.Diene.Interfaces"
 	}
-	if !regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$`).MatchString(interfaces) {
-		return nil, fmt.Errorf("interfaces %q must be a C# namespace", interfaces)
+	if err := gen.CheckInterfaces("dotnet", interfaces); err != nil {
+		return nil, err
 	}
 	g := &emitter{c: c, ns: ns, interfaces: interfaces, packageID: o.PackageID, contractID: o.ContractID, declared: map[string]string{}}
 	if err := g.plan(); err != nil {
