@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -156,14 +157,12 @@ func TestIncidentsNamedWindowWithoutObservationIsUnknown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var missed []string
-	for _, m := range res.IncidentNotAlerted {
-		if m.Incident == "" {
-			missed = append(missed, m.Incident)
-		}
+	// The only repository gap is the orphan fixture; the unobserved window adds none, whatever its identifier.
+	if len(res.IncidentNotAlerted) != 1 || res.IncidentNotAlerted[0].Incident != "orphan" {
+		t.Fatalf("a quiet-looking Grafana window is unknown, never a miss; only the orphan fixture is a gap: %+v", res.IncidentNotAlerted)
 	}
-	if len(missed) != 0 || len(res.Windows) != 2 || res.Windows[1].Unknown == "" {
-		t.Fatalf("a quiet-looking Grafana window is unknown, never a miss: %+v", res)
+	if len(res.Windows) != 2 || res.Windows[0].Status != "caught" || res.Windows[1].Status != "not_seen" || res.Windows[1].Unknown == "" {
+		t.Fatalf("window 1 is caught, window 2 is not_seen with a reason: %+v", res.Windows)
 	}
 	var sb strings.Builder
 	res.Print(&sb)
@@ -907,10 +906,10 @@ func largeAlertsAnswer(w http.ResponseWriter) {
 }
 
 func TestIncidentsAlertsLookbackStaysGrouped(t *testing.T) {
-	var rawReads int
+	var rawReads atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/query" {
-			rawReads++
+			rawReads.Add(1)
 			largeAlertsAnswer(w)
 			return
 		}
@@ -924,16 +923,16 @@ func TestIncidentsAlertsLookbackStaysGrouped(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rawReads != 0 || len(res.Fired) != 1 || len(res.Fired[0].Observations) != 0 {
-		t.Fatalf("no named windows need no raw reads: reads=%d result=%+v", rawReads, res)
+	if rawReads.Load() != 0 || len(res.Fired) != 1 || len(res.Fired[0].Observations) != 0 {
+		t.Fatalf("no named windows need no raw reads: reads=%d result=%+v", rawReads.Load(), res)
 	}
 }
 
 func TestIncidentsOversizedRawWindowIsUnknown(t *testing.T) {
-	rawReads := 0
+	var rawReads atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/query" {
-			rawReads++
+			rawReads.Add(1)
 			largeAlertsAnswer(w)
 			return
 		}
@@ -944,20 +943,20 @@ func TestIncidentsOversizedRawWindowIsUnknown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rawReads != 1 || len(res.Windows) != 1 || res.Windows[0].Status != "not_seen" || len(res.Windows[0].Fired) != 0 || res.Windows[0].Unknown != "raw ALERTS samples too large to read" {
-		t.Fatalf("oversized raw samples must leave only the window unknown: reads=%d %+v", rawReads, res.Windows)
+	if rawReads.Load() != 1 || len(res.Windows) != 1 || res.Windows[0].Status != "not_seen" || len(res.Windows[0].Fired) != 0 || res.Windows[0].Unknown != "raw ALERTS samples too large to read" {
+		t.Fatalf("oversized raw samples must leave only the window unknown: reads=%d %+v", rawReads.Load(), res.Windows)
 	}
 }
 
 func TestIncidentsRawWindowsChunkAndMergeSamples(t *testing.T) {
-	rawReads := 0
+	var rawReads atomic.Int64
 	samples := []time.Time{t0.Add(10 * time.Minute), t0.Add(70 * time.Minute)}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/query_range" {
 			fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[]}}`)
 			return
 		}
-		rawReads++
+		rawReads.Add(1)
 		q := r.URL.Query().Get("query")
 		width, err := ParseSpan(q[strings.LastIndex(q, "[")+1 : len(q)-1])
 		if err != nil || width > time.Hour+time.Millisecond {
@@ -978,20 +977,19 @@ func TestIncidentsRawWindowsChunkAndMergeSamples(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rawReads != 2 || len(res.Fired) != 1 || len(res.Fired[0].Observations) != 2 || !res.Fired[0].Observations[0].At.Equal(samples[0]) || !res.Fired[0].Observations[1].At.Equal(samples[1]) || res.Windows[0].Status != "caught" {
-		t.Fatalf("merge timestamped evidence from bounded chunks: reads=%d %+v", rawReads, res)
+	if rawReads.Load() != 2 || len(res.Fired) != 1 || len(res.Fired[0].Observations) != 2 || !res.Fired[0].Observations[0].At.Equal(samples[0]) || !res.Fired[0].Observations[1].At.Equal(samples[1]) || res.Windows[0].Status != "caught" {
+		t.Fatalf("merge timestamped evidence from bounded chunks: reads=%d %+v", rawReads.Load(), res)
 	}
 }
 
 func TestIncidentsFutureOversizedChunkPreservesPartialEvidenceAndReason(t *testing.T) {
-	rawReads := 0
+	var rawReads atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/query_range" {
 			fmt.Fprint(w, `{"status":"success","data":{"resultType":"matrix","result":[]}}`)
 			return
 		}
-		rawReads++
-		if rawReads == 1 {
+		if rawReads.Add(1) == 1 {
 			fmt.Fprintf(w, `{"status":"success","data":{"resultType":"matrix","result":[{"metric":{"grafana_rule_uid":"high-errors"},"values":[[%d,"1"]]}]}}`, t0.Add(15*time.Minute).Unix())
 			return
 		}
@@ -1002,8 +1000,8 @@ func TestIncidentsFutureOversizedChunkPreservesPartialEvidenceAndReason(t *testi
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rawReads != 2 || len(res.Windows) != 1 {
-		t.Fatalf("expected one partial window and two raw chunks: reads=%d %+v", rawReads, res.Windows)
+	if rawReads.Load() != 2 || len(res.Windows) != 1 {
+		t.Fatalf("expected one partial window and two raw chunks: reads=%d %+v", rawReads.Load(), res.Windows)
 	}
 	wr := res.Windows[0]
 	if wr.Status != "not_yet_observable" || len(wr.Fired) != 0 || len(wr.PartialFired) != 1 || wr.PartialFired[0] != "high-errors" || !strings.Contains(wr.Unknown, "window ends after the history cutoff") || !strings.Contains(wr.Unknown, "raw ALERTS samples too large to read") {
@@ -1013,5 +1011,119 @@ func TestIncidentsFutureOversizedChunkPreservesPartialEvidenceAndReason(t *testi
 	res.Print(&out)
 	if !strings.Contains(out.String(), "partial evidence before the cutoff: [high-errors]") || !strings.Contains(out.String(), "raw ALERTS samples too large to read") || strings.Contains(out.String(), "caught:") {
 		t.Fatalf("text must show partial evidence and the size diagnostic without caught: %s", out.String())
+	}
+}
+
+// A firing whose resolution is missing from history is an open span inferred to the cutoff:
+// its duration is unknown, never a measured 55 minutes. A span with both transitions is measured.
+func TestIncidentsFiringWithoutResolutionIsOpenNotMeasured(t *testing.T) {
+	dir := writeRepo(t)
+	now := t0.Add(time.Hour)
+	open := grafanaHistory(t, &recorder{}, []stateChange{{"high-errors", "High error rate", "Normal", "Alerting", t0.Add(5 * time.Minute)}})
+	res, err := Incidents(context.Background(), &Client{}, &Target{Name: "prod", Grafana: open.URL}, IncidentOptions{Dir: dir, Since: 2 * time.Hour, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Fired) != 1 {
+		t.Fatalf("the firing observation is kept: %+v", res.Fired)
+	}
+	f := res.Fired[0]
+	if f.Firings != 1 || !f.First.Equal(t0.Add(5*time.Minute)) || len(f.Observations) == 0 {
+		t.Fatalf("keep the observed firing at 14:05: %+v", f)
+	}
+	if !f.SpanOpen || f.Longest != 0 {
+		t.Fatalf("a firing with no resolution in history is open with unknown duration, not a measured %s: %+v", f.Longest, f)
+	}
+	var sb strings.Builder
+	res.Print(&sb)
+	if strings.Contains(sb.String(), "longest 55m") || !strings.Contains(sb.String(), "no resolution in history") {
+		t.Fatalf("the text must say the span is open and inferred:\n%s", sb.String())
+	}
+	if b, err := res.JSON(); err != nil || !strings.Contains(string(b), `"span_open": true`) {
+		t.Fatalf("json must carry span_open: %v %s", err, b)
+	}
+
+	closed := grafanaHistory(t, &recorder{}, []stateChange{
+		{"high-errors", "High error rate", "Normal", "Alerting", t0.Add(5 * time.Minute)},
+		{"high-errors", "High error rate", "Alerting", "Normal", t0.Add(6 * time.Minute)},
+	})
+	res, err = Incidents(context.Background(), &Client{}, &Target{Name: "prod", Grafana: closed.URL}, IncidentOptions{Dir: dir, Since: 2 * time.Hour, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Fired) != 1 || res.Fired[0].SpanOpen || res.Fired[0].Longest != time.Minute {
+		t.Fatalf("both transitions present: the measured duration stays: %+v", res.Fired)
+	}
+}
+
+// seriesServer answers the grouped lookback with rows and the raw read with the raw rows.
+func seriesServer(t *testing.T, grouped, raw string) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/query" {
+			fmt.Fprintf(w, `{"status":"success","data":{"resultType":"matrix","result":[%s]}}`, raw)
+			return
+		}
+		fmt.Fprintf(w, `{"status":"success","data":{"resultType":"matrix","result":[%s]}}`, grouped)
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// A ruler UID and an alert name with the same text are different grouping keys.
+func TestIncidentsUIDAndAlertNameWithTheSameTextStayApart(t *testing.T) {
+	grouped := fmt.Sprintf(`{"metric":{"alertname":"High error rate","grafana_rule_uid":"high-errors"},"values":[[%d,"1"]]},{"metric":{"alertname":"high-errors"},"values":[[%d,"1"]]}`, t0.Unix(), t0.Unix())
+	// Only the name-only alert has a raw firing sample inside the named window.
+	raw := fmt.Sprintf(`{"metric":{"alertname":"high-errors"},"values":[[%d,"1"]]}`, t0.Add(10*time.Minute).Unix())
+	srv := seriesServer(t, grouped, raw)
+	res, err := Incidents(context.Background(), &Client{}, &Target{Metrics: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: 7 * 24 * time.Hour, Windows: []Window{{From: t0, To: t0.Add(time.Hour)}}, Now: func() time.Time { return t0.Add(3 * time.Hour) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Fired) != 2 {
+		t.Fatalf("the UID row and the name-only row are two alerts: %+v", res.Fired)
+	}
+	for _, f := range res.Fired {
+		switch {
+		case f.InRepo && len(f.Observations) != 0:
+			t.Fatalf("the sample of the name-only alert must not make the UID alert catch the window: %+v", f)
+		case !f.InRepo && len(f.Observations) != 1:
+			t.Fatalf("the name-only alert owns the raw sample: %+v", f)
+		}
+	}
+}
+
+// An alert name that equals a repository UID is not that rule: only an explicit UID, or a unique title, matches.
+func TestIncidentsAlertNameEqualToRepoUIDDoesNotMatchTheRule(t *testing.T) {
+	grouped := fmt.Sprintf(`{"metric":{"alertname":"high-errors"},"values":[[%d,"1"]]}`, t0.Unix())
+	srv := seriesServer(t, grouped, "")
+	res, err := Incidents(context.Background(), &Client{}, &Target{Metrics: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: 7 * 24 * time.Hour, Now: func() time.Time { return t0.Add(time.Hour) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Fired) != 1 {
+		t.Fatalf("%+v", res.Fired)
+	}
+	f := res.Fired[0]
+	if f.InRepo || f.Runbook != "" || f.Incident != "" {
+		t.Fatalf("a name-only row called high-errors is not the rule with uid high-errors (title High error rate): %+v", f)
+	}
+	if len(res.FiredNoIncident) != 1 {
+		t.Fatalf("it is still fired-but-no-incident: %+v", res.FiredNoIncident)
+	}
+
+	// The explicit UID and a unique title still match.
+	for name, metric := range map[string]string{
+		"uid":   `{"alertname":"anything","grafana_rule_uid":"high-errors"}`,
+		"title": `{"alertname":"High error rate"}`,
+	} {
+		srv := seriesServer(t, fmt.Sprintf(`{"metric":%s,"values":[[%d,"1"]]}`, metric, t0.Unix()), "")
+		res, err := Incidents(context.Background(), &Client{}, &Target{Metrics: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: 7 * 24 * time.Hour, Now: func() time.Time { return t0.Add(time.Hour) }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Fired) != 1 || !res.Fired[0].InRepo || res.Fired[0].ID != "high-errors" || res.Fired[0].Runbook == "" || res.Fired[0].Incident != "spike" {
+			t.Fatalf("%s match: %+v", name, res.Fired)
+		}
 	}
 }

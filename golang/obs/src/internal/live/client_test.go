@@ -610,3 +610,47 @@ func TestStoreTextLargeAnswerIsNotPrinted(t *testing.T) {
 		t.Fatalf("a short answer keeps its excerpt: %q", got)
 	}
 }
+
+// An oversized non-2xx answer is still an HTTP failure; the size sentinel is for 2xx only.
+func TestGetOversizedNon2xxStaysAnHTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		padding := strings.Repeat("x", 64<<10)
+		for i := 0; i < maxBody/len(padding)+1; i++ {
+			if _, err := fmt.Fprint(w, padding); err != nil {
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+	_, err := (&Client{}).Get(context.Background(), srv.URL, "/api/v1/query", nil)
+	if err == nil {
+		t.Fatal("a 502 must be an error")
+	}
+	if errors.Is(err, errResponseTooLarge) {
+		t.Fatalf("an oversized 502 must not be reported as a size limit: %v", err)
+	}
+	if !strings.Contains(err.Error(), "HTTP 502") || !strings.Contains(err.Error(), "obs prints none of it") {
+		t.Fatalf("want the HTTP status and a bounded body note: %v", err)
+	}
+	if len(err.Error()) > 400 {
+		t.Fatalf("the body excerpt must stay bounded: %d bytes", len(err.Error()))
+	}
+}
+
+// An oversized 2xx answer still gets the size sentinel.
+func TestGetOversized2xxKeepsTheSizeSentinel(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		padding := strings.Repeat(" ", 64<<10)
+		for i := 0; i < maxBody/len(padding)+1; i++ {
+			if _, err := fmt.Fprint(w, padding); err != nil {
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+	_, err := (&Client{}).Get(context.Background(), srv.URL, "/api/v1/query", nil)
+	if !errors.Is(err, errResponseTooLarge) {
+		t.Fatalf("an oversized 2xx keeps the size sentinel: %v", err)
+	}
+}

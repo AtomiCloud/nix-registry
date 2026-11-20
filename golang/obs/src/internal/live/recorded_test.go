@@ -49,6 +49,11 @@ func TestRecordingPublishesOnlyAfterPassingTest(t *testing.T) {
 		}
 		return
 	}
+	// os.Args[0] may be relative (./live.test from go test -c); the child runs in another directory.
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("cannot resolve this test binary: %v", err)
+	}
 	for _, mode := range []string{"fail", "pass"} {
 		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
@@ -60,7 +65,7 @@ func TestRecordingPublishesOnlyAfterPassingTest(t *testing.T) {
 			if err := os.WriteFile(file, []byte(original), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			cmd := exec.Command(os.Args[0], "-test.run=^TestRecordingPublishesOnlyAfterPassingTest$")
+			cmd := exec.CommandContext(t.Context(), exe, "-test.run=^TestRecordingPublishesOnlyAfterPassingTest$")
 			cmd.Dir = dir
 			cmd.Env = append(os.Environ(), "OBS_RECORDING_GUARD_CHILD="+mode, "OBS_LIVE_RECORD=metrics=http://127.0.0.1:1")
 			out, err := cmd.CombinedOutput()
