@@ -185,7 +185,7 @@ func TestFlatTierFindings(t *testing.T) {
 		{"flat tier followed by a ConfigMap", "alerts/q/critical.yaml", retryQueueFlat + "---\napiVersion: v1\nkind: ConfigMap\nmetadata: { name: x }\n", "flat-alert-documents", "more than one YAML document"},
 		{"flat tier preceded by a marker and followed by a CR", "alerts/q/critical.yaml", "---\n" + retryQueueFlat + "---\nkind: GrafanaAlertRuleGroup\n", "flat-alert-documents", "more than one YAML document"},
 		{"comment header, marker, then a tier with a YAML error", "alerts/q/critical.yaml", "# yaml-language-server: $schema=https://example.com/tier.json\n\n---\n" + retryQueueFlat + "summary2: 'unclosed\n", "flat-alert-yaml", "not valid YAML"},
-		{"comment header, marker, a tier and a second document", "alerts/q/critical.yaml", "# header\n---\n" + retryQueueFlat + "---\nkind: ConfigMap\n", "flat-alert-documents", "more than one YAML document"},
+		{"comment-only first document, then a tier and a second document", "alerts/q/critical.yaml", "---\n# comment-only first document\n---\n" + retryQueueFlat + "---\nkind: ConfigMap\n", "flat-alert-documents", "more than one YAML document"},
 		{"uid over 40", "alerts/a-very-long-slug-name-here/critical.yaml", retryQueueFlat, "flat-alert-uid-length", "tracker-zinc-a-very-long-slug-name-here-critical"},
 	}
 	for _, c := range cases {
