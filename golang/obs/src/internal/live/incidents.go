@@ -650,6 +650,12 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 		ids = append(ids, k)
 	}
 	sort.Strings(ids)
+	// How many fired source identities carry each title: a title another fired identity shares is not
+	// unique in the source, so it never matches a repository rule.
+	firedTitles := map[string]int{}
+	for _, k := range ids {
+		firedTitles[fired[k].Title]++
+	}
 	firedRule := map[string]bool{}
 	for _, k := range ids {
 		f := fired[k]
@@ -661,7 +667,7 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 				if _, ok := byID[f.ruleUID]; ok {
 					match = f.ruleUID
 				}
-			} else if len(byTitle[f.Title]) == 1 {
+			} else if len(byTitle[f.Title]) == 1 && firedTitles[f.Title] == 1 {
 				match = byTitle[f.Title][0].ID
 			}
 		}

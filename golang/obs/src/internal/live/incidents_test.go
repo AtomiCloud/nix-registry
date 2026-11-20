@@ -1459,3 +1459,40 @@ func TestIncidentsZeroLengthFiringKeepsObservedTimes(t *testing.T) {
 		t.Fatalf("text names the observed firing without a span:\n%s", out.String())
 	}
 }
+
+// On the ALERTS fallback a name-only row matches a repository rule by title only when no other fired
+// identity carries that title: a second fired alert with the same title and a different, non-repository
+// UID makes the title ambiguous, so neither row borrows the repository rule's runbook or incident.
+func TestIncidentsTitleFallbackSkipsATitleAnotherFiredAlertShares(t *testing.T) {
+	nameOnly := `{"alertname":"High error rate"}`
+	otherUID := `{"alertname":"High error rate","grafana_rule_uid":"elsewhere"}`
+	grouped := fmt.Sprintf(`{"metric":%s,"values":[[%d,"1"]]},{"metric":%s,"values":[[%d,"1"]]}`, nameOnly, t0.Unix(), otherUID, t0.Unix())
+	raw := fmt.Sprintf(`{"metric":%s,"values":[[%d,"1"]]}`, nameOnly, t0.Add(10*time.Minute).Unix())
+	srv := seriesServer(t, grouped, raw)
+	res, err := Incidents(context.Background(), &Client{}, &Target{Metrics: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: 7 * 24 * time.Hour, Windows: []Window{{From: t0, To: t0.Add(time.Hour)}}, Now: func() time.Time { return t0.Add(3 * time.Hour) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Fired) != 2 {
+		t.Fatalf("two fired identities: %+v", res.Fired)
+	}
+	for _, f := range res.Fired {
+		if f.InRepo || f.ID == "high-errors" || f.Runbook != "" || f.Incident != "" {
+			t.Fatalf("a shared title must not attribute a fired alert to the repository rule: %+v", f)
+		}
+	}
+	if len(res.FiredNoIncident) != 2 {
+		t.Fatalf("both fired alerts stay without an incident: %+v", res.FiredNoIncident)
+	}
+
+	// Uncontested: the name-only row alone still matches the repository rule by its unique title.
+	grouped = fmt.Sprintf(`{"metric":%s,"values":[[%d,"1"]]}`, nameOnly, t0.Unix())
+	srv = seriesServer(t, grouped, raw)
+	res, err = Incidents(context.Background(), &Client{}, &Target{Metrics: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: 7 * 24 * time.Hour, Windows: []Window{{From: t0, To: t0.Add(time.Hour)}}, Now: func() time.Time { return t0.Add(3 * time.Hour) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Fired) != 1 || !res.Fired[0].InRepo || res.Fired[0].ID != "high-errors" {
+		t.Fatalf("an uncontested title still matches: %+v", res.Fired)
+	}
+}
