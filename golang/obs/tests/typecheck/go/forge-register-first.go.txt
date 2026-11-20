@@ -1,6 +1,6 @@
 // planted forging (review round 6): an app package registers a forged table before the generated init runs
-// (see forge-register-first.early.go.txt). The generated init's Register is then the second registration:
-// it poisons the port, which refuses every signal from then on, the forged one and the real one alike.
+// (see forge-register-first.early.go.txt), reusing a real event name. The generated registration
+// detects the duplicate owner and poisons every signal, forged and real alike.
 package main
 
 import (

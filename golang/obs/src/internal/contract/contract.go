@@ -197,6 +197,8 @@ type Target struct {
 	Module  string `yaml:"namespace,omitempty"`
 	// Interfaces is the import path (go), package (dart, bun) or namespace (dotnet) of the hand-written interfaces library the generated code builds on; empty means the published default.
 	Interfaces string `yaml:"interfaces,omitempty"`
+	// PackageID overrides manifest discovery for the registration identity.
+	PackageID string `yaml:"package_id,omitempty"`
 }
 
 // Contract is the parsed contract.yaml.

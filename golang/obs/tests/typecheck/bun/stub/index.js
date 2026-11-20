@@ -8,13 +8,13 @@ const drop = (reason, error) => {
 };
 const own = (o, k) => Object.prototype.hasOwnProperty.call(o, k);
 
-// Tables are accepted once per process: the generated signals.ts registers them when it loads. A second
-// registration, or any table that is not the registered one, poisons the port: from then on every signal is
-// refused until restart. A forged table is never used silently. The registered objects are kept only to
-// recognise them; the guard reads a frozen deep copy taken at registration, so editing the exported
-// generated tables later changes nothing.
-let registered = null;
-let snapshot = null;
+// Merged boot registry. Only registered table objects bind; guards read frozen copies.
+const { isDeepStrictEqual } = require('node:util');
+const contracts = new Map();
+const owners = new Map();
+const registered = { metrics: new WeakSet(), events: new WeakSet(), spans: new WeakSet() };
+const snapshot = { metrics: {}, events: {}, spans: {} };
+let closed = false;
 let poisoned = false;
 const deepFreeze = o => {
   if (o && typeof o === 'object') {
@@ -28,7 +28,7 @@ const poison = () => {
   poisoned = true;
 };
 const bind = (which, table) => {
-  if (registered === null || registered[which] !== table) poison();
+  if (!table || !registered[which].has(table)) poison();
 };
 const poisonedErr = what =>
   drop(
@@ -38,17 +38,44 @@ const poisonedErr = what =>
 
 exports.dropped = reason => counts[reason];
 exports.register = tables => {
-  if (registered !== null) {
-    poison();
-    return {
-      ok: false,
-      error:
-        'dropped.register: the tables are already registered once in this process; the port is now poisoned and refuses every signal until restart',
-    };
+  const refuse = why => {
+    poisoned = true;
+    return drop('register', why);
+  };
+  try {
+    if (poisoned) return refuse('the port is already poisoned');
+    if (closed) return refuse('contract "' + tables.contract + '" registered after the first signal');
+    const previous = contracts.get(tables.contract);
+    if (previous) {
+      if (!isDeepStrictEqual(previous, tables))
+        return refuse('contract "' + tables.contract + '" reused with a different hash or table');
+    } else {
+      for (const which of ['metrics', 'events', 'spans']) {
+        for (const name of Object.keys(tables[which] || {})) {
+          if (owners.has(name))
+            return refuse(
+              'signal "' +
+                name +
+                '" is owned by both contract "' +
+                owners.get(name) +
+                '" and contract "' +
+                tables.contract +
+                '"',
+            );
+        }
+      }
+      const copy = deepFreeze(structuredClone(tables));
+      contracts.set(tables.contract, copy);
+      for (const which of ['metrics', 'events', 'spans']) {
+        for (const name of Object.keys(copy[which] || {})) owners.set(name, tables.contract);
+        Object.assign(snapshot[which], copy[which]);
+      }
+    }
+    for (const which of ['metrics', 'events', 'spans']) if (tables[which]) registered[which].add(tables[which]);
+    return ok(undefined);
+  } catch {
+    return refuse('invalid registration table contents');
   }
-  registered = tables;
-  snapshot = deepFreeze(structuredClone(tables));
-  return ok(undefined);
 };
 exports.bounded = (spec, n) =>
   Number.isInteger(n) && n >= spec.min && n <= spec.max
@@ -78,6 +105,7 @@ exports.metrics = given => {
         'unknown_key',
         `metric "${name}" keys [${extra.join(' ')}] are not in its generated keys [${row.keys.join(' ')}]`,
       );
+    closed = true;
     return ok(undefined);
   };
   return { counter: emit('counter'), histogram: emit('histogram'), gauge: emit('gauge') };
@@ -94,6 +122,7 @@ exports.logger = given => {
         'unknown_event',
         `event "${event.name}" is ${events[event.name]} in the generated event table, not ${level}`,
       );
+    closed = true;
     return ok(undefined);
   };
   return { error: log('error'), warn: log('warn'), info: log('info'), debug: log('debug') };
@@ -105,7 +134,13 @@ exports.tracer = given => {
     run: (name, attributes, fn) => {
       if (poisoned) counts.poisoned += 1;
       const keys = !poisoned && own(table, name) ? table[name].keys : [];
-      for (const k of Object.keys(attributes)) if (!keys.includes(k)) counts.unknown_key += 1;
+      let valid = !poisoned && own(table, name);
+      for (const k of Object.keys(attributes))
+        if (!keys.includes(k)) {
+          counts.unknown_key += 1;
+          valid = false;
+        }
+      if (valid) closed = true;
       return fn({ set: () => ok(undefined), end: () => ok(undefined) });
     },
   };

@@ -293,9 +293,8 @@ var SpanTable = map[string]obs.DurianSignalSpanInfo{
 	"checkout.queue.consume": {Kind: "consumer", Keys: []string{"order_id"}},
 }
 
-// init registers the tables with the port, once per process. Any competing registration (earlier or later)
-// poisons the port: it then refuses every signal until restart. The port refuses names, kinds, levels,
-// label types, keys and values not in the tables.
+// init merges this contract's tables at boot, before the first signal.
+// Duplicate names, changed contracts and late registration poison the port until restart.
 func init() {
-	_ = obs.Register(obs.DurianSignalTables{Metrics: MetricTable, Events: EventTable, Spans: SpanTable})
+	_ = obs.Register(obs.DurianSignalTables{Contract: "example.com/checkout:observability/contract.yaml", Hash: "sha256:9129ac662e5875890cc17bf5204b61c434716b9df86e6a05575befa205924c2d", Metrics: MetricTable, Events: EventTable, Spans: SpanTable})
 }

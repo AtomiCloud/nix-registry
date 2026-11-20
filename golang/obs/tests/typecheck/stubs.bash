@@ -46,3 +46,8 @@ YAML
     ;;
   esac
 }
+
+# Each scenario runs in a fresh process: poison/registration closure lasts until restart.
+# shellcheck disable=SC2034 # consumed by the four compiler scripts
+obs_port_cases=(merged repeat changed-hash changed-table duplicate-metric duplicate-event duplicate-span cross-kind late late-span fresh-forgery refused-metric refused-event refused-span)
+obs_port_hash() { sed -n 's|^// contract-hash: ||p' "$1"; }
