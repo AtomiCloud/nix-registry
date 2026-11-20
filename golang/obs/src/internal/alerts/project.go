@@ -64,7 +64,7 @@ func loadProject(dir, seedPath string, allowEmptyExpect bool) (*Project, error) 
 		return nil, err
 	}
 	if len(set.Problems) > 0 {
-		return nil, fmt.Errorf("%s: %s", set.Problems[0].File, set.Problems[0].Msg)
+		return nil, fmt.Errorf("%s: %s", set.Problems[0].File, set.Problems[0].Text())
 	}
 	if len(set.Rules) == 0 {
 		return nil, fmt.Errorf("%s/alerts: no GrafanaAlertRuleGroup rules", dir)

@@ -1,0 +1,8 @@
+args: query --static --dir ok-flat-alert/observability --seed shared-seed.yaml --base 1700000000
+exit: 0
+--- stdout
+obs query: ok-flat-alert/observability/obs.yaml: versions match the evaluators embedded in this obs
+note alerts/error-logs/warning.yaml rule payments-checkout-error-logs-warning query A: [event-rule] events=[checkout.charge.failed]
+note alerts/error-logs/warning.yaml rule payments-checkout-error-logs-warning query A: [assumed-filter] assumed true (free-form fields): severity_text:ERROR
+obs query --static: ok: 2 queries (1 logs, 1 metrics), 0 failures, 0 warnings
+--- stderr

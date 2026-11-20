@@ -68,7 +68,7 @@ func AnnotateReplay(ctx context.Context, hc *http.Client, grafana string, uids [
 // not backfill historical state when loading historical samples.
 func ProvisionAlerts(ctx context.Context, hc *http.Client, grafana, project string, set *files.Set) error {
 	if len(set.Problems) > 0 {
-		return fmt.Errorf("%s: %s", set.Problems[0].File, set.Problems[0].Msg)
+		return fmt.Errorf("%s: %s", set.Problems[0].File, set.Problems[0].Text())
 	}
 	folder := "obs-" + project
 	if len(set.Rules) == 0 {

@@ -96,12 +96,14 @@ the file, the rule or panel, the rule id in `[brackets]` and the offending name 
 
 `--dir` (default `observability`) holds:
 
-- **`alerts/<slug>/<severity>.yaml`**: one `GrafanaAlertRuleGroup` CR per file (the golden
-  shape in the platform's observability standard, `alerts.md`). obs reads each rule's `data[]`:
+- **`alerts/<slug>/<severity>.yaml`**: either the platform standard's flat tier file (one flat YAML
+  map: `title`, `datasource`, `expr`, `for`, `summary`, `description`, optional `panel`; see
+  [Flat alert tier files](#flat-alert-tier-files)) or one `GrafanaAlertRuleGroup` CR per file. For a CR,
+  obs reads each rule's `data[]`:
   `datasourceUid`, `relativeTimeRange.from`, `model.expr`, `model.queryType`, and
   `model.datasource.type` when present. Grafana expression nodes (`datasourceUid: __expr__`)
-  are not queries and are skipped. A flat authoring file (`title/datasource/expr`) is refused
-  with a pointer to the CR. More than one YAML document in a file is refused.
+  are not queries and are skipped. More than one YAML document in a file is refused. A file that is
+  neither a CR nor a tier file (no `kind`, none of the tier fields) is refused.
 - **`dashboards/**/\*.json`**: dashboard JSON. Panels (also inside collapsed rows), `targets[].expr`,
   `templating.list`, `time.from/to` are read. Annotation queries are not checked.
 - **`seed.yaml`** (`--live` only; `--seed` overrides the path): see below.
@@ -555,6 +557,8 @@ versions:
   alloy: v1.21.3 # reference only: no evaluator is embedded for it
   pyroscope: 2.4.3 # the sandbox image
   dashboard_schema: 42 # Grafana 13.3.0 dashboard schemaVersion
+platform: tracker # optional: names the rule uid <platform>-<service>-<slug>-<severity> of flat alert tier files
+service: zinc # optional: else the contract's service
 thresholds:
   logs: # the VictoriaLogs -search.* flags, under the names below
     max_query_len: 16KiB # -search.maxQueryLen
@@ -843,6 +847,80 @@ labels their input has. A metric label is compared in its stored spelling, dots
 kept and quoted (`{"payment.provider"="stripe"}`, `by ("payment.provider")`); the underscore form of a dotted label is
 `contract-undeclared-label` and the finding names the dotted spelling (a pod key in either spelling is
 `contract-pod-label`). Other log fields are free-form (§6): not judged.
+
+## Flat alert tier files
+
+The platform standard (`docs/standards/observability/alerts.md`, "The tier file") says every
+`alerts/<slug>/<severity>.yaml` is ONE FLAT YAML MAP; the standard's chart (`shipping.md`, "What the chart adds
+to each alert") turns it into one `GrafanaAlertRuleGroup` holding one rule. obs 0.5 refused the flat map; obs 0.6
+reads it, in every command that reads alerts (`check`, `query`, `alerts`, `test`, `look`, `live`, `sandbox`):
+the one reader, `internal/files`, builds the rule the chart renders, and every command takes it from there. The
+`GrafanaAlertRuleGroup` CR stays accepted, beside flat files in the same folder.
+
+```yaml
+title: Retry queue saturated
+datasource: metrics
+expr: webhook_retry_queue_depth{"durian.cloud.service"="zinc"} > 5000
+for: 10m
+summary: 'Retry queue at {{ $values.A.Value }}; deliveries dropping'
+description: 'Check downstream health; the queue drains only if endpoints are up.'
+panel: 2
+```
+
+What obs builds from it (the same as shipping.md's example, checked by `internal/files/flat_test.go` against that
+example's CR):
+
+| Rendered field                      | Comes from                                                                                                  |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| rule `uid` and group name           | `<platform>-<service>-<slug>-<severity>`: slug = the folder, severity = the file name                       |
+| `severity` label, title prefix      | the file name: `critical` 🚨, `warning` ⚠️, `info` ℹ️ in front of `title`                                 |
+| query `A`                           | `expr`, instant (metrics: `instant: true`; logs: `queryType: stats`), `relativeTimeRange: { from: 600, to: 0 }` |
+| query `A` datasource                | `datasource: metrics` or `logs` becomes the datasource uid `metrics` or `logs` (obs checks one landscape)       |
+| query `B`, `condition: B`           | the fixed math expression `is_number($A) || is_nan($A) || is_inf($A)`: any series `A` returns fires, even at 0    |
+| `for`, `noDataState`, `execErrState` | `for` from the file; `OK` and `Error` fixed                                                                  |
+| `summary`, `description`            | the same fields; `__dashboardUid__` (`<platform>-<service>-overview`) and `__panelId__` when `panel` is set    |
+| labels `platform`, `service`        | the two values below                                                                                        |
+
+Not built, because obs cannot know them: the `landscape` and `module` labels (each landscape has its own Grafana),
+`runbook_url` (the repo URL) and the generic dashboard uid used when `panel` is unset.
+
+**Where platform and service come from.** The uid needs both, and a flat file holds neither:
+
+- `service`: the `service:` key of `observability/obs.yaml` if it has one, else the `service:` of `observability/contract.yaml`.
+- `platform`: the `platform:` key of `observability/obs.yaml` (a new optional key, see [`obs.yaml`](#obsyaml-the-versions-and-thresholds-a-repo-targets)).
+
+A flat file with either value unknown is refused (`flat-alert-identity`) and the message says which file and key to write.
+
+**What is refused**, with the rule id in the finding (`[rule-id]`), the file, and the bad token (the standard's tier-file
+table, its structural checks, and the "no severity field" rule):
+
+| Rule id                                    | Refused                                                                                                  |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `flat-alert-file-name`                     | not `alerts/<slug>/critical.yaml`, `warning.yaml` or `info.yaml`                                         |
+| `flat-alert-field-missing`, `-field-type`  | a required field (`title`, `datasource`, `expr`, `for`, `summary`, `description`) missing, empty or not a string |
+| `flat-alert-field-unknown`                 | a key outside the table (`severity` gets its own message: the file name is the severity)                  |
+| `flat-alert-title-length`                  | `title` over 48 characters                                                                               |
+| `flat-alert-datasource`                    | `datasource` is not `metrics` or `logs`                                                                  |
+| `flat-alert-for`                           | `for` is not a duration (`0m`, `10m`, `2h`)                                                              |
+| `flat-alert-landscape`                     | `expr` selects `landscape` (`landscape="x"`, `"durian.cloud.landscape"=~"x"`, `landscape:x`)               |
+| `flat-alert-panel`                         | `panel` is not an integer                                                                                |
+| `flat-alert-identity`                      | platform or service unknown (above)                                                                      |
+| `flat-alert-uid-length`                    | the uid is over 40 characters (Grafana's limit)                                                          |
+
+Not checked here: that `panel` is a panel id of `dashboards/overview.json`, and that the set has a `runbook.md`
+(the standard's other structural checks). Tier gaps and everything else in the standard's review step stay with the reviewer.
+
+## Migrating from 0.5 to 0.6
+
+- **A flat tier file that 0.5 refused is now read.** Any CI that relied on that refusal (a flat file making
+  `obs query --static` or `obs check` exit 1 with `want GrafanaAlertRuleGroup (this is the flat authoring form ...)`)
+  changes from exit 1 to the new result: the file is checked as the rule the chart renders, and exits 0 when it is valid.
+  A flat file with a rule broken, or with no platform or service to name its uid, is still exit 1 with a `flat-alert-*` rule id.
+- `obs.yaml` has two new optional top-level keys, `platform:` and `service:`. An obs.yaml without them reads as before.
+- `tests/compat.sh` still holds 58 goldens. ONE changed: `query-static__bad-flat-alert.out` pinned the refusal, so it is
+  now `query-static__ok-flat-alert.out` (the fixture `bad-flat-alert` became `ok-flat-alert`, a valid flat fixture, regenerated from the 0.6 binary).
+  Every other golden is byte-identical to 0.5.
+- `obs live` prints `read-only: only GET to query endpoints` (0.5 said "GET and POST"; the client only ever sent GET). Its usage text says the same.
 
 ## Migrating from 0.4 to 0.5
 
@@ -1548,9 +1626,10 @@ not touched. obs builds with `golang/obs/go.nix`: Go 1.27.4 from the narrow `nix
   - green: `tests/fixtures/good` (a checkout service, with `contract.yaml`) and `tests/fixtures/sample-app`
     (a made-up platform's `crash-logs` and `pod-crashloop` alerts, copied and written as CRs, and a dashboard);
   - red, each naming file + rule or panel + the bad token: `bad-logsql-syntax`, `bad-metricsql-syntax`,
-    `bad-logsql-no-stats`, `bad-prom-only-function`, `bad-loki-datasource`, `bad-flat-alert`,
+    `bad-logsql-no-stats`, `bad-prom-only-function`, `bad-loki-datasource`,
     `bad-event-missing`, `bad-no-rows` (a metric the seed does not hold), `bad-drifted-field`
-    (`severity` for `severity_text`), `bad-dashboard-label`; `ok-rollup-no-window` is green with a warning.
+    (`severity` for `severity_text`), `bad-dashboard-label`; `ok-rollup-no-window` is green with a warning; `ok-flat-alert` is green (a flat metrics tier and a flat logs tier, with `obs.yaml` platform).
+    `tests/flat.sh` runs the flat fixture through `query`, `check` and `alerts`, then plants each flat-file failure.
     Each fixture's `expect` file lists what its output must contain.
 
 - `tests/check-test.sh` (run by `tests/run.sh`): `obs check` on every static fixture (same rule and token as `obs query --static`), its flags, an over-budget contract and a broken query red in one run with one summary, an
@@ -2457,6 +2536,7 @@ Tempo: trace-to-logs 2, metric-to-traces 2, span-to-profile 2) and `TestParityPr
 
 ## Not tested
 
+- **Flat alert tier files in `obs look`, `obs live incidents` and `obs sandbox up`.** These read the folder through the same loader as `obs query`, `obs check` and `obs alerts`, so the rule they get is the one tested in `internal/files/flat_test.go` and `tests/flat.sh`; the local stack, Grafana provisioning of a flat file's rule and a live firing of one were not started here (no containers in a test). Not tested: Grafana accepting the rule built from a flat file (uids `metrics` and `logs` are the sandbox datasources' uids), `obs test` on a flat folder with incidents, and that the real chart renders exactly the rule obs builds (checked against shipping.md's example, not against a chart: the chart does not exist yet).
 - Cross-architecture byte equality of histogram `_sum` floats: arm64's fused multiply-add already made
   these differ from amd64 in 0.4. The original full byte goldens run on amd64; the portable legacy
   goldens pin counter, log and histogram bucket/count bytes on every architecture.

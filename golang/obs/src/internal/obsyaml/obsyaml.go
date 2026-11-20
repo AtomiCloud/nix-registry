@@ -104,6 +104,8 @@ type rawFile struct {
 
 // schema lists every key; a nil value is a leaf.
 var schema = map[string]any{
+	// platform and service name the rule uid of a flat alert tier file: <platform>-<service>-<slug>-<severity>.
+	"platform": nil, "service": nil,
 	"versions": map[string]any{
 		"grafana": nil, "victoriametrics": nil, "victorialogs": nil, "tempo": nil,
 		"alloy": nil, "pyroscope": nil, "dashboard_schema": nil,
