@@ -15,6 +15,7 @@ import (
 type parser struct {
 	file  string
 	probs []Problem
+	opts  options
 }
 
 type pair struct {
@@ -35,8 +36,8 @@ func (p *parser) add(code string, line int, format string, a ...any) {
 // parseDocs parses the rules that look at one file alone: UL101, UL102, UL104, UL105, UL106
 // and UL108. A document whose YAML cannot be read, or whose namespace is unusable, is dropped
 // (it has no id to hang words on); every other problem keeps the document.
-func parseDocs(file string, data []byte) ([]*Doc, []Problem) {
-	p := &parser{file: file}
+func parseDocs(file string, data []byte, opts options) ([]*Doc, []Problem) {
+	p := &parser{file: file, opts: opts}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	var docs []*Doc
 	count := 0
@@ -280,6 +281,12 @@ func (p *parser) entry(word string, line int, v *yaml.Node) *Entry {
 					break
 				}
 				e.Status = s
+			case "translations":
+				if p.opts.translations != modeFixed {
+					p.add("UL101", kv.knode.Line, "%s: unknown field \"translations\" (this repo runs ul with --translations %s, which has no such field)", word, p.opts.translations)
+					break
+				}
+				e.Translations = p.translations(word, kv.vnode)
 			case "replacedBy":
 				s, ok := text(kv.vnode)
 				if !ok || strings.TrimSpace(s) == "" {
@@ -288,7 +295,7 @@ func (p *parser) entry(word string, line int, v *yaml.Node) *Entry {
 				}
 				e.ReplacedBy = Named{s, kv.knode.Line}
 			default:
-				p.add("UL101", kv.knode.Line, "%s: unknown field %q (allowed: desc, details, aliases, avoid, see, status, replacedBy)", word, kv.key)
+				p.add("UL101", kv.knode.Line, "%s: unknown field %q (allowed: desc, details, aliases, avoid, see, status, replacedBy%s)", word, kv.key, p.allowedExtra())
 			}
 		}
 	}
@@ -296,4 +303,50 @@ func (p *parser) entry(word string, line int, v *yaml.Node) *Entry {
 		p.add("UL106", line, "%s: desc is missing", word)
 	}
 	return e
+}
+
+// allowedExtra names the fields a mode adds to the allowed list in the unknown-field message.
+func (p *parser) allowedExtra() string {
+	if p.opts.translations == modeFixed {
+		return ", translations"
+	}
+	return ""
+}
+
+// langRe is the shape of a language code: a BCP 47 tag such as es, pt or zh-Hans.
+var langRe = regexp.MustCompile(`^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$`)
+
+// translations reads the translations field: a mapping of language code to one fixed term
+// (UL110 refuses anything else).
+func (p *parser) translations(word string, n *yaml.Node) []Translation {
+	n = resolveNode(n)
+	if isNullNode(n) {
+		return nil
+	}
+	if n.Kind != yaml.MappingNode {
+		p.add("UL110", n.Line, "%s: translations must be a mapping of language code to term", word)
+		return nil
+	}
+	var out []Translation
+	for _, kv := range p.pairs(n, word+": translations") {
+		if !langRe.MatchString(kv.key) {
+			p.add("UL110", kv.knode.Line, "%s: translations: %q is not a language code such as es, pt or zh-Hans", word, kv.key)
+			continue
+		}
+		s, ok := text(kv.vnode)
+		term, single := oneLine(s)
+		switch {
+		case !ok || strings.TrimSpace(term) == "":
+			p.add("UL110", kv.knode.Line, "%s: translations: the %s term is empty", word, kv.key)
+		case !single:
+			p.add("UL110", kv.knode.Line, "%s: translations: the %s term must be one line", word, kv.key)
+		case term != strings.TrimSpace(term):
+			p.add("UL110", kv.knode.Line, "%s: translations: the %s term has spaces at its start or end", word, kv.key)
+		case utf8.RuneCountInString(term) > 100:
+			p.add("UL110", kv.knode.Line, "%s: translations: the %s term is longer than 100 characters", word, kv.key)
+		default:
+			out = append(out, Translation{Lang: kv.key, Term: term, Line: kv.knode.Line})
+		}
+	}
+	return out
 }

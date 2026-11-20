@@ -80,10 +80,40 @@ for d in "$SRC"/testdata/bad/*/; do
   name=$(basename "$d")
   want=${name:0:5}
   got=0
-  out=$("$UL" check --root "$d" 2>&1) || got=$?
+  out=$("$UL" check --root "$d" 2>/dev/null) || got=$?
   codes=$(awk '{print $2}' <<<"$out" | sort -u | tr '\n' ' ')
   if [ "$got" = 1 ] && [ "$codes" = "$want " ]; then ok "check $want $name"; else bad "check $name: exit $got, want 1 with only $want, got [$codes]: $out"; fi
 done
+
+# --- doc pages: the word checks over docs/ (.md here; .dh.md pages are read through dh) ---
+docs="$work/docs"
+cp -r "$SRC/testdata/docs/clean" "$docs"
+chmod -R u+w "$docs"
+expect_exit 0 "docs: clean check" "$UL" check --root "$docs"
+[ -z "$out" ] && ok "docs: clean check prints nothing to stdout" || bad "docs: clean check printed: $out"
+[ "$(grep -c ' flag: ' <<<"$err")" = 2 ] && ok "docs: two flags go to stderr (UL404, UL406)" || bad "docs: flags: $err"
+expect_exit 0 "docs: clean check json has the flags apart" "$UL" check --root "$docs" --format json
+jq -e '(.problems | length) == 0 and ([.flags[].code] | sort) == ["UL404","UL406"]' >/dev/null <<<"$out" && ok "docs: json problems and flags" || bad "docs: json: $out"
+expect_exit 0 "docs: all json carries translations" "$UL" all --root "$docs"
+jq -e '[.words[] | select(.word == "Oven" and .namespace == "example.org/cooking/kitchen")][0].translations.es == "horno"' >/dev/null <<<"$out" && ok "docs: translations in all json" || bad "docs: translations json"
+# translations, three modes
+sed -i 's/El horno (Oven)/La cocina (Oven)/' "$docs/docs/i18n/es/domain/kitchen/model/frying-pan.md"
+expect_exit 1 "docs: fixed mode refuses a missing fixed term" "$UL" check --root "$docs"
+grep -q 'UL502' <<<"$out" && ok "docs: fixed mode names UL502" || bad "docs: fixed: $out"
+expect_exit 1 "docs: english mode refuses the translations field" "$UL" check --root "$docs" --translations english
+grep -q 'UL101' <<<"$out" && ok "docs: english mode names UL101" || bad "docs: english: $out"
+expect_exit 1 "docs: free mode refuses the translations field" "$UL" check --root "$docs" --translations free
+expect_exit 2 "docs: unknown translation mode" "$UL" check --root "$docs" --translations latin
+# the what folder
+cp -r "$SRC/testdata/bad/UL408-concept-not-word" "$work/what"
+chmod -R u+w "$work/what"
+expect_exit 1 "docs: model/ is the what folder" "$UL" check --root "$work/what"
+expect_exit 0 "docs: --what-folder core leaves model/ alone" "$UL" check --root "$work/what" --what-folder core
+# dh is needed only for .dh.md pages
+expect_exit 1 "docs: a .md repo never calls dh" "$UL" check --root "$SRC/testdata/bad/UL403-avoided-word" --dh /no/such/dh
+expect_exit 2 "docs: a .dh.md page with no dh is exit 2" "$UL" check --root "$SRC/testdata/dh/parts" --dh /no/such/dh
+expect_exit 1 "docs: a .dh.md page is read through dh" "$UL" check --root "$SRC/testdata/dh/parts" --dh "$SRC/testdata/dh/fake-dh"
+[ "$(grep -c UL403 <<<"$out")" = 20 ] && ok "docs: 20 avoided words in the parts of a .dh.md page" || bad "docs: dh parts: $out"
 
 # --- no session layer: the repo scan is the whole UL -------------------------------------
 expect_exit 2 "no add command" "$UL" add --root "$clean" --word W --desc x

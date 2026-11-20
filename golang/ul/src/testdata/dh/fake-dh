@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# A test double of `dh json <page...>`: it prints the JSON recorded beside each page (page.dhjson,
+# made by tests/record-dh.sh with the real dh), or, for a page with a page.dherr file, the error
+# the real dh prints for a page that does not parse, and exits 1.
+[ "${1:-}" = json ] || { echo "usage: dh json <page...>" >&2; exit 2; }
+shift
+for p in "$@"; do
+  if [ -f "$p.dherr" ]; then
+    cat "$p.dherr" >&2
+    exit 1
+  fi
+  cat "$p.dhjson"
+done

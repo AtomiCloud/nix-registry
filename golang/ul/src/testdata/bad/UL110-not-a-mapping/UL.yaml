@@ -1,0 +1,6 @@
+namespace: example.org/cooking/kitchen
+premise: Made-up
+language:
+  Oven:
+    desc: A box.
+    translations: [horno]

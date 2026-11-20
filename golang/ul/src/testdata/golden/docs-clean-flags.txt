@@ -1,0 +1,2 @@
+docs/domain/kitchen/index.md:10: UL404 flag: "Oven" is defined in both example.org/cooking/kitchen and example.org/cooking/pantry, which the page lists
+docs/domain/pantry/UL.yaml:6: UL406 flag: "Oven" is also defined in example.org/cooking/kitchen; one repo should not define a word twice
