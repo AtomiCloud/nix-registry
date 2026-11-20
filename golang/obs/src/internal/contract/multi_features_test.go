@@ -1,10 +1,13 @@
 package contract
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strings"
+	"sync"
 	"testing"
 )
 
@@ -212,5 +215,138 @@ func TestNearMiss(t *testing.T) {
 		if got := NearMiss(in, declared); got != want {
 			t.Fatalf("NearMiss(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// A chart at the Git ROOT: its files/ and templates/ copies are skipped (contracts and folders), the repository's own
+// observability folders stay. A chart at an app root keeps the observability folder beside its Chart.yaml.
+func TestChartCopiesAtTheRootAndBesideAnApp(t *testing.T) {
+	root := t.TempDir()
+	write(t, filepath.Join(root, ".git", "HEAD"), "ref")
+	write(t, filepath.Join(root, "Chart.yaml"), "name: c\n")
+	a := filepath.Dir(write(t, filepath.Join(root, "observability", "nfctag", "contract.yaml"), aDoc))
+	friend := write(t, filepath.Join(root, "observability", "friend", "contract.yaml"), bDoc)
+	write(t, filepath.Join(root, "observability", "nfctag", "alerts", "e", "w.yaml"), "x: 1\n")
+	write(t, filepath.Join(root, "files", "observability", "nfctag", "contract.yaml"), aDoc)
+	write(t, filepath.Join(root, "files", "observability", "nfctag", "alerts", "e", "w.yaml"), "x: 1\n")
+	write(t, filepath.Join(root, "templates", "observability", "x", "contract.yaml"), aDoc)
+	fs, err := Folders(a)
+	if err != nil || !reflect.DeepEqual(fs, []string{filepath.Dir(friend), a}) {
+		t.Fatalf("Folders = %v, %v; want the two source folders", fs, err)
+	}
+	got, err := Discover(a)
+	if err != nil || !reflect.DeepEqual(got, []string{friend}) {
+		t.Fatalf("Discover = %v, %v; want [%s]", got, err, friend)
+	}
+	// a chart beside an app's observability folder: that folder is still an observability folder
+	write(t, filepath.Join(root, "apps", "x", "Chart.yaml"), "name: x\n")
+	app := write(t, filepath.Join(root, "apps", "x", "observability", "contract.yaml"), aDoc)
+	got, err = Discover(a)
+	if err != nil || !reflect.DeepEqual(got, []string{app, friend}) {
+		t.Fatalf("Discover with a chart beside an app folder = %v, %v", got, err)
+	}
+}
+
+// Discover skips the same copies as Folders: a whole observability folder (contract included) under a chart's files/
+// or under a folder git ignores is not a second contract.
+func TestDiscoverSkipsChartAndIgnoredCopies(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	root := t.TempDir()
+	cmd := exec.Command("git", "-C", root, "init", "-q")
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	a := filepath.Dir(write(t, filepath.Join(root, "observability", "nfctag", "contract.yaml"), aDoc))
+	friend := write(t, filepath.Join(root, "observability", "friend", "contract.yaml"), bDoc)
+	write(t, filepath.Join(root, "chart", "Chart.yaml"), "name: c\n")
+	write(t, filepath.Join(root, "chart", "files", "observability", "nfctag", "contract.yaml"), aDoc)
+	write(t, filepath.Join(root, "build", "observability", "nfctag", "contract.yaml"), aDoc)
+	got, err := Discover(a)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("Discover before the ignore rule = %v, %v (the control: the build copy counts)", got, err)
+	}
+	write(t, filepath.Join(root, ".gitignore"), "build/\n")
+	got, err = Discover(a)
+	if err != nil || !reflect.DeepEqual(got, []string{friend}) {
+		t.Fatalf("Discover = %v, %v; want only [%s]", got, err, friend)
+	}
+}
+
+// A top-level contract.yaml makes the repository a standalone observability repository only when it reads as an obs
+// contract; an OpenAPI file leaves an ordinary repository, so its single-contract layout keeps its 0.5 result.
+func TestRootIsObservabilityByContent(t *testing.T) {
+	cases := map[string]struct {
+		files map[string]string
+		want  bool
+	}{
+		"obs.yaml":           {map[string]string{"obs.yaml": "versions: {}\n"}, true},
+		"obs contract":       {map[string]string{"contract.yaml": aDoc}, true},
+		"logs only contract": {map[string]string{"contract.yaml": "service: s\nlogs: {}\n"}, true},
+		"openapi":            {map[string]string{"contract.yaml": "openapi: 3.0.0\ninfo: { title: x, version: '1' }\npaths: {}\n"}, false},
+		"service only":       {map[string]string{"contract.yaml": "service: s\n"}, false},
+		"not yaml":           {map[string]string{"contract.yaml": "a: [\n"}, false},
+		"nothing":            {map[string]string{}, false},
+	}
+	for name, c := range cases {
+		root := t.TempDir()
+		for f, body := range c.files {
+			write(t, filepath.Join(root, f), body)
+		}
+		if got := rootIsObservability(root); got != c.want {
+			t.Fatalf("%s: rootIsObservability = %v, want %v", name, got, c.want)
+		}
+	}
+	// the 0.5 layout with an unrelated top-level contract.yaml: the app's contract has no company
+	root := t.TempDir()
+	write(t, filepath.Join(root, ".git", "HEAD"), "ref")
+	write(t, filepath.Join(root, "contract.yaml"), "openapi: 3.0.0\ninfo: { title: x, version: '1' }\n")
+	own := write(t, filepath.Join(root, "observability", "contract.yaml"), aDoc)
+	if got, err := Discover(filepath.Dir(own)); err != nil || len(got) != 0 {
+		t.Fatalf("an OpenAPI contract.yaml at the top was discovered: %v, %v", got, err)
+	}
+	// and the standalone repository with an obs contract at its top does see its features
+	write(t, filepath.Join(root, "contract.yaml"), bDoc)
+	write(t, filepath.Join(root, "friend", "contract.yaml"), bDoc)
+	if got, err := Discover(filepath.Dir(own)); err != nil || len(got) != 2 {
+		t.Fatalf("a standalone repository with an obs contract at its top: %v, %v", got, err)
+	}
+}
+
+// Git refusing the repository for its ownership must not fail silently: one note says ignored folders are not skipped.
+func TestIgnoredByNotesDubiousOwnership(t *testing.T) {
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "git")
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\necho 'fatal: detected dubious ownership in repository at /x' >&2\nexit 128\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	var buf bytes.Buffer
+	old := NoteWriter
+	NoteWriter = &buf
+	gitNote = sync.Once{}
+	defer func() { NoteWriter = old }()
+	root := t.TempDir()
+	f := filepath.Join(root, "observability", "a")
+	for i := 0; i < 3; i++ {
+		if got := ignoredBy(root, []string{f}); len(got) != 0 {
+			t.Fatalf("ignoredBy = %v", got)
+		}
+	}
+	out := buf.String()
+	if strings.Count(out, "note: git refused to read") != 1 || !strings.Contains(out, "dubious ownership") || !strings.Contains(out, "safe.directory") {
+		t.Fatalf("want exactly one note naming the cause and the fix, got %q", out)
+	}
+	// any other git failure (not a repository: a fake .git) is quiet, as before
+	if err := os.WriteFile(stub, []byte("#!/bin/sh\necho 'fatal: not a git repository' >&2\nexit 128\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	buf.Reset()
+	gitNote = sync.Once{}
+	ignoredBy(root, []string{f})
+	if buf.Len() != 0 {
+		t.Fatalf("a repository that is not one printed a note: %q", buf.String())
 	}
 }

@@ -4,12 +4,16 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
+
+	"gopkg.in/yaml.v3"
 )
 
 // A repository may hold several contracts (apps/box/observability and apps/k8s-monitoring/observability):
@@ -57,6 +61,9 @@ func Discover(dir string) ([]string, error) {
 			if p != root && (skipDirs[d.Name()] || testDirs[d.Name()]) {
 				return filepath.SkipDir
 			}
+			if copySubtree(abs, p, d.Name()) {
+				return filepath.SkipDir // a chart's copy of an observability folder is not a second one
+			}
 			return nil
 		}
 		if d.Name() == "contract.yaml" && p != own && d.Type().IsRegular() && !sameInfo(ownInfo, p) && belowObservability(root, filepath.Dir(p), rootObs, true) {
@@ -68,15 +75,65 @@ func Discover(dir string) ([]string, error) {
 		return nil, err
 	}
 	sort.Strings(out)
-	return out, nil
+	return dropIgnored(root, abs, out, func(p string) string { return filepath.Dir(p) }), nil
+}
+
+// copySubtree is true for the folders a chart's copies of the observability folders live in: the files/ and the
+// templates/ of a folder that holds a Chart.yaml (Helm reads a chart's files from there, so the build step copies
+// the alerts and dashboards in). Discovery and the rule uid scan share it, so a copy is never a second contract or
+// a second definition of a rule uid. The selected folder (abs) and the folders above it are never copies.
+func copySubtree(abs, p, name string) bool {
+	if name != "files" && name != "templates" {
+		return false
+	}
+	if p == abs || strings.HasPrefix(abs, p+string(filepath.Separator)) {
+		return false
+	}
+	return isChart(filepath.Dir(p))
+}
+
+// dropIgnored removes from paths those whose folder (folderOf) git ignores, except the selected folder abs.
+func dropIgnored(root, abs string, paths []string, folderOf func(string) string) []string {
+	var folders []string
+	seen := map[string]bool{}
+	for _, p := range paths {
+		if f := folderOf(p); !seen[f] {
+			seen[f] = true
+			folders = append(folders, f)
+		}
+	}
+	ign := ignoredBy(root, folders)
+	kept := paths[:0]
+	for _, p := range paths {
+		if f := folderOf(p); f == abs || !ign[f] {
+			kept = append(kept, p)
+		}
+	}
+	return kept
 }
 
 // rootIsObservability is true when the Git root is itself an observability folder: a standalone observability
-// repository, recognised by what is at its top (a contract.yaml or an obs.yaml), never by the name of the folder
-// it is checked out in (a clone may be called anything).
+// repository, recognised by what is at its top, never by the name of the folder it is checked out in (a clone
+// may be called anything): an obs.yaml, or a contract.yaml that reads as an obs contract (a service: and one of
+// the obs sections metrics:, logs:, spans:, platform_metrics:). A contract.yaml of something else (an OpenAPI
+// file, a package manifest) leaves the repository an ordinary one.
 func rootIsObservability(root string) bool {
-	for _, n := range []string{"contract.yaml", "obs.yaml"} {
-		if st, err := os.Stat(filepath.Join(root, n)); err == nil && st.Mode().IsRegular() {
+	if st, err := os.Stat(filepath.Join(root, "obs.yaml")); err == nil && st.Mode().IsRegular() {
+		return true
+	}
+	b, err := os.ReadFile(filepath.Join(root, "contract.yaml"))
+	if err != nil {
+		return false
+	}
+	var doc map[string]any
+	if yaml.Unmarshal(b, &doc) != nil {
+		return false
+	}
+	if svc, _ := doc["service"].(string); svc == "" {
+		return false
+	}
+	for _, k := range []string{"metrics", "logs", "spans", "platform_metrics"} {
+		if _, ok := doc[k]; ok {
 			return true
 		}
 	}
@@ -115,8 +172,8 @@ func sameInfo(info os.FileInfo, p string) bool {
 
 // Folders returns every observability folder of dir's repository that holds a contract.yaml or an alerts
 // folder: a folder named observability or below one, at any depth, below the Git root, fixtures and
-// testdata folders skipped. Copies are not folders of their own: a folder git ignores (git check-ignore) and
-// anything below a folder that holds a Chart.yaml (a chart's files/ copy of the alerts and dashboards) is
+// testdata folders skipped. Copies are not folders of their own: a folder git ignores (git check-ignore) and the
+// files/ and templates/ of a folder that holds a Chart.yaml (a chart's copy of the alerts and dashboards) are
 // skipped, except dir itself. Sorted. dir itself is in the list when it qualifies. A dir that is in a
 // fixtures or testdata folder, or in no Git repository, has none. An unreadable folder is an error naming it.
 func Folders(dir string) ([]string, error) {
@@ -149,8 +206,8 @@ func Folders(dir string) ([]string, error) {
 		if p != root && (skipDirs[d.Name()] || testDirs[d.Name()]) {
 			return filepath.SkipDir
 		}
-		if p != root && p != abs && isChart(p) {
-			return filepath.SkipDir // a chart's own files are copies of what the repository's folders hold
+		if copySubtree(abs, p, d.Name()) {
+			return filepath.SkipDir // a chart's files are copies of what the repository's folders hold
 		}
 		st, serr := os.Stat(filepath.Join(p, "contract.yaml"))
 		hasContract := serr == nil && st.Mode().IsRegular()
@@ -168,14 +225,7 @@ func Folders(dir string) ([]string, error) {
 		return nil, err
 	}
 	sort.Strings(out)
-	ign := ignoredBy(root, out)
-	kept := out[:0]
-	for _, f := range out {
-		if f == abs || !ign[f] {
-			kept = append(kept, f)
-		}
-	}
-	return kept, nil
+	return dropIgnored(root, abs, out, func(p string) string { return p }), nil
 }
 
 // isChart is true when folder p holds a Chart.yaml.
@@ -360,8 +410,15 @@ func SameFile(a, b string) bool {
 	return os.SameFile(sa, sb)
 }
 
+// NoteWriter is where the one note about git is written (stderr; tests replace it).
+var NoteWriter io.Writer = os.Stderr
+
+var gitNote sync.Once
+
 // ignoredBy returns the folders git ignores (git check-ignore, run in the Git root), by path. Git missing, or
-// the root not a repository git can read, ignores nothing: obs then counts every folder, as it did before.
+// the root not a repository git can read, ignores nothing: obs then counts every folder, as it did before. When git
+// refuses the repository for its ownership (exit 128, "dubious ownership": a container CI running as another user
+// than the checkout's), one note says that ignored folders are not skipped: it must not fail silently.
 func ignoredBy(root string, folders []string) map[string]bool {
 	out := map[string]bool{}
 	if len(folders) == 0 {
@@ -382,8 +439,17 @@ func ignoredBy(root string, folders []string) map[string]bool {
 	}
 	cmd := exec.Command(git, "-C", root, "check-ignore", "-z", "--stdin")
 	cmd.Stdin = &in
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
-	b, _ := cmd.Output() // exit 1 = nothing ignored, 128 = not a repository: both mean no ignored folder
+	b, err := cmd.Output() // exit 1 = nothing ignored; 128 = git cannot read the repository
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && ee.ExitCode() == 128 && (strings.Contains(stderr.String(), "dubious ownership") || strings.Contains(stderr.String(), "safe.directory")) {
+		gitNote.Do(func() {
+			fmt.Fprintf(NoteWriter, "note: git refused to read %s (dubious ownership): folders git ignores are NOT skipped when obs counts observability folders, so an ignored copy of the alerts can clash; run: git config --global --add safe.directory %s\n", root, root)
+		})
+		return out
+	}
 	for _, rel := range strings.Split(string(b), "\x00") {
 		if rel != "" {
 			out[filepath.Join(root, filepath.FromSlash(rel))] = true

@@ -392,6 +392,78 @@ else
   echo "SKIP ignored copy: git is not installed"
 fi
 
+# a WHOLE observability folder (contract included) copied under a chart's files/ or into an ignored folder is not a second contract
+repo "wholecopy" i nfctag-errors friend-errors friend.invites ""
+mkdir -p "$R/chart"
+printf 'apiVersion: v2\nname: c\nversion: 0.1.0\n' >"$R/chart/Chart.yaml"
+mkdir -p "$R/chart/files/observability"
+cp -r "$FA" "$R/chart/files/observability/nfctag"
+run check --dir "$FA"
+check "whole copy under chart/files: no [metric-clash] and no [rule-id-clash] (obs check)" 0 'obs check: ok'
+absent '[metric-clash]' '[rule-id-clash]' || bad "whole copy under chart/files clashed"
+run alerts --dir "$FA" --base "$base"
+check "whole copy under chart/files: obs alerts" 0
+run test --dir "$FA" --base "$base"
+check "whole copy under chart/files: obs test" 0 'obs test: ok'
+rm -f "$R/chart/Chart.yaml"
+run check --dir "$FA"
+check "whole copy under chart/files with no Chart.yaml: [metric-clash] (the control)" 1 '[metric-clash]'
+if command -v git >/dev/null 2>&1; then
+  repo "wholeignored" i nfctag-errors friend-errors friend.invites ""
+  rm -rf "${R:?}/.git"
+  git -C "$R" init -q
+  mkdir -p "$R/build/observability"
+  cp -r "$FA" "$R/build/observability/nfctag"
+  run check --dir "$FA"
+  check "whole copy in an untracked folder is a second contract (the control)" 1 '[metric-clash]'
+  printf 'build/\n' >"$R/.gitignore"
+  run check --dir "$FA"
+  check "whole copy in an ignored folder: obs check" 0 'obs check: ok'
+  absent '[metric-clash]' '[rule-id-clash]' || bad "whole copy in an ignored folder clashed"
+  run alerts --dir "$FA" --base "$base"
+  check "whole copy in an ignored folder: obs alerts" 0
+  run test --dir "$FA" --base "$base"
+  check "whole copy in an ignored folder: obs test" 0 'obs test: ok'
+fi
+# a chart at the Git ROOT: its files/ copy is skipped, the repository's own observability folders are scanned
+repo "rootchart" i nfctag-errors friend-errors friend.invites ""
+printf 'apiVersion: v2\nname: c\nversion: 0.1.0\n' >"$R/Chart.yaml"
+mkdir -p "$R/files/observability"
+cp -r "$FA" "$R/files/observability/nfctag"
+run check --dir "$FA"
+check "root chart: one source alert and its files/ copy: obs check is green and still reads the other feature" 0 'obs check: ok' '(service friend, read with this one)'
+absent '[metric-clash]' '[rule-id-clash]' || bad "root chart: the copy clashed"
+run alerts --dir "$FA" --base "$base"
+check "root chart: obs alerts" 0
+sed -i 's/friend-errors/nfctag-errors/' "$FB/alerts/errors/warning.yaml"
+run check --dir "$FA"
+check "root chart: two SOURCE folders with one uid still clash (the control)" 1 '[rule-id-clash]' 'observability/friend/alerts/errors/warning.yaml' 'observability/nfctag/alerts/errors/warning.yaml'
+absent 'files/observability' || bad "root chart: the copy was named in the clash"
+
+# ---- a top-level contract.yaml of something else (OpenAPI) leaves an ordinary repository; an obs contract at the top does not ----
+repo "openapi" i nfctag-errors friend-errors friend.invites ""
+printf 'openapi: 3.0.0\ninfo: { title: api, version: "1" }\npaths: {}\n' >"$R/contract.yaml"
+run check --dir "$FA"
+check "top-level OpenAPI contract.yaml: the repository keeps its result (not read as a contract, no failure)" 0 'obs check: ok' '(service friend, read with this one)'
+absent 'contract.yaml: ' 'FAIL contract.yaml' || bad "top-level OpenAPI contract.yaml was read as an obs contract"
+R=$work/sa-contract/checkout
+rm -rf "${work:?}/sa-contract"
+mkdir -p "$R/.git"
+printf 'service: top\nmetrics: {}\n' >"$R/contract.yaml"
+feature "$R/nfctag" nfctag nfctag.scans errors-warning ""
+feature "$R/friend" friend friend.invites errors-warning ""
+run check --dir "$R/friend"
+check "standalone repository recognised by an obs contract at its top (no obs.yaml): features discovered, uid clash red" 1 '(service nfctag, read with this one)' '[rule-id-clash]'
+
+# ---- obs live and obs sandbox say it too, with the same note as obs check ----------------------------------------------------
+repo "livenote" ii nfctag-errors friend-errors friend.invites ""
+mkdir -p "$R/observability"
+printf 'versions:\n  victoriametrics: v1.156.0\n' >"$R/observability/obs.yaml"
+run live usage --target local --dir "$FA" --timeout 2s
+check "obs live: the same root obs.yaml note on stderr" 2 "note: observability/obs.yaml exists but $FA/obs.yaml does not exist, so it is not used"
+run sandbox up --dir "$FA" --runtime none
+grep -q 'exists but' "$work/out.txt" && ok "obs sandbox up: the same root obs.yaml note" || bad "obs sandbox up: no root obs.yaml note: $(head -5 "$work/out.txt")"
+
 # ---- a repository that is itself an observability folder: recognised by content, never by the checkout folder's name -----
 for name in observability checkout; do
   R=$work/sa-$name/$name
@@ -482,6 +554,12 @@ if command -v git >/dev/null 2>&1; then
       feature "$L/observability/nfctag" nfctag nfctag.scans nfctag-errors ""
       feature "$L/App/Friend/observability" friend friend.invites friend-errors ""
     fi
+    # a file whose name only ends in contract.yaml, and a chart's files/ copy of a feature: neither is run
+    mkdir -p "$L/observability/misc" "$L/chart/files"
+    printf 'not: a contract\n' >"$L/observability/misc/alert-contract.yaml"
+    printf 'name: c\n' >"$L/chart/Chart.yaml"
+    if [ "$2" = yes ]; then cp -r "$L/nfctag" "$L/chart/files/nfctag"; else cp -r "$L/observability/nfctag" "$L/chart/files/nfctag"; fi
+    [ "$2" = yes ] || printf 'openapi: 3.0.0\ninfo: { title: api, version: "1" }\n' >"$L/contract.yaml" # not an obs contract: the repository stays ordinary
     mkdir -p "$L/tests/fixtures/x"
     # a fixture: never run. A contract.yaml of docs/ that is not observability's is not run in a repository with
     # observability folders; in a standalone observability repository every folder holding a contract is one.
