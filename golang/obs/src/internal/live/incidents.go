@@ -369,11 +369,14 @@ func fromAnnotations(ctx context.Context, c *Client, t *Target, from, to time.Ti
 			f.First = time.Time{}
 			f.Last = time.Time{}
 		}
+		// With no span to time it (unknown spans, or a firing and its resolution in one instant so no
+		// span survives the clip), first and last come from the observations themselves.
+		fromObs := f.SpanUnknown || len(f.spans) == 0
 		for _, o := range obs {
-			if f.SpanUnknown && (f.First.IsZero() || o.At.Before(f.First)) {
+			if fromObs && (f.First.IsZero() || o.At.Before(f.First)) {
 				f.First = o.At
 			}
-			if f.SpanUnknown && o.At.After(f.Last) {
+			if fromObs && o.At.After(f.Last) {
 				f.Last = o.At
 			}
 		}
@@ -822,6 +825,10 @@ func (r *IncidentsResult) Print(w io.Writer) {
 		}
 		if f.SpanUnknown {
 			fmt.Fprintf(w, "  %s: firing observed, first %s; spans, duration and firing count unknown%s\n", f.ID, f.First.Format(time.RFC3339), repo)
+			continue
+		}
+		if f.Firings == 0 && !f.First.IsZero() {
+			fmt.Fprintf(w, "  %s: firing observed, first %s; no span of nonzero length in history, so no firing count or duration is measured%s\n", f.ID, f.First.Format(time.RFC3339), repo)
 			continue
 		}
 		if f.SpanOpen {

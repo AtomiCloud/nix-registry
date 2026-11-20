@@ -1423,3 +1423,39 @@ func TestIncidentsEveryFiredIdentityHasADistinctDisplayID(t *testing.T) {
 		t.Fatalf("swapping the observation between identities must change the attribution: %v", seenIDs)
 	}
 }
+
+// A firing and its resolution in the same millisecond leave no span after clipping, but the firing was
+// observed: first and last come from the observation, while the span count and duration stay zero, and
+// the text says no span was measured instead of printing a zero time.
+func TestIncidentsZeroLengthFiringKeepsObservedTimes(t *testing.T) {
+	a := map[string]string{"instance": "a"}
+	at := t0.Add(5 * time.Minute)
+	body := twoInstanceHistory(
+		historyRow("high-errors", 7, "High error rate", "Normal", "Alerting", at, a, nil),
+		historyRow("high-errors", 7, "High error rate", "Alerting", "Normal", at, a, nil),
+	)
+	srv := grafanaFake(t, &recorder{}, body, 0)
+	now := t0.Add(time.Hour)
+	res, err := Incidents(context.Background(), &Client{}, &Target{Name: "prod", Grafana: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: 2 * time.Hour, Now: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Fired) != 1 {
+		t.Fatalf("one rule fired: %+v", res.Fired)
+	}
+	f := res.Fired[0]
+	if f.Firings != 0 || f.Longest != 0 || f.SpanOpen {
+		t.Fatalf("no span survives a zero-length firing: %+v", f)
+	}
+	if !f.First.Equal(at) || !f.Last.Equal(at) {
+		t.Fatalf("first/last come from the observation %s, got first %s last %s", at, f.First, f.Last)
+	}
+	var out strings.Builder
+	res.Print(&out)
+	if strings.Contains(out.String(), "0001-01-01") {
+		t.Fatalf("text prints a zero time:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "high-errors: firing observed, first "+at.Format(time.RFC3339)+"; no span of nonzero length in history, so no firing count or duration is measured") {
+		t.Fatalf("text names the observed firing without a span:\n%s", out.String())
+	}
+}
