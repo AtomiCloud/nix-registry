@@ -46,8 +46,11 @@ const grafanaForDashboardSchema = "13.3.0"
 
 // File is a parsed obs.yaml.
 type File struct {
-	Path     string   // the file that was read
-	Versions Versions // the versions the repo targets
+	Path string // the file that was read
+	// Inherited is true when the folder asked for has no obs.yaml and Path is the nearest enclosing
+	// observability folder's (observability/<feature> reads observability/obs.yaml).
+	Inherited bool
+	Versions  Versions // the versions the repo targets
 	// Resolved thresholds. A nil pointer or zero value means obs.yaml does not name that
 	// group, and the consumer keeps its built-in default.
 	Logs      *vl.Limits         // thresholds.logs over the pinned VictoriaLogs defaults
@@ -130,12 +133,56 @@ func Load(dir string) (*File, error) {
 	path := filepath.Join(dir, FileName)
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return nil, nil
+		// A feature folder (observability/<feature>) has no obs.yaml of its own: the nearest enclosing
+		// observability folder's is read instead (File.Inherited says so). None: the built-in values.
+		enc := enclosing(dir)
+		if enc == "" {
+			return nil, nil
+		}
+		eb, eerr := os.ReadFile(enc)
+		if eerr != nil {
+			return nil, eerr
+		}
+		f, perr := Parse(enc, eb)
+		if f != nil {
+			f.Inherited = true
+		}
+		return f, perr
 	}
 	if err != nil {
 		return nil, err
 	}
 	return Parse(path, b)
+}
+
+// enclosing is the obs.yaml of the nearest observability folder above dir (dir's own folder excluded),
+// as a path in the spelling of dir (relative when dir is), or "" when none has one. The search stops at the
+// Git root. Only folders named observability count: a folder without an obs.yaml of its own reads
+// that folder's, never an unrelated parent's.
+func enclosing(dir string) string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	for d := filepath.Dir(abs); ; d = filepath.Dir(d) {
+		if filepath.Base(d) == "observability" {
+			p := filepath.Join(d, FileName)
+			if st, err := os.Stat(p); err == nil && st.Mode().IsRegular() {
+				if filepath.IsAbs(dir) {
+					return p
+				}
+				if wd, err := os.Getwd(); err == nil {
+					if rel, err := filepath.Rel(wd, p); err == nil {
+						return rel
+					}
+				}
+				return p
+			}
+		}
+		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil || filepath.Dir(d) == d {
+			return ""
+		}
+	}
 }
 
 // Parse parses the bytes of an obs.yaml read from path.

@@ -401,8 +401,8 @@ metrics:
   both values and the contract `file:line` of the type; rename one. Bun quotes every value, so it never collides.
   Only values of types an own metric, log or span uses are generated; a `source:`-only type makes no code.
 
-**Several contracts in one repository.** `obs check` and `obs query` read **every** `observability/contract.yaml`
-below the Git root, not only `--dir`'s: a dashboard in `apps/hub/observability` may read a metric that
+**Several contracts in one repository.** `obs check` and `obs query` read **every** contract in or below an `observability/` folder
+below the Git root (`apps/hub/observability/contract.yaml`, and [one per feature](#one-contract-per-feature)), not only `--dir`'s: a dashboard in `apps/hub/observability` may read a metric that
 `apps/cluster/observability/contract.yaml` declares. `obs check` validates and prints each. One table of **stored**
 series names decides ownership: a metric (ours or a `source:` one) against a metric of another contract, and a
 platform metric's possible stored names (unit and histogram variants, see the keep-list) against a metric of another
@@ -414,6 +414,28 @@ others' metrics and platform metrics into the lookup (each keeps its own types);
 stay the `--dir` contract's. Contracts in a `fixtures` or `testdata` folder are never read as company, and
 a folder in one never looks for company; outside a Git repository only `--dir`'s contract is read.
 `--contracts none` reads only `--dir`'s. `obs gen` and `obs assert` stay per contract.
+
+### One contract per feature
+
+A service may keep one contract per feature instead of one for the whole service, in either layout (both work, pick one per repository):
+
+```text
+(i)  observability/obs.yaml                      <feature>/ folders grouped in ONE observability folder
+     observability/nfctag/contract.yaml
+     observability/nfctag/alerts/<slug>/<severity>.yaml
+     observability/friend/contract.yaml
+
+(ii) App/Modules/NfcTag/observability/contract.yaml     an observability folder INSIDE each feature
+     App/Modules/Friend/observability/contract.yaml
+```
+
+- **Discovery.** A `contract.yaml` belongs to the repository's observability when its folder is named `observability` or is **at any depth below** one (`observability/contract.yaml`, `observability/<feature>/contract.yaml`, `observability/billing/payments/contract.yaml`, `<feature>/observability/contract.yaml`). A `contract.yaml` anywhere else (`docs/`, `config/`) is not read. Folders named `fixtures`, `testdata`, `node_modules`, `vendor`, `.git`, `.direnv`, `.dart_tool` and `.obs-cache` are skipped, and the search is the Git root's: outside a Git repository only `--dir`'s contract is read, as before.
+- **`--dir` for a feature.** Every command takes the feature's folder: `obs check --dir observability/friend`, `obs gen --dir App/Modules/Friend/observability`, `obs alerts`, `obs test`. `--dir` is that feature's contract, seed, incidents, alerts and dashboards; the other features' contracts are read with it (`obs check` prints each, `obs query` merges their metrics into the lookup, a metric two features both declare is `[metric-clash]` and names both files), so an alert of one feature may read a metric another feature declares. `--contracts none` keeps this folder's only. CI loops over the contracts, with nothing to keep in a list: `for d in $(git ls-files '*observability/*contract.yaml' | xargs -n1 dirname); do obs check --dir "$d"; done`.
+- **`obs.yaml`.** A folder uses its own `obs.yaml`; with none, the nearest **enclosing `observability/` folder's** (`observability/friend` reads `observability/obs.yaml`); with none there, the versions and thresholds built into obs, as in 0.5. The output says which file it read (`obs.yaml <path>: every version it names matches (the enclosing observability folder's: ...)`, and `note: <dir>/obs.yaml not found: using <path>, the enclosing observability folder's` in `obs check`). Only a folder named `observability` counts as an enclosing one, the search stops at the Git root, and layout (ii) has no enclosing folder: put one `obs.yaml` in each `<feature>/observability/`, or accept the built-in values.
+- **A rule uid is unique in the repository.** Grafana keeps one rule per `uid` (the `metadata.name` when a rule has none), so two features shipping `errors-warning` would overwrite each other. `obs check` reads the `alerts/` folder of every observability folder of the repository and fails with `FAIL rule <file>: [rule-id-clash] uid "<uid>" is also defined in <other file>: ...`, both files relative to the Git root; `obs alerts` and `obs test` fail (exit 2) with the same line for a uid of `--dir` that another folder also defines. `--contracts none` (obs check and obs test) skips it. A repository with one observability folder prints nothing new; two rules with one uid inside one folder are still the per-folder `duplicate uid` failure of `obs alerts`.
+- **Service totals.** `obs check` prints the series and log-stream totals per contract as before. When **several contracts name the same `service:`** it adds one line, `service total (<service>, <n> contracts: <files>): worst case <S> series per landscape; log streams worst case <K> (...)`: the series are the contracts' worst cases added, the log streams are `--landscapes` times the distinct `modules:` across them (a contract with no `modules:` is one unnamed module). A contract has **no service-level budget** (budgets are per metric, concept 3.2, and a stored name is in one contract only), so the line is information: each metric is still judged on its own budget. A repository whose contracts all name different services prints no new line.
+- **Not per feature, by design.** The generated signal code of each contract is its own file in its own namespace, and `contract/events.json`, `aggregation.yaml` and `keep.yaml` are written per contract, so with one contract per feature no generated file is shared between two features. The platform renderer must collect every `keep.yaml`; the interface libraries' one-table signal port is outside this tool (see Not tested).
+- **A folder with no contract of its own.** `obs check --dir observability` on layout (i)'s top folder with alerts but no `contract.yaml` skips the limits with a note and reads no contract names, as before; its alerts are still part of the rule uid check.
 
 ## `obs check`
 
@@ -427,6 +449,8 @@ obs check [--dir observability] [--pods n] [--landscapes n] [--names] [--event-r
 1. **limits** (the contract rules below);
 2. **versions**: the evaluator versions this obs embeds, against `observability/obs.yaml`;
 3. **queries**: everything `obs query --static` does ([the rules](#obs-query---static-the-rules)): every alert and dashboard query parsed by the embedded engines and checked against the contract. `--vl-settings`, `--tempo-config`, `--event-rule`, `--contracts` and `--names` mean what they mean there. A folder with no alert and no dashboard is fine (the `[empty]` rule belongs to `obs query --static`); a folder with no `contract.yaml` skips the limits with a note and still checks the queries. Each query finding keeps its rule id.
+
+Two things were added for [one contract per feature](#one-contract-per-feature), and only print where they apply: a `service total (...)` line when several contracts name one service, and `[rule-id-clash]` failures when two observability folders of the repository define one alert rule uid.
 
 It exits 1 when any half fails and prints one summary line at the end, for example
 `obs check: ok: 1 metrics, 3 log events, 0 spans, 2 types, contract hash 754fae475354; queries: 7 queries (3 logs, 4 metrics), 0 failures, 0 warnings`
@@ -541,7 +565,7 @@ and `obs query --live` alone 2.0 s on the 24 h seed in an earlier measurement (e
 
 ## `obs.yaml`: the versions and thresholds a repo targets
 
-`observability/obs.yaml` (next to `contract.yaml`) says which store and tool versions the repo's
+`observability/obs.yaml` (next to `contract.yaml`; a feature folder without its own reads the nearest enclosing `observability/` folder's, see [one contract per feature](#one-contract-per-feature)) says which store and tool versions the repo's
 charts run and which query limits the stores run under. One loader reads it for `obs check`,
 `obs query`, `obs alerts`, `obs sandbox up` and `obs look`, so no command reads it its own way.
 Every key is optional: a key that is absent keeps the version or default built into obs.
@@ -843,6 +867,19 @@ labels their input has. A metric label is compared in its stored spelling, dots
 kept and quoted (`{"payment.provider"="stripe"}`, `by ("payment.provider")`); the underscore form of a dotted label is
 `contract-undeclared-label` and the finding names the dotted spelling (a pod key in either spelling is
 `contract-pod-label`). Other log fields are free-form (§6): not judged.
+
+## Migrating from 0.5 to 0.6
+
+Every 0.5 command, flag and output stays. For the 58 cases in `tests/compat.sh` the output is byte for byte the 0.5 output, and a repository with one contract (or one contract per `<app>/observability/`) prints what it printed in 0.5, unless one of the findings below applies. New:
+
+| In 0.5 | In 0.6 |
+| ------ | ------ |
+| Only a `contract.yaml` whose folder is named `observability` is another contract of the repository. | Also any `contract.yaml` **below** an `observability/` folder, at any depth: `observability/<feature>/contract.yaml`. A contract you kept in a sub-folder of `observability/` that 0.5 ignored is now read, validated and checked for clashes; a failure it hides shows up here. Move it, or fix it. |
+| `obs check --dir observability/<feature>` found no other contract and used the built-in versions. | The other features are read (`[metric-clash]`, cross-feature alert reads pass) and `obs.yaml` comes from the nearest enclosing `observability/` folder. A feature folder that now finds an `obs.yaml` above it is checked against it: a version in it that this obs does not embed is a new red. |
+| Two alert rules with one `uid` in different observability folders were not noticed. | `[rule-id-clash]` in `obs check`; exit 2 in `obs alerts` and `obs test`. Rename one uid (the convention: start it with the feature name) or use `obs check --contracts none` for one run. |
+| Several contracts naming one service printed a total per contract only. | An added `service total (...)` line. |
+
+Nothing else changes: no new flag, no new file, no changed exit code outside the rows above.
 
 ## Migrating from 0.4 to 0.5
 
@@ -2496,7 +2533,8 @@ source) where its section says so.
 - **Platform metric names other than `*.duration`.** The stored names of such a metric are not in the contract, so all names it may have are kept; which one the store really holds was not measured on a running store.
 - **A `source:` counter or gauge name is assumed to be the stored name.** Checked against the cluster draft's names and VictoriaMetrics' scrape path (names are stored as scraped); a source that reaches the store through OTLP (dotted name, unit suffix) would need the stored name written out.
 - **Churn is information only.** `obs check` prints the approximate new series a day from each estimate's `churn_per_day`; the 30-day retention of the concept is not applied to the budget, and no measurement checks the estimates against a real cluster.
-- **Several contracts** are discovered below the Git root; large monorepos were not timed, and a repository with no `.git` (a source archive) reads only `--dir`'s contract.
+- **Several contracts** are discovered below the Git root; large monorepos were not timed, and a repository with no `.git` (a source archive) reads only `--dir`'s contract. The rule uid check reads the alert files of every observability folder in the repository on every `obs alerts` run (one walk of the Git root, as the contract discovery does); also not timed.
+- **One contract per feature** (`tests/features.sh`): two synthetic features per layout, not a real repository (the alcohol.zinc scratch copies of the study ran on 0.5, not on this build). Grafana's real behaviour for a repeated rule uid (one rule kept, the other overwritten) is from its documented provisioning model, not run here. A contract has no service-level budget, so the service total is never judged, only printed. The interface libraries' signal port (one table per process, so two features' generated `init()` calls would clash at run time) and the platform renderer collecting many `keep.yaml` files are outside this tool and were not run. Layout (i)'s top `observability/` folder with no `contract.yaml` of its own reads no contract names for its alerts (as in 0.5); name-checking such service-wide alerts against the feature contracts is not done. Windows path separators in the new messages were not run.
 
 **Queries and data**
 

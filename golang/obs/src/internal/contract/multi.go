@@ -19,10 +19,12 @@ var skipDirs = map[string]bool{".git": true, ".direnv": true, "node_modules": tr
 // testDirs are folders of test material: a contract in one is a fixture, not part of the repository's observability.
 var testDirs = map[string]bool{"fixtures": true, "testdata": true}
 
-// Discover returns the other contract.yaml files of dir's repository: every observability/contract.yaml
-// below the Git root, except dir's own and any under a fixtures or testdata folder. A contract that
-// is itself in such a folder, or in no Git repository, has no others. Sorted. A folder the walk cannot
-// read is an error naming it (relative to the Git root): the others in it would go unchecked.
+// Discover returns the other contract.yaml files of dir's repository: every contract.yaml in or below an
+// observability folder, at any depth, below the Git root (observability/contract.yaml,
+// observability/<feature>/contract.yaml, <feature>/observability/contract.yaml), except dir's own and any
+// under a fixtures or testdata folder. A contract that is itself in such a folder, or in no Git repository,
+// has no others. Sorted. A folder the walk cannot read is an error naming it (relative to the Git root):
+// the others in it would go unchecked.
 func Discover(dir string) ([]string, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
@@ -53,7 +55,7 @@ func Discover(dir string) ([]string, error) {
 			}
 			return nil
 		}
-		if d.Name() == "contract.yaml" && p != own && filepath.Base(filepath.Dir(p)) == "observability" && d.Type().IsRegular() {
+		if d.Name() == "contract.yaml" && p != own && d.Type().IsRegular() && belowObservability(root, filepath.Dir(p)) {
 			out = append(out, p)
 		}
 		return nil
@@ -63,6 +65,93 @@ func Discover(dir string) ([]string, error) {
 	}
 	sort.Strings(out)
 	return out, nil
+}
+
+// belowObservability is true when dir is a folder named observability or any folder below one (between
+// the Git root and dir): the places a contract.yaml belongs to a repository's observability.
+func belowObservability(root, dir string) bool {
+	if filepath.Base(dir) == "observability" {
+		return true // also the Git root's own folder, as obs 0.5 read it
+	}
+	rel, err := filepath.Rel(root, dir)
+	if err != nil {
+		return false
+	}
+	for _, seg := range strings.Split(filepath.ToSlash(rel), "/") {
+		if seg == "observability" {
+			return true
+		}
+	}
+	return false
+}
+
+// Folders returns every observability folder of dir's repository that holds a contract.yaml or an alerts
+// folder: a folder named observability or below one, at any depth, below the Git root, fixtures and
+// testdata folders skipped. Sorted. dir itself is in the list when it qualifies. A dir that is in a
+// fixtures or testdata folder, or in no Git repository, has none. An unreadable folder is an error naming it.
+func Folders(dir string) ([]string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, fmt.Errorf("observability folders: %w", err)
+	}
+	root := gitRoot(abs)
+	if root == "" || inTestDir(root, abs) {
+		return nil, nil
+	}
+	var out []string
+	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			cause := err
+			var pe *fs.PathError
+			if errors.As(err, &pe) {
+				cause = pe.Err
+			}
+			rel, rerr := filepath.Rel(root, p)
+			if rerr != nil {
+				rel = p
+			}
+			return fmt.Errorf("observability folders: cannot read %s: %w", filepath.ToSlash(rel), cause)
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		if p != root && (skipDirs[d.Name()] || testDirs[d.Name()]) {
+			return filepath.SkipDir
+		}
+		if !belowObservability(root, p) {
+			return nil
+		}
+		if st, serr := os.Stat(filepath.Join(p, "contract.yaml")); serr == nil && st.Mode().IsRegular() {
+			out = append(out, p)
+		} else if st, serr := os.Stat(filepath.Join(p, "alerts")); serr == nil && st.IsDir() {
+			out = append(out, p)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// ServiceStreamCount is the worst-case VictoriaLogs stream count of one service whose contracts are cs:
+// landscapes x the distinct modules across them (a contract that names no module is one unnamed module).
+// For one contract it is StreamCount.
+func ServiceStreamCount(cs []*Contract, landscapes int) int64 {
+	if landscapes < 1 {
+		landscapes = 1
+	}
+	mods := map[string]bool{}
+	for _, c := range cs {
+		if len(c.Modules) == 0 {
+			mods[""] = true
+		}
+		for _, m := range c.Modules {
+			mods[m] = true
+		}
+	}
+	return int64(landscapes) * int64(max(len(mods), 1))
 }
 
 func inTestDir(root, p string) bool {
