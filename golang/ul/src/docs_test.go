@@ -389,3 +389,25 @@ func TestTranslationSourceIsAPage(t *testing.T) {
 		t.Fatalf("exit %d\n%s", code, out)
 	}
 }
+
+// More of what a reader sees: an escaped hyphen, a lone-CR file and a mermaid statement after a
+// semicolon.
+func TestReaderEdgeCases2(t *testing.T) {
+	dir := cleanWith(t, map[string]string{
+		"docs/esc.md": "---\ntitle: E\nnamespaces: [example.org/cooking/kitchen]\n---\n\nThe Fry\\ pan is not a name but \\*griddle\\* is.\n",
+		"docs/cr.md":  "---\rtitle: C\rnamespaces: [example.org/cooking/kitchen]\r---\r\rA griddle.\r",
+		"docs/mer.md": "---\ntitle: M\nnamespaces: [example.org/cooking/kitchen]\n---\n\n```mermaid\nclassDiagram\n  Animal --|> Food : griddle\n```\n\n```mermaid\nflowchart LR\n  A[Acceptable] --> B[Oven]; click B \"https://x.test/griddle\"\n```\n",
+	})
+	code, out, _ := docsCheck(t, dir)
+	if code != 1 {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+	for _, want := range []string{"docs/esc.md:6: UL403", "docs/cr.md:6: UL403", "docs/mer.md:8: UL403"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "docs/mer.md:13") {
+		t.Errorf("a click target was read:\n%s", out)
+	}
+}

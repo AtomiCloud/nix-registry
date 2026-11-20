@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"html"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -22,7 +23,7 @@ var cmark = goldmark.New(goldmark.WithExtensions(extension.GFM))
 // frontMatter splits a page into its front matter (without the --- lines) and its body, and
 // says how many lines come before the body. A page with no front matter has none.
 func splitFrontMatter(src []byte) (fm []byte, body []byte, bodyLine int) {
-	s := bytes.ReplaceAll(src, []byte("\r\n"), []byte("\n"))
+	s := normalizeNewlines(src)
 	if !bytes.HasPrefix(s, []byte("---\n")) {
 		return nil, s, 0
 	}
@@ -99,7 +100,7 @@ func inlines(n ast.Node, src []byte, lineOf func(int) int, sb *segBuilder) {
 	for c := n.FirstChild(); c != nil; c = c.NextSibling() {
 		switch v := c.(type) {
 		case *ast.Text:
-			sb.add(html.UnescapeString(string(v.Segment.Value(src))), lineOf(v.Segment.Start))
+			sb.add(unescapeMd(string(v.Segment.Value(src))), lineOf(v.Segment.Start))
 			if v.SoftLineBreak() || v.HardLineBreak() {
 				sb.space()
 			}
@@ -113,4 +114,14 @@ func inlines(n ast.Node, src []byte, lineOf func(int) int, sb *segBuilder) {
 			inlines(c, src, lineOf, sb)
 		}
 	}
+}
+
+var mdEscape = regexp.MustCompile("\\\\([!-/:-@\\[-`{-~])")
+
+// unescapeMd is the text a reader sees: backslash escapes and character entities resolved.
+func unescapeMd(s string) string { return html.UnescapeString(mdEscape.ReplaceAllString(s, "$1")) }
+
+// normalizeNewlines turns CRLF and a lone CR into LF, as dh does before it reads a page.
+func normalizeNewlines(b []byte) []byte {
+	return bytes.ReplaceAll(bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n")), []byte("\r"), []byte("\n"))
 }

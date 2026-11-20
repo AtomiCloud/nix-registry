@@ -1,0 +1,57 @@
+{
+  "ast": 1,
+  "format": 8,
+  "source": "---\ntitle: Wrap\nconcept: wrap\ndescription: A name wrapped over a line break.\nnamespaces: []\n---\n\nThe Frying\npan is one name.\n\n```terminal\n$ x\n```\n",
+  "path": "docs/domain/kitchen/implementation/wrap.dh.md",
+  "frontMatter": {
+    "title": "Wrap",
+    "concept": "wrap",
+    "description": "A name wrapped over a line break.",
+    "namespaces": []
+  },
+  "title": "Wrap",
+  "banner": null,
+  "blocks": [
+    {
+      "type": "markdown",
+      "line": 7,
+      "md": [
+        {
+          "t": "p",
+          "c": [
+            {
+              "t": "text",
+              "v": "The Frying\npan is one name."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "terminal",
+      "id": null,
+      "line": 11,
+      "attrs": {},
+      "llm": "```terminal\n$ x\n```",
+      "llmKind": "as-is",
+      "steps": [
+        {
+          "title": "",
+          "lines": [
+            {
+              "k": "cmd",
+              "prompt": "$",
+              "text": "x"
+            }
+          ]
+        }
+      ],
+      "prompt": "$",
+      "title": null
+    }
+  ],
+  "headings": [],
+  "problems": [],
+  "highlighted": false,
+  "llm": "---\ntitle: Wrap\nconcept: wrap\ndescription: A name wrapped over a line break.\nnamespaces: []\nsource: docs/domain/kitchen/implementation/wrap.dh.md\n---\n<!-- Made by dh llm from the source; nobody edits this file. -->\n\nThe Frying\npan is one name.\n\n```terminal\n$ x\n```\n"
+}

@@ -182,7 +182,7 @@ func TestDhDataEntityAndBanner(t *testing.T) {
 	dir := fixture(t, "dh/data")
 	probs, _, _ := checkLines(t, newEnv(t, dir), dir)
 	const page = "docs/domain/kitchen/implementation/data.dh.md"
-	want := []string{page + ":14: UL403", page + ":16: UL403"} // the banner; the entity paragraph (a line is found by its text, and the source spells the word differently, so it names the start of its block)
+	want := []string{page + ":14: UL403", page + ":17: UL403"}
 	if strings.Join(probs, "|") != strings.Join(want, "|") {
 		t.Fatalf("got %v\nwant %v", probs, want)
 	}
@@ -222,4 +222,39 @@ func TestDhLargePageThroughPipe(t *testing.T) {
 	if code != 1 || len(probs) != 3 {
 		t.Fatalf("exit %d: %v", code, probs)
 	}
+}
+
+// A name wrapped over a line break in rich prose is the name, as it is in .md.
+func TestDhWrappedName(t *testing.T) {
+	dir := fixture(t, "dh/wrap")
+	probs, _, _ := checkLines(t, newEnv(t, dir), dir)
+	if strings.Join(probs, "|") != "docs/domain/kitchen/implementation/wrap.dh.md:8: UL402" {
+		t.Fatalf("got %v", probs)
+	}
+}
+
+// ul only believes a page dh printed for the file it asked about, and a page with blocks.
+func TestDhOutputIsThePage(t *testing.T) {
+	dir := fixture(t, "dh/repeat")
+	rp := filepath.Join(dir, "docs/domain/kitchen/implementation/repeat.dh.md.dhjson")
+	for name, rec := range map[string]string{
+		"another page": `{"ast":1,"source":"another page","blocks":[]}`,
+		"no blocks":    `{"ast":1,"source":"` + strings.ReplaceAll(readSourceOf(t, rp), "\n", `\n`) + `"}`,
+	} {
+		if err := os.WriteFile(rp, []byte(rec), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if code, _, errs := newEnv(t, dir).ul("check", "--root", dir, "--dh", useFakeDh(t)); code != 2 {
+			t.Errorf("%s: exit %d: %s", name, code, errs)
+		}
+	}
+}
+
+func readSourceOf(t *testing.T, recording string) string {
+	t.Helper()
+	var doc map[string]any
+	if err := jsonUnmarshal(readAll(t, recording), &doc); err != nil {
+		t.Fatal(err)
+	}
+	return doc["source"].(string)
 }

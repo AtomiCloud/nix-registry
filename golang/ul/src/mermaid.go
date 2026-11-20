@@ -18,78 +18,80 @@ func mermaidSegs(src string, first int) []Seg {
 			out = append(out, plainSeg(label, line))
 		}
 	}
-	for i, raw := range lines {
-		line := first + i
-		t := strings.TrimSpace(raw)
-		if t == "" || strings.HasPrefix(t, "%%") {
-			continue
-		}
-		if kind == "" {
-			kind = diagramKind(t)
+	for i, whole := range lines {
+		for _, raw := range splitStatements(whole) {
+			line := first + i
+			t := strings.TrimSpace(raw)
+			if t == "" || strings.HasPrefix(t, "%%") {
+				continue
+			}
 			if kind == "" {
-				continue
-			}
-		}
-		if kind == "flow" && skipFlow.MatchString(t) {
-			continue // styling and click directives hold no label
-		}
-		if kind == "seq" && seqSkip.MatchString(t) {
-			continue
-		}
-		// quoted labels: "text"
-		rest := t
-		for _, m := range quotedRe.FindAllStringSubmatch(t, -1) {
-			add(m[1], line)
-		}
-		rest = quotedRe.ReplaceAllString(rest, `""`)
-		if m := titleRe.FindStringSubmatch(rest); m != nil {
-			add(m[2], line)
-			continue
-		}
-		switch kind {
-		case "flow":
-			if skipFlow.MatchString(rest) {
-				continue
-			}
-			if m := subgraphRe.FindStringSubmatch(rest); m != nil {
-				if m[2] == "" && !strings.ContainsAny(m[1], "[({") {
-					add(m[1], line)
+				kind = diagramKind(t)
+				if kind == "" {
+					continue
 				}
-				rest = m[2]
 			}
-			for _, m := range bracketRe.FindAllStringSubmatch(rest, -1) {
-				add(strings.Trim(m[1], "/\\ "), line)
+			if (kind == "flow" && skipFlow.MatchString(t)) || clickRe.MatchString(t) {
+				continue // styling and click directives hold no label
 			}
-			for _, m := range pipeRe.FindAllStringSubmatch(rest, -1) {
+			if kind == "seq" && seqSkip.MatchString(t) {
+				continue
+			}
+			// quoted labels: "text"
+			rest := t
+			for _, m := range quotedRe.FindAllStringSubmatch(t, -1) {
 				add(m[1], line)
 			}
-			for _, re := range inlineEdgeRes {
-				for _, m := range re.FindAllStringSubmatch(rest, -1) {
-					add(m[1], line)
-				}
-			}
-		case "seq":
-			if seqSkip.MatchString(rest) {
-				continue
-			}
-			if m := participantRe.FindStringSubmatch(rest); m != nil {
+			rest = quotedRe.ReplaceAllString(rest, `""`)
+			if m := titleRe.FindStringSubmatch(rest); m != nil {
 				add(m[2], line)
-			} else if m := noteRe.FindStringSubmatch(rest); m != nil {
-				add(m[1], line)
-			} else if m := messageRe.FindStringSubmatch(rest); m != nil {
-				add(m[1], line)
+				continue
 			}
-		case "other":
-			if m := relationRe.FindStringSubmatch(rest); m != nil {
-				add(m[1], line)
-			}
-		case "state":
-			if m := stateEdgeRe.FindStringSubmatch(rest); m != nil {
-				add(m[1], line)
-			} else if m := stateDescRe.FindStringSubmatch(rest); m != nil {
-				add(m[1], line)
-			} else if m := stateNoteRe.FindStringSubmatch(rest); m != nil {
-				add(m[1], line)
+			switch kind {
+			case "flow":
+				if skipFlow.MatchString(rest) {
+					continue
+				}
+				if m := subgraphRe.FindStringSubmatch(rest); m != nil {
+					if m[2] == "" && !strings.ContainsAny(m[1], "[({") {
+						add(m[1], line)
+					}
+					rest = m[2]
+				}
+				for _, m := range bracketRe.FindAllStringSubmatch(rest, -1) {
+					add(strings.Trim(m[1], "/\\ "), line)
+				}
+				for _, m := range pipeRe.FindAllStringSubmatch(rest, -1) {
+					add(m[1], line)
+				}
+				for _, re := range inlineEdgeRes {
+					for _, m := range re.FindAllStringSubmatch(rest, -1) {
+						add(m[1], line)
+					}
+				}
+			case "seq":
+				if seqSkip.MatchString(rest) {
+					continue
+				}
+				if m := participantRe.FindStringSubmatch(rest); m != nil {
+					add(m[2], line)
+				} else if m := noteRe.FindStringSubmatch(rest); m != nil {
+					add(m[1], line)
+				} else if m := messageRe.FindStringSubmatch(rest); m != nil {
+					add(m[1], line)
+				}
+			case "other":
+				if m := relationRe.FindStringSubmatch(rest); m != nil {
+					add(m[1], line)
+				}
+			case "state":
+				if m := stateEdgeRe.FindStringSubmatch(rest); m != nil {
+					add(m[1], line)
+				} else if m := stateDescRe.FindStringSubmatch(rest); m != nil {
+					add(m[1], line)
+				} else if m := stateNoteRe.FindStringSubmatch(rest); m != nil {
+					add(m[1], line)
+				}
 			}
 		}
 	}
@@ -117,6 +119,7 @@ func diagramKind(first string) string {
 var (
 	quotedRe      = regexp.MustCompile(`"([^"]*)"`)
 	titleRe       = regexp.MustCompile(`(?i)^\s*(title|section|accTitle|accDescr)\s*:?\s+(.+)$`)
+	clickRe       = regexp.MustCompile(`(?i)^\s*click\b`)
 	skipFlow      = regexp.MustCompile(`(?i)^\s*(classDef|class|style|linkStyle|click|direction|end)\b`)
 	subgraphRe    = regexp.MustCompile(`(?i)^\s*subgraph\s+([^\[\]]*?)\s*(\[.*)?$`)
 	bracketRe     = regexp.MustCompile(`[\[({>]+([^\[\](){}"|>]*[^\[\](){}"|>\s/\\][^\[\](){}"|]*?)[\])}]+`)
@@ -126,7 +129,7 @@ var (
 	messageRe     = regexp.MustCompile(`^\s*[^\s:]+\s*(?:-->>|->>|-->|->|--x|-x|--\)|-\))[+-]?\s*[^\s:]+\s*:\s*(.+)$`)
 	stateEdgeRe   = regexp.MustCompile(`^\s*[^\s:]+\s*-->\s*[^\s:]+\s*:\s*(.+)$`)
 	stateDescRe   = regexp.MustCompile(`^\s*[A-Za-z0-9_\-]+\s*:\s*(.+)$`)
-	relationRe    = regexp.MustCompile(`^\s*\S+\s*(?:<\|--|\*--|o--|-->|\.\.>|\.\.\|>|--|\.\.)\s*\S+\s*:\s*(.+)$`)
+	relationRe    = regexp.MustCompile(`^\s*\S+\s*(?:--\|>|<\|--|\*--|o--|-->|\.\.>|\.\.\|>|--|\.\.)\s*\S+\s*:\s*(.+)$`)
 	seqSkip       = regexp.MustCompile(`(?i)^\s*(links?|properties|details)\b`)
 	stateNoteRe   = regexp.MustCompile(`(?i)^\s*note\s+(?:left of|right of)\s+\S+\s*:\s*(.+)$`)
 	inlineEdgeRes = []*regexp.Regexp{
@@ -135,3 +138,20 @@ var (
 		regexp.MustCompile(`==\s+([^=>|]+?)\s+==>`),
 	}
 )
+
+// splitStatements splits a line at the semicolons outside double quotes: mermaid allows several
+// statements on one line.
+func splitStatements(line string) []string {
+	var out []string
+	inQuote, start := false, 0
+	for i, r := range line {
+		switch {
+		case r == '"':
+			inQuote = !inQuote
+		case r == ';' && !inQuote:
+			out = append(out, line[start:i])
+			start = i + 1
+		}
+	}
+	return append(out, line[start:])
+}

@@ -91,6 +91,7 @@ func readFrontMatter(fm []byte) (p page, ok bool) {
 func (l *loaded) loadPages() (pages []*page, probs []Problem, err error) {
 	var dhRels, probe []string
 	byRel := map[string]*page{}
+	want := map[string]string{} // the text dh must print back for each page
 	for _, rel := range l.scan.Docs {
 		i18n := strings.HasPrefix(rel, i18nDir)
 		if i18n && l.opts.translations == modeFree {
@@ -102,6 +103,7 @@ func (l *loaded) loadPages() (pages []*page, probs []Problem, err error) {
 			continue
 		}
 		fm, body, bodyLine := splitFrontMatter(data)
+		want[rel] = strings.ReplaceAll(string(normalizeNewlines(data)), "\x00", "\ufffd")
 		p, ok := readFrontMatter(fm)
 		if !ok {
 			if len(fm) > 0 && strings.HasSuffix(rel, ".dh.md") && !frontMatterParses(fm) {
@@ -129,6 +131,9 @@ func (l *loaded) loadPages() (pages []*page, probs []Problem, err error) {
 		probs = append(probs, dprobs...)
 		for _, rel := range dhRels {
 			if d := docs[rel]; d != nil {
+				if w, ok := want[rel]; ok && d.Source != w {
+					return nil, nil, fmt.Errorf("dh json printed another page for %s: its source is not the file", rel)
+				}
 				segs, sp := dhSegs(d, rel)
 				byRel[rel].segs = segs
 				probs = append(probs, sp...)

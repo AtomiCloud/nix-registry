@@ -64,6 +64,9 @@ func (s *Seg) lineAt(off int, matched string) int {
 			return l
 		}
 	}
+	for from < s.to && from <= len(s.src) && strings.TrimSpace(s.src[from-1]) == "" {
+		from++ // the run starts on the next line that holds text
+	}
 	return from
 }
 

@@ -36,7 +36,7 @@ type dhDoc struct {
 		Text []mdInline `json:"text"`
 	} `json:"banner"`
 	Source   string      `json:"source"`
-	Blocks   []dhBlock   `json:"blocks"`
+	Blocks   *[]dhBlock  `json:"blocks"`
 	Problems []dhProblem `json:"problems"`
 }
 
@@ -143,7 +143,7 @@ func runDhBatch(dh, root string, pages []string) (map[string]*dhDoc, []Problem, 
 			if err := dec.Decode(d); err != nil {
 				return nil, nil, fmt.Errorf("dh json printed fewer pages than it was given, or something that is not a page (%s): %v", p, err)
 			}
-			if d.AST != 1 || d.Source == "" {
+			if d.AST != 1 || d.Source == "" || d.Blocks == nil {
 				return nil, nil, fmt.Errorf("dh json printed something that is not a page for %s (no \"ast\": 1)", p)
 			}
 			docs[p] = d
@@ -188,7 +188,9 @@ func dhSegs(d *dhDoc, rel string) ([]Seg, []Problem) {
 		inlineText(d.Banner.Text, &sb, 1)
 		r.add(&sb, 1, frontMatterEnd(lines))
 	}
-	r.blocks(d.Blocks, len(lines))
+	if d.Blocks != nil {
+		r.blocks(*d.Blocks, len(lines))
+	}
 	return r.segs, append(probs, r.probs...)
 }
 
@@ -415,7 +417,7 @@ func inlineText(in []mdInline, sb *segBuilder, line int) {
 	for _, x := range in {
 		switch x.T {
 		case "text":
-			sb.add(html.UnescapeString(x.V), line)
+			sb.add(strings.ReplaceAll(html.UnescapeString(x.V), "\n", " "), line)
 		case "strong", "em", "del", "link", "coderef":
 			inlineText(x.C, sb, line)
 		case "br":
