@@ -26,6 +26,14 @@ func DotnetNamespace(c *contract.Contract, namespace string) string {
 	}
 	ns := ident(c.Service)
 	dir := path.Dir(ContractPath(c))
+	// App/App.csproj beside App/observability is a service root too. A
+	// grouped contract below observability remains a feature contract.
+	if filepath.Base(filepath.Dir(c.File)) == "observability" {
+		projects, _ := filepath.Glob(filepath.Join(filepath.Dir(filepath.Dir(c.File)), "*.csproj"))
+		if len(projects) > 0 {
+			return ns + ".Signals"
+		}
+	}
 	if dir != "." && dir != "observability" {
 		feature := path.Base(dir)
 		if feature == "observability" {

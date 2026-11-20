@@ -32,6 +32,16 @@ func PackageIdentity(root string, target contract.Target) (string, error) {
 	fail := func(err error) (string, error) {
 		return "", fmt.Errorf("generate %s out: %q: package identity: %w (or set package_id:)", target.Lang, target.Out, err)
 	}
+	boundary := GitRoot(root)
+	if boundary == "" {
+		boundary, err = filepath.Abs(root)
+		if err != nil {
+			return fail(err)
+		}
+	}
+	if !within(boundary, start) {
+		return fail(fmt.Errorf("target is outside project boundary %s", boundary))
+	}
 	for dir := start; ; dir = filepath.Dir(dir) {
 		name := ""
 		switch target.Lang {
@@ -121,9 +131,9 @@ func PackageIdentity(root string, target contract.Target) (string, error) {
 				return fail(e)
 			}
 		}
-		if filepath.Dir(dir) == dir {
+		if dir == boundary || filepath.Dir(dir) == dir {
 			break
 		}
 	}
-	return fail(fmt.Errorf("no manifest at or above %s", start))
+	return fail(fmt.Errorf("no manifest from %s through project boundary %s", start, boundary))
 }

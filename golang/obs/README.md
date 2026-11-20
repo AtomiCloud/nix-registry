@@ -836,6 +836,8 @@ multiple .NET projects at the same level need an explicit `package_id:`. Optiona
 manifest discovery (and can resolve computed MSBuild properties). It is the package's stable identity,
 not the feature name or the generated namespace. Manifest edits change generated registration too;
 `obs gen --check` detects that drift even when the contract hash stays the same.
+The walk stops at the Git root, or the project root without `.git`; a manifest above that boundary
+is never used. Set `package_id:` when the owning manifest is unavailable inside the project.
 
 Each `generate:` target accepts optional `interfaces:` to override its dependency import. The merged-port
 registration behavior is now specified in [the corpus port design and four interfaces goals](https://github.com/ProtoDurian/diene-corpus/pull/116)
@@ -843,7 +845,8 @@ registration behavior is now specified in [the corpus port design and four inter
 interfaces nodes reconcile them. The fixtures validate these models, not published packages:
 
 For .NET, an explicit `namespace:` wins. The default stays `<Service>.Signals` for a root
-`observability/contract.yaml`; feature contracts use `<Service>.<Feature>.Signals`, where Feature is
+`observability/contract.yaml`, including a service project such as `App/App.csproj` beside
+`App/observability/`; feature contracts use `<Service>.<Feature>.Signals`, where Feature is
 the PascalCase feature folder in either `<feature>/observability/` or `observability/<feature>/`.
 This lets two features of the same service compile in one assembly without editing a shared namespace.
 Namespaces must be dotted C# identifiers without whitespace around dots; invalid spellings name the
@@ -854,6 +857,8 @@ Both contract paths are named. These clashes are across contracts: one contract 
 Go and C# into a shared folder when they write different files, as in 0.5. Writing the same file twice
 is still refused. The repository checks share contract discovery and exclude fixture trees;
 `obs check --contracts none` keeps its existing single-contract scope.
+`obs gen` and `obs gen --check` skip invalid sibling contracts in the clash check, preserving 0.5
+generation of a valid contract; `obs check` still diagnoses those invalid siblings.
 
 The fixture span recorders (`obs.StartSpan`, `Port.StartSpan`, `DurianSignalPort.startSpan`) are
 additional assumed ABI details, not prescribed entrypoint names. Together with Bun's `tracer.run`,

@@ -96,3 +96,38 @@ func TestPackageIdentityOverride(t *testing.T) {
 		}
 	}
 }
+
+func TestPackageIdentityStopsAtProjectBoundary(t *testing.T) {
+	for _, git := range []bool{true, false} {
+		for _, tc := range []struct{ lang, manifest, body string }{
+			{"go", "go.mod", "module example.com/ambient\n"},
+			{"bun", "package.json", `{"name":"ambient"}`},
+			{"dart", "pubspec.yaml", "name: ambient\n"},
+			{"dotnet", "Ambient.csproj", "<Project/>"},
+		} {
+			t.Run(tc.lang+map[bool]string{true: "/git", false: "/no-git"}[git], func(t *testing.T) {
+				parent := t.TempDir()
+				root := filepath.Join(parent, "project")
+				if err := os.MkdirAll(root, 0755); err != nil {
+					t.Fatal(err)
+				}
+				if git {
+					if err := os.Mkdir(filepath.Join(root, ".git"), 0755); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := os.WriteFile(filepath.Join(parent, tc.manifest), []byte(tc.body), 0644); err != nil {
+					t.Fatal(err)
+				}
+				target := contract.Target{Lang: tc.lang, Out: "gen"}
+				if id, err := gen.PackageIdentity(root, target); err == nil {
+					t.Fatalf("manifest above project boundary was used: %q", id)
+				}
+				target.PackageID = "explicit"
+				if id, err := gen.PackageIdentity(root, target); err != nil || id != "explicit" {
+					t.Fatalf("explicit override: %q %v", id, err)
+				}
+			})
+		}
+	}
+}

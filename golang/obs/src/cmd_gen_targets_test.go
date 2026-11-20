@@ -136,3 +136,22 @@ func TestGenerationResolvedOutputCollision(t *testing.T) {
 		})
 	}
 }
+
+func TestGenerationIgnoresInvalidSiblings(t *testing.T) {
+	for _, bad := range []string{"service: [broken]\n", "service: broken\nmetrics: {bad: {kind: nonsense}}\n"} {
+		root := repo(t, map[string]string{
+			"go.mod":                             "module example.com/valid\n\ngo 1.24\n",
+			"observability/contract.yaml":        "service: valid\nlogs: {Failed: {event: valid.failed, level: error}}\ngenerate: [{lang: go, out: gen}]\n",
+			"Broken/observability/contract.yaml": bad,
+		})
+		dir := filepath.Join(root, "observability")
+		for _, args := range [][]string{{"gen", "--dir", dir}, {"gen", "--check", "--dir", dir}} {
+			if rc, out := obs(args...); rc != 0 {
+				t.Errorf("valid contract gen must ignore invalid sibling: rc=%d %s", rc, out)
+			}
+		}
+		if rc, out := obs("check", "--dir", dir); rc == 0 || !strings.Contains(out, "Broken/observability/contract.yaml") {
+			t.Errorf("check must still name invalid sibling: rc=%d %s", rc, out)
+		}
+	}
+}

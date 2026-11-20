@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"github.com/AtomiCloud/obs/internal/contract"
 	"github.com/AtomiCloud/obs/internal/gen"
 )
@@ -17,10 +16,10 @@ func generationTargetIssues(primary *contract.Contract, dir string) ([]string, e
 	for _, file := range paths {
 		other, err := contract.Load(file)
 		if err != nil {
-			return nil, err
+			continue // obs check diagnoses invalid siblings; gen keeps its 0.5 scope
 		}
 		if issues := other.Validate(); len(issues) > 0 {
-			return nil, fmt.Errorf("%s: %s", other.Rel(), issues[0])
+			continue
 		}
 		contracts = append(contracts, other)
 	}
