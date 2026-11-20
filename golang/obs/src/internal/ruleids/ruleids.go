@@ -45,7 +45,7 @@ func Others(dir string) ([]Rule, error) {
 	if err != nil {
 		return nil, err
 	}
-	folders, err := contract.Folders(abs)
+	folders, skip, err := contract.FoldersSkip(abs)
 	if err != nil {
 		return nil, err
 	}
@@ -54,7 +54,7 @@ func Others(dir string) ([]Rule, error) {
 		if f == abs || contract.SameFile(f, abs) { // a symlinked --dir is the same folder as its target
 			continue
 		}
-		rs, err := read(f)
+		rs, err := read(f, skip)
 		if err != nil {
 			return nil, err
 		}
@@ -71,7 +71,7 @@ func All(dir string) ([]Clash, error) {
 	if err != nil {
 		return nil, err
 	}
-	folders, err := contract.Folders(abs)
+	folders, skip, err := contract.FoldersSkip(abs)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +80,7 @@ func All(dir string) ([]Clash, error) {
 	}
 	var all []Rule
 	for _, f := range folders {
-		rs, err := read(f)
+		rs, err := read(f, skip)
 		if err != nil {
 			return nil, err
 		}
@@ -113,8 +113,10 @@ func Find(rules []Rule, mine map[string]bool) []Clash {
 	return out
 }
 
-// read is the rules of one observability folder, files named relative to the Git root.
-func read(folder string) ([]Rule, error) {
+// read is the rules of one observability folder, files named relative to the Git root. A rule file below a folder
+// the discovery walk prunes (git-ignored, a nested repository, a chart's copy) is not a definition of its uid: the
+// folder's alerts/ is read with the same rule as the folders themselves.
+func read(folder string, skip *contract.RepoSkip) ([]Rule, error) {
 	set, err := files.Load(folder)
 	if err != nil {
 		return nil, err
@@ -124,6 +126,9 @@ func read(folder string) ([]Rule, error) {
 		id := ID(r)
 		if id == "" {
 			continue // a rule with no uid and no name is that folder's own failure
+		}
+		if skip.Skips(filepath.Join(folder, r.File)) {
+			continue
 		}
 		out = append(out, Rule{ID: id, File: contract.RelPath(filepath.Join(folder, r.File))})
 	}

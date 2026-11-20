@@ -2,6 +2,7 @@ package ruleids
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -119,5 +120,51 @@ func TestOthersSkipsTheSelectedFolderThroughASymlink(t *testing.T) {
 	}
 	if len(others) != 1 || !strings.Contains(others[0].File, "Friend") {
 		t.Fatalf("others = %v, want only Friend's rule (%s)", others, b)
+	}
+}
+
+func gitInit(t *testing.T, dir string) {
+	t.Helper()
+	cmd := exec.Command("git", "-C", dir, "init", "-q")
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+}
+
+// A generated copy INSIDE a discovered folder's alerts/ (git-ignored, or a nested repository) is not a second
+// definition of its uids: the rule reader prunes with the discovery's rule.
+func TestCopiesInsideAFoldersAlertsAreNotClashes(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	root := t.TempDir()
+	gitInit(t, root)
+	a := filepath.Join(root, "observability", "nfctag")
+	b := filepath.Join(root, "observability", "friend")
+	put(t, filepath.Join(a, "contract.yaml"), "service: a\n")
+	put(t, filepath.Join(a, "alerts", "e", "warning.yaml"), alertDoc("a-errors"))
+	put(t, filepath.Join(b, "contract.yaml"), "service: b\n")
+	put(t, filepath.Join(b, "alerts", "e", "warning.yaml"), alertDoc("b-errors"))
+	put(t, filepath.Join(b, "alerts", "build", "e", "warning.yaml"), alertDoc("b-errors"))
+	cs, err := All(a)
+	if err != nil || len(cs) != 1 {
+		t.Fatalf("the control (not ignored): clashes = %v, %v; want the copy to clash", cs, err)
+	}
+	put(t, filepath.Join(root, ".gitignore"), "build/\n")
+	if cs, err := All(a); err != nil || len(cs) != 0 {
+		t.Fatalf("an ignored copy inside alerts/: %v, %v", cs, err)
+	}
+	put(t, filepath.Join(root, ".gitignore"), "")
+	if err := os.RemoveAll(filepath.Join(b, "alerts", "build")); err != nil {
+		t.Fatal(err)
+	}
+	put(t, filepath.Join(b, "alerts", "vendored", "e", "warning.yaml"), alertDoc("b-errors"))
+	gitInit(t, filepath.Join(b, "alerts", "vendored"))
+	if cs, err := All(a); err != nil || len(cs) != 0 {
+		t.Fatalf("a nested repository inside alerts/: %v, %v", cs, err)
+	}
+	if others, err := Others(a); err != nil || len(others) != 1 {
+		t.Fatalf("Others = %v, %v; want friend's one rule", others, err)
 	}
 }

@@ -496,6 +496,28 @@ if command -v git >/dev/null 2>&1 && [ "$(id -u)" != 0 ]; then
 else
   echo "SKIP unreadable ignored folder and nested repository: git is not installed or the tests run as root"
 fi
+# a generated copy INSIDE a discovered feature's alerts/ (ignored, or a nested repository) is not a second definition of its uids
+if command -v git >/dev/null 2>&1; then
+  repo "inside" i nfctag-errors friend-errors friend.invites ""
+  rm -rf "${R:?}/.git"
+  git -C "$R" init -q
+  mkdir -p "$FB/alerts/build"
+  cp -r "$FB/alerts/errors" "$FB/alerts/build/errors"
+  run check --dir "$FA"
+  check "copy inside a feature's alerts/ that is not ignored: [rule-id-clash] (the control)" 1 '[rule-id-clash]' 'friend/alerts/build/errors/warning.yaml'
+  printf 'build/\n' >"$R/.gitignore"
+  run check --dir "$FA"
+  check "ignored copy inside a feature's alerts/: no false [rule-id-clash]" 0 'obs check: ok'
+  absent '[rule-id-clash]' || bad "ignored copy inside a feature's alerts/ clashed"
+  printf '' >"$R/.gitignore"
+  rm -rf "$FB/alerts/build"
+  mkdir -p "$FB/alerts/vendored"
+  git -C "$FB/alerts/vendored" init -q
+  cp -r "$FB/alerts/errors" "$FB/alerts/vendored/errors"
+  run check --dir "$FA"
+  check "nested repository inside a feature's alerts/: no false [rule-id-clash]" 0 'obs check: ok'
+  absent '[rule-id-clash]' || bad "nested repository inside a feature's alerts/ clashed"
+fi
 
 # ---- a repository that is itself an observability folder: recognised by content, never by the checkout folder's name -----
 for name in observability checkout; do

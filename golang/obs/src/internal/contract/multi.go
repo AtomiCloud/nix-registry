@@ -196,13 +196,42 @@ func sameInfo(info os.FileInfo, p string) bool {
 // skipped, except dir itself. Sorted. dir itself is in the list when it qualifies. A dir that is in a
 // fixtures or testdata folder, or in no Git repository, has none. An unreadable folder is an error naming it.
 func Folders(dir string) ([]string, error) {
+	out, _, err := FoldersSkip(dir)
+	return out, err
+}
+
+// RepoSkip is the prune set of one walk of the repository (ignored folders, nested repositories, chart copies,
+// dependency and test folders), kept so the files below a folder can be judged by the same rule: Skips is true for a
+// path the walk would not have entered. A nil RepoSkip skips nothing.
+type RepoSkip struct{ w *walkSkip }
+
+// Skips reports whether the absolute path p (a file or a folder) lies in something the walk prunes.
+func (r *RepoSkip) Skips(p string) bool {
+	if r == nil || r.w == nil {
+		return false
+	}
+	w := r.w
+	if w.ignored[p] {
+		return true
+	}
+	for d := filepath.Dir(p); d != w.root && strings.HasPrefix(d, w.root+string(filepath.Separator)); d = filepath.Dir(d) {
+		if w.dir(d, filepath.Base(d)) {
+			return true
+		}
+	}
+	return false
+}
+
+// FoldersSkip is Folders and the prune set it used (nil when dir has no repository), so a reader of the files below
+// those folders applies the same ignore, nested-repository and copy rules without asking git again.
+func FoldersSkip(dir string) ([]string, *RepoSkip, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
-		return nil, fmt.Errorf("observability folders: %w", err)
+		return nil, nil, fmt.Errorf("observability folders: %w", err)
 	}
 	root := gitRoot(abs)
 	if root == "" || inTestDir(root, abs) {
-		return nil, nil
+		return nil, nil, nil
 	}
 	rootObs := rootIsObservability(root)
 	skip := newWalkSkip(root, abs)
@@ -239,7 +268,7 @@ func Folders(dir string) ([]string, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	sort.Strings(out)
 	others := len(out)
@@ -249,7 +278,7 @@ func Folders(dir string) ([]string, error) {
 		}
 	}
 	skip.note(others)
-	return out, nil
+	return out, &RepoSkip{skip}, nil
 }
 
 // isChart is true when folder p holds a Chart.yaml.
