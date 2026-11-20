@@ -342,7 +342,7 @@ func TestIncidentsFirstEntryNormalWithPreviousAlertingNeedsNoEarlierHistory(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(res.Fired) != 1 || res.Fired[0].Longest != 10*time.Minute || !res.Fired[0].StartedBeforeWindow {
+	if len(res.Fired) != 1 || res.Fired[0].Longest != 0 || !res.Fired[0].StartedBeforeWindow || res.Fired[0].Firings != 1 {
 		t.Fatalf("%+v", res.Fired)
 	}
 }
@@ -1261,5 +1261,165 @@ func TestMergeIntervalsOpenIsTrueWhenAnyMergedSpanIsOpen(t *testing.T) {
 	got := mergeIntervals([]interval{{From: at(5), To: at(15)}, {From: at(10), To: at(30)}})
 	if len(got) != 1 || got[0].open || !got[0].To.Equal(at(30)) {
 		t.Errorf("closed spans stay closed: %+v", got)
+	}
+}
+
+// A span whose start was synthesized at the history read start (the first entry is Alerting -> Normal)
+// is not measured: longest_ns counts only spans with BOTH transitions observed. The firing itself was
+// observed, so the window is still caught.
+func TestIncidentsSynthesizedStartIsNotMeasured(t *testing.T) {
+	dir := writeRepo(t)
+	now := t0.Add(time.Hour)
+	srv := grafanaHistory(t, &recorder{}, []stateChange{{"high-errors", "High error rate", "Alerting", "Normal", t0.Add(40 * time.Minute)}})
+	res, err := Incidents(context.Background(), &Client{}, &Target{Name: "prod", Grafana: srv.URL}, IncidentOptions{
+		Dir: dir, Since: 30 * time.Minute, Now: func() time.Time { return now },
+		Windows: []Window{{From: t0.Add(35 * time.Minute), To: t0.Add(45 * time.Minute)}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Fired) != 1 {
+		t.Fatalf("%+v", res.Fired)
+	}
+	f := res.Fired[0]
+	if f.Longest != 0 || f.SpanOpen || !f.StartedBeforeWindow || f.Firings != 1 {
+		t.Fatalf("the only span has an inferred start: longest_ns must be 0, not a measured duration: %+v", f)
+	}
+	if len(res.Windows) != 1 || res.Windows[0].Status != "caught" || len(res.Windows[0].Fired) != 1 {
+		t.Fatalf("the direct observation still catches the window: %+v", res.Windows)
+	}
+	var sb strings.Builder
+	res.Print(&sb)
+	if strings.Contains(sb.String(), "longest 0s") || strings.Contains(sb.String(), "longest 10m") {
+		t.Fatalf("the text must not claim a measured duration:\n%s", sb.String())
+	}
+	// A second instance that has both transitions observed is still measured.
+	a, b := map[string]string{"instance": "a"}, map[string]string{"instance": "b"}
+	row := func(prev, next string, at time.Duration, l map[string]string) string {
+		return historyRow("high-errors", 7, "High error rate", prev, next, t0.Add(at), l, nil)
+	}
+	g := incidentsOver(t, twoInstanceHistory(
+		row("Alerting", "Normal", 40*time.Minute, a),
+		row("Normal", "Alerting", 41*time.Minute, b),
+		row("Alerting", "Normal", 44*time.Minute, b),
+	), now)
+	if g.Longest != 3*time.Minute {
+		t.Fatalf("the measured instance span stays; the synthesized one is ignored: %+v", g)
+	}
+}
+
+// Every instance span is clipped to the report window [from, cutoff) and empty ones are dropped before
+// merging: a firing exactly at the exclusive cutoff neither sets span_open nor merges.
+func TestIncidentsFiringExactlyAtTheCutoffIsNotASpan(t *testing.T) {
+	a, b := map[string]string{"instance": "a"}, map[string]string{"instance": "b"}
+	row := func(prev, next string, at time.Duration, l map[string]string) string {
+		return historyRow("high-errors", 7, "High error rate", prev, next, t0.Add(at), l, nil)
+	}
+	now := t0.Add(time.Hour)
+
+	// A closed 10m span, then B starts exactly at the cutoff.
+	f := incidentsOver(t, twoInstanceHistory(
+		row("Normal", "Alerting", 5*time.Minute, a),
+		row("Alerting", "Normal", 15*time.Minute, a),
+		row("Normal", "Alerting", 60*time.Minute, b),
+	), now)
+	if f.SpanOpen || f.Firings != 1 || f.Longest != 10*time.Minute {
+		t.Fatalf("an empty span at the cutoff is no firing and not open: %+v", f)
+	}
+
+	// A resolves exactly at the cutoff; B starts exactly at the cutoff: they must not merge into an open span.
+	f = incidentsOver(t, twoInstanceHistory(
+		row("Normal", "Alerting", 5*time.Minute, a),
+		row("Alerting", "Normal", 60*time.Minute, a),
+		row("Normal", "Alerting", 60*time.Minute, b),
+	), now)
+	if f.SpanOpen || f.Firings != 1 || f.Longest != 55*time.Minute {
+		t.Fatalf("B at the cutoff must not merge with A or open the span: %+v", f)
+	}
+
+	// Round-2 behaviour stays: an open span that started before the cutoff still opens the union.
+	f = incidentsOver(t, twoInstanceHistory(
+		row("Normal", "Alerting", 5*time.Minute, a),
+		row("Normal", "Alerting", 10*time.Minute, b),
+		row("Alerting", "Normal", 60*time.Minute, a),
+	), now)
+	if !f.SpanOpen || f.Longest != 55*time.Minute {
+		t.Fatalf("an open span before the cutoff keeps span_open: %+v", f)
+	}
+}
+
+// Three fired identities whose text collides all get distinct display IDs, deterministically, in
+// every output; swapping which one has the raw sample changes the attribution.
+func TestIncidentsEveryFiredIdentityHasADistinctDisplayID(t *testing.T) {
+	uidRow := `{"alertname":"High error rate","grafana_rule_uid":"high-errors"}`
+	nameRow := `{"alertname":"high-errors"}`
+	typedRow := `{"alertname":"alertname:high-errors"}`
+	grouped := ""
+	for _, m := range []string{uidRow, nameRow, typedRow} {
+		grouped += fmt.Sprintf(`{"metric":%s,"values":[[%d,"1"]]},`, m, t0.Unix())
+	}
+	grouped = strings.TrimSuffix(grouped, ",")
+	want := map[string]string{uidRow: "high-errors", nameRow: "alertname:high-errors#2", typedRow: "alertname:high-errors"}
+	seenIDs := map[string]bool{}
+	for _, c := range []struct {
+		name, metric string
+		cutoffAfter  bool
+	}{{"uid", uidRow, false}, {"name-only", nameRow, false}, {"name-only typed", typedRow, false}, {"future uid", uidRow, true}, {"future name-only", nameRow, true}, {"future typed", typedRow, true}} {
+		raw := fmt.Sprintf(`{"metric":%s,"values":[[%d,"1"]]}`, c.metric, t0.Add(10*time.Minute).Unix())
+		srv := seriesServer(t, grouped, raw)
+		w := Window{From: t0, To: t0.Add(time.Hour)}
+		now := t0.Add(3 * time.Hour)
+		if c.cutoffAfter {
+			now = t0.Add(30 * time.Minute)
+		}
+		res, err := Incidents(context.Background(), &Client{}, &Target{Metrics: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: 7 * 24 * time.Hour, Windows: []Window{w}, Now: func() time.Time { return now }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := map[string]bool{}
+		for _, f := range res.Fired {
+			ids[f.ID] = true
+		}
+		if len(res.Fired) != 3 || len(ids) != 3 || !ids["high-errors"] || !ids["alertname:high-errors"] || !ids["alertname:high-errors#2"] {
+			t.Fatalf("%s: three identities, three distinct ids: %+v", c.name, ids)
+		}
+		got := res.Windows[0].Fired
+		if c.cutoffAfter {
+			got = res.Windows[0].PartialFired
+		}
+		if len(got) != 1 || got[0] != want[c.metric] {
+			t.Fatalf("%s: attribution want %q, got %v (%+v)", c.name, want[c.metric], got, res.Windows[0])
+		}
+		seenIDs[got[0]] = true
+		var out strings.Builder
+		res.Print(&out)
+		if !c.cutoffAfter && !strings.Contains(out.String(), "caught: "+want[c.metric]+" fired") {
+			t.Fatalf("%s: text:\n%s", c.name, out.String())
+		}
+		for id := range ids {
+			if !strings.Contains(out.String(), "  "+id+": ") {
+				t.Fatalf("%s: FIRED line for %q missing:\n%s", c.name, id, out.String())
+			}
+		}
+		noInc := map[string]bool{}
+		for _, f := range res.FiredNoIncident {
+			noInc[f.ID] = true
+		}
+		if !noInc["alertname:high-errors#2"] || !noInc["alertname:high-errors"] {
+			t.Fatalf("%s: fired-but-no-incident ids: %+v", c.name, noInc)
+		}
+		// Deterministic: a second run over the same input gives the same ids.
+		again, err := Incidents(context.Background(), &Client{}, &Target{Metrics: srv.URL}, IncidentOptions{Dir: writeRepo(t), Since: 7 * 24 * time.Hour, Windows: []Window{w}, Now: func() time.Time { return now }})
+		if err != nil {
+			t.Fatal(err)
+		}
+		a, _ := res.JSON()
+		b, _ := again.JSON()
+		if string(a) != string(b) {
+			t.Fatalf("%s: output is not deterministic", c.name)
+		}
+	}
+	if len(seenIDs) != 3 {
+		t.Fatalf("swapping the observation between identities must change the attribution: %v", seenIDs)
 	}
 }
