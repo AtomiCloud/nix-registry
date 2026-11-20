@@ -150,7 +150,7 @@ func TestUpRefusesBeforeStartingAnything(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	started := time.Now()
-	_, err = Up(ctx, Config{Project: "demo", Dir: project(t), Runner: fr, Components: got})
+	_, err = Up(ctx, Config{Project: "demo", Dir: project(t), Runner: fr, Components: got, StateDir: t.TempDir()})
 	if err == nil || !strings.Contains(err.Error(), "refusing") || !strings.Contains(err.Error(), "2.4.2") {
 		t.Fatalf("want a refusal naming the wanted tag, got %v", err)
 	}

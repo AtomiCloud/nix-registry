@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -152,11 +153,13 @@ func TestLookFailsBeforeUploadingWhenTheMarkCannotBeWritten(t *testing.T) {
 	cfg := s.cfg(t, &fakeRunner{})
 	cfg.Dir = lookFixture
 	cfg.ApplyIncidents = true
-	blocker := filepath.Join(t.TempDir(), "file")
-	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+	// The state file cannot be replaced (a directory sits where it goes); the lock next to it still works.
+	cfg.StateDir = t.TempDir()
+	c := cfg
+	c.defaults()
+	if err := os.MkdirAll(filepath.Join(stateFile(c), "x"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	cfg.StateDir = filepath.Join(blocker, "state") // a directory cannot be made under a file
 	if _, err := Up(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "seed load") {
 		t.Fatalf("want an error naming the seed load record, got %v", err)
 	}
@@ -282,5 +285,248 @@ func TestHistoricalReuseJSONHasNoFingerprint(t *testing.T) {
 	b, _ := json.Marshal(again)
 	if strings.Contains(string(b), "live_rules") {
 		t.Errorf("a historical reuse with no forecast prints forecast fields: %s", b)
+	}
+}
+
+// A second setup (or sandbox down) of the same project while one is running must not tear down the stores
+// the running one is loading: the incomplete mark is also present during a load.
+func TestSecondSetupOfTheSameProjectDoesNotTearDownARunningLoad(t *testing.T) {
+	s := newStackServer(t)
+	fr := &fakeRunner{}
+	cfg := s.cfg(t, fr)
+	cfg.Dir = lookFixture
+	cfg.ApplyIncidents = true
+	s.failTraces = true
+	if _, err := Up(context.Background(), cfg); err == nil {
+		t.Fatal("want the Tempo failure that leaves the incomplete mark")
+	}
+	s.failTraces = false
+	// The running setup holds the project lock, as Up does from its state read to its last state write.
+	c := cfg
+	c.defaults()
+	lf, err := os.OpenFile(lockFile(c), os.O_CREATE|os.O_RDWR, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lf.Close()
+	if err := syscall.Flock(int(lf.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	runningStack(fr)
+	fr.calls = nil
+	if _, err := Up(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("a second setup of a busy project must refuse, got %v", err)
+	}
+	if err := Down(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("sandbox down of a busy project must refuse, got %v", err)
+	}
+	if fr.has("rm") {
+		t.Fatalf("the running setup's stores were removed: %v", fr.calls)
+	}
+	if st := ReadState(cfg); st == nil || !st.SeedIncomplete {
+		t.Fatalf("the running setup's state must be left alone: %+v", st)
+	}
+	_ = syscall.Flock(int(lf.Fd()), syscall.LOCK_UN)
+	if _, err := Up(context.Background(), cfg); err != nil {
+		t.Fatalf("once the project is free, a failed load is cleared and reloaded: %v", err)
+	}
+	if !fr.has("rm", "-f", "-v", "obs-sandbox-demo-vm") {
+		t.Errorf("the part-loaded stores must be removed once the project is free: %v", fr.calls)
+	}
+}
+
+// A state folder that cannot be made: the lock beside it cannot be taken, so the setup stops before anything
+// is uploaded or any container is touched (fail closed).
+func TestLookFailsBeforeUploadingWhenTheStateFolderCannotBeMade(t *testing.T) {
+	s := newStackServer(t)
+	cfg := s.cfg(t, &fakeRunner{})
+	cfg.Dir = lookFixture
+	cfg.ApplyIncidents = true
+	blocker := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocker, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg.StateDir = filepath.Join(blocker, "state") // a directory cannot be made under a file
+	if _, err := Up(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "sandbox lock") {
+		t.Fatalf("want the lock error, got %v", err)
+	}
+	if s.vmBody != "" || len(s.vlBodies) != 0 {
+		t.Errorf("data was uploaded: vm %d bytes, vl %d bodies", len(s.vmBody), len(s.vlBodies))
+	}
+}
+
+// A lock file that cannot be opened for writing (left by another user) still locks: a second setup of a
+// busy project is refused and removes nothing.
+func TestAReadOnlyLockFileStillLocksTheProject(t *testing.T) {
+	s := newStackServer(t)
+	fr := &fakeRunner{}
+	cfg := s.cfg(t, fr)
+	cfg.Dir = lookFixture
+	cfg.ApplyIncidents = true
+	s.failTraces = true
+	if _, err := Up(context.Background(), cfg); err == nil {
+		t.Fatal("want the Tempo failure that leaves the incomplete mark")
+	}
+	s.failTraces = false
+	c := cfg
+	c.defaults()
+	name := lockFile(c)
+	if err := os.Chmod(name, 0o444); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := os.OpenFile(name, os.O_RDWR, 0); err == nil {
+		f.Close()
+		t.Skip("running as a user that can write a 0444 file (root): the case cannot be made here")
+	}
+	held, err := os.Open(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	if err := syscall.Flock(int(held.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		t.Fatal(err)
+	}
+	runningStack(fr)
+	fr.calls = nil
+	if _, err := Up(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "already running") {
+		t.Fatalf("a busy project with a read-only lock file must refuse, got %v", err)
+	}
+	if fr.has("rm") {
+		t.Fatalf("the running setup's stores were removed: %v", fr.calls)
+	}
+}
+
+// A lock file that cannot be opened at all: refuse rather than run unlocked (with or without state).
+func TestAnUnopenableLockFileRefuses(t *testing.T) {
+	s := newStackServer(t)
+	fr := &fakeRunner{}
+	cfg := s.cfg(t, fr)
+	cfg.Dir = lookFixture
+	cfg.ApplyIncidents = true
+	s.failTraces = true
+	if _, err := Up(context.Background(), cfg); err == nil {
+		t.Fatal("want the Tempo failure that leaves the incomplete mark")
+	}
+	s.failTraces = false
+	c := cfg
+	c.defaults()
+	name := lockFile(c)
+	if err := os.Chmod(name, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := os.Open(name); err == nil {
+		f.Close()
+		t.Skip("running as a user that can read a 0000 file (root): the case cannot be made here")
+	}
+	runningStack(fr)
+	fr.calls = nil
+	if _, err := Up(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "touches no container without it") {
+		t.Fatalf("want a refusal naming the lock, got %v", err)
+	}
+	if fr.has("rm") {
+		t.Fatalf("stores were removed without the lock: %v", fr.calls)
+	}
+}
+
+// With no state file at all, an unopenable lock still refuses: a running setup holds the lock before it
+// writes any state, so "no state" does not mean "nothing running".
+func TestAnUnopenableLockFileRefusesWithoutState(t *testing.T) {
+	s := newStackServer(t)
+	fr := &fakeRunner{}
+	cfg := s.cfg(t, fr)
+	c := cfg
+	c.defaults()
+	name := lockFile(c)
+	if err := os.MkdirAll(filepath.Dir(name), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(name, nil, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	if f, err := os.Open(name); err == nil {
+		f.Close()
+		t.Skip("running as a user that can read a 0000 file (root): the case cannot be made here")
+	}
+	runningStack(fr)
+	if err := Down(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "touches no container without it") {
+		t.Fatalf("want a refusal naming the lock, got %v", err)
+	}
+	if fr.has("rm") {
+		t.Fatalf("containers were removed without the lock: %v", fr.calls)
+	}
+}
+
+// The default lock depends on no environment variable: invocations with different XDG_CACHE_HOME or TMPDIR
+// that address the same project share it.
+func TestDefaultLockIsSharedAcrossCacheFolders(t *testing.T) {
+	cfg := Config{Project: "demo"}
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("TMPDIR", t.TempDir())
+	a := lockFile(cfg)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("TMPDIR", t.TempDir())
+	if b := lockFile(cfg); a != b || a != "/tmp/obs-sandbox-demo.lock" {
+		t.Fatalf("lock path must be one machine-wide place per project: %q vs %q", a, b)
+	}
+}
+
+// The lock is never taken through a symlink or on anything but a regular file, and a project name cannot
+// reach outside the lock folder.
+func TestLockRefusesSymlinksOtherFilesAndBadNames(t *testing.T) {
+	old := lockDir
+	lockDir = t.TempDir()
+	defer func() { lockDir = old }()
+	target := filepath.Join(t.TempDir(), "victim")
+	if err := os.WriteFile(target, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(lockDir, "obs-sandbox-link.lock")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lockProject(Config{Project: "link"}); err == nil {
+		t.Fatal("a symlinked lock file must be refused")
+	}
+	if err := os.Mkdir(filepath.Join(lockDir, "obs-sandbox-dir.lock"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := lockProject(Config{Project: "dir"}); err == nil || !strings.Contains(err.Error(), "touches no container") {
+		t.Fatalf("a directory in the lock's place must be refused, got %v", err)
+	}
+	for _, p := range []string{"../x", "a/b", "", "-x", "..", "a b"} {
+		if _, err := lockProject(Config{Project: p}); err == nil || !strings.Contains(err.Error(), "sandbox project") {
+			t.Errorf("project %q must be refused by the name check, got %v", p, err)
+		}
+	}
+	unlock, err := lockProject(Config{Project: "ok-1.a_b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock()
+	if fi, err := os.Lstat(filepath.Join(lockDir, "obs-sandbox-ok-1.a_b.lock")); err != nil || !fi.Mode().IsRegular() {
+		t.Fatalf("the lock must be a regular file in the lock folder: %v %v", fi, err)
+	}
+}
+
+// A FIFO in the lock's place is rejected at once: no open may wait for a writer before the regular-file check.
+func TestLockRejectsAFIFOPromptly(t *testing.T) {
+	old := lockDir
+	lockDir = t.TempDir()
+	defer func() { lockDir = old }()
+	// 0444: the read-write open fails, so the read-only fallback is the open that could block.
+	if err := syscall.Mkfifo(filepath.Join(lockDir, "obs-sandbox-fifo.lock"), 0o444); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		_, err := lockProject(Config{Project: "fifo"})
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil || !strings.Contains(err.Error(), "not a regular file") {
+			t.Fatalf("a FIFO must be refused as not a regular file, got %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("opening a FIFO lock blocked")
 	}
 }

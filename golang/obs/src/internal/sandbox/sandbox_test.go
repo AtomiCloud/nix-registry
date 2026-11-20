@@ -190,7 +190,7 @@ func TestEveryCreateIsLabelledNamedAndPinned(t *testing.T) {
 
 func TestUpRefusesAContainerWithAnotherImageTag(t *testing.T) {
 	fr := &fakeRunner{ps: "obs-sandbox-demo-vm|victoriametrics/victoria-metrics:v1.111.0|running\n"}
-	_, err := Up(context.Background(), Config{Project: "demo", Dir: project(t), Runner: fr})
+	_, err := Up(context.Background(), Config{Project: "demo", Dir: project(t), Runner: fr, StateDir: t.TempDir()})
 	if err == nil || !strings.Contains(err.Error(), "refusing") || !strings.Contains(err.Error(), "v1.111.0") || !strings.Contains(err.Error(), "v1.156.0") {
 		t.Fatalf("want a refusal naming both tags, got %v", err)
 	}
