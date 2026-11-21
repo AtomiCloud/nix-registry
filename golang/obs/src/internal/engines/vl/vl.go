@@ -306,3 +306,44 @@ type FieldFilter = logstorage.ObsFieldFilter
 
 // FieldFilters returns every filter on field before the first pipe.
 func (q *Query) FieldFilters(field string) []FieldFilter { return q.q.ObsFieldFilters(field) }
+
+// FilterFields returns the field of every filter the query evaluates on stored rows: the main filter,
+// the `if (...)` condition of a stats function or a transforming pipe, `filter` pipes before the stats,
+// and the filters of every nested source (in(...) subqueries, union, join). A stream filter reports
+// "_stream" and one "_stream:<tag>" per tag it names. A query form the walker cannot read (an opaque
+// pipe) is an error: the caller decides what that means.
+func (q *Query) FilterFields() ([]string, error) {
+	set := map[string]bool{}
+	var walk func(n logstorage.ObsFilterTree)
+	walk = func(n logstorage.ObsFilterTree) {
+		if n.Kind == "stream" {
+			set["_stream"] = true
+			for _, tag := range n.Values {
+				set["_stream:"+tag] = true
+			}
+		} else if n.Field != "" {
+			set[n.Field] = true
+		}
+		for _, c := range n.Children {
+			walk(c)
+		}
+	}
+	_, err := q.q.ObsAlertTransform(func(n logstorage.ObsFilterTree) (string, error) {
+		walk(n)
+		return n.Text, nil
+	}, func(string, []string) error { return nil })
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(set))
+	for f := range set {
+		out = append(out, f)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// RetainedKeyFilters returns the `by (...)` names of the last `stats` pipe that a later `filter` pipe
+// filters on while the name is still that retained group key (a rename moves the key, a `math`, rename or
+// copy onto the name clears it, `fields` and `delete` follow it). A computed field that only shares a name is not one.
+func (q *Query) RetainedKeyFilters() []string { return q.q.ObsRetainedKeyFilters() }

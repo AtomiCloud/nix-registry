@@ -44,6 +44,8 @@ type Options struct {
 	// NoOtherContracts is `obs test --contracts none`: the static check reads this folder's contract only, not the
 	// repository's other observability/contract.yaml files. `obs alerts` leaves it false.
 	NoOtherContracts bool
+	// Scope is the root/filter set selected by --all, absent for obs alerts.
+	Scope *contract.Scope
 }
 
 // TempoAlertingNote is printed once per obs alerts run that has trace rules.
@@ -97,10 +99,16 @@ func run(o Options, stdout, stderr io.Writer, res *RunResult) int {
 	VerifyMismatch.Store(0)
 	verifyExamples.Store(0)
 	SkippedRuns, SkipChecked, SkipMismatch = 0, 0, 0
-	p, err := loadProject(o.Dir, o.SeedPath, o.AllowEmptyExpect)
+	p, err := loadProjectScope(o.Dir, o.SeedPath, o.AllowEmptyExpect, o.Scope)
 	if err != nil {
 		fmt.Fprintln(stderr, "obs alerts:", err)
 		return 2
+	}
+	if !o.NoOtherContracts { // one rule uid in two features: Grafana keeps one (the other observability folders are read)
+		if err := repoRuleIDs(p, o.Scope); err != nil {
+			fmt.Fprintln(stderr, "obs alerts:", err)
+			return 2
+		}
 	}
 	var tempoFrontend *tempo.Frontend
 	{
@@ -149,7 +157,11 @@ func run(o Options, stdout, stderr io.Writer, res *RunResult) int {
 		return 1
 	}
 	// The shared reader and static checker enforce the same language and event rules.
-	set, err := files.Load(o.Dir)
+	root := ""
+	if o.Scope != nil {
+		root = o.Scope.Root
+	}
+	set, err := files.LoadScoped(o.Dir, contract.PayloadSkip(o.Dir, o.Scope), root)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2
@@ -161,7 +173,7 @@ func run(o Options, stdout, stderr io.Writer, res *RunResult) int {
 		}
 	}
 	set.Queries, set.Dashboards = queries, nil
-	rep := check.Static(set, check.Options{Dir: o.Dir, EventRule: o.EventRule, NoOtherContracts: o.NoOtherContracts})
+	rep := check.Static(set, check.Options{Dir: o.Dir, EventRule: o.EventRule, NoOtherContracts: o.NoOtherContracts, Scope: o.Scope})
 	rep.Print(stdout)
 	if rep.Failures() > 0 {
 		return 1

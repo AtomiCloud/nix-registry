@@ -129,6 +129,9 @@ public static class Spans
 /// <summary>The data tables: allowed label keys per metric and span, every event name and its level.</summary>
 public static class SignalTables
 {
+    /// <summary>The package-qualified contract id and hash used at boot registration.</summary>
+    public static readonly DurianSignalContract Contract = new("pay.Signals:observability/contract.yaml", "sha256:5060e61bbe64b9238fc7ba07f1c81cb9ee3035981a56ce618ca94aef955d1cb6");
+
     public static readonly IReadOnlyDictionary<string, DurianSignalMetricInfo> Metrics =
         new Dictionary<string, DurianSignalMetricInfo>
         {

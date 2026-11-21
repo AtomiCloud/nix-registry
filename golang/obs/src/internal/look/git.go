@@ -7,10 +7,13 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/AtomiCloud/obs/internal/gitcmd"
 )
 
 func gitRun(dir string, args ...string) (string, error) {
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	cmd.Env = gitcmd.Env(dir)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {

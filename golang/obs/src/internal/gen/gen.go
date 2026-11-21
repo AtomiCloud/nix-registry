@@ -25,6 +25,8 @@ type Options struct {
 	Package    string // go package name, dart library name
 	Namespace  string // .NET namespace
 	Interfaces string // dependency import/module/namespace (defaults to the published package)
+	PackageID  string // owning package identity resolved from the target's manifest
+	ContractID string // complete manifest-relative registration identity
 }
 
 // Generator writes the typed signals of one language.

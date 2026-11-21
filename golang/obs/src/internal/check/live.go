@@ -128,7 +128,7 @@ func runLive(set *files.Set, o Options, ds *seed.Dataset, m metricsEngine, l log
 	// The contract decides the event rule exactly as --static does: when it applies, a log alert's
 	// filters on free-form fields are assumed true and dropped, as `obs alerts` does.
 	lv.eventOn = lv.o.eventRuleOn()
-	if c, problems := loadContract(&lv.o); len(problems) == 0 {
+	if c, problems := loadContract(&lv.o); len(problems) == 0 && !lv.o.metricsOnly {
 		lv.contract = c
 	}
 	// A recording rule's output exists only once `obs alerts` evaluates the rule: the seed never holds it.

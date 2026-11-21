@@ -17,7 +17,7 @@ types:
   pod: { kind: estimate, min: 1, max: 10, churn_per_day: 2 }
   lane: { kind: enum, values: [a, b] }
 generate:
-  - { lang: go, out: gen/go }
+  - { lang: go, package_id: example.com/test, out: gen/go }
 metrics:
   checkout.charges:
     kind: counter
@@ -242,10 +242,10 @@ types:
   priority_class: { kind: enum, values: ['', system-critical, batch] }
   lane: { kind: enum, values: [a, b] }
 generate:
-  - { lang: go, out: gen/go/signals, package: signals }
-  - { lang: dotnet, out: gen/dotnet/Signals, namespace: S.Signals }
-  - { lang: dart, out: gen/dart/lib/src/signals, package: s_signals }
-  - { lang: bun, out: gen/bun/src/signals }
+  - { lang: go, package_id: example.com/test, out: gen/go/signals, package: signals }
+  - { lang: dotnet, package_id: test, out: gen/dotnet/Signals, namespace: S.Signals }
+  - { lang: dart, package_id: test, out: gen/dart/lib/src/signals, package: s_signals }
+  - { lang: bun, package_id: test, out: gen/bun/src/signals }
 metrics:
   checkout.charges:
     kind: counter

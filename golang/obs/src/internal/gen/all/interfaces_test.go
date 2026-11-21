@@ -50,10 +50,10 @@ func TestPlanPassesTargetInterfaces(t *testing.T) {
 service: s
 logs: {Failed: {event: s.failed, level: error}}
 generate:
-  - {lang: go, out: generated/go, interfaces: example.com/custom/obs}
-  - {lang: bun, out: generated/bun, interfaces: '@example/interfaces'}
-  - {lang: dotnet, out: generated/dotnet, interfaces: Example.Interfaces}
-  - {lang: dart, out: generated/dart, interfaces: custom_interfaces}
+  - {lang: go, package_id: example.com/test, out: generated/go, interfaces: example.com/custom/obs}
+  - {lang: bun, package_id: test, out: generated/bun, interfaces: '@example/interfaces'}
+  - {lang: dotnet, package_id: test, out: generated/dotnet, interfaces: Example.Interfaces}
+  - {lang: dart, package_id: test, out: generated/dart, interfaces: custom_interfaces}
 `))
 	if err != nil {
 		t.Fatal(err)

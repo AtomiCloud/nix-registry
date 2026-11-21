@@ -191,16 +191,20 @@ type Span struct {
 
 // Target is one generated output: a language, where it goes, and its options.
 type Target struct {
+	Scope   *Scope `yaml:"-" json:"-"`
 	Lang    string `yaml:"lang"`
 	Out     string `yaml:"out"`               // folder, relative to the repo root (the folder holding observability/)
 	Package string `yaml:"package,omitempty"` // go package / dart library
 	Module  string `yaml:"namespace,omitempty"`
 	// Interfaces is the import path (go), package (dart, bun) or namespace (dotnet) of the hand-written interfaces library the generated code builds on; empty means the published default.
 	Interfaces string `yaml:"interfaces,omitempty"`
+	// PackageID overrides manifest discovery for the registration identity.
+	PackageID string `yaml:"package_id,omitempty"`
 }
 
 // Contract is the parsed contract.yaml.
 type Contract struct {
+	Scope    *Scope            `yaml:"-" json:"-"`
 	Service  string            `yaml:"service"`
 	Modules  []string          `yaml:"modules,omitempty"`
 	PodKeys  []string          `yaml:"pod_keys,omitempty"`

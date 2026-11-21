@@ -96,12 +96,14 @@ the file, the rule or panel, the rule id in `[brackets]` and the offending name 
 
 `--dir` (default `observability`) holds:
 
-- **`alerts/<slug>/<severity>.yaml`**: one `GrafanaAlertRuleGroup` CR per file (the golden
-  shape in the platform's observability standard, `alerts.md`). obs reads each rule's `data[]`:
+- **`alerts/<slug>/<severity>.yaml`**: either the platform standard's flat tier file (one flat YAML
+  map: `title`, `datasource`, `expr`, `for`, `summary`, `description`, optional `panel`; see
+  [Flat alert tier files](#flat-alert-tier-files)) or one `GrafanaAlertRuleGroup` CR per file. For a CR,
+  obs reads each rule's `data[]`:
   `datasourceUid`, `relativeTimeRange.from`, `model.expr`, `model.queryType`, and
   `model.datasource.type` when present. Grafana expression nodes (`datasourceUid: __expr__`)
-  are not queries and are skipped. A flat authoring file (`title/datasource/expr`) is refused
-  with a pointer to the CR. More than one YAML document in a file is refused.
+  are not queries and are skipped. More than one YAML document in a file is refused. A file that is
+  neither a CR nor a tier file (no `kind`, none of the tier fields) is refused.
 - **`dashboards/**/\*.json`**: dashboard JSON. Panels (also inside collapsed rows), `targets[].expr`,
   `templating.list`, `time.from/to` are read. Annotation queries are not checked.
 - **`seed.yaml`** (`--live` only; `--seed` overrides the path): see below.
@@ -401,8 +403,8 @@ metrics:
   both values and the contract `file:line` of the type; rename one. Bun quotes every value, so it never collides.
   Only values of types an own metric, log or span uses are generated; a `source:`-only type makes no code.
 
-**Several contracts in one repository.** `obs check` and `obs query` read **every** `observability/contract.yaml`
-below the Git root, not only `--dir`'s: a dashboard in `apps/hub/observability` may read a metric that
+**Several contracts in one repository.** `obs check` and `obs query` read **every** contract in or below an `observability/` folder
+below the Git root (`apps/hub/observability/contract.yaml`, and [one per feature](#one-contract-per-feature)), not only `--dir`'s: a dashboard in `apps/hub/observability` may read a metric that
 `apps/cluster/observability/contract.yaml` declares. `obs check` validates and prints each. One table of **stored**
 series names decides ownership: a metric (ours or a `source:` one) against a metric of another contract, and a
 platform metric's possible stored names (unit and histogram variants, see the keep-list) against a metric of another
@@ -415,6 +417,28 @@ stay the `--dir` contract's. Contracts in a `fixtures` or `testdata` folder are 
 a folder in one never looks for company; outside a Git repository only `--dir`'s contract is read.
 `--contracts none` reads only `--dir`'s. `obs gen` and `obs assert` stay per contract.
 
+### One contract per feature
+
+A service may keep one contract per feature instead of one for the whole service, in either layout (both work, pick one per repository):
+
+```text
+(i)  observability/obs.yaml                      <feature>/ folders grouped in ONE observability folder
+     observability/nfctag/contract.yaml
+     observability/nfctag/alerts/<slug>/<severity>.yaml
+     observability/friend/contract.yaml
+
+(ii) App/Modules/NfcTag/observability/contract.yaml     an observability folder INSIDE each feature
+     App/Modules/Friend/observability/contract.yaml
+```
+
+- **Discovery.** A `contract.yaml` belongs to the repository's observability when its folder is named `observability` or is **at any depth below** one (`observability/contract.yaml`, `observability/<feature>/contract.yaml`, `observability/billing/payments/contract.yaml`, `<feature>/observability/contract.yaml`). A `contract.yaml` anywhere else (`docs/`, `config/`) is not read. Folders named `fixtures`, `testdata`, `node_modules`, `vendor`, `.git`, `.direnv`, `.dart_tool` and `.obs-cache` are skipped, and the search is the Git root's: outside a Git repository only `--dir`'s contract is read, as before. Only **paths relative to the Git root** count, never the name of the folder the repository is checked out in (a CI clone is `repo/repo`, a worktree has any name): the same repository gives the same answer wherever it sits. A repository that **is** an observability folder (a standalone observability repository) is recognised by its content: when its top holds an `obs.yaml`, or a `contract.yaml` that reads as an obs contract (a `service:` and one of `metrics:`, `logs:`, `spans:`, `platform_metrics:`; a top-level `contract.yaml` of something else, an OpenAPI file for example, does not count), the Git root counts as an observability folder, and the folders below it count when they hold a `contract.yaml` (an `examples/` or `docs/` folder with only alerts does not). **Copies are not folders:** for discovery (contracts) and for the rule uid check below alike, a folder that git ignores (pruned when the walk reaches it, so it is never read: an unreadable ignored `build/` cannot fail a run; the ignored set comes from one `git ls-files --others --ignored --directory` call, no `git` on the PATH means nothing is ignored, and when git refuses the repository for its ownership, `dubious ownership` in a container CI, one note on stderr says that ignored folders are not skipped) and the `files/` and `templates/` folders of a folder that holds a `Chart.yaml` (a chart's `files/observability/<feature>/...` copy of the alerts, dashboards or whole folders; a chart at the Git root too, whose own source observability folders stay counted) are skipped, and a **nested Git repository or submodule** (a folder with its own `.git`) is its own boundary that the walk does not enter, so a copy is neither a second contract (`[metric-clash]`) nor a second definition of a rule uid. The chart copy step may therefore write into the chart's `files/` (or `templates/`), or into a folder git ignores; a copy anywhere else is a second folder.
+- **`--dir` for a feature.** Every command takes the feature's folder: `obs check --dir observability/friend`, `obs gen --dir App/Modules/Friend/observability`, `obs alerts`, `obs test`. `--dir` is that feature's contract, seed, incidents, alerts and dashboards; the other features' contracts are read with it (`obs check` prints each, `obs query` merges their metrics into the lookup, a metric two features both declare is `[metric-clash]` and names both files), so an alert of one feature may read a metric another feature declares. `--contracts none` keeps this folder's only. The CI recipe is `obs check --all`: it uses the same discovery skips and needs no list or hand-written loop.
+- **`obs.yaml`.** The lookup is the same for every folder and every command: the folder's own `obs.yaml`; else the nearest **enclosing folder named `observability`** that holds one (`observability/friend` reads `observability/obs.yaml`; `App/observability/Friend/observability` reads `App/observability/obs.yaml`); else the `obs.yaml` at the **Git root** (a standalone observability repository); else the versions and thresholds built into obs, as in 0.5. Nothing else is read. The output says which file it read (`obs.yaml <path>: every version it names matches (the enclosing observability folder's: ...)`, and `note: <dir>/obs.yaml not found: using <path>, the enclosing observability folder's` in `obs check`). Only a folder named `observability` below the Git root counts as an enclosing one, and so does the Git root itself when it holds the `obs.yaml` (a standalone observability repository, by content, whatever its checkout folder is called). Only the repository is searched: the Git root (the folder itself, or the nearest ancestor holding `.git`) is the last folder looked at, so an `obs.yaml` of an `observability/` folder above the repository is never read, outside a Git repository none is (except under `--all`, which uses the export root as the Git root when there is no `.git`, for obs.yaml, the platform of flat alert tier files and every other read of the run), and an `obs.yaml` that is a symlink to a file outside the Git root (checked after resolving every link) is not read. **Layout (ii) and a monorepo's apps keep the 0.5 behaviour:** a `<feature>/observability/` folder or an app folder with no `obs.yaml` of its own reads none (the built-in versions and thresholds) unless an enclosing folder named `observability` or the Git root holds one, never the root `observability/obs.yaml` of a sibling tree. When that root file exists and was not used, the command prints **one note on stderr** (`note: observability/obs.yaml exists but <dir>/obs.yaml does not exist, so it is not used: ...; copy observability/obs.yaml to <dir>/obs.yaml or add one`): copy the file into each app folder, or add one.
+- **A rule uid is unique in the repository.** Grafana keeps one rule per `uid` (the `metadata.name` when a rule has none), so two features shipping `errors-warning` would overwrite each other. `obs check` is the repository gate: it reads the `alerts/` folder of every observability folder of the repository and fails (exit 1) on **any** clash among them, from whichever folder it runs, with `FAIL rule <file>: [rule-id-clash] uid "<uid>" is also defined in <other file>: ...`, both files relative to the Git root. `obs alerts` and `obs test` judge the folder they are given: they fail (exit 2, the same line) only on a clash that involves one of **that folder's own rules**; a clash between two other features does not fail a third feature's `obs alerts` or `obs test` (as an invalid contract of a sibling feature does not fail another folder's `obs gen`). `--contracts none` (obs check and obs test) skips it. A repository with one observability folder prints nothing new; two rules with one uid inside one folder are still the per-folder `duplicate uid` failure of `obs alerts`.
+- **Service totals.** `obs check` prints the series and log-stream totals per contract as before. When **several contracts name the same `service:`** it adds one line, `service total (<service>, <n> contracts: <files>): worst case <S> series per landscape; log streams worst case <K> (...)`: the series are the contracts' worst cases added, the log streams are `--landscapes` times the distinct `modules:` across them (a contract with no `modules:` is one unnamed module). A contract has **no service-level budget** (budgets are per metric, concept 3.2, and a stored name is in one contract only), so the line is information: each metric is still judged on its own budget. A repository whose contracts all name different services prints no new line.
+- **Not per feature, by design.** The generated signal code of each contract is its own file in its own namespace, and `contract/events.json`, `aggregation.yaml` and `keep.yaml` are written per contract, so with one contract per feature no generated file is shared between two features. The platform renderer must collect every `keep.yaml`. The interface libraries' signal port takes one table per contract and merges them: every feature registers before any signal, equal registration is harmless and a clash is refused naming both contracts (see [`obs gen`](#obs-gen)); the real libraries' behaviour is outside this tool (see Not tested).
+- **A folder with no contract of its own** (layout (i)'s top `observability/` folder, holding the service-wide alerts and dashboards: overview, pod alerts; or a contract-less app folder in a monorepo). When discovery finds contracts elsewhere in the repository, the metric names of a query in that folder are looked up in the **merged contracts** of the repository, **leniently**: a metric that is in no contract (`up`, `kube_*`, an app's own `b_reqs_total`) is a **note** (`contract-name-unknown`), as it was a pass in 0.5; only a **near miss of a declared name** is `[contract-undeclared-metric]` (same first word, then a typo of edit distance at most 2 and at most a quarter of the name's length, a dot for an underscore, or a wrong `_total`/`_seconds`/`_bytes`/`_ratio`/`_bucket`/`_sum`/`_count` suffix), and its message names the merged contract files, for example `metric "nfctag_scan_total" is not in the repository's contracts (observability/friend/contract.yaml, observability/nfctag/contract.yaml) and not a platform metric; did you mean "nfctag_scans_total"?`. A label or a value outside the declared contract of a metric that IS declared is red as in a folder with a contract, and an invalid or clashing contract among them fails the run naming its file (`obs check`, `obs query --static`, and the query part of `obs test` and `obs alerts`). The limits (series, streams) are not checked for such a folder (`obs check` says so in a note: the features' own runs check them), and log events, spans and the event rule are not checked either: they belong to one contract, and this folder has none. A repository with no contract anywhere, a folder with a contract of its own, and `--contracts none` behave as in 0.5 (no names read, or the folder's own plus the others'). The folder's alerts are part of the rule uid check either way.
+
 ## `obs check`
 
 ```text
@@ -426,7 +450,9 @@ obs check [--dir observability] [--pods n] [--landscapes n] [--names] [--event-r
 
 1. **limits** (the contract rules below);
 2. **versions**: the evaluator versions this obs embeds, against `observability/obs.yaml`;
-3. **queries**: everything `obs query --static` does ([the rules](#obs-query---static-the-rules)): every alert and dashboard query parsed by the embedded engines and checked against the contract. `--vl-settings`, `--tempo-config`, `--event-rule`, `--contracts` and `--names` mean what they mean there. A folder with no alert and no dashboard is fine (the `[empty]` rule belongs to `obs query --static`); a folder with no `contract.yaml` skips the limits with a note and still checks the queries. Each query finding keeps its rule id.
+3. **queries**: everything `obs query --static` does ([the rules](#obs-query---static-the-rules)): every alert and dashboard query parsed by the embedded engines and checked against the contract. `--vl-settings`, `--tempo-config`, `--event-rule`, `--contracts` and `--names` mean what they mean there. A folder with no alert and no dashboard is fine (the `[empty]` rule belongs to `obs query --static`); a folder with no `contract.yaml` skips the limits with a note and still checks the queries (against the repository's other contracts when it has any, see [one contract per feature](#one-contract-per-feature)). Each query finding keeps its rule id.
+
+Two things were added for [one contract per feature](#one-contract-per-feature), and only print where they apply: a `service total (...)` line when several contracts name one service, and `[rule-id-clash]` failures when two observability folders of the repository define one alert rule uid.
 
 It exits 1 when any half fails and prints one summary line at the end, for example
 `obs check: ok: 1 metrics, 3 log events, 0 spans, 2 types, contract hash 754fae475354; queries: 7 queries (3 logs, 4 metrics), 0 failures, 0 warnings`
@@ -541,7 +567,7 @@ and `obs query --live` alone 2.0 s on the 24 h seed in an earlier measurement (e
 
 ## `obs.yaml`: the versions and thresholds a repo targets
 
-`observability/obs.yaml` (next to `contract.yaml`) says which store and tool versions the repo's
+`observability/obs.yaml` (next to `contract.yaml`; a feature folder without its own reads the nearest enclosing `observability/` folder's, see [one contract per feature](#one-contract-per-feature)) says which store and tool versions the repo's
 charts run and which query limits the stores run under. One loader reads it for `obs check`,
 `obs query`, `obs alerts`, `obs sandbox up` and `obs look`, so no command reads it its own way.
 Every key is optional: a key that is absent keeps the version or default built into obs.
@@ -555,6 +581,8 @@ versions:
   alloy: v1.21.3 # reference only: no evaluator is embedded for it
   pyroscope: 2.4.3 # the sandbox image
   dashboard_schema: 42 # Grafana 13.3.0 dashboard schemaVersion
+platform: tracker # optional: names the rule uid <platform>-<service>-<slug>-<severity> of flat alert tier files
+service: zinc # optional: else the contract's service
 thresholds:
   logs: # the VictoriaLogs -search.* flags, under the names below
     max_query_len: 16KiB # -search.maxQueryLen
@@ -733,7 +761,7 @@ consumers (the Bun stub has an `index.js`, run with the `node` that nixpkgs `tsc
 - requires every planted `forge-*` consumer to compile, run without throwing, and show the port's refusal
   (`dropped.unknown_event`, `unknown_metric`, `unknown_key`, `unknown_value`, `register` or `poisoned`).
 
-The same stubs support the 36 name-fuzz contract/language cases. The .NET harness builds three separate
+The same stubs support the 36 name-fuzz contract/language cases and the two-contract apps: both features emit, equal registration is harmless, duplicate names name both ids, changed tables and late registration poison, and fresh-name forgery is admitted. The .NET harness builds three separate
 assemblies, Obs, Signals and App; only Signals has access to the library's internal constructors.
 
 **Forging: three layers (concept §3.4 "one hole per language").** With shared carriers in the library,
@@ -745,29 +773,43 @@ an app can make its own carrier in Go (exported constructors) and Dart (`extends
    made), and the bases have no generic `add/record/set`: each generated metric class has its own method
    typed to its own labels class, so an upcast cannot reach a covariant check that throws. .NET is closed
    at compile time (internal constructors, friend access for Signals only).
-2. A run-time guard in all four, which checks everything against the generated tables. Go's generated
-   `init()` calls `obs.Register`; Bun's generated `signals.ts` calls `register(...)` when it loads, and
-   `metrics(...)`, `logger(...)` and `tracer(...)` accept only those same table objects (any other table
-   poisons the port, see below); Dart's generated `installSignals()` calls `DurianSignalPort.install`;
-   .NET calls `Port.Install(SignalTables.Metrics, SignalTables.EventLevels)` (no one-shot rule there: .NET
-   carriers cannot be forged, so a foreign table could only drop real signals, never admit a forged one). Each metric row carries its generated
-   labels type (Go, Dart), the allowed values of each enum label and the min..max of each bounded label.
-   The port refuses a name not in its table, a kind or level that differs, a labels value of another type
-   (even with the same keys), keys that are not the name's keys, and a value outside the allowed values or
-   range. Registration is once per process: Go `Register` (called by the generated `init()`), Bun
-   `register` (called by the generated `signals.ts` when it loads) and Dart `install` (called by the
-   generated `installSignals()`). Nothing guarantees the generated call comes first (an independent Go
-   package's `init()`, a Bun module loaded before `signals.ts`, or app code before `installSignals()` can
-   register a forged table earlier), so a competing registration, earlier or later, poisons the port (in
-   Bun also a table passed to `metrics/logger/tracer` that is not the registered object): it is refused
-   and counted (`dropped.register`), and from then on the port refuses every signal (`dropped.poisoned`)
-   until restart. A forged table is never used silently; it is a loud telemetry failure, never an app
-   failure. The lint rule forbids `obs.Register`, Bun `register` and `DurianSignalPort.install` outside
-   generated files.
-   The tables are deep-copied at registration (in Bun also frozen; the guard reads only that copy), so
-   editing the exported generated tables later changes nothing. The port counts `dropped.<reason>`, returns an
-   error and never throws or panics (the type is checked before any field is read; a panic or exception
-   is recovered and counted as a last resort).
+2. A run-time guard in all four checks signals against a merged view of the registered contract tables.
+   Each generated contract registers its own table set and hash. Its id is
+   `<package identity>:<contract path relative to the identity manifest's folder>`. With that manifest, adding or
+   removing `.git` does not change ids. A `package_id:` override uses the same owning manifest's
+   folder as the path base (or the Git root, then project folder, when no manifest is available).
+   Headers retain their source-path ownership marker.
+   Go's generated `init()` calls `obs.Register`; Bun's generated `signals.ts` calls `register(...)`
+   when it loads; Dart's generated `installSignals()` calls `DurianSignalPort.install`; .NET wiring
+   calls `Port.Install(SignalTables.Contract, SignalTables.Metrics, SignalTables.EventLevels, SignalTables.Spans)`.
+   Any number of contracts may register before the first signal. Re-registering the same id, hash and
+   equal table content is a no-op before signals flow. Reusing an id with different content or a different
+   hash, declaring a metric/event/span name already owned by another contract (including across signal
+   kinds), or registering after the first signal is recorded refuses registration and poisons the port.
+   A refused signal records nothing and leaves registration open.
+   A duplicate-name refusal names both contract ids. The refusal counts `dropped.register`; every signal
+   after it is refused and counts `dropped.poisoned` until restart. Bun's `metrics/logger/tracer(table)`
+   accept any registered table object; an unregistered object also poisons the port.
+   Each metric row carries its generated labels type (Go, Dart), allowed enum values and bounded ranges.
+   The port refuses unknown names, wrong kinds/levels, labels of another generated type, wrong keys and
+   out-of-range values. Tables are deep-copied at registration (Bun's copies are also frozen), so later
+   edits to exported tables change nothing. Refusals return errors and are counted; they never throw or panic.
+
+   **Boot wiring is required.** Every feature's registration must run from the templates' GENERATED wiring
+   list at boot, before signals flow: Go imports the packages for their `init()`, Bun imports each
+   `signals.ts`, Dart calls each library's `installSignals()`, and .NET installs each namespace's tables.
+   obs gen does not write that wiring list; the templates' wiring generators own it. No hand-kept list
+   that every feature edits is allowed. A lazy-loaded Bun or Dart feature that registers after the first
+   signal poisons the entire port. Each contract has its own Go package, Bun module, Dart library or .NET
+   namespace; Dart wiring uses import prefixes when the libraries both export `installSignals()`.
+
+   **The forgery guarantee changed.** The old one-table port made every second registration loud.
+   The merged port still makes a forgery that reuses a real name, or registers after signals start, loud.
+   An early forged table containing only NEW names is admitted. The lint rule forbidding registration
+   outside generated code is therefore required; for metrics, the platform's `contract/keep.yaml`
+   write-door rule also drops names no contract lists. New event and span names have NO write-door
+   guard: lint is their only guard. The compile/run fixtures document this admitted fresh-name forgery,
+   including .NET's reflection escape hatch; they do not claim the template lint or platform keep rule runs here.
 3. A lint rule in the template's CI (documented here, NOT TESTED; the lint config lives in the templates).
 
 | Language | Hole the compiler leaves                                                                   | Run-time guard (tested)                                    | Lint rule (NOT TESTED)                                   |
@@ -789,7 +831,7 @@ Lint rule text per language (to copy into the templates):
         analyze-types: true
         forbid:
           - pattern: ^obs\.(New(Event|Counter|Histogram|Gauge|Span)|Register)$
-            pkg: ^github\.com/ProtoDurian/diene\.go-interfaces/obs$
+            pkg: ^github\.com/AtomiCloud/diene\.go-interfaces/obs$
             msg: only obs gen output makes signal carriers; use the generated signals package
     exclusions:
       generated: strict
@@ -797,6 +839,7 @@ Lint rule text per language (to copy into the templates):
 
   Assigning to a generated exported variable stays a `forbidigo`/`gocritic` rule as in concept §3.4, and
   `depguard` denies `unsafe` in app packages (an unsafe-made enum value is refused at run time anyway).
+  Registration outside generated code must be forbidden: an early table with only new names is admitted.
 
 - **Dart**: one analyzer-plugin rule (`analysis_server_plugin`): in a file whose first line is not
   `// Code generated by obs gen. DO NOT EDIT.`, flag `extends`, `implements` or `with` of any
@@ -807,23 +850,129 @@ Lint rule text per language (to copy into the templates):
   argument that is not the generated `metricTable`/`eventTable`/`spanTable`.
 - **.NET**: a Roslyn analyzer for `default(Int<...>)`, `null!` of a generated enum class, and reflection
   on generated types (a reflection-made enum value is refused at run time by the allowed values).
+  Forbid `Port.Install` outside generated wiring; this closes early fresh-name table forgery.
 
-**`out:` and orphans.** In a Git repository `out:` may point anywhere under the Git root (for example
+**`out:` and orphans.** `out:` is resolved from the folder holding the nearest `observability/` ancestor:
+
+| Contract | `out:` | Generated Bun file |
+| --- | --- | --- |
+| `src/modules/orders/observability/contract.yaml` | `signals` | `src/modules/orders/signals/signals.ts` |
+| `observability/orders/contract.yaml` | `src/modules/orders/signals` | `src/modules/orders/signals/signals.ts` |
+| `observability/contract.yaml` | `gen` | `gen/signals.ts` |
+
+A standalone observability Git repository resolves outputs from its own root. Contract data
+(`contract/events.json`, `aggregation.yaml`, `keep.yaml`) stays beside that feature's contract.
+Two grouped contracts with `out: gen` therefore collide and are refused; use a distinct output per feature.
+In a Git repository `out:` may point anywhere under the Git root (for example
 `../shared/bun`); headers name the contract's repository-relative path and the orphan walk starts at the
 Git root. An `out:` that leaves the Git root, or is absolute, is refused before anything is written; the
 check is made on the written path and on its resolved path, so a symlink in `out:` cannot lead outside.
-With no `.git`, `out:` may not use `..` or a symlink that leads out of the project folder, and the header's contract path is relative to the folder that holds
-`observability/`, whatever the working directory (so `--check` from another folder sees the same headers).
+With no `.git`, single-folder mode refuses `..` and a symlink that leads out of that output base.
+The `--all` modes instead bound both written and resolved output paths to their fixed repository/export
+scope; `out:` still uses the per-layout base above, and `..` is allowed while staying inside that scope.
+Single-folder headers use the
+topmost ancestor containing a project marker (`.sln`, `.slnx`, `.csproj`,
+`flake.nix`, `go.work`, `go.mod`, `package.json`, `pubspec.yaml`), stopping after the home directory when it is an ancestor,
+or the observability project's base when there is no marker. Feature paths stay distinct, and a complete
+source export with its project marker can run `obs gen --check` or regenerate without an empty `.git` workaround.
+The `--all` modes instead fix the source-export root to the current directory once for every child,
+including headers and identity fallback, so independent modules need no shared root marker.
+A Docker build context must be the repository root for `obs gen --check` to match the checkout.
+Each generated-file destination must be a regular file or absent. A symlink at the file itself,
+including a dangling symlink, is refused before any file is written. Directory aliases are allowed
+within the permitted root; full destinations are resolved through existing ancestors (including a
+missing tail) and compared across all contracts. Aliases to the same generated file are refused.
 
-Each `generate:` target accepts optional `interfaces:` to override its dependency import. Every name
-in the last column is assumed, not in the goal; the interfaces nodes reconcile them:
+Each `generate:` target gets its package identity from the nearest language manifest at or above `out:`:
+Go's `go.mod` module path, Bun's `package.json` name, Dart's `pubspec.yaml` name, or .NET's `.csproj`
+literal `PackageId`, then literal `AssemblyName`, then project filename; unevaluated MSBuild expressions
+such as `$(AssemblyName)` fall through to the next choice. This keeps two libraries that both ship
+`observability/contract.yaml` distinct. A missing manifest/identity fails generation naming the target;
+multiple .NET projects at the same level need an explicit `package_id:`. Optional `package_id:` overrides
+the identity value; locating the owning project remains independent of parsing that value.
+It is the package's stable identity,
+not the feature name or the generated namespace. Manifest edits change generated registration too;
+`obs gen --check` detects that drift even when the contract hash stays the same.
+The walk follows the resolved `out:` directory's ancestors and stops at the resolved Git root.
+Without `.git`, a single-folder walk includes home and stops above it when home is an ancestor
+(Docker's `HOME=/root`, `WORKDIR /root` can own the manifests). An `--all` walk stays within its resolved scope.
+Use `package_id:` to pin the identity outside Git or when the owning manifest is unavailable.
+
+Each `generate:` target accepts optional `interfaces:` to override its dependency import. The merged-port
+registration behavior is now specified in [the corpus port design and four interfaces goals](https://github.com/ProtoDurian/diene-corpus/pull/116)
+(concept §3). The last column lists the remaining API details that the goals do not spell; the
+interfaces nodes reconcile them. The fixtures validate these models, not published packages:
+
+**.NET assembly boundary.** Generated C# must be compiled in an assembly named **`Signals`**: the
+interfaces carriers have internal constructors and grant friend access to that assembly. Giving the
+app public constructors would weaken the compile-time guarantee, so obs keeps the boundary. A fixed
+project can collect every feature without a hand-kept list:
+
+```xml
+<!-- Signals/Signals.csproj -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>Signals</AssemblyName></PropertyGroup>
+  <ItemGroup><Compile Include="../App/Modules/*/Signals/*.g.cs" /></ItemGroup>
+  <!-- Reference the interfaces package here; the app references this project. -->
+</Project>
+```
+
+The app's project removes `Modules/*/Signals/*.g.cs` from its own `Compile` items and references the
+Signals project. `obs gen`/`obs check` report `[generate-assembly]` when a project in repository/project
+scope may compile the file with another assembly name: SDK defaults under that project and literal
+`Compile Include` entries in other projects are checked, independently of the package-identity manifest.
+A matching unconditional `Compile Remove` is honored in the project or in the nearest
+`Directory.Build.targets` between the project and the scope root. A `Remove` in `Directory.Build.props`
+runs before the SDK adds its default `Compile` items and does not exclude those files; put the removal
+in the `.csproj` or `Directory.Build.targets`. Real MSBuild item-list and compiler controls test both orders.
+obs reads literal properties and Compile items in `.csproj`, `Directory.Build.props` and
+`Directory.Build.targets` in MSBuild order; Conditions, imports and other targets are not evaluated
+(the .NET Nix suite compares with real MSBuild). A computed
+or conditional assembly name that cannot be verified requires a literal `AssemblyName` of `Signals`.
+Package identity still comes from the nearest manifest at `out:`; this may be the app project even
+when the separate Signals project compiles the file. Use `package_id:` to pin identity if needed.
+
+**Bun public API.** Every generated exported symbol carries `/** @public */`, so knip can recognize
+the generated module as a public API even when one app uses only some of its signals.
+
+For .NET, an explicit `namespace:` wins. A service's only .NET contract keeps `<Service>.Signals`
+wherever its `.csproj` sits, including `App/App.csproj` beside `App/observability/` and a project
+under `src/` with a contract under `services/Checkout/observability/`.
+With several valid .NET contracts for one service, the single root candidate (repo-root
+`observability/` or an adjacent `.csproj`, when exactly one exists) keeps `<Service>.Signals`.
+The rest use `<Service>.<Feature>.Signals`; with several root candidates all use feature names.
+Feature is the PascalCase folder in `<feature>/observability/` or `observability/<feature>/`
+(`Root` for a repository-root contract that needs disambiguation). A remaining namespace clash
+tells you to set `namespace:` on one target.
+Outside Git, sibling scope for namespace, target-clash and registration-id checks is the topmost
+ancestor folder containing a project marker (`.sln`, `.csproj`, `go.mod`, `package.json` or
+`pubspec.yaml`). Defaults are computed over that topmost project folder, including adjacent feature
+projects under one solution. An export containing only part of a repository can have different
+defaults; set `namespace:` explicitly to pin them for such exports.
+This lets two features of the same service compile in one assembly without editing a shared namespace.
+Namespaces must be dotted C# identifiers without whitespace around dots; invalid spellings name the
+`namespace:` key and contract. A leading `@` is canonicalized per segment when comparing namespaces.
+Generation and checks also refuse two contracts with the same registration id, naming both owners
+relative to their shared owning root. This catches override collisions before boot registration.
+`obs gen` (including `--check`) and `obs check` refuse two targets that resolve to the same .NET
+namespace (`generate-namespace-clash`) or the same `out:` folder in any language (`generate-out-clash`).
+Both contract paths are named. These clashes are across contracts: one contract may still generate
+Go and C# into a shared folder when they write different files, as in 0.5. Writing the same file twice
+is still refused. The repository checks share contract discovery and exclude fixture trees;
+`obs check --contracts none` keeps its existing single-contract scope.
+`obs gen` and `obs gen --check` skip invalid sibling contracts in the clash check, preserving 0.5
+generation of a valid contract; `obs check` still diagnoses those invalid siblings.
+
+The fixture span recorders (`obs.StartSpan`, `Port.StartSpan`, `DurianSignalPort.startSpan`) are
+additional assumed ABI details, not prescribed entrypoint names. Together with Bun's `tracer.run`,
+they test that recording the first span also closes registration and poisons any late feature install.
 
 | Language | Default `interfaces`                             | In the goal                                                                                                                                                                                                                         | Assumed, not in goal                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | -------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Go       | `github.com/ProtoDurian/diene.go-interfaces/obs` | module `ProtoDurian/diene.go-interfaces`; `obs.Add`, `obs.Int[Spec]`, `obs.NewInt`, `obs.AtTime` with an error return; `obs.Error(ctx, Event[Error], ...)`                                                                          | the `/obs` package path; `IntSpec` `Name/Min/Max/Unit` (int64); `Int.Valid`; `Level` and the six markers; `NewEvent/NewCounter/NewHistogram/NewGauge/NewSpan`; `DurianSignal*` carriers and info rows (`Labels`, `Values`, `Ranges`); `Field`; `Record/Set/Warn/Info`; one-shot `Register` returning an error (a second one poisons the port), `DurianSignalTables`, `Dropped`                                                                        |
-| Bun      | `@atomicloud/diene.interfaces`                   | `counter(name, labels)`; `log.error(ev, fields?, err?)`; `bounded(spec, n): Result`; `Tracer`/`Span`, `DurianSignalSpanTable`                                                                                                       | `register(tables)` (one-shot; a second one or a foreign table poisons the port); `metrics(table)`, `histogram/gauge`, `MetricTable` (with `values`, `ranges`); `logger(eventTable)`, `EventTable`, `Level`; `dropped()`; `tracer(table)`; `Bounded<N>`; a synchronous `{ok, value}` Result (the published Result is promise-based)                                                                                                                    |
-| .NET     | `AtomiCloud.Diene.Interfaces`                    | `Port.Add(Names.X, new XLabels(...))`; `Int<Spec>.Of(n)` returning a `Result` (package `AtomiCloud.Diene.Result`: struct `Result<T, E>`, `Ok/Err`, `IsSuccess`); `Log.Error(Event<ErrorLevel>, ...)`; internal carrier constructors | namespace `AtomiCloud.Diene.Result` and `Value/Error`; `IDurianSignal*` interfaces, `Valid/Wire`; `AtTime`; `DurianSignalDate`; label attribute and info rows; `Port.Record/Set/Install/Dropped`; info row `Values`/`Ranges`; `Log.Warn`                                                                                                                                                                                                              |
-| Dart     | `diene_interfaces`                               | `checkoutCharges.add(XLabels(...))`; `error(Event<ErrorLevel>, ...)`; enums; extension types; `shardSpec.of(n)` returning a `Result`; `entries` getter                                                                              | barrel `diene_interfaces.dart`; `DurianSignalWire/Labels/Metric`, carrier bases and constructors; `DurianSignalBoundSpec` and `atTime`; sealed level markers; `DurianSignalPort` (one-shot `install` returning a Result, a second one poisons the port, `add/record/set/dropped`); generated `installSignals()`; `warn/info`; info rows (`labels` Type, `values`, `ranges`); local `Result/DurianSignalOk/DurianSignalErr` in place of `diene_result` |
+| Go       | `github.com/AtomiCloud/diene.go-interfaces/obs` | `obs.Add`, `obs.Int[Spec]`, `obs.NewInt`, `obs.AtTime` with an error return; `obs.Error(ctx, Event[Error], ...)`; `obs.Register(DurianSignalTables{Contract, Hash, ...})`, merged boot registration and poison rules | the `/obs` package path; `IntSpec` `Name/Min/Max/Unit` (int64); `Int.Valid`; `Level` and the six markers; `NewEvent/NewCounter/NewHistogram/NewGauge/NewSpan`; `DurianSignal*` carriers and info rows (`Labels`, `Values`, `Ranges`); `Field`; `Record/Set/Warn/Info`; fixture `StartSpan`; exact `DurianSignalTables` map/row fields; `Dropped(reason)`                                                                        |
+| Bun      | `@atomicloud/diene.interfaces`                   | `counter(name, labels)`; `log.error(ev, fields?, err?)`; `bounded(spec, n): Result`; `Tracer`/`Span`, `DurianSignalSpanTable`; `register({contract, hash, metrics, events, spans})`, merged boot registration and registered-object binding | `metrics(table)`, `histogram/gauge`, `MetricTable` (with `values`, `ranges`); `logger(eventTable)`, `EventTable`, `Level`; `dropped()`; `tracer(table)`; `Bounded<N>`; a synchronous `{ok, value}` Result (the published Result is promise-based)                                                                                                                    |
+| .NET     | `AtomiCloud.Diene.Interfaces`                    | `Port.Add(Names.X, new XLabels(...))`; `Int<Spec>.Of(n)` returning a `Result` (package `AtomiCloud.Diene.Result`: struct `Result<T, E>`, `Ok/Err`, `IsSuccess`); `Log.Error(Event<ErrorLevel>, ...)`; internal carrier constructors; per-contract `Port.Install`, merged boot registration and poison rules | namespace `AtomiCloud.Diene.Result` and `Value/Error`; `IDurianSignal*` interfaces, `Valid/Wire`; `AtTime`; `DurianSignalDate`; label attribute and info rows; `Port.Record/Set/Dropped`; fixture `Port.StartSpan`; `Port.Install(SignalTables.Contract, SignalTables.Metrics, SignalTables.EventLevels, SignalTables.Spans)` returning a Result; `DurianSignalContract(Id, Hash)`; info row `Values`/`Ranges`; `Log.Warn`                                                                                                                                                                                                              |
+| Dart     | `diene_interfaces`                               | `checkoutCharges.add(XLabels(...))`; `error(Event<ErrorLevel>, ...)`; enums; extension types; `shardSpec.of(n)` returning a `Result`; `entries` getter; generated `installSignals()` and `DurianSignalPort.install`, merged boot registration and poison rules | barrel `diene_interfaces.dart`; `DurianSignalWire/Labels/Metric`, carrier bases and constructors; `DurianSignalBoundSpec` and `atTime`; sealed level markers; exact `install(contract:, hash:, metrics:, events:, spans:)` named arguments and Result shape; `add/record/set/dropped`; fixture `startSpan`; `warn/info`; info rows (`labels` Type, `values`, `ranges`); local `Result/DurianSignalOk/DurianSignalErr` in place of `diene_result` |
 
 The compile fixtures model Result locally and do not validate integration with the separately published
 result libraries. .NET name constructors require the real library to grant friend access to the
@@ -843,6 +992,201 @@ labels their input has. A metric label is compared in its stored spelling, dots
 kept and quoted (`{"payment.provider"="stripe"}`, `by ("payment.provider")`); the underscore form of a dotted label is
 `contract-undeclared-label` and the finding names the dotted spelling (a pod key in either spelling is
 `contract-pod-label`). Other log fields are free-form (§6): not judged.
+
+## Flat alert tier files
+
+The platform standard (`docs/standards/observability/alerts.md`, "The tier file") says every
+`alerts/<slug>/<severity>.yaml` is ONE FLAT YAML MAP; the standard's chart (`shipping.md`, "What the chart adds
+to each alert") turns it into one `GrafanaAlertRuleGroup` holding one rule. obs 0.5 refused the flat map; obs 0.6
+reads it, in every command that reads alerts (`check`, `query`, `alerts`, `test`, `look`, `live`, `sandbox`):
+the one reader, `internal/files`, builds the rule the chart renders, and every command takes it from there. The
+`GrafanaAlertRuleGroup` CR stays accepted, beside flat files in the same folder.
+
+```yaml
+title: Retry queue saturated
+datasource: metrics
+expr: webhook_retry_queue_depth{"durian.cloud.service"="zinc"} > 5000
+for: 10m
+summary: 'Retry queue at {{ $values.A.Value }}; deliveries dropping'
+description: 'Check downstream health; the queue drains only if endpoints are up.'
+panel: 2
+```
+
+What obs builds from it (the same as shipping.md's example, checked by `internal/files/flat_test.go` against that
+example's CR):
+
+| Rendered field                      | Comes from                                                                                                  |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| rule `uid` and group name           | `<platform>-<service>-<slug>-<severity>`: slug = the folder, severity = the file name                       |
+| `severity` label, title prefix      | the file name: `critical` 🚨, `warning` ⚠️, `info` ℹ️ in front of `title`                                 |
+| query `A`                           | `expr`, instant (metrics: `instant: true`; logs: `queryType: stats`), `relativeTimeRange: { from: 600, to: 0 }` |
+| query `A` datasource                | `datasource: metrics` or `logs` becomes the datasource uid `metrics` or `logs` (obs checks one landscape)       |
+| query `B`, `condition: B`           | the fixed math expression `is_number($A) || is_nan($A) || is_inf($A)`: any series `A` returns fires, even at 0    |
+| `for`, `noDataState`, `execErrState` | `for` from the file; `OK` and `Error` fixed                                                                  |
+| `summary`, `description`            | the same fields; `__dashboardUid__` (`<platform>-<service>-overview`) and `__panelId__` when `panel` is set    |
+| labels `platform`, `service`        | the two values below                                                                                        |
+
+Not built, because obs cannot know them: the `landscape` and `module` labels (each landscape has its own Grafana),
+`runbook_url` (the repo URL) and the generic dashboard uid used when `panel` is unset.
+
+**Where platform and service come from.** The uid needs both, and a flat file holds neither:
+
+- `service`: the `service:` key of `observability/obs.yaml` if it has one, else the `service:` of `observability/contract.yaml`.
+  Keep `service:` in obs.yaml for a folder that has no contract of its own.
+- `platform`: the `platform:` key of `observability/obs.yaml` (a new optional key, see [`obs.yaml`](#obsyaml-the-versions-and-thresholds-a-repo-targets)).
+
+Both are read with the same loader every command uses for obs.yaml (`internal/obsyaml`), so the obs.yaml that loader finds for a
+folder is the one the platform comes from.
+With one `observability/` folder grouped by feature (`observability/<feature>/contract.yaml`), a feature folder with no obs.yaml of its
+own reads the nearest enclosing `observability/obs.yaml`, so `platform:` is written once in the top file and a flat file in
+`observability/<feature>/` takes it from there (the feature's own obs.yaml wins). The full lookup, for any folder: its own obs.yaml, else the nearest enclosing folder named `observability` that holds an obs.yaml
+(`App/observability/Friend/observability` reads `App/observability/obs.yaml`), else the obs.yaml at the Git root (a standalone
+observability repository); nothing else is read, so a `<feature>/observability/` folder never reads an obs.yaml in a folder above it that is
+not named `observability`. When the file found has no `platform:`, write it there: a flat file is refused (`flat-alert-identity`) and the
+finding names that file's path (the folder's own obs.yaml when none was found).
+In short: the platform comes from the same obs.yaml obs uses for that folder: its own, the one inherited per the layout rules above, or
+the obs.yaml at the Git root of a standalone observability repository (which every folder in that repository uses, layout (ii) included).
+(tests: `internal/files/flat_inherit_test.go`, `tests/flat.sh`).
+
+A flat file with either value unknown is refused (`flat-alert-identity`) and the message says which file and key to write.
+
+**What is refused**, with the rule id in the finding (`[rule-id]`), the file, and the bad token (the standard's tier-file
+table, its structural checks, and the "no severity field" rule):
+
+| Rule id                                    | Refused                                                                                                  |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `flat-alert-file-name`                     | not `alerts/<slug>/critical.yaml`, `warning.yaml` or `info.yaml`                                         |
+| `flat-alert-field-missing`, `-field-type`  | a required field (`title`, `datasource`, `expr`, `for`, `summary`, `description`) missing, empty or not a string |
+| `flat-alert-field-unknown`                 | a key outside the table (`severity` gets its own message: the file name is the severity)                  |
+| `flat-alert-title-length`                  | `title` over 48 characters                                                                               |
+| `flat-alert-title-emoji`                   | `title` holds an emoji: a code point from U+1F000 up, a Basic Multilingual Plane `Emoji_Presentation` one (✅ ⭐ ❌), or any character followed by U+FE0F or U+20E3 (⚠️ ℹ️ keycaps). The chart adds the severity emoji from the file name, so it would show twice. Text symbols (`→ ↑ ▲ ™`) are fine |
+| `flat-alert-datasource`                    | `datasource` is not `metrics` or `logs`                                                                  |
+| `flat-alert-for`                           | `for` is not what Prometheus's `model.ParseDuration` accepts (Grafana reads it with that): `1d12h`, `10m`, `0`, `1y` (365d) pass; `1.5m`, `1M`, `10`, `-5m` do not |
+| `flat-alert-bool`                          | PromQL `bool` modifier in `expr`, read from the parse tree (the standard: let the comparison filter)       |
+| `flat-alert-landscape`                     | `expr` has a label matcher (metrics) or field filter (logs, also in `_stream:{...}`) on `landscape` or `durian.cloud.landscape`; read from the parsed query, so the word in a quoted message, a label value or a metric name is fine. Logs: also inside a stats conditional (`count() if ("durian.cloud.landscape":=x)`), a `filter` pipe before the stats, a nested source (`in(...)` subquery), and a `filter` after the stats on a group key the stats kept (`stats by ("durian.cloud.landscape") ... | filter "durian.cloud.landscape":=x`); a computed field of the same name (`stats count() as landscape | filter landscape:>5`) is fine |
+| `flat-alert-yaml`, `flat-alert-documents`      | a file that reads as a tier file (top-level tier keys, no `kind`) is not valid YAML, or is followed by another document (the first document decides: a tier file followed by a ConfigMap is a tier file with trailing documents); `obs live incidents` stops on it (exit 2) |
+| `flat-alert-panel`                         | `panel` is present but not an integer (`panel: null`, an empty `panel:`, a string, a float or a bool); leave the key out for none |
+| `flat-alert-identity`                      | platform or service unknown (above)                                                                      |
+| `flat-alert-uid`                           | the built uid contains a character outside `A-Z`, `a-z`, `0-9`, `_`, `-` (the finding names the uid and slug) |
+| `flat-alert-uid-length`                    | the uid is over 40 characters (Grafana's limit)                                                          |
+
+`obs live incidents` also treats the sibling `alerts/<slug>/runbook.md` as the flat rule's runbook (no `alert_without_runbook`),
+and a flat file it cannot read as a rule stops it with the finding instead of skipping the file. `obs sandbox up` and `obs look`
+provision a flat rule's summary, description and panel link into Grafana.
+
+**What the landscape check covers, and what it does not.** It reads the parsed query: label matchers (metrics); field filters,
+stream selectors, `if (...)` conditions of stats functions and other pipes, `filter` pipes before the stats and nested sources
+(logs); and a `filter` after the stats on a retained group key, which it follows through `math`, `fields`/`keep`, `delete`, `sort`,
+`limit`, `rename` (the key moves) and `copy` (an overwrite by `math`, `rename` or `copy` ends the trail). It does not follow a key
+through `format`, `extract`, `unpack_*`, `replace` or a wildcard rename/copy target, does not judge `by (landscape)` grouping on its own
+(a grouping is no selector), and does not see a landscape named through a recording rule or another rule's output. A corner it misses is
+a review item, not a guarantee.
+
+Not checked here: that `panel` is a panel id of `dashboards/overview.json`, and that the set has a `runbook.md`
+(the standard's other structural checks). Tier gaps and everything else in the standard's review step stay with the reviewer.
+
+## Migrating from 0.5 to 0.6
+
+### Run every feature without a shell loop
+
+```bash
+obs gen --all
+obs gen --check --all
+obs check --all
+obs test --all
+```
+
+Generation runs once per discovered contract folder, with one summary line naming that contract.
+`obs check --all` and `obs test --all` also visit observability folders that hold `alerts/` or
+`dashboards/` without a contract, so shared service dashboards and alerts participate in the CI gate.
+Their summary names the folder. At least one contract is required except for a `gen --all` run that only reports orphaned files.
+Failures retain their diagnostics and do not prevent the remaining folders from running. Exit 0 means
+every folder passed, 1 means a check failed, and 2 means an input or enumeration error. No contracts
+found and no orphans reported is an error, never a successful zero-check run. The CI static-check recipe is `obs check --all`.
+Run `--all` from the repository root, including inside a Docker context or Git-less export. The start
+folder is the current directory unless `--dir` is explicitly supplied; the default `observability/`
+path cannot select a nested repository or submodule, which remains a boundary. Outside
+Git the start folder is the export root; it is resolved once and passed to every child scan,
+header, identity calculation and enclosing `observability/obs.yaml` lookup, without re-inferring a root
+from each module. Explicit `--dir` chooses the repository/export root. Discovery and each folder's loads share the fixture/dependency, Git-ignore,
+nested-repository and chart-copy skips: ignored contract files, alert folders and dashboards do not
+become candidates or get read through a shared folder. Existing options are forwarded to each run.
+Payload folders (`alerts/`, `dashboards/`) and their descendants are never feature candidates,
+including a flat alert slug named `dashboards`. Symlinked `contract.yaml` files are followed when their
+regular target is inside the repository/export scope; dangling links, loops and links outside that
+scope are input errors (exit 2) naming the path. Eligible unreadable entries are errors after pruning,
+not absent configuration or payloads.
+Git-ignore filtering requires both Git and checkout metadata. A Git-less export must leave out ignored
+build and chart copies; any copies included in the export count and can produce findings such as `[metric-clash]`.
+Git subprocesses use the repository selected by obs. Inherited `GIT_DIR` and `GIT_WORK_TREE` do not
+retarget them. An inherited `GIT_INDEX_FILE` is kept when `GIT_DIR` is unset or resolves to that
+repository's Git directory, so a hook can keep its staged index; a foreign repository's index is dropped.
+Cross-contract metric-name, query and
+rule-uid checks use that same scope in `--all` mode, including a complete Git-less export. The existing
+single-folder commands keep their discovery behavior. Use separate `--dir` runs for
+`obs test --out`, `--steps` or `--recorded`: `--all` refuses a shared file export that would be overwritten.
+
+After renaming or deleting a feature, run `obs gen --all`, then delete the listed orphaned files before
+the application boots. Generation reports exact paths with `[gen-orphan]` and "remove this file yourself";
+it never deletes files. `gen --check --all` fails on these files. A file is reported only when it has a
+valid generated header and its owner is absent (`Lstat` reports ENOENT) under every plausible writing
+base: the generated file's Git root and every project-marker ancestor, including project-relative
+headers from before a Git import. Live owners outside discovery and unresolved owners are kept silently.
+`--lang` limits the report to selected language outputs (shared YAML artifacts still participate), and
+an invalid language is refused before any discovery or generation work.
+
+Every 0.5 command, flag and output stays. For 57 of the 58 cases in `tests/compat.sh` the output is byte for byte the 0.5 output (the one that changed is `query-static` `bad-flat-alert`, now `ok-flat-alert`: a valid flat file is no longer refused), and a repository with one contract (or one contract per `<app>/observability/`) prints what it printed in 0.5, unless one of the findings below applies. New:
+
+| In 0.5 | In 0.6 |
+| ------ | ------ |
+| Only a `contract.yaml` whose folder is named `observability` is another contract of the repository. | Also any `contract.yaml` **below** an `observability/` folder, at any depth: `observability/<feature>/contract.yaml`. A contract you kept in a sub-folder of `observability/` that 0.5 ignored is now read, validated and checked for clashes; a failure it hides shows up here. Move it, or fix it. |
+| `obs check --dir observability/<feature>` found no other contract and used the built-in versions. | The other features are read (`[metric-clash]`, cross-feature alert reads pass) and `obs.yaml` comes from the nearest enclosing `observability/` folder. A feature folder that now finds an `obs.yaml` above it is checked against it: a version in it that this obs does not embed is a new red. |
+| Two alert rules with one `uid` in different observability folders were not noticed. | `[rule-id-clash]` in `obs check` (any clash in the repository); exit 2 in `obs alerts` and `obs test` when the clash involves the folder's own rules. Rename one uid (the convention: start it with the feature name) or use `obs check --contracts none` for one run. |
+| Several contracts naming one service printed a total per contract only. | An added `service total (...)` line. |
+| A folder with no `contract.yaml` of its own read no contract names, wherever the other contracts were. | When the repository has contracts elsewhere, its metric names are looked up in them: a metric in no contract is a note and stays green; a near miss of a declared name (a typo) in a service-wide alert or dashboard is now red. A repository with no contract anywhere is unchanged. |
+| A run in an app folder with no `obs.yaml` printed nothing about the root `observability/obs.yaml`. | One note on stderr, from every command that reads `obs.yaml` (`obs check`, `test`, `alerts`, `query`, `live`, `sandbox`, `look`), when that root file exists and was not used (the behaviour is unchanged: the app reads the built-in values). |
+
+The rows above are the changes to discovery, checks and notes. The new `--all` modes and generated-code changes are described below.
+
+All 0.5 commands and flags remain available. After upgrading, regenerate with `obs gen`: generated
+registration now carries a package-qualified contract id and hash, and the files change. Make the owning
+package manifest available at or above each `out:`, or set `package_id:` on that target. Upgrade the
+interfaces ports to the merged-table contract described above. Generate boot wiring that registers every
+feature before any signal; a hand-kept list or late/lazy registration does not satisfy the contract.
+Regeneration also switches the default Go import to `github.com/AtomiCloud/diene.go-interfaces/obs`
+and tags Bun exports `@public`. Update any Go import allow/deny rules to the new module path.
+For grouped contracts, `out:` now resolves from the folder holding `observability/`, so remove the
+old extra `../` workaround and give each feature a distinct output. Headers in complete source exports
+use the project boundary without requiring `.git`. Compile .NET output in the Signals assembly described above.
+A service's sole .NET contract keeps its old namespace default. Multiple contracts use the root-candidate
+and feature namespace rules above. Remove any cross-contract namespace or output-folder collision reported by `obs gen`
+or `obs check`; explicitly choosing one namespace for two contracts is refused too.
+Generation skips siblings whose contract or generate configuration is invalid (including `out:` and
+`interfaces:`); `obs check` reports them.
+If a 0.5 repository has a symlink at a generated-file path, replace that link with the real generated
+file before regenerating. Directory aliases within the allowed root may remain.
+
+The 58 compatibility goldens cover query, alerts and links output; they do not cover generated code.
+For an unchanged single-contract repository those command outputs remain byte-identical. Generated
+single-contract signal files change at registration, the default Go import and Bun public tags; the
+per-signal types and tables retain their shapes. The other generated contract data keeps its format.
+The fresh-name forgery gap above is deliberate: lint and the metric keep-list now carry that guarantee;
+new event/span names have lint alone.
+
+Flat alert tier files and `obs live` (part D):
+
+- **A flat tier file that 0.5 refused is now read.** Any CI that relied on that refusal (a flat file making
+  `obs query --static` or `obs check` exit 1 with `want GrafanaAlertRuleGroup (this is the flat authoring form ...)`)
+  changes from exit 1 to the new result: the file is checked as the rule the chart renders, and exits 0 when it is valid.
+  A flat file with a rule broken, or with no platform or service to name its uid, is still exit 1 with a `flat-alert-*` rule id.
+- `obs.yaml` has two new optional top-level keys, `platform:` and `service:`. An obs.yaml without them reads as before.
+- A rule's `for` and `keepFiringFor`: a flat file is held to Prometheus's `model.ParseDuration` exactly (`1d12h`, `1y` = 365d; `1.5m` refused). `obs alerts` and `obs sandbox` read a CR's with that **or** Go's `time.ParseDuration` (what 0.5 accepted, e.g. `1.5m`), so no CR that passed 0.5 fails now and `for: 1d` in a CR, which 0.5 refused, is now evaluated.
+- A flat-looking tier file that is not valid YAML, or has a second document, stops `obs live incidents` with exit 2 and the file and finding (0.5 skipped unreadable files); a CR file that does not parse keeps 0.5's behaviour.
+- `tests/compat.sh` still holds 58 goldens. ONE changed: `query-static__bad-flat-alert.out` pinned the refusal, so it is
+  now `query-static__ok-flat-alert.out` (the fixture `bad-flat-alert` became `ok-flat-alert`, a valid flat fixture, regenerated from the 0.6 binary).
+  Every other golden is byte-identical to 0.5.
+- `obs live` prints `read-only: only GET to query endpoints` (0.5 said "GET and POST"; the client only ever sent GET). Its usage text says the same.
+
 
 ## Migrating from 0.4 to 0.5
 
@@ -1548,9 +1892,10 @@ not touched. obs builds with `golang/obs/go.nix`: Go 1.27.4 from the narrow `nix
   - green: `tests/fixtures/good` (a checkout service, with `contract.yaml`) and `tests/fixtures/sample-app`
     (a made-up platform's `crash-logs` and `pod-crashloop` alerts, copied and written as CRs, and a dashboard);
   - red, each naming file + rule or panel + the bad token: `bad-logsql-syntax`, `bad-metricsql-syntax`,
-    `bad-logsql-no-stats`, `bad-prom-only-function`, `bad-loki-datasource`, `bad-flat-alert`,
+    `bad-logsql-no-stats`, `bad-prom-only-function`, `bad-loki-datasource`,
     `bad-event-missing`, `bad-no-rows` (a metric the seed does not hold), `bad-drifted-field`
-    (`severity` for `severity_text`), `bad-dashboard-label`; `ok-rollup-no-window` is green with a warning.
+    (`severity` for `severity_text`), `bad-dashboard-label`; `ok-rollup-no-window` is green with a warning; `ok-flat-alert` is green (a flat metrics tier and a flat logs tier, with `obs.yaml` platform).
+    `tests/flat.sh` runs the flat fixture through `query`, `check` and `alerts`, then plants each flat-file failure.
     Each fixture's `expect` file lists what its output must contain.
 
 - `tests/check-test.sh` (run by `tests/run.sh`): `obs check` on every static fixture (same rule and token as `obs query --static`), its flags, an over-budget contract and a broken query red in one run with one summary, an
@@ -1570,7 +1915,8 @@ The harness creates fresh containers for every run: VictoriaLogs retains duplica
 
 ## obs alerts
 
-`obs alerts --dir observability` evaluates the `GrafanaAlertRuleGroup` CRs in
+`obs alerts --dir observability` evaluates the flat alert tier files (see [Flat alert tier files](#flat-alert-tier-files))
+and the `GrafanaAlertRuleGroup` CRs in
 `alerts/<slug>/<severity>.yaml` on the seed and each named incident. It prints one
 line per rule and expectation, including its file and incident window, and exits
 1 on a miss. Every rule must stay quiet on the baseline; rules omitted from an
@@ -2457,6 +2803,7 @@ Tempo: trace-to-logs 2, metric-to-traces 2, span-to-profile 2) and `TestParityPr
 
 ## Not tested
 
+- **Flat alert tier files in `obs look`, `obs live incidents` and `obs sandbox up`.** These read the folder through the same loader as `obs query`, `obs check` and `obs alerts`, so the rule they get is the one tested in `internal/files/flat_test.go` and `tests/flat.sh`; the local stack, Grafana provisioning of a flat file's rule and a live firing of one were not started here (no containers in a test). Not tested: Grafana accepting the rule built from a flat file (uids `metrics` and `logs` are the sandbox datasources' uids), `obs test` on a flat folder with incidents, and that the real chart renders exactly the rule obs builds (checked against shipping.md's example, not against a chart: the chart does not exist yet).
 - Cross-architecture byte equality of histogram `_sum` floats: arm64's fused multiply-add already made
   these differ from amd64 in 0.4. The original full byte goldens run on amd64; the portable legacy
   goldens pin counter, log and histogram bucket/count bytes on every architecture.
@@ -2467,6 +2814,9 @@ is MEASURED (a test or a run in this repository) or FROM SOURCE (read in the pin
 source) where its section says so.
 
 **Commands and builds**
+
+- **Knip itself on generated Bun output.** The generator test scans every export for knip's `@public` tag; it does not run the knip CLI against an application.
+- **Full MSBuild evaluation for the Signals assembly check.** Compiler fixtures prove the `Signals` assembly succeeds and an app assembly fails, including props/targets removal order. The static project check covers SDK defaults, literal compile items and the nearest Directory.Build.props/targets, not arbitrary additional imports, conditions or computed properties.
 
 - **`obs live` on dev, stage and prod.** No access to any of them; only the local sandbox was read for real (and recorded). The edge cases (two landscapes, a label outside the type, a failing query, an alert that fired before the window, redirects) are tested on hand-written payloads in the shapes the sandbox recorded. Not run against a real remote store: auth headers from the environment on a real gateway, and a very large metrics store (the points/min queries are one `count_over_time` per stored metric name and the series read is one `/api/v1/series` call; a store with more series than its `-search.maxSeries` answers an error, which obs reports as exit 2).
 - **`obs live incidents`: what the recording does not hold.** The recorded Grafana state history holds a real Normal -> Pending and Normal -> Alerting change; its tag-only payload now proves a firing observation, with unknown spans. Optional lossless label maps, Alerting -> Normal, Recovering, overlapping instances, absent transitions, title/ID collisions, future windows and capped responses are tested on synthetic payloads. There is no current-state GET in the command or the incident recording. The `ALERTS` grouped list and raw range-selector path (a vmalert-style ruler) are tested on fake stores only, including bounded per-window reads, responses exceeding 64 MiB, merged chunk evidence and a carried-forward evaluation point that must not count as firing inside a later window.
@@ -2496,7 +2846,8 @@ source) where its section says so.
 - **Platform metric names other than `*.duration`.** The stored names of such a metric are not in the contract, so all names it may have are kept; which one the store really holds was not measured on a running store.
 - **A `source:` counter or gauge name is assumed to be the stored name.** Checked against the cluster draft's names and VictoriaMetrics' scrape path (names are stored as scraped); a source that reaches the store through OTLP (dotted name, unit suffix) would need the stored name written out.
 - **Churn is information only.** `obs check` prints the approximate new series a day from each estimate's `churn_per_day`; the 30-day retention of the concept is not applied to the budget, and no measurement checks the estimates against a real cluster.
-- **Several contracts** are discovered below the Git root; large monorepos were not timed, and a repository with no `.git` (a source archive) reads only `--dir`'s contract.
+- **Several contracts** are discovered below the Git root; large monorepos were not timed, and a repository with no `.git` (a source archive) reads only `--dir`'s contract. The rule uid check reads the alert files of every observability folder in the repository on every `obs alerts` run (one walk of the Git root, as the contract discovery does); also not timed.
+- **One contract per feature** (`tests/features.sh`): two synthetic features per layout, not a real repository (the alcohol.zinc scratch copies of the study ran on 0.5, not on this build). Grafana's real behaviour for a repeated rule uid (one rule kept, the other overwritten) is from its documented provisioning model, not run here. A contract has no service-level budget, so the service total is never judged, only printed. The real interface libraries' signal port (the merged table of one table per contract, a clash refused naming both contracts) is covered by the stub tests only, and the platform renderer collecting many `keep.yaml` files is outside this tool; neither was run against the real libraries or a real platform. The merged-contract lookup of a folder with no contract of its own checks metric names (near misses only), labels and values; its log events and span attributes are not checked, the near-miss limits (distance 2, same first word) are a judgement measured on synthetic names only, and a real service-wide alert set was not run through it. The git-ignore skip needs `git` on the PATH (without it every folder counts); it was run with git 2.x on Linux only, and the `dubious ownership` note was tested with a stand-in `git` that prints git's message, not with a real checkout owned by another user. Windows path separators in the new messages were not run.
 
 **Queries and data**
 

@@ -7,6 +7,9 @@
 #   compat.sh <obs> --capture   rewrite the golden files (only ever with the 0.4 binary, i.e. the
 #                               one built from the commit before the regroup)
 #
+# One golden was regenerated from the 0.6 binary: query-static__ok-flat-alert (it was bad-flat-alert, which pinned the
+# refusal of a flat alert tier file; 0.6 reads it). Never run --capture with a newer binary: it rewrites every golden.
+#
 # Every run is `cd tests/fixtures && obs <cmd> --dir <fixture>/... --base <fixed>`: relative paths
 # and a fixed seed start keep the output the same on every machine.
 set -euo pipefail
