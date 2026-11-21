@@ -299,3 +299,29 @@ func TestDhBlockWithoutLine(t *testing.T) {
 		t.Fatalf("exit %d, want 1 (the avoided words are still found)", code)
 	}
 }
+
+// A word that a paragraph holds on two lines is found on each, and two labels that differ only in
+// case keep their own lines whatever order the chart's keys are read in.
+func TestDhEachHitOnItsOwnLine(t *testing.T) {
+	dir := fixture(t, "dh/lines")
+	const page = "docs/domain/kitchen/implementation/lines.dh.md"
+	// "Griddle" is written on line 16 and "griddle" on line 17, the other way round from the order
+	// of the chart's keys (x, then y).
+	want := strings.Join([]string{page + ":9: UL403 griddle", page + ":10: UL403 griddle", page + ":16: UL403 Griddle", page + ":17: UL403 griddle"}, "|")
+	for i := 0; i < 20; i++ { // map order differs from run to run
+		te := newEnv(t, dir)
+		_, out, errs := te.ul("check", "--root", dir, "--format", "json", "--dh", useFakeDh(t))
+		var res problemsOut
+		if err := jsonUnmarshal(out, &res); err != nil {
+			t.Fatalf("not JSON: %v\n%s%s", err, out, errs)
+		}
+		var got []string
+		for _, p := range res.Problems {
+			w := p.Message[strings.Index(p.Message, "\"")+1:]
+			got = append(got, fmt.Sprintf("%s:%d: %s %s", p.File, p.Line, p.Code, w[:strings.Index(w, "\"")]))
+		}
+		if strings.Join(got, "|") != want {
+			t.Fatalf("run %d: got %v\nwant %v", i, got, want)
+		}
+	}
+}

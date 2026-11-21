@@ -231,6 +231,11 @@ func (r *dhReader) push(s Seg) {
 	k := fmt.Sprintf("%d|%s", s.from, strings.ToLower(s.Text))
 	s.occ = r.seen[k]
 	r.seen[k]++
+	if s.exact { // the same text in the same case, so labels that differ in case keep their own lines
+		k = fmt.Sprintf("%d|=%s", s.from, s.Text)
+		s.occCase = r.seen[k]
+		r.seen[k]++
+	}
 	r.segs = append(r.segs, s)
 }
 
@@ -376,11 +381,11 @@ func walkTextKeys(v any, key string, f func(string)) {
 			walkTextKeys(y, key, f)
 		}
 	case map[string]any:
-		for k, y := range x {
+		for _, k := range slices.Sorted(maps.Keys(x)) { // one order on every run
 			if k == "let" {
 				continue // named expressions: data, whatever their keys are called
 			}
-			walkTextKeys(y, k, f)
+			walkTextKeys(x[k], k, f)
 		}
 	}
 }

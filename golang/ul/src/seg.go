@@ -16,9 +16,12 @@ type Seg struct {
 	// own line is looked for in these source lines.
 	src      []string
 	from, to int // 1-based, inclusive
-	occ      int // how many earlier runs of the page hold the same text
+	occ      int // how many earlier runs of the page hold the same text (in any case)
 	// exact: Text is written in the source as it is (a title, a label), so it anchors whole.
 	exact bool
+	// occCase: for an exact run, how many earlier runs hold the same text in the same case, so
+	// two labels that differ only in case each find their own line.
+	occCase int
 }
 
 type segBreak struct{ off, line int }
@@ -41,6 +44,18 @@ func (s *Seg) lineAt(off int, matched string) int {
 	a := anchorOf(s.Text)
 	if s.exact {
 		a = strings.ToLower(strings.TrimSpace(s.Text))
+		// The line that writes the text in this very case comes first; the case-blind search below
+		// is for text the source spells differently.
+		if w, seen := strings.TrimSpace(s.Text), 0; w != "" {
+			for l := s.from; l <= s.to && l <= len(s.src); l++ {
+				if strings.Contains(s.src[l-1], w) {
+					if seen == s.occCase {
+						return s.hitLine(l, m, off)
+					}
+					seen++
+				}
+			}
+		}
 	}
 	if a != "" {
 		seen := 0
@@ -53,6 +68,25 @@ func (s *Seg) lineAt(off int, matched string) int {
 				seen++
 			}
 		}
+	}
+	return s.hitLine(from, m, off)
+}
+
+// hitLine is the line, from line from on, that holds the hit at byte offset off of the run: the
+// k-th time the word is written in the source, where k is how many times the run holds it before
+// off, so a word written on two lines of one paragraph is found on each.
+func (s *Seg) hitLine(from int, m string, off int) int {
+	if off > len(s.Text) {
+		off = len(s.Text)
+	}
+	k := countWord(strings.ToLower(s.Text[:off]), m)
+	seen := 0
+	for l := from; l <= s.to && l <= len(s.src); l++ {
+		n := countWord(codeSpanRe.ReplaceAllString(strings.ToLower(s.src[l-1]), " "), m)
+		if k < seen+n {
+			return l
+		}
+		seen += n
 	}
 	for l := from; l <= s.to && l <= len(s.src); l++ {
 		if containsWord(codeSpanRe.ReplaceAllString(strings.ToLower(s.src[l-1]), " "), m) {
@@ -118,6 +152,25 @@ func (sb *segBuilder) lastLine() int {
 }
 
 var codeSpanRe = regexp.MustCompile("`[^`\n]*`")
+
+// countWord is how many times line holds m as a whole word, not counting overlaps.
+func countWord(line, m string) int {
+	n := 0
+	for i := 0; i < len(line); {
+		j := strings.Index(line[i:], m)
+		if j < 0 {
+			break
+		}
+		a, b := i+j, i+j+len(m)
+		if (a == 0 || !isWordRune(lastRune(line[:a]))) && (b >= len(line) || !isWordRune(firstRune(line[b:]))) {
+			n++
+			i = b
+		} else {
+			i = a + 1
+		}
+	}
+	return n
+}
 
 // containsWord reports whether line holds m as a whole word (letters, digits and _ end a word).
 func containsWord(line, m string) bool {
