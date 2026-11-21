@@ -14,6 +14,8 @@ import (
 	"sync"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/AtomiCloud/obs/internal/gitcmd"
 )
 
 // A repository may hold several contracts (apps/box/observability and apps/k8s-monitoring/observability):
@@ -126,9 +128,12 @@ func discoverAt(abs, root string, includeOwn bool, scopes ...*Scope) ([]string, 
 			return nil
 		}
 		if d.Name() == "contract.yaml" && belowObservability(root, filepath.Dir(p), rootObs, true) {
-			regular, err := contractEntry(root, p, d)
-			if err != nil {
-				return err
+			regular := d.Type().IsRegular()
+			if scope != nil {
+				regular, err = contractEntry(root, p, d)
+				if err != nil {
+					return err
+				}
 			}
 			if regular && (includeOwn || (p != own && !sameInfo(ownInfo, p))) {
 				out = append(out, p)
@@ -614,7 +619,7 @@ func ignoredPaths(root string) (out map[string]bool, refused bool) {
 	cmd := exec.Command(git, "-C", root, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-	cmd.Env = append(os.Environ(), "GIT_OPTIONAL_LOCKS=0")
+	cmd.Env = append(gitcmd.Env(root), "GIT_OPTIONAL_LOCKS=0")
 	b, err := cmd.Output()
 	var ee *exec.ExitError
 	if errors.As(err, &ee) && ee.ExitCode() == 128 && (strings.Contains(stderr.String(), "dubious ownership") || strings.Contains(stderr.String(), "safe.directory")) {

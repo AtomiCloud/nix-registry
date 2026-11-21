@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -49,9 +48,7 @@ func TestAllFiltersSharedCandidatesAndLoads(t *testing.T) {
 		"observability/shared/dashboards/nested/bad.json":  `{"title":`,
 	})
 	t.Chdir(root)
-	if out, err := exec.Command("git", "init", "-q", root).CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v %s", err, out)
-	}
+	releaseGit(t, root, "init", "-q")
 	if rc, output := obs("gen", "--all"); rc != 0 || strings.Count(output, "--all:") != 1 {
 		t.Errorf("generation discovery control: rc=%d %s", rc, output)
 	}

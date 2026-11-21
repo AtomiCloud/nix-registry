@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/AtomiCloud/obs/internal/testfix"
 )
 
 func alertDoc(uid string) string {
@@ -125,8 +127,8 @@ func TestOthersSkipsTheSelectedFolderThroughASymlink(t *testing.T) {
 
 func gitInit(t *testing.T, dir string) {
 	t.Helper()
-	cmd := exec.Command("git", "-C", dir, "init", "-q")
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	cmd := testfix.Git(dir, "init", "-q")
+	cmd.Env = append(cmd.Env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
