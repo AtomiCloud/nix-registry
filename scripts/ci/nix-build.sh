@@ -67,5 +67,7 @@ nix shell --max-jobs 1 --cores 2 nixpkgs#bash \
   releaser --version &&
   resolver-smoke --version &&
   bun-cli-fixture --version &&
+  dh --version &&
+  doccheck --version &&
   RESOLVER_SMOKE=resolver-smoke ./bunWrapper/resolver-smoke/tests/run.sh &&
   echo "🎉 Done"'

@@ -85,4 +85,6 @@ REGISTRY_PACKAGES=(
   releaser
   resolver-smoke
   bun-cli-fixture
+  dh
+  doccheck
 )
