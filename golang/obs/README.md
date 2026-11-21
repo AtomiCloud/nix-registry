@@ -988,6 +988,8 @@ With one `observability/` folder grouped by feature (`observability/<feature>/co
 own reads the nearest enclosing `observability/obs.yaml`, so `platform:` is written once in the top file and a flat file in
 `observability/<feature>/` takes it from there (the feature's own obs.yaml wins). With `<feature>/observability/` there is no
 fallback to a folder above: write `platform:` in that folder's obs.yaml, or a flat file there is refused (`flat-alert-identity`).
+In short: the platform comes from the same obs.yaml obs uses for that folder: its own, the one inherited per the layout rules above, or
+the obs.yaml at the Git root of a standalone observability repository (which every folder in that repository uses, layout (ii) included).
 (tests: `internal/files/flat_inherit_test.go`, `tests/flat.sh`).
 
 A flat file with either value unknown is refused (`flat-alert-identity`) and the message says which file and key to write.
@@ -1028,7 +1030,7 @@ Not checked here: that `panel` is a panel id of `dashboards/overview.json`, and 
 
 ## Migrating from 0.5 to 0.6
 
-Every 0.5 command, flag and output stays. For the 58 cases in `tests/compat.sh` the output is byte for byte the 0.5 output, and a repository with one contract (or one contract per `<app>/observability/`) prints what it printed in 0.5, unless one of the findings below applies. New:
+Every 0.5 command, flag and output stays. For 57 of the 58 cases in `tests/compat.sh` the output is byte for byte the 0.5 output (the one that changed is `query-static` `bad-flat-alert`, now `ok-flat-alert`: a valid flat file is no longer refused), and a repository with one contract (or one contract per `<app>/observability/`) prints what it printed in 0.5, unless one of the findings below applies. New:
 
 | In 0.5 | In 0.6 |
 | ------ | ------ |

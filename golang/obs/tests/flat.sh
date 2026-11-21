@@ -154,6 +154,18 @@ echo "platform: payments" >"$work/lay2/Checkout/observability/obs.yaml"
 run query --static --dir "$work/lay2/Checkout/observability" --seed "$seed" --base "$base"
 expect "layout (ii): platform written in the feature's own obs.yaml" 0 "obs query --static: ok: 2 queries"
 
+# a standalone repository: obs.yaml at the Git root is read for layout (ii) too.
+rm -rf "${work:?}/lay3"
+mkdir -p "$work/lay3/.git" "$work/lay3/Checkout/observability"
+echo ref >"$work/lay3/.git/HEAD"
+echo "platform: payments" >"$work/lay3/obs.yaml"
+cp "$fx/ok-flat-alert/observability/contract.yaml" "$work/lay3/Checkout/observability/contract.yaml"
+cp -R "$fx/ok-flat-alert/observability/alerts" "$work/lay3/Checkout/observability/alerts"
+chmod -R u+w "$work/lay3"
+run query --static --dir "$work/lay3/Checkout/observability" --seed "$seed" --base "$base"
+expect "layout (ii): platform from the Git-root obs.yaml of a standalone repository" 0 "obs query --static: ok: 2 queries" \
+  "rule payments-checkout-error-logs-warning query A"
+
 # for: 1d is a duration for every command: the flat check and obs alerts judge it the same way
 fresh for1d
 sed -i "s|^for: 5m|for: 1d|" "$work/for1d/observability/$crit"
