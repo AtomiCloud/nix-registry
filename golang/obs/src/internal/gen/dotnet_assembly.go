@@ -38,6 +38,11 @@ func checkDotnetAssembly(root string, target contract.Target) error {
 	if target.Lang != "dotnet" {
 		return nil
 	}
+	// Pure emitters also accept synthetic contracts whose logical folders do
+	// not exist. There is no compiler project to inspect for those inputs.
+	if _, err := os.Stat(root); os.IsNotExist(err) {
+		return nil
+	}
 	projects, err := contract.ProjectFiles(root, ".csproj")
 	if err != nil {
 		return err
