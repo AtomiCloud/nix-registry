@@ -36,16 +36,63 @@ func Discover(dir string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("contract discovery: %w", err)
 	}
-	own := filepath.Join(abs, "contract.yaml")
-	ownInfo, _ := os.Stat(own) // a symlinked --dir spells its own contract another way: compare the file, not the path
 	root := gitRoot(abs)
-	if root == "" || inTestDir(root, abs) {
+	if root == "" {
 		return nil, nil
 	}
-	rootObs := rootIsObservability(root)
-	skip := newWalkSkip(root, abs)
+	return discoverAt(abs, root, false)
+}
+
+// DiscoverAll enumerates every contract, including dir itself, using the same
+// pruning rules as Discover. A source export uses its topmost project boundary.
+func DiscoverAll(dir string) ([]string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, fmt.Errorf("contract discovery: %w", err)
+	}
+	root := gitRoot(abs)
+	if root == "" {
+		root = ProjectRoot(abs)
+	}
+	return discoverAt(abs, root, true)
+}
+
+// DiscoverProject is the source-export equivalent of Discover for generator
+// scope checks. General single-folder query discovery keeps its Git semantics.
+func DiscoverProject(dir string) ([]string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, fmt.Errorf("contract discovery: %w", err)
+	}
+	return discoverAt(abs, ProjectRoot(abs), false)
+}
+
+// DiscoverScope uses project discovery in a source export only when requested
+// by a repository-wide command. Existing single-folder commands stay Git-only.
+func DiscoverScope(dir string, project bool) ([]string, error) {
+	if project && gitRoot(dir) == "" {
+		return DiscoverProject(dir)
+	}
+	return Discover(dir)
+}
+
+func discoverAt(abs, root string, includeOwn bool, scopes ...*Scope) ([]string, error) {
+	if inTestDir(root, abs) {
+		return nil, nil
+	}
+	own := filepath.Join(abs, "contract.yaml")
+	ownInfo, _ := os.Stat(own)
+	var scope *Scope
+	var skip *walkSkip
+	if len(scopes) > 0 && scopes[0] != nil {
+		scope = scopes[0]
+		skip = scope.Skip.w
+	} else {
+		skip = newWalkSkip(root, abs)
+	}
+	rootObs := rootIsObservability(root, scope)
 	var out []string
-	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			cause := err
 			var pe *fs.PathError
@@ -64,7 +111,7 @@ func Discover(dir string) ([]string, error) {
 			}
 			return nil
 		}
-		if d.Name() == "contract.yaml" && p != own && d.Type().IsRegular() && !sameInfo(ownInfo, p) && !skip.ignored[p] && belowObservability(root, filepath.Dir(p), rootObs, true) {
+		if d.Name() == "contract.yaml" && d.Type().IsRegular() && (includeOwn || (p != own && !sameInfo(ownInfo, p))) && !skip.ignored[p] && belowObservability(root, filepath.Dir(p), rootObs, true) {
 			out = append(out, p)
 		}
 		return nil
@@ -142,9 +189,16 @@ func hasGit(p string) bool {
 // may be called anything): an obs.yaml, or a contract.yaml that reads as an obs contract (a service: and one of
 // the obs sections metrics:, logs:, spans:, platform_metrics:). A contract.yaml of something else (an OpenAPI
 // file, a package manifest) leaves the repository an ordinary one.
-func rootIsObservability(root string) bool {
-	if st, err := os.Stat(filepath.Join(root, "obs.yaml")); err == nil && st.Mode().IsRegular() {
+func rootIsObservability(root string, scopes ...*Scope) bool {
+	var scope *Scope
+	if len(scopes) > 0 {
+		scope = scopes[0]
+	}
+	if st, err := os.Stat(filepath.Join(root, "obs.yaml")); err == nil && st.Mode().IsRegular() && !scope.Skips(root, filepath.Join(root, "obs.yaml")) {
 		return true
+	}
+	if scope.Skips(root, filepath.Join(root, "contract.yaml")) {
+		return false
 	}
 	b, err := os.ReadFile(filepath.Join(root, "contract.yaml"))
 	if err != nil {
@@ -234,11 +288,20 @@ func (r *RepoSkip) Skips(folder, p string) bool {
 // FoldersSkip is Folders and the prune set it used (nil when dir has no repository), so a reader of the files below
 // those folders applies the same ignore, nested-repository and copy rules without asking git again.
 func FoldersSkip(dir string) ([]string, *RepoSkip, error) {
+	return FoldersScopeSkip(dir, false)
+}
+
+// FoldersScopeSkip includes contract-less dashboard folders for repository-wide
+// commands, and uses the project boundary when the source export has no Git.
+func FoldersScopeSkip(dir string, project bool) ([]string, *RepoSkip, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, nil, fmt.Errorf("observability folders: %w", err)
 	}
 	root := gitRoot(abs)
+	if root == "" && project {
+		root = ProjectRoot(abs)
+	}
 	if root == "" || inTestDir(root, abs) {
 		return nil, nil, nil
 	}
@@ -266,12 +329,19 @@ func FoldersSkip(dir string) ([]string, *RepoSkip, error) {
 		}
 		st, serr := os.Stat(filepath.Join(p, "contract.yaml"))
 		hasContract := serr == nil && st.Mode().IsRegular()
-		if !belowObservability(root, p, rootObs, hasContract) {
+		hasData := false
+		for _, name := range []string{"alerts", "dashboards"} {
+			if name == "dashboards" && !project {
+				continue
+			}
+			if st, err := os.Stat(filepath.Join(p, name)); err == nil && st.IsDir() {
+				hasData = true
+			}
+		}
+		if !belowObservability(root, p, rootObs, hasContract || (project && hasData)) {
 			return nil
 		}
-		if hasContract {
-			out = append(out, p)
-		} else if st, serr := os.Stat(filepath.Join(p, "alerts")); serr == nil && st.IsDir() {
+		if hasContract || hasData {
 			out = append(out, p)
 		}
 		return nil

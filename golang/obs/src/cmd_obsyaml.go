@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/AtomiCloud/obs/internal/contract"
 	"github.com/AtomiCloud/obs/internal/obsyaml"
 	"github.com/AtomiCloud/obs/internal/pins"
 	"github.com/AtomiCloud/obs/internal/sandbox"
@@ -15,8 +16,14 @@ import (
 // loadObsYaml is the one obs.yaml loader every command uses. A missing file is (nil, true):
 // the command keeps the versions and defaults built into this obs. A bad file prints the
 // error (file, line, key) and returns false: the command exits 2.
-func loadObsYaml(dir, cmd string, stderr io.Writer) (*obsyaml.File, bool) {
-	f, err := obsyaml.Load(dir)
+func loadObsYaml(dir, cmd string, stderr io.Writer, scopes ...*contract.Scope) (*obsyaml.File, bool) {
+	var f *obsyaml.File
+	var err error
+	if len(scopes) > 0 && scopes[0] != nil {
+		f, err = obsyaml.LoadInRoot(dir, scopes[0].Root)
+	} else {
+		f, err = obsyaml.Load(dir)
+	}
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", cmd, err)
 		return nil, false

@@ -7,11 +7,15 @@ import { register as durianSignalRegister } from '@atomicloud/diene.interfaces';
 import type { Event as DurianSignalEvent } from '@atomicloud/diene.interfaces';
 
 // Label value types.
+/** @public */
 export type Provider = 'stripe' | 'adyen';
 
 // Metrics: one label type per metric, the name -> labels map and the allowed-key table.
+/** @public */
 export type BillingChargesLabels = { provider: Provider };
+/** @public */
 export type MetricLabels = { 'billing.charges': BillingChargesLabels };
+/** @public */
 export const metricTable = {
   'billing.charges': {
     kind: 'counter',
@@ -21,26 +25,34 @@ export const metricTable = {
 } as const;
 
 // Metric name carriers (keys of MetricLabels).
+/** @public */
 export const BillingCharges = 'billing.charges' as const;
 
 // Log events: a name and the level it fixes. Fields are free-form.
+/** @public */
 export const ChargeFailed = {
   name: 'billing.charge.failed',
   level: 'error',
 } as const satisfies DurianSignalEvent<'error'>;
+/** @public */
 export const eventNames = ['billing.charge.failed'] as const;
+/** @public */
 export const eventTable = { 'billing.charge.failed': 'error' } as const;
 
 // Spans: attribute types are `type` aliases (an interface does not fit the Tracer constraint).
+/** @public */
 export type BillingProviderPaymentChargeSubmissionAttrs = { provider?: Provider };
+/** @public */
 export type SpanAttrs = {
   'billing.provider.payment.charge.submission': BillingProviderPaymentChargeSubmissionAttrs;
 };
+/** @public */
 export const spanTable = {
   'billing.provider.payment.charge.submission': { kind: 'internal', keys: ['provider'] },
 } as const;
 
 // Span name carriers (keys of SpanAttrs).
+/** @public */
 export const BillingProviderPaymentChargeSubmission = 'billing.provider.payment.charge.submission' as const;
 
 // Merges this contract's tables at boot; duplicate names, changed contracts and late

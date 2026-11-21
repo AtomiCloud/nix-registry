@@ -14,9 +14,13 @@ import (
 
 // loadContract reads and validates <dir>/contract.yaml, printing every issue. ok is false when
 // the contract cannot be used (then the exit code is the caller's rc).
-func loadContract(dir, cmd string, stdout, stderr io.Writer) (c *contract.Contract, rc int) {
+func loadContract(dir, cmd string, stdout, stderr io.Writer, scopes ...*contract.Scope) (c *contract.Contract, rc int) {
 	path := filepath.Join(dir, "contract.yaml")
-	c, err := contract.Load(path)
+	var scope *contract.Scope
+	if len(scopes) > 0 {
+		scope = scopes[0]
+	}
+	c, err := contract.LoadInScope(path, scope)
 	if err != nil {
 		fmt.Fprintf(stderr, "%s: %v\n", cmd, err)
 		return nil, 2
@@ -34,19 +38,32 @@ func loadContract(dir, cmd string, stdout, stderr io.Writer) (c *contract.Contra
 // runGen is `obs gen` and `obs gen --check` (concept section 3.4): types and constants per
 // language from the contract, contract/events.json and the aggregation file (section 4.1).
 func runGen(args []string, stdout, stderr io.Writer) int {
+	return runGenScope(args, stdout, stderr, nil)
+}
+
+func runGenScope(args []string, stdout, stderr io.Writer, scope *contract.Scope) int {
 	fs := flag.NewFlagSet("obs gen", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	all := fs.Bool("all", false, "run once per discovered contract, using repository discovery skips")
 	dir := fs.String("dir", "observability", "the observability folder (holds contract.yaml)")
 	check := fs.Bool("check", false, "regenerate into a temp dir and diff with the committed files; fail on a hand edit or a stale generate")
 	langs := fs.String("lang", "", "comma-separated languages to generate (default: every `generate:` target of the contract)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	if *all {
+		return runAll(func() string {
+			if *check {
+				return "obs gen --check"
+			}
+			return "obs gen"
+		}(), fs, *dir, stdout, stderr, runGenScope)
+	}
 	cmd := "obs gen"
 	if *check {
 		cmd = "obs gen --check"
 	}
-	c, rc := loadContract(*dir, cmd, stdout, stderr)
+	c, rc := loadContract(*dir, cmd, stdout, stderr, scope)
 	if c == nil {
 		return rc
 	}
@@ -77,7 +94,7 @@ func runGen(args []string, stdout, stderr io.Writer) int {
 		for _, issue := range issues {
 			fmt.Fprintf(stdout, "FAIL %s\n", issue)
 		}
-		fmt.Fprintf(stdout, "%s: FAILED: %d generation target clashes\n", cmd, len(issues))
+		fmt.Fprintf(stdout, "%s: FAILED: %d generation target failures\n", cmd, len(issues))
 		return 1
 	}
 	outs, err := gen.Plan(c, *dir, want)
@@ -85,7 +102,7 @@ func runGen(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "%s: %v\n", cmd, err)
 		return 2
 	}
-	root := gen.Root(*dir)
+	root := gen.Root(*dir, scope)
 	if *check {
 		probs, err := gen.Check(root, outs, c, want...)
 		if err != nil {

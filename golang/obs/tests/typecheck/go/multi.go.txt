@@ -5,7 +5,7 @@ import (
 	billing "example.com/app/billing"
 	"example.com/app/signals"
 	"fmt"
-	obs "github.com/ProtoDurian/diene.go-interfaces/obs"
+	obs "github.com/AtomiCloud/diene.go-interfaces/obs"
 	"os"
 	"strings"
 	"time"

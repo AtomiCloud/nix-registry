@@ -430,7 +430,7 @@ A service may keep one contract per feature instead of one for the whole service
 ```
 
 - **Discovery.** A `contract.yaml` belongs to the repository's observability when its folder is named `observability` or is **at any depth below** one (`observability/contract.yaml`, `observability/<feature>/contract.yaml`, `observability/billing/payments/contract.yaml`, `<feature>/observability/contract.yaml`). A `contract.yaml` anywhere else (`docs/`, `config/`) is not read. Folders named `fixtures`, `testdata`, `node_modules`, `vendor`, `.git`, `.direnv`, `.dart_tool` and `.obs-cache` are skipped, and the search is the Git root's: outside a Git repository only `--dir`'s contract is read, as before. Only **paths relative to the Git root** count, never the name of the folder the repository is checked out in (a CI clone is `repo/repo`, a worktree has any name): the same repository gives the same answer wherever it sits. A repository that **is** an observability folder (a standalone observability repository) is recognised by its content: when its top holds an `obs.yaml`, or a `contract.yaml` that reads as an obs contract (a `service:` and one of `metrics:`, `logs:`, `spans:`, `platform_metrics:`; a top-level `contract.yaml` of something else, an OpenAPI file for example, does not count), the Git root counts as an observability folder, and the folders below it count when they hold a `contract.yaml` (an `examples/` or `docs/` folder with only alerts does not). **Copies are not folders:** for discovery (contracts) and for the rule uid check below alike, a folder that git ignores (pruned when the walk reaches it, so it is never read: an unreadable ignored `build/` cannot fail a run; the ignored set comes from one `git ls-files --others --ignored --directory` call, no `git` on the PATH means nothing is ignored, and when git refuses the repository for its ownership, `dubious ownership` in a container CI, one note on stderr says that ignored folders are not skipped) and the `files/` and `templates/` folders of a folder that holds a `Chart.yaml` (a chart's `files/observability/<feature>/...` copy of the alerts, dashboards or whole folders; a chart at the Git root too, whose own source observability folders stay counted) are skipped, and a **nested Git repository or submodule** (a folder with its own `.git`) is its own boundary that the walk does not enter, so a copy is neither a second contract (`[metric-clash]`) nor a second definition of a rule uid. The chart copy step may therefore write into the chart's `files/` (or `templates/`), or into a folder git ignores; a copy anywhere else is a second folder.
-- **`--dir` for a feature.** Every command takes the feature's folder: `obs check --dir observability/friend`, `obs gen --dir App/Modules/Friend/observability`, `obs alerts`, `obs test`. `--dir` is that feature's contract, seed, incidents, alerts and dashboards; the other features' contracts are read with it (`obs check` prints each, `obs query` merges their metrics into the lookup, a metric two features both declare is `[metric-clash]` and names both files), so an alert of one feature may read a metric another feature declares. `--contracts none` keeps this folder's only. To check every feature in CI, run `obs check --all` (added later in this release: it uses this discovery) or `obs check --dir <folder>` once per folder; there is no list to keep, and no shell loop is documented here.
+- **`--dir` for a feature.** Every command takes the feature's folder: `obs check --dir observability/friend`, `obs gen --dir App/Modules/Friend/observability`, `obs alerts`, `obs test`. `--dir` is that feature's contract, seed, incidents, alerts and dashboards; the other features' contracts are read with it (`obs check` prints each, `obs query` merges their metrics into the lookup, a metric two features both declare is `[metric-clash]` and names both files), so an alert of one feature may read a metric another feature declares. `--contracts none` keeps this folder's only. The CI recipe is `obs check --all`: it uses the same discovery skips and needs no list or hand-written loop.
 - **`obs.yaml`.** A folder uses its own `obs.yaml`; with none, the nearest **enclosing `observability/` folder's** (`observability/friend` reads `observability/obs.yaml`); with none there, the versions and thresholds built into obs, as in 0.5. The output says which file it read (`obs.yaml <path>: every version it names matches (the enclosing observability folder's: ...)`, and `note: <dir>/obs.yaml not found: using <path>, the enclosing observability folder's` in `obs check`). Only a folder named `observability` below the Git root counts as an enclosing one, and so does the Git root itself when it holds the `obs.yaml` (a standalone observability repository, by content, whatever its checkout folder is called). Only the repository is searched: the Git root (the folder itself, or the nearest ancestor holding `.git`) is the last folder looked at, so an `obs.yaml` of an `observability/` folder above the repository is never read, outside a Git repository none is, and an `obs.yaml` that is a symlink to a file outside the Git root (checked after resolving every link) is not read. **Layout (ii) and a monorepo's apps keep the 0.5 behaviour:** a `<feature>/observability/` folder or an app folder with no `obs.yaml` of its own reads none (the built-in versions and thresholds), never the root `observability/obs.yaml`. When that root file exists and was not used, the command prints **one note on stderr** (`note: observability/obs.yaml exists but <dir>/obs.yaml does not exist, so it is not used: ...; copy observability/obs.yaml to <dir>/obs.yaml or add one`): copy the file into each app folder, or add one.
 - **A rule uid is unique in the repository.** Grafana keeps one rule per `uid` (the `metadata.name` when a rule has none), so two features shipping `errors-warning` would overwrite each other. `obs check` is the repository gate: it reads the `alerts/` folder of every observability folder of the repository and fails (exit 1) on **any** clash among them, from whichever folder it runs, with `FAIL rule <file>: [rule-id-clash] uid "<uid>" is also defined in <other file>: ...`, both files relative to the Git root. `obs alerts` and `obs test` judge the folder they are given: they fail (exit 2, the same line) only on a clash that involves one of **that folder's own rules**; a clash between two other features does not fail a third feature's `obs alerts` or `obs test` (as an invalid contract of a sibling feature does not fail another folder's `obs gen`). `--contracts none` (obs check and obs test) skips it. A repository with one observability folder prints nothing new; two rules with one uid inside one folder are still the per-folder `duplicate uid` failure of `obs alerts`.
 - **Service totals.** `obs check` prints the series and log-stream totals per contract as before. When **several contracts name the same `service:`** it adds one line, `service total (<service>, <n> contracts: <files>): worst case <S> series per landscape; log streams worst case <K> (...)`: the series are the contracts' worst cases added, the log streams are `--landscapes` times the distinct `modules:` across them (a contract with no `modules:` is one unnamed module). A contract has **no service-level budget** (budgets are per metric, concept 3.2, and a stored name is in one contract only), so the line is information: each metric is still judged on its own budget. A repository whose contracts all name different services prints no new line.
@@ -827,7 +827,7 @@ Lint rule text per language (to copy into the templates):
         analyze-types: true
         forbid:
           - pattern: ^obs\.(New(Event|Counter|Histogram|Gauge|Span)|Register)$
-            pkg: ^github\.com/ProtoDurian/diene\.go-interfaces/obs$
+            pkg: ^github\.com/AtomiCloud/diene\.go-interfaces/obs$
             msg: only obs gen output makes signal carriers; use the generated signals package
     exclusions:
       generated: strict
@@ -848,12 +848,32 @@ Lint rule text per language (to copy into the templates):
   on generated types (a reflection-made enum value is refused at run time by the allowed values).
   Forbid `Port.Install` outside generated wiring; this closes early fresh-name table forgery.
 
-**`out:` and orphans.** In a Git repository `out:` may point anywhere under the Git root (for example
+**`out:` and orphans.** `out:` is resolved from the folder holding the nearest `observability/` ancestor:
+
+| Contract | `out:` | Generated Bun file |
+| --- | --- | --- |
+| `src/modules/orders/observability/contract.yaml` | `signals` | `src/modules/orders/signals/signals.ts` |
+| `observability/orders/contract.yaml` | `src/modules/orders/signals` | `src/modules/orders/signals/signals.ts` |
+| `observability/contract.yaml` | `gen` | `gen/signals.ts` |
+
+A standalone observability Git repository resolves outputs from its own root. Contract data
+(`contract/events.json`, `aggregation.yaml`, `keep.yaml`) stays beside that feature's contract.
+Two grouped contracts with `out: gen` therefore collide and are refused; use a distinct output per feature.
+In a Git repository `out:` may point anywhere under the Git root (for example
 `../shared/bun`); headers name the contract's repository-relative path and the orphan walk starts at the
 Git root. An `out:` that leaves the Git root, or is absolute, is refused before anything is written; the
 check is made on the written path and on its resolved path, so a symlink in `out:` cannot lead outside.
-With no `.git`, `out:` may not use `..` or a symlink that leads out of the project folder, and the header's contract path is relative to the folder that holds
-`observability/`, whatever the working directory (so `--check` from another folder sees the same headers).
+With no `.git`, single-folder mode refuses `..` and a symlink that leads out of that output base.
+The `--all` modes instead bound both written and resolved output paths to their fixed repository/export
+scope; `out:` still uses the per-layout base above, and `..` is allowed while staying inside that scope.
+Single-folder headers use the
+topmost ancestor containing a project marker (`.sln`, `.slnx`, `.csproj`,
+`flake.nix`, `go.work`, `go.mod`, `package.json`, `pubspec.yaml`), stopping after the home directory when it is an ancestor,
+or the observability project's base when there is no marker. Feature paths stay distinct, and a complete
+source export with its project marker can run `obs gen --check` or regenerate without an empty `.git` workaround.
+The `--all` modes instead fix the source-export root to the current directory once for every child,
+including headers and identity fallback, so independent modules need no shared root marker.
+A Docker build context must be the repository root for `obs gen --check` to match the checkout.
 Each generated-file destination must be a regular file or absent. A symlink at the file itself,
 including a dangling symlink, is refused before any file is written. Directory aliases are allowed
 within the permitted root; full destinations are resolved through existing ancestors (including a
@@ -870,13 +890,46 @@ It is the package's stable identity,
 not the feature name or the generated namespace. Manifest edits change generated registration too;
 `obs gen --check` detects that drift even when the contract hash stays the same.
 The walk follows the resolved `out:` directory's ancestors and stops at the resolved Git root.
-Without `.git`, it walks up without a bound, so a manifest above the project can be picked up.
+Without `.git`, a single-folder walk includes home and stops above it when home is an ancestor
+(Docker's `HOME=/root`, `WORKDIR /root` can own the manifests). An `--all` walk stays within its resolved scope.
 Use `package_id:` to pin the identity outside Git or when the owning manifest is unavailable.
 
 Each `generate:` target accepts optional `interfaces:` to override its dependency import. The merged-port
 registration behavior is now specified in [the corpus port design and four interfaces goals](https://github.com/ProtoDurian/diene-corpus/pull/116)
 (concept §3). The last column lists the remaining API details that the goals do not spell; the
 interfaces nodes reconcile them. The fixtures validate these models, not published packages:
+
+**.NET assembly boundary.** Generated C# must be compiled in an assembly named **`Signals`**: the
+interfaces carriers have internal constructors and grant friend access to that assembly. Giving the
+app public constructors would weaken the compile-time guarantee, so obs keeps the boundary. A fixed
+project can collect every feature without a hand-kept list:
+
+```xml
+<!-- Signals/Signals.csproj -->
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>Signals</AssemblyName></PropertyGroup>
+  <ItemGroup><Compile Include="../App/Modules/*/Signals/*.g.cs" /></ItemGroup>
+  <!-- Reference the interfaces package here; the app references this project. -->
+</Project>
+```
+
+The app's project removes `Modules/*/Signals/*.g.cs` from its own `Compile` items and references the
+Signals project. `obs gen`/`obs check` report `[generate-assembly]` when a project in repository/project
+scope may compile the file with another assembly name: SDK defaults under that project and literal
+`Compile Include` entries in other projects are checked, independently of the package-identity manifest.
+A matching unconditional `Compile Remove` is honored in the project or in the nearest
+`Directory.Build.targets` between the project and the scope root. A `Remove` in `Directory.Build.props`
+runs before the SDK adds its default `Compile` items and does not exclude those files; put the removal
+in the `.csproj` or `Directory.Build.targets`. Real MSBuild item-list and compiler controls test both orders.
+obs reads literal properties and Compile items in `.csproj`, `Directory.Build.props` and
+`Directory.Build.targets` in MSBuild order; Conditions, imports and other targets are not evaluated
+(the .NET Nix suite compares with real MSBuild). A computed
+or conditional assembly name that cannot be verified requires a literal `AssemblyName` of `Signals`.
+Package identity still comes from the nearest manifest at `out:`; this may be the app project even
+when the separate Signals project compiles the file. Use `package_id:` to pin identity if needed.
+
+**Bun public API.** Every generated exported symbol carries `/** @public */`, so knip can recognize
+the generated module as a public API even when one app uses only some of its signals.
 
 For .NET, an explicit `namespace:` wins. A service's only .NET contract keeps `<Service>.Signals`
 wherever its `.csproj` sits, including `App/App.csproj` beside `App/observability/` and a project
@@ -912,7 +965,7 @@ they test that recording the first span also closes registration and poisons any
 
 | Language | Default `interfaces`                             | In the goal                                                                                                                                                                                                                         | Assumed, not in goal                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | -------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Go       | `github.com/ProtoDurian/diene.go-interfaces/obs` | module `ProtoDurian/diene.go-interfaces`; `obs.Add`, `obs.Int[Spec]`, `obs.NewInt`, `obs.AtTime` with an error return; `obs.Error(ctx, Event[Error], ...)`; `obs.Register(DurianSignalTables{Contract, Hash, ...})`, merged boot registration and poison rules | the `/obs` package path; `IntSpec` `Name/Min/Max/Unit` (int64); `Int.Valid`; `Level` and the six markers; `NewEvent/NewCounter/NewHistogram/NewGauge/NewSpan`; `DurianSignal*` carriers and info rows (`Labels`, `Values`, `Ranges`); `Field`; `Record/Set/Warn/Info`; fixture `StartSpan`; exact `DurianSignalTables` map/row fields; `Dropped(reason)`                                                                        |
+| Go       | `github.com/AtomiCloud/diene.go-interfaces/obs` | `obs.Add`, `obs.Int[Spec]`, `obs.NewInt`, `obs.AtTime` with an error return; `obs.Error(ctx, Event[Error], ...)`; `obs.Register(DurianSignalTables{Contract, Hash, ...})`, merged boot registration and poison rules | the `/obs` package path; `IntSpec` `Name/Min/Max/Unit` (int64); `Int.Valid`; `Level` and the six markers; `NewEvent/NewCounter/NewHistogram/NewGauge/NewSpan`; `DurianSignal*` carriers and info rows (`Labels`, `Values`, `Ranges`); `Field`; `Record/Set/Warn/Info`; fixture `StartSpan`; exact `DurianSignalTables` map/row fields; `Dropped(reason)`                                                                        |
 | Bun      | `@atomicloud/diene.interfaces`                   | `counter(name, labels)`; `log.error(ev, fields?, err?)`; `bounded(spec, n): Result`; `Tracer`/`Span`, `DurianSignalSpanTable`; `register({contract, hash, metrics, events, spans})`, merged boot registration and registered-object binding | `metrics(table)`, `histogram/gauge`, `MetricTable` (with `values`, `ranges`); `logger(eventTable)`, `EventTable`, `Level`; `dropped()`; `tracer(table)`; `Bounded<N>`; a synchronous `{ok, value}` Result (the published Result is promise-based)                                                                                                                    |
 | .NET     | `AtomiCloud.Diene.Interfaces`                    | `Port.Add(Names.X, new XLabels(...))`; `Int<Spec>.Of(n)` returning a `Result` (package `AtomiCloud.Diene.Result`: struct `Result<T, E>`, `Ok/Err`, `IsSuccess`); `Log.Error(Event<ErrorLevel>, ...)`; internal carrier constructors; per-contract `Port.Install`, merged boot registration and poison rules | namespace `AtomiCloud.Diene.Result` and `Value/Error`; `IDurianSignal*` interfaces, `Valid/Wire`; `AtTime`; `DurianSignalDate`; label attribute and info rows; `Port.Record/Set/Dropped`; fixture `Port.StartSpan`; `Port.Install(SignalTables.Contract, SignalTables.Metrics, SignalTables.EventLevels, SignalTables.Spans)` returning a Result; `DurianSignalContract(Id, Hash)`; info row `Values`/`Ranges`; `Log.Warn`                                                                                                                                                                                                              |
 | Dart     | `diene_interfaces`                               | `checkoutCharges.add(XLabels(...))`; `error(Event<ErrorLevel>, ...)`; enums; extension types; `shardSpec.of(n)` returning a `Result`; `entries` getter; generated `installSignals()` and `DurianSignalPort.install`, merged boot registration and poison rules | barrel `diene_interfaces.dart`; `DurianSignalWire/Labels/Metric`, carrier bases and constructors; `DurianSignalBoundSpec` and `atTime`; sealed level markers; exact `install(contract:, hash:, metrics:, events:, spans:)` named arguments and Result shape; `add/record/set/dropped`; fixture `startSpan`; `warn/info`; info rows (`labels` Type, `values`, `ranges`); local `Result/DurianSignalOk/DurianSignalErr` in place of `diene_result` |
@@ -938,6 +991,35 @@ kept and quoted (`{"payment.provider"="stripe"}`, `by ("payment.provider")`); th
 
 ## Migrating from 0.5 to 0.6
 
+### Run every feature without a shell loop
+
+```bash
+obs gen --all
+obs gen --check --all
+obs check --all
+obs test --all
+```
+
+Generation runs once per discovered contract folder, with one summary line naming that contract.
+`obs check --all` and `obs test --all` also visit observability folders that hold `alerts/` or
+`dashboards/` without a contract, so shared service dashboards and alerts participate in the CI gate.
+Their summary names the folder. At least one contract is still required.
+Failures retain their diagnostics and do not prevent the remaining folders from running. Exit 0 means
+every folder passed, 1 means a check failed, and 2 means an input or enumeration error. No contracts
+found is an error, never a successful zero-check run. The CI static-check recipe is `obs check --all`.
+Run `--all` from the repository root, including inside a Docker context or Git-less export. The start
+folder is the current directory unless `--dir` is explicitly supplied; the default `observability/`
+path cannot select a nested repository or submodule, which remains a boundary. Outside
+Git the start folder is the export root; it is resolved once and passed to every child scan,
+header, identity calculation and enclosing `observability/obs.yaml` lookup, without re-inferring a root
+from each module. Explicit `--dir` chooses the repository/export root. Discovery and each folder's loads share the fixture/dependency, Git-ignore,
+nested-repository and chart-copy skips: ignored contract files, alert folders and dashboards do not
+become candidates or get read through a shared folder. Existing options are forwarded to each run.
+Cross-contract metric-name, query and
+rule-uid checks use that same scope in `--all` mode, including a complete Git-less export. The existing
+single-folder commands keep their discovery behavior. Use separate `--dir` runs for
+`obs test --out`, `--steps` or `--recorded`: `--all` refuses a shared file export that would be overwritten.
+
 Every 0.5 command, flag and output stays. For the 58 cases in `tests/compat.sh` the output is byte for byte the 0.5 output, and a repository with one contract (or one contract per `<app>/observability/`) prints what it printed in 0.5, unless one of the findings below applies. New:
 
 | In 0.5 | In 0.6 |
@@ -949,13 +1031,18 @@ Every 0.5 command, flag and output stays. For the 58 cases in `tests/compat.sh` 
 | A folder with no `contract.yaml` of its own read no contract names, wherever the other contracts were. | When the repository has contracts elsewhere, its metric names are looked up in them: a metric in no contract is a note and stays green; a near miss of a declared name (a typo) in a service-wide alert or dashboard is now red. A repository with no contract anywhere is unchanged. |
 | A run in an app folder with no `obs.yaml` printed nothing about the root `observability/obs.yaml`. | One note on stderr, from every command that reads `obs.yaml` (`obs check`, `test`, `alerts`, `query`, `live`, `sandbox`, `look`), when that root file exists and was not used (the behaviour is unchanged: the app reads the built-in values). |
 
-The rows above are the changes to discovery, checks and notes: no new flag, no new file and no changed exit code outside them. Generated code changes as described next.
+The rows above are the changes to discovery, checks and notes. The new `--all` modes and generated-code changes are described below.
 
 All 0.5 commands and flags remain available. After upgrading, regenerate with `obs gen`: generated
 registration now carries a package-qualified contract id and hash, and the files change. Make the owning
 package manifest available at or above each `out:`, or set `package_id:` on that target. Upgrade the
 interfaces ports to the merged-table contract described above. Generate boot wiring that registers every
 feature before any signal; a hand-kept list or late/lazy registration does not satisfy the contract.
+Regeneration also switches the default Go import to `github.com/AtomiCloud/diene.go-interfaces/obs`
+and tags Bun exports `@public`. Update any Go import allow/deny rules to the new module path.
+For grouped contracts, `out:` now resolves from the folder holding `observability/`, so remove the
+old extra `../` workaround and give each feature a distinct output. Headers in complete source exports
+use the project boundary without requiring `.git`. Compile .NET output in the Signals assembly described above.
 A service's sole .NET contract keeps its old namespace default. Multiple contracts use the root-candidate
 and feature namespace rules above. Remove any cross-contract namespace or output-folder collision reported by `obs gen`
 or `obs check`; explicitly choosing one namespace for two contracts is refused too.
@@ -966,7 +1053,7 @@ file before regenerating. Directory aliases within the allowed root may remain.
 
 The 58 compatibility goldens cover query, alerts and links output; they do not cover generated code.
 For an unchanged single-contract repository those command outputs remain byte-identical. Generated
-single-contract signal files change only at registration (metadata, calls and their comments); the
+single-contract signal files change at registration, the default Go import and Bun public tags; the
 per-signal types and tables retain their shapes. The other generated contract data keeps its format.
 The fresh-name forgery gap above is deliberate: lint and the metric keep-list now carry that guarantee;
 new event/span names have lint alone.
@@ -2594,6 +2681,9 @@ is MEASURED (a test or a run in this repository) or FROM SOURCE (read in the pin
 source) where its section says so.
 
 **Commands and builds**
+
+- **Knip itself on generated Bun output.** The generator test scans every export for knip's `@public` tag; it does not run the knip CLI against an application.
+- **Full MSBuild evaluation for the Signals assembly check.** Compiler fixtures prove the `Signals` assembly succeeds and an app assembly fails, including props/targets removal order. The static project check covers SDK defaults, literal compile items and the nearest Directory.Build.props/targets, not arbitrary additional imports, conditions or computed properties.
 
 - **`obs live` on dev, stage and prod.** No access to any of them; only the local sandbox was read for real (and recorded). The edge cases (two landscapes, a label outside the type, a failing query, an alert that fired before the window, redirects) are tested on hand-written payloads in the shapes the sandbox recorded. Not run against a real remote store: auth headers from the environment on a real gateway, and a very large metrics store (the points/min queries are one `count_over_time` per stored metric name and the series read is one `/api/v1/series` call; a store with more series than its `-search.maxSeries` answers an error, which obs reports as exit 2).
 - **`obs live incidents`: what the recording does not hold.** The recorded Grafana state history holds a real Normal -> Pending and Normal -> Alerting change; its tag-only payload now proves a firing observation, with unknown spans. Optional lossless label maps, Alerting -> Normal, Recovering, overlapping instances, absent transitions, title/ID collisions, future windows and capped responses are tested on synthetic payloads. There is no current-state GET in the command or the incident recording. The `ALERTS` grouped list and raw range-selector path (a vmalert-style ruler) are tested on fake stores only, including bounded per-window reads, responses exceeding 64 MiB, merged chunk evidence and a carried-forward evaluation point that must not count as firing inside a later window.

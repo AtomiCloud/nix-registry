@@ -136,10 +136,10 @@ func TestRegistrationIdentityIndependentOfGit(t *testing.T) {
 		t.Fatal(err)
 	}
 	write("interfaces-stub/obs/obs.go", string(stub))
-	write("interfaces-stub/go.mod", "module github.com/ProtoDurian/diene.go-interfaces\n\ngo 1.24\n")
-	write("go.mod", "module example.com/workspace\n\ngo 1.24\nrequire github.com/ProtoDurian/diene.go-interfaces v0.0.0\nreplace github.com/ProtoDurian/diene.go-interfaces => ./interfaces-stub\n")
+	write("interfaces-stub/go.mod", "module github.com/AtomiCloud/diene.go-interfaces\n\ngo 1.24\n")
+	write("go.mod", "module example.com/workspace\n\ngo 1.24\nrequire github.com/AtomiCloud/diene.go-interfaces v0.0.0\nreplace github.com/AtomiCloud/diene.go-interfaces => ./interfaces-stub\n")
 	write("main.go", `package main
-import("context";"fmt";orders "example.com/workspace/Orders/gen";billing "example.com/workspace/Billing/gen";obs "github.com/ProtoDurian/diene.go-interfaces/obs")
+import("context";"fmt";orders "example.com/workspace/Orders/gen";billing "example.com/workspace/Billing/gen";obs "github.com/AtomiCloud/diene.go-interfaces/obs")
 func main(){if err:=obs.Error(context.Background(),orders.Failed);err!=nil{panic(err)};if err:=obs.Error(context.Background(),billing.Failed);err!=nil{panic(err)};if obs.Dropped("register")!=0||obs.Dropped("poisoned")!=0{panic("poisoned")};fmt.Println("PASS git-less two-feature registration")}
 `)
 	goTool, err := exec.LookPath("go")

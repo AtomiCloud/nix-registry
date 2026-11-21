@@ -6,7 +6,7 @@
 package signals
 
 import (
-	obs "github.com/ProtoDurian/diene.go-interfaces/obs"
+	obs "github.com/AtomiCloud/diene.go-interfaces/obs"
 	"time"
 )
 

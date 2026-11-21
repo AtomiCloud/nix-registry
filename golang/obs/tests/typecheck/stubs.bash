@@ -11,8 +11,8 @@ obs_setup_stub() {
     cp -r --no-preserve=mode "$stubs/go/stub/." "$d/interfaces-stub/"
     cat >>"$d/go.mod" <<'MOD'
 
-require github.com/ProtoDurian/diene.go-interfaces v0.0.0
-replace github.com/ProtoDurian/diene.go-interfaces => ./interfaces-stub
+require github.com/AtomiCloud/diene.go-interfaces v0.0.0
+replace github.com/AtomiCloud/diene.go-interfaces => ./interfaces-stub
 MOD
     ;;
   bun)

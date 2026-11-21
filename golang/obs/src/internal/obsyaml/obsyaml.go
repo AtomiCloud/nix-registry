@@ -130,12 +130,22 @@ var tokenRe = regexp.MustCompile(`^[A-Za-z0-9.]+$`)
 // Load reads <dir>/obs.yaml. A missing file returns (nil, nil). Any other problem is an
 // error that names the file, the line and the key; callers exit 2 on it.
 func Load(dir string) (*File, error) {
+	return loadInRoot(dir, "")
+}
+
+// LoadInRoot uses the boundary already resolved by --all, including exports
+// without Git. Single-folder callers continue to use Load's Git-only lookup.
+func LoadInRoot(dir, root string) (*File, error) {
+	return loadInRoot(dir, root)
+}
+
+func loadInRoot(dir, root string) (*File, error) {
 	path := filepath.Join(dir, FileName)
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
 		// A feature folder (observability/<feature>) has no obs.yaml of its own: the nearest enclosing
 		// observability folder's is read instead (File.Inherited says so). None: the built-in values.
-		enc := enclosing(dir)
+		enc := enclosingInRoot(dir, root)
 		if enc == "" {
 			return nil, nil
 		}
@@ -161,18 +171,36 @@ func Load(dir string) (*File, error) {
 // outside a Git repository nothing is read. Only folders named observability count: a folder without an obs.yaml
 // of its own reads that folder's, never an unrelated parent's.
 func enclosing(dir string) string {
+	return enclosingInRoot(dir, "")
+}
+
+func enclosingInRoot(dir, root string) string {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return ""
 	}
-	root := ""
-	for d := abs; ; d = filepath.Dir(d) {
-		if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
-			root = d
-			break
+	if root != "" {
+		root, err = filepath.Abs(root)
+		if err != nil {
+			return ""
 		}
-		if filepath.Dir(d) == d {
-			return "" // no Git repository: no folder above is this repository's
+		root, err = filepath.EvalSymlinks(root)
+		if err != nil {
+			return ""
+		}
+		abs, err = filepath.EvalSymlinks(abs)
+		if err != nil || !insideRepo(abs, root) {
+			return ""
+		}
+	} else {
+		for d := abs; ; d = filepath.Dir(d) {
+			if _, err := os.Stat(filepath.Join(d, ".git")); err == nil {
+				root = d
+				break
+			}
+			if filepath.Dir(d) == d {
+				return "" // no Git repository: no folder above is this repository's
+			}
 		}
 	}
 	for d := abs; d != root; {
