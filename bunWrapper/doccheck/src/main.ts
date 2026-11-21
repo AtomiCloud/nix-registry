@@ -17,7 +17,15 @@ import {
   git,
   repoName,
 } from './model';
-import { loadOutline, checkOutline, splitOutline, handwritten, makeStubs, outlineText } from './outline';
+import {
+  loadOutline,
+  checkOutline,
+  checkEntriesExist,
+  splitOutline,
+  handwritten,
+  makeStubs,
+  outlineText,
+} from './outline';
 import { generate } from './generate';
 import { checkTree, checkHistory, checkTranslations, checkLlm, checkChanges, loadUl, type UlData } from './checks';
 import { checkCode } from './code';
@@ -170,6 +178,9 @@ export function main(argv = process.argv.slice(2)): number {
         message = `checked ${pages.filter(p => !p.generated).length} pages`;
       } else {
         const o = loadOutline(docs, c, pages, issues);
+        // gen and gen --check write or compare maps that link to every authored entry: refuse the
+        // outline first when an entry names a page that does not exist (nothing is generated).
+        if (cmd === 'gen' && !issues.length) checkEntriesExist(docs, pages, o, issues);
         if (cmd === 'outline') {
           if (issues.length) {
           } else if (format === 'text') {

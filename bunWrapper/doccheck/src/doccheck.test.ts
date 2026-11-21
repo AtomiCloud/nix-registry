@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, unlinkSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { parse } from 'durian-hypermedia';
@@ -28,7 +28,15 @@ import {
   proseLineCount,
   loadUl,
 } from './checks';
-import { handwritten, fromPages, checkOutline, splitOutline, makeStubs, loadOutline } from './outline';
+import {
+  handwritten,
+  fromPages,
+  checkOutline,
+  checkEntriesExist,
+  splitOutline,
+  makeStubs,
+  loadOutline,
+} from './outline';
 import { expectedGenerated, generate } from './generate';
 import { checkCode, defined, commentsOf } from './code';
 import { expectedLlm, sectionHashes } from './dh-library';
@@ -402,6 +410,69 @@ describe('outline and generators', () => {
     expect(a[0].fm.order).toBe(10);
     expect(configFor(docs).pageOrder).toBe('A');
     expect(run(i => checkOutline(docs, a, fromPages(docs, a, i), i))).toEqual([]);
+  });
+  test('gen refuses an authored entry that names a missing page, and writes nothing', () => {
+    const { docs } = fixture();
+    put(join(docs, 'doccheck.yaml'), 'pageOrder: B\nllmView: build\n');
+    put(
+      join(docs, 'outline.yaml'),
+      yamlText({
+        contexts: [],
+        guides: [{ page: 'setup.md', type: 'guide', rank: 'core', learns: 'Set it up.' }],
+        repo: [],
+        readingPath: [],
+      }),
+    );
+    const o = handwritten(docs);
+    expect(
+      has(
+        run(i => checkEntriesExist(docs, [], o, i)),
+        'outline in step',
+      ),
+    ).toBe(true);
+    // a generated context overview is not an authored page: gen creates it
+    const ov = {
+      contexts: [{ context: 'shop', pages: [{ full: 'domain/shop/index.md', rank: 'core', learns: 'x' }] }],
+      guides: [],
+      repo: [],
+      readingPath: [],
+    } as any;
+    expect(run(i => checkEntriesExist(docs, [], ov, i))).toEqual([]);
+    expect(main(['gen', docs])).toBe(1);
+    expect(main(['gen', docs, '--check'])).toBe(1);
+    expect(existsSync(join(docs, 'README.md'))).toBe(false);
+  });
+  test('split keeps one readingPath key when the page already has it, and refuses a different one', () => {
+    const { docs } = fixture();
+    const text = (rp: number) =>
+      `---\ntitle: Order\nconcept: order\ndescription: ${fm.description}\nnamespaces: []\ntype: feature\nreadingPath: ${rp}\n---\n\n${body}`;
+    const p = page(docs);
+    put(p.file, text(1));
+    const outlineWith = () =>
+      put(
+        join(docs, 'outline.yaml'),
+        yamlText({
+          contexts: [
+            {
+              context: 'shop',
+              learns: 'Orders',
+              pages: [{ page: 'model/order.md', type: 'feature', rank: 'core', learns: fm.description }],
+            },
+          ],
+          guides: [],
+          repo: [],
+          readingPath: ['domain/shop/model/order.md'],
+        }),
+      );
+    outlineWith();
+    expect(splitOutline(docs, loadPages(docs))).toBe(1);
+    expect(readFileSync(p.file, 'utf8').match(/^readingPath:/gm)?.length).toBe(1);
+    // a different position is refused before any page is written
+    put(p.file, text(2));
+    const before = readFileSync(p.file, 'utf8');
+    outlineWith();
+    expect(() => splitOutline(docs, loadPages(docs))).toThrow('readingPath');
+    expect(readFileSync(p.file, 'utf8')).toBe(before);
   });
   test('stubs never overwrite a page', () => {
     const { docs } = fixture();
@@ -827,6 +898,82 @@ describe('code references and comments', () => {
   });
 });
 
+describe('staged pin checks', () => {
+  const oldPin = 'a'.repeat(40),
+    newPin = 'b'.repeat(40);
+  const make = (pin: string, steps: [string, string][]) =>
+    `---\n${yamlText({ ...fm, pins: { shop: pin } })}---\n\n${body}\n\`\`\`codewalk repo=shop\n${steps
+      .map(([cite, note]) => `@step shop/src/a.ts#${cite}\n${note}`)
+      .join('\n')}\n\`\`\`\n`;
+  const reader = (folder: string, rel: string, newText: string, oldText: string) => (_root: string, args: string[]) => {
+    if (args[0] === 'diff') return `${folder}/${rel}\n`;
+    if (args[0] !== 'show') return null;
+    const want = args[1];
+    if (want === `HEAD:${folder}/${rel}`) return oldText;
+    if (want === `:${folder}/${rel}`) return newText;
+    if (want === `${oldPin}:src/a.ts`) return 'before\nsame\n';
+    if (want === `${newPin}:src/a.ts`) return 'after\nsame\n';
+    if (want === ':src/a.ts') return 'after\nsame\n';
+    return null;
+  };
+  test('a selected documentation folder other than docs is checked', () => {
+    const { root } = fixture();
+    const docs = join(root, 'handbook');
+    mkdirSync(docs);
+    const base = page(docs);
+    const o = { ...outline([base]), repoName: 'shop' };
+    const steps: [string, string][] = [['L1', 'One.']];
+    const issues = run(i =>
+      checkCode(docs, [base], o, i, undefined, reader('handbook', base.rel, make(newPin, steps), make(oldPin, steps))),
+    );
+    expect(has(issues, 'code walk ranges')).toBe(true);
+  });
+  test('a page deleted from the worktree is still checked from the staged paths', () => {
+    const { docs } = fixture();
+    const base = page(docs);
+    const o = { ...outline([]), repoName: 'shop' };
+    const steps: [string, string][] = [['L1', 'One.']];
+    const read = reader('docs', base.rel, make(newPin, steps), make(oldPin, steps));
+    expect(
+      has(
+        run(i => checkCode(docs, [], o, i, undefined, read)),
+        'code walk ranges',
+      ),
+    ).toBe(true);
+  });
+  test('steps are matched by citation, so a swap does not hide a changed range', () => {
+    const { docs } = fixture();
+    const base = page(docs);
+    const o = { ...outline([base]), repoName: 'shop' };
+    const first: [string, string] = ['L1', 'One.'],
+      second: [string, string] = ['L2', 'Two.'];
+    // line 1 changes between the pins, line 2 does not; the author swaps the two steps
+    const issues = run(i =>
+      checkCode(
+        docs,
+        [base],
+        o,
+        i,
+        undefined,
+        reader('docs', base.rel, make(newPin, [second, first]), make(oldPin, [first, second])),
+      ),
+    );
+    expect(has(issues, 'code walk ranges')).toBe(true);
+    // the same order is flagged for the same reason, and an unchanged range is not flagged
+    const quiet = run(i =>
+      checkCode(
+        docs,
+        [base],
+        o,
+        i,
+        undefined,
+        reader('docs', base.rel, make(newPin, [second]), make(oldPin, [second])),
+      ),
+    );
+    expect(has(quiet, 'code walk ranges')).toBe(false);
+  });
+});
+
 describe('translation and LLM freshness', () => {
   test('translation keeps the full made-up codewalk file, including lines outside a step', () => {
     const { docs } = fixture();
@@ -1022,6 +1169,32 @@ describe('ADR and staged change checks', () => {
         'engineering standards untouched',
       ),
     ).toBe(true);
+  });
+  test('staged checks follow the selected documentation folder', () => {
+    const { root } = fixture();
+    const handbook = join(root, 'handbook');
+    mkdirSync(handbook);
+    expect(
+      has(
+        run(i => checkChanges(handbook, [], i, mock('M\0handbook/adr/0001-order.md\0', 'old text', 'new text'))),
+        'ADR unchanged',
+      ),
+    ).toBe(true);
+    expect(
+      has(
+        run(i => checkChanges(handbook, [], i, mock('M\0handbook/standards/orders/index.md\0', '', ''))),
+        'engineering standards untouched',
+      ),
+    ).toBe(true);
+    const asked: string[][] = [];
+    run(i =>
+      checkChanges(handbook, [], i, (_root: string, args: string[]) => {
+        if (args[0] === 'diff') asked.push(args);
+        return '';
+      }),
+    );
+    expect(asked[0]).toContain('handbook');
+    expect(asked[0]).not.toContain('docs');
   });
   test('standards state needs semantic change and managed entry; source repo exempt', () => {
     const { docs } = fixture();

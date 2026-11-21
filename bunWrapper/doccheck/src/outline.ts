@@ -200,6 +200,15 @@ export function checkOutline(docs: string, pages: Page[], o: Outline, issues: Is
   for (const p of pages.filter(planned))
     if (!keys.has(canonical(p.rel))) issue(issues, p.file, 'outline in step', 'page is missing from the outline');
 }
+/** Authored outline entries (mode B) must name pages that exist, or the generated maps would link to
+ * nothing. The generated context overviews are exempt: gen creates them. */
+export function checkEntriesExist(docs: string, pages: Page[], o: Outline, issues: Issue[]) {
+  const have = new Set(pages.map(p => canonical(p.rel)));
+  for (const e of entriesOf(o)) {
+    if (/^domain\/[^/]+\/index\.md$/.test(e.full) || have.has(canonical(e.full))) continue;
+    issue(issues, join(docs, 'outline.yaml'), 'outline in step', `${e.full} has no page; write it or make a stub`);
+  }
+}
 export function splitOutline(docs: string, pages: Page[]): number {
   const o = handwritten(docs);
   const by = new Map(pages.map(p => [canonical(p.rel), p]));
@@ -213,18 +222,15 @@ export function splitOutline(docs: string, pages: Page[]): number {
     const n = (counts.get(dir) ?? 0) + 10;
     counts.set(dir, n);
     const read = o.readingPath.findIndex(x => canonical(x) === canonical(e.full));
-    const fm = { ...p.fm };
-    delete fm.readingPath;
-    const text = writeFrontMatter(
-      { ...p, fm },
-      {
-        rank: e.rank,
-        order: n,
-        learns: e.learns,
-        ...(e.sources ? { sources: e.sources } : {}),
-        ...(read >= 0 ? { readingPath: read + 1 } : {}),
-      },
-    );
+    // The page keeps its own readingPath: a matching key is left as it is, a different one is refused
+    // (writeFrontMatter) before any page is written, so no key is ever added twice.
+    const text = writeFrontMatter(p, {
+      rank: e.rank,
+      order: n,
+      learns: e.learns,
+      ...(e.sources ? { sources: e.sources } : {}),
+      ...(read >= 0 ? { readingPath: read + 1 } : {}),
+    });
     writes.push([p.file, text]);
   }
   // Validate every input before changing any page.

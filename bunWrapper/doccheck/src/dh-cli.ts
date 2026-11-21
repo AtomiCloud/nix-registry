@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   readdirSync,
@@ -38,10 +39,39 @@ function below(parent: string, child: string): boolean {
   return path === '' || (path !== '..' && !path.startsWith('../'));
 }
 
+/** The path a JSON export of page is written to under outDir. */
+function jsonDestination(target: string, outDir: string, page: string): string {
+  return join(
+    outDir,
+    relative(statSync(target).isDirectory() ? target : dirname(target), page).replace(/(?:\.dh)?\.md$/, '.json'),
+  );
+}
+
+/** Check every JSON destination before the first write: a link in the output folder must not send a
+ * file elsewhere (over a source page, or out of the folder), so no destination may be redirected. */
+function checkJsonDestinations(target: string, outDir: string, pages: string[]) {
+  const out = canonical(outDir);
+  for (const page of pages) {
+    const dest = jsonDestination(target, outDir, page);
+    try {
+      if (lstatSync(dest).isSymbolicLink()) throw new Error(`output link leaves ${outDir}: ${dest}`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    if (canonical(dest) !== join(out, relative(resolve(outDir), resolve(dest))))
+      throw new Error(`output link leaves ${outDir}: ${dest}`);
+  }
+}
+
 function readCode(repo: string, path: string, commit: string | null, codeRoot: string): string {
   const repoRoot = basename(codeRoot) === repo || !repo ? codeRoot : inside(codeRoot, repo);
   const file = inside(repoRoot, path);
-  if (!commit) return readFileSync(file, 'utf8');
+  if (!commit) {
+    // inside() is lexical: a committed symlink can point out of the checkout, so read the real path.
+    const real = realpathSync(file);
+    if (!below(realpathSync(repoRoot), real)) throw new Error(`code path leaves ${repoRoot}: ${path}`);
+    return readFileSync(real, 'utf8');
+  }
   if (!/^[a-f0-9]{40}$/i.test(commit)) throw new Error(`invalid full commit id: ${commit}`);
   const result = spawnSync('git', ['-C', repoRoot, 'show', `${commit}:${relative(repoRoot, file)}`], {
     encoding: 'utf8',
@@ -217,7 +247,9 @@ export function main(args = process.argv.slice(2)): number {
         }
         continue;
       }
-      for (const page of walkPages(target, command === 'stamp')) {
+      const pagesOf = walkPages(target, command === 'stamp');
+      if (command === 'json' && outDir) checkJsonDestinations(target, outDir, pagesOf);
+      for (const page of pagesOf) {
         const doc = parseFile(page, publicView);
         if (command === 'stamp' && statSync(target).isDirectory() && !doc.frontMatter.translation) continue;
         const error = doc.problems.find(p => p.level === 'error');
@@ -238,17 +270,7 @@ export function main(args = process.argv.slice(2)): number {
         } else if (command === 'json') {
           const hydrated = hydrate(doc, codeRoot ?? rootOf(page));
           const json = JSON.stringify(publicView ? publicJson(hydrated) : hydrated, null, 2) + '\n';
-          if (outDir)
-            write(
-              join(
-                outDir,
-                relative(statSync(target).isDirectory() ? target : dirname(target), page).replace(
-                  /(?:\.dh)?\.md$/,
-                  '.json',
-                ),
-              ),
-              json,
-            );
+          if (outDir) write(jsonDestination(target, outDir, page), json);
           else process.stdout.write(json);
         } else {
           hydrate(doc, codeRoot ?? rootOf(page));

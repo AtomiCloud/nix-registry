@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { dirname, join, resolve, relative, basename } from 'node:path';
+import { dirname, join, resolve, relative, basename, sep } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import {
   check as checkFormat,
@@ -662,6 +662,9 @@ export function checkTree(docs: string, pages: Page[], o: Outline, c: Config, is
 
 export function checkChanges(docs: string, pages: Page[], issues: Issue[], readGit = git) {
   const root = dirname(docs);
+  // The selected documentation folder, relative to the repository (docs by default): the staged
+  // pathspec and every path rule below follow it.
+  const rel = relative(root, docs).split(sep).join('/');
   const changed = readGit(root, [
     'diff',
     '--cached',
@@ -670,7 +673,7 @@ export function checkChanges(docs: string, pages: Page[], issues: Issue[], readG
     '-z',
     'HEAD',
     '--',
-    'docs',
+    rel,
     '.cyan_state.yaml',
   ]);
   if (changed == null) return;
@@ -724,7 +727,7 @@ export function checkChanges(docs: string, pages: Page[], issues: Issue[], readG
   for (const x of changes) {
     if (!x.file) continue;
     if (
-      x.file.startsWith('docs/standards/') &&
+      x.file.startsWith(`${rel}/standards/`) &&
       protectedRepo &&
       (!stateChanged || (x.status !== 'D' && !managed.has(x.file)))
     )
@@ -745,7 +748,7 @@ export function checkChanges(docs: string, pages: Page[], issues: Issue[], readG
           'accepted ADRs may only change whitespace; add a superseding ADR',
         );
     }
-    if (x.file === 'docs/outline.yaml') {
+    if (x.file === `${rel}/outline.yaml`) {
       const entries = (text: string | null) => {
         try {
           const d = text ? yaml(text) : {};
@@ -760,8 +763,8 @@ export function checkChanges(docs: string, pages: Page[], issues: Issue[], readG
           return [];
         }
       };
-      const before = entries(readGit(root, ['show', 'HEAD:docs/outline.yaml'])),
-        after = entries(readGit(root, ['show', ':docs/outline.yaml']));
+      const before = entries(readGit(root, ['show', `HEAD:${rel}/outline.yaml`])),
+        after = entries(readGit(root, ['show', `:${rel}/outline.yaml`]));
       const old = new Map(before.map(e => [e.page, e.rank])),
         now = new Map(after.map(e => [e.page, e.rank]));
       const added = after.filter(e => !old.has(e.page)).map(e => `added ${e.page} (${e.rank})`);
@@ -774,7 +777,7 @@ export function checkChanges(docs: string, pages: Page[], issues: Issue[], readG
         'warn',
       );
     }
-    if (x.file === 'docs/guides/running-example.md') {
+    if (x.file === `${rel}/guides/running-example.md`) {
       const users = pages
         .filter(p =>
           allInline(markdownBlocks(p.doc)).some(

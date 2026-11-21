@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
-import { dirname, join, relative, basename } from 'node:path';
+import { dirname, join, relative, basename, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import { spawnSync } from 'node:child_process';
 import {
@@ -62,7 +62,9 @@ export function checkCode(
 ) {
   const root = dirname(docs),
     self = repoName(docs, o);
-  const stagedPaths = new Set((readGit(root, ['diff', '--cached', '--name-only', '--', 'docs']) ?? '').split('\n'));
+  // The selected documentation folder, relative to the repository (docs by default).
+  const prefix = relative(root, docs).split(sep).join('/');
+  const stagedPaths = new Set((readGit(root, ['diff', '--cached', '--name-only', '--', prefix]) ?? '').split('\n'));
   const cache = new Map<string, string | null>();
   const read = (file: string, pin?: string): string | null => {
     const k = `${pin ?? 'work'}:${file}`;
@@ -162,34 +164,39 @@ export function checkCode(
     for (const q of hydrateEditors(p.doc, { repoRoot: root, repoName: self, codeRoot: sourceRoot }))
       issue(issues, p.file, 'part data', q.message, q.level, q.line);
   }
-  function checkWalks(p: Page) {
-    const walks = blocksOf(p.doc.blocks).filter((b): b is CodeWalkBlock => b.type === 'codewalk');
-    const staged = stagedPaths.has(`docs/${p.rel}`);
-    if (!walks.length && !staged) return;
-    const old = staged ? readGit(root, ['show', `HEAD:docs/${p.rel}`]) : null;
-    const oldDoc = old ? parse(old, { path: p.file }) : null;
+  /** The staged pin comparison of one page, driven by Git's staged paths, not by the worktree. */
+  function checkStagedPins(rel: string, file: string) {
+    if (!stagedPaths.has(`${prefix}/${rel}`)) return;
+    const old = readGit(root, ['show', `HEAD:${prefix}/${rel}`]);
+    const oldDoc = old ? parse(old, { path: file }) : null;
     const oldWalks = oldDoc ? blocksOf(oldDoc.blocks).filter((b): b is CodeWalkBlock => b.type === 'codewalk') : [];
-    const stagedText = staged ? readGit(root, ['show', `:docs/${p.rel}`]) : null;
-    const stagedDoc = stagedText ? parse(stagedText, { path: p.file }) : null;
+    const stagedText = readGit(root, ['show', `:${prefix}/${rel}`]);
+    const stagedDoc = stagedText ? parse(stagedText, { path: file }) : null;
     const stagedWalks = stagedDoc
       ? blocksOf(stagedDoc.blocks).filter((b): b is CodeWalkBlock => b.type === 'codewalk')
       : [];
+    // A step is matched to its earlier self by citation (repo, file, lines and note), not by its
+    // position, so reordering steps is not a revision. Equal citations pair in order of appearance.
+    type Step = CodeWalkBlock['steps'][number];
+    const cite = (s: Step) => JSON.stringify([s.repo, s.file, s.lines ?? null, inlineText(s.note)]);
+    const earlier = new Map<string, Step[]>();
+    for (const w of oldWalks)
+      for (const s of w.steps) {
+        const k = cite(s);
+        earlier.set(k, [...(earlier.get(k) ?? []), s]);
+      }
+    const seen = new Map<string, number>();
     // Immutable pin comparisons use the two committed inputs, independent of unstaged edits.
-    stagedWalks.forEach((b, wi) =>
-      b.steps.forEach((s, si) => {
+    stagedWalks.forEach(b =>
+      b.steps.forEach(s => {
+        const k = cite(s);
+        const n = seen.get(k) ?? 0;
+        seen.set(k, n + 1);
         if (s.repo !== self || !s.lines) return;
         const pin = (stagedDoc!.frontMatter.pins as any)?.[s.repo];
         const was = (oldDoc?.frontMatter.pins as any)?.[s.repo];
-        const prev = oldWalks[wi]?.steps[si];
-        if (
-          !pin ||
-          !was ||
-          pin === was ||
-          !prev ||
-          JSON.stringify(prev.lines) !== JSON.stringify(s.lines) ||
-          inlineText(prev.note) !== inlineText(s.note)
-        )
-          return;
+        const prev = earlier.get(k)?.[n];
+        if (!pin || !was || pin === was || !prev) return;
         const range = (text: string | null) =>
           text
             ?.replace(/\n$/, '')
@@ -199,7 +206,7 @@ export function checkCode(
         if (range(read(prev.file, was)) !== range(read(s.file, pin)))
           issue(
             issues,
-            p.file,
+            file,
             'code walk ranges',
             `${s.file}: staged pin moved and cited lines changed without updating range or note`,
             'error',
@@ -207,8 +214,12 @@ export function checkCode(
           );
       }),
     );
-    walks.forEach((b, wi) =>
-      b.steps.forEach((s, si) => {
+  }
+  function checkWalks(p: Page) {
+    const walks = blocksOf(p.doc.blocks).filter((b): b is CodeWalkBlock => b.type === 'codewalk');
+    checkStagedPins(p.rel, p.file);
+    walks.forEach(b =>
+      b.steps.forEach(s => {
         const pin = p.fm.pins?.[s.repo];
         const foreign = s.repo && s.repo !== self;
         if (foreign) {
@@ -260,6 +271,19 @@ export function checkCode(
         }
       }),
     );
+  }
+  // A page whose staged pin update is still in the index but is gone from the worktree is checked
+  // from Git's staged paths alone.
+  const loaded = new Set(pages.map(p => p.rel));
+  for (const path of stagedPaths) {
+    if (!path.startsWith(`${prefix}/`) || !path.endsWith('.md')) continue;
+    const rel = path.slice(prefix.length + 1);
+    if (loaded.has(rel)) continue;
+    try {
+      checkStagedPins(rel, join(docs, rel));
+    } catch {
+      /* a page the parser cannot read is refused by the page checks, not here */
+    }
   }
   const tracked = readGit(root, ['ls-files', '-co', '--exclude-standard', '-z']);
   const files =

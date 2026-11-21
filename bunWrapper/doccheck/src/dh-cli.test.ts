@@ -117,6 +117,40 @@ test('json hydrates parser supplied code ranges from a host checkout', () => {
   expect(walk.steps[1].code).toBe('const two = 2;');
 });
 
+test('json refuses a code link that leaves the checkout and reads nothing of its target', () => {
+  const root = tree();
+  writeFileSync(join(root, 'secret.txt'), 'top secret\n');
+  mkdirSync(join(root, 'demo'));
+  symlinkSync(join(root, 'secret.txt'), join(root, 'demo', 'link.ts'));
+  writeFileSync(join(root, 'demo', 'real.ts'), 'const one = 1;\n');
+  const doc = parse('```codewalk repo=demo\n@step link.ts#L1-L1\nRead.\n@step real.ts#L1-L1\nRead.\n```\n', {
+    path: 'docs/example.dh.md',
+  });
+  const walk: any = hydrate(doc, root).blocks.find(block => block.type === 'codewalk');
+  expect(walk.steps[0].error).toContain('leaves');
+  expect(JSON.stringify(walk)).not.toContain('top secret');
+  expect(walk.steps[1].code).toBe('const one = 1;');
+});
+
+test('json export refuses an output link before writing anything', () => {
+  const root = tree();
+  const source = join(root, 'docs', 'example.md');
+  writeFileSync(source, page);
+  mkdirSync(join(root, 'out'));
+  symlinkSync(source, join(root, 'out', 'example.json'));
+  expect(main(['json', join(root, 'docs'), '--out', join(root, 'out')])).toBe(1);
+  expect(readFileSync(source, 'utf8')).toBe(page);
+  // a link out of the folder, and one that does not exist yet, are refused too
+  rmSync(join(root, 'out', 'example.json'));
+  writeFileSync(join(root, 'elsewhere.json'), 'untouched');
+  symlinkSync(join(root, 'elsewhere.json'), join(root, 'out', 'example.json'));
+  expect(main(['json', join(root, 'docs'), '--out', join(root, 'out')])).toBe(1);
+  expect(readFileSync(join(root, 'elsewhere.json'), 'utf8')).toBe('untouched');
+  rmSync(join(root, 'out', 'example.json'));
+  expect(main(['json', join(root, 'docs'), '--out', join(root, 'out')])).toBe(0);
+  expect(JSON.parse(readFileSync(join(root, 'out', 'example.json'), 'utf8')).ast).toBe(1);
+});
+
 test('tokens include ordinary human prose and usage rejects invalid commands', () => {
   const doc = parse(page, { path: 'example.md' });
   expect(humanText(doc)).toContain('A person reads this.');
