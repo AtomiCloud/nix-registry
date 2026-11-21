@@ -6,9 +6,16 @@ set -euo pipefail
 cd "$(dirname "$0")/../src"
 dh="${DH:-dh}"
 rc=0
+out="$(mktemp)"
+trap 'rm -f "$out"' EXIT
 while read -r page; do
   [ -f "$page.dherr" ] && continue
-  if ! diff <("$dh" json "$page" | jq .) "$page.dhjson" >/dev/null; then
+  # The pipeline's own status comes first: a dh that prints matching JSON and then fails is not a
+  # match (a process substitution inside diff would hide its exit status).
+  if ! "$dh" json "$page" | jq . >"$out"; then
+    echo "FAILED $page: dh or jq exited nonzero"
+    rc=1
+  elif ! diff "$out" "$page.dhjson" >/dev/null; then
     echo "STALE $page: run tests/record-dh.sh"
     rc=1
   fi
