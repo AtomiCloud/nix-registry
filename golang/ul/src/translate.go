@@ -52,14 +52,14 @@ func (l *loaded) translationProblems(f *Final, pages []*page, uses map[string]*p
 				case term == "":
 					probs = append(probs, Problem{Code: "UL501", File: t.rel, Line: max(t.tr.line, 1),
 						Message: fmt.Sprintf("the source uses UL word %q (%s), which has no %s term in its translations field", u.fe.E.Word, u.fe.NS.Namespace, t.tr.lang)})
-				case !strings.Contains(text, strings.ToLower(term)):
+				case !hasTerm(text, strings.ToLower(term)):
 					probs = append(probs, Problem{Code: "UL502", File: t.rel, Line: max(t.tr.line, 1),
 						Message: fmt.Sprintf("the source uses UL word %q, but its fixed %s term %q never appears", u.fe.E.Word, t.tr.lang, term)})
 				}
 			case modeEnglish:
 				kept := false
 				for n := range u.names {
-					if strings.Contains(text, n) {
+					if hasEnglishName(text, n, u.fe) {
 						kept = true
 						break
 					}
@@ -72,4 +72,39 @@ func (l *loaded) translationProblems(f *Final, pages []*page, uses map[string]*p
 		}
 	}
 	return probs, nil
+}
+
+// hasTerm reports whether text holds term as a word of its own (not inside another word), or with
+// a plural ending: -s or -es.
+func hasTerm(text, term string) bool {
+	if term == "" {
+		return false
+	}
+	for i := 0; i < len(text); {
+		j := strings.Index(text[i:], term)
+		if j < 0 {
+			return false
+		}
+		a, b := i+j, i+j+len(term)
+		if a == 0 || !isWordRune(lastRune(text[:a])) {
+			if b >= len(text) || !isWordRune(firstRune(text[b:])) {
+				return true
+			}
+			for _, end := range []string{"s", "es"} {
+				if strings.HasPrefix(text[b:], end) && (b+len(end) >= len(text) || !isWordRune(firstRune(text[b+len(end):]))) {
+					return true
+				}
+			}
+		}
+		i = a + 1
+	}
+	return false
+}
+
+// hasEnglishName reports whether text keeps the English name the source used, as a word of its own
+// and with the plural endings English writes (the same rule that found the name in the source).
+func hasEnglishName(text, name string, fe *FEntry) bool {
+	t := &trie{}
+	t.insert(name, fe)
+	return len(t.scanSpans(text)) > 0
 }

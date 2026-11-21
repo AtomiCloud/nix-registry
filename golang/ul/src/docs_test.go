@@ -372,6 +372,10 @@ func TestTranslationTagRules(t *testing.T) {
 		if (code == 0) != want {
 			t.Errorf("tag %s: exit %d (accepted %v, want %v)\n%s", tag, code, code == 0, want, out)
 		}
+		// A refused tag is refused by the tag rule (UL110, exit 1), not by some other error.
+		if !want && (code != 1 || !strings.Contains(out, "UL110")) {
+			t.Errorf("tag %s: exit %d, want exit 1 with UL110\n%s", tag, code, out)
+		}
 	}
 	dir := t.TempDir()
 	writeTree(t, dir, map[string]string{"UL.yaml": "namespace: example.org/a/b\npremise: P\nlanguage:\n  Oven:\n    desc: A box.\n    translations:\n      es: horno\n      ES: forno\n"})
@@ -517,5 +521,138 @@ func TestPluralEnglishModeKeepsName(t *testing.T) {
 	rewrite(t, dir, clnSrc, "> A conflict resolver settles two recipes. Several conflict resolvers can take part.", "> Several conflict resolvers can take part.")
 	if code, out, errs := docsCheck(t, dir, "--translations", "english"); code != 0 {
 		t.Fatalf("exit %d\n%s%s", code, out, errs)
+	}
+}
+
+// A page that is not under docs/i18n/ is read only when it has namespaces: a translation field
+// alone does not admit it, and it is not a source for other translations.
+func TestTranslationFieldAdmitsOnlyI18nPages(t *testing.T) {
+	dir := cleanWith(t, map[string]string{
+		"docs/a.md": "---\ntitle: A\ntranslation:\n  lang: es\n  source: b.md\n---\n\nThe Oven.\n",
+	})
+	if code, out, errs := docsCheck(t, dir); code != 0 {
+		t.Fatalf("a regular page with only a translation field is not read: exit %d\n%s%s", code, out, errs)
+	}
+	writeTree(t, dir, map[string]string{
+		"docs/i18n/es/c.md": "---\ntitle: C\ntranslation:\n  lang: es\n  source: ../../a.md\n---\n\nEl horno.\n",
+	})
+	if code, out, _ := docsCheck(t, dir); code != 1 || !strings.Contains(out, "docs/i18n/es/c.md:3: UL503") {
+		t.Fatalf("a page without namespaces is not a translation source: exit %d\n%s", code, out)
+	}
+}
+
+// Two pages that write the concept the same way are two pages for one word (UL409); one page
+// that lists a namespace twice is one page.
+func TestConceptSameSpellingTwoPages(t *testing.T) {
+	dir := cleanWith(t, map[string]string{
+		"docs/a.md": "---\ntitle: A\nconcept: Frying pan\n" + kitchenNSLine + "\n---\n\nThe Frying pan.\n",
+	})
+	if code, out, _ := docsCheck(t, dir); code != 1 || strings.Count(out, "UL409") != 1 || !strings.Contains(out, "one page explains one word") {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+	dir = cleanWith(t, map[string]string{
+		"docs/c.md": "---\ntitle: C\nconcept: Oven\nnamespaces: [example.org/cooking/kitchen, example.org/cooking/kitchen]\n---\n\nThe Oven.\n",
+	})
+	if code, out, errs := docsCheck(t, dir); code != 0 {
+		t.Fatalf("a namespace listed twice on one page: exit %d\n%s%s", code, out, errs)
+	}
+}
+
+// A hit in a folded overview intro names the line it is written on.
+func TestOverviewFoldedIntroLine(t *testing.T) {
+	for _, head := range []string{">", ">-", ">+"} {
+		dir := cleanWith(t, map[string]string{"docs/domain/kitchen/overview.yaml": "intro: " + head + "\n  First line.\n  A griddle here.\n"})
+		code, out, _ := docsCheck(t, dir)
+		if code != 1 || !strings.Contains(out, `docs/domain/kitchen/overview.yaml:3: UL403 avoided word "griddle"`) {
+			t.Fatalf("%s: exit %d\n%s", head, code, out)
+		}
+	}
+}
+
+// An empty front matter is empty: a namespaces field in the body below it does not admit the page.
+func TestEmptyFrontMatterIsNotRead(t *testing.T) {
+	dir := cleanWith(t, map[string]string{
+		"docs/e.md": "---\n---\nnamespaces: [example.org/cooking/kitchen]\n---\nA griddle.\n",
+	})
+	if code, out, errs := docsCheck(t, dir); code != 0 {
+		t.Fatalf("exit %d\n%s%s", code, out, errs)
+	}
+}
+
+// An escaped ampersand is the text &#105;, so it hides no word; an unescaped reference is a letter.
+func TestEscapedAmpersandHidesNoWord(t *testing.T) {
+	dir := cleanWith(t, map[string]string{"docs/e.md": "---\ntitle: E\n" + kitchenNSLine + "\n---\n\nThe Frying pan, not a gr\\&#105;ddle.\n"})
+	if code, out, errs := docsCheck(t, dir); code != 0 {
+		t.Fatalf("exit %d\n%s%s", code, out, errs)
+	}
+	rewrite(t, dir, "docs/e.md", "gr\\&#105;ddle", "gr&#105;ddle")
+	if code, out, _ := docsCheck(t, dir); code != 1 || !strings.Contains(out, "docs/e.md:6: UL403") {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+}
+
+// -s is not the plural of a name that ends in a consonant and y (Citys), and a plural of a longer
+// name beats the avoided shorter one at the same end (Axes is Axe, not Ax).
+func TestPluralConsonantYAndAvoidTie(t *testing.T) {
+	extra := "namespace: example.org/cooking/extra\npremise: Made-up example; plurals\nlanguage:\n  City:\n    desc: A large town.\n  Axe:\n    desc: A chopping tool.\n    avoid: [Ax]\n"
+	dir := cleanWith(t, map[string]string{
+		"docs/domain/extra/UL.yaml": extra,
+		"docs/a.md":                 "---\ntitle: A\nnamespaces: [example.org/cooking/kitchen]\n---\n\nCitys and Cities.\n",
+	})
+	code, out, errs := docsCheck(t, dir)
+	if code != 1 || strings.Count(out, "\n") != 1 || !strings.Contains(out, `docs/a.md:6: UL402 "Cities" is a UL word of example.org/cooking/extra`) {
+		t.Fatalf("Citys is no plural: exit %d\n%s%s", code, out, errs)
+	}
+	rewrite(t, dir, "docs/a.md", "namespaces: [example.org/cooking/kitchen]\n---\n\nCitys and Cities.", "namespaces: [example.org/cooking/extra]\n---\n\nAxes and an Axe.")
+	if code, out, errs := docsCheck(t, dir); code != 0 || out != "" {
+		t.Fatalf("Axes is the plural of Axe: exit %d\n%s%s", code, out, errs)
+	}
+	rewrite(t, dir, "docs/a.md", "Axes and an Axe.", "An Ax.")
+	if code, out, _ := docsCheck(t, dir); code != 1 || !strings.Contains(out, `UL403 avoided word "Ax"; write "Axe"`) {
+		t.Fatalf("the bare Ax is still avoided: exit %d\n%s", code, out)
+	}
+}
+
+// A translation holds the fixed term as a word of its own, with a plural ending allowed: not
+// inside another word.
+func TestFixedTermIsAWord(t *testing.T) {
+	for _, c := range []struct {
+		body string
+		ok   bool
+	}{
+		{"Un horno.", true}, {"Los hornos.", true}, {"El HORNO.", true},
+		{"Un hornofrito.", false}, {"Un ahorno.", false},
+	} {
+		dir := cleanWith(t, map[string]string{
+			"docs/o.md":         "---\ntitle: O\n" + kitchenNSLine + "\n---\n\nThe Oven.\n",
+			"docs/i18n/es/o.md": "---\ntitle: O\ntranslation:\n  lang: es\n  source: ../../o.md\n---\n\n" + c.body + "\n",
+		})
+		code, out, errs := docsCheck(t, dir, "--translations", "fixed")
+		if c.ok && code != 0 || !c.ok && (code != 1 || !strings.Contains(out, "docs/i18n/es/o.md:3: UL502")) {
+			t.Errorf("%q: exit %d\n%s%s", c.body, code, out, errs)
+		}
+	}
+}
+
+// English mode: the English word is kept as a word of its own, in the plural English writes
+// (Cities for City), not inside another word (joven for Oven).
+func TestEnglishNameIsAWord(t *testing.T) {
+	for _, c := range []struct {
+		src, body string
+		ok        bool
+	}{
+		{"The Oven.", "Un Oven.", true}, {"The Ovens.", "Dos Oven.", true}, {"The Oven.", "Un joven.", false},
+		{"Big Cities.", "Grandes Cities.", true}, {"A City.", "Una City.", true}, {"A City.", "Una Cities.", true},
+	} {
+		dir := cleanWith(t, map[string]string{
+			"docs/domain/extra/UL.yaml": "namespace: example.org/cooking/extra\npremise: Made-up example; plurals\nlanguage:\n  City:\n    desc: A large town.\n",
+			"docs/o.md":                 "---\ntitle: O\nnamespaces: [example.org/cooking/kitchen, example.org/cooking/extra]\n---\n\n" + c.src + "\n",
+			"docs/i18n/es/o.md":         "---\ntitle: O\ntranslation:\n  lang: es\n  source: ../../o.md\n---\n\n" + c.body + "\n",
+		})
+		stripTranslations(t, dir) // English mode has no translations field
+		code, out, errs := docsCheck(t, dir, "--translations", "english")
+		if c.ok && code != 0 || !c.ok && (code != 1 || !strings.Contains(out, "docs/i18n/es/o.md:3: UL502")) {
+			t.Errorf("%q -> %q: exit %d\n%s%s", c.src, c.body, code, out, errs)
+		}
 	}
 }

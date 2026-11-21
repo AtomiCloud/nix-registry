@@ -30,12 +30,16 @@ func splitFrontMatter(src []byte) (fm []byte, body []byte, bodyLine int) {
 	rest := s[4:]
 	end := bytes.Index(rest, []byte("\n---\n"))
 	tail := 5
-	if end < 0 {
-		if bytes.HasSuffix(rest, []byte("\n---")) {
-			end, tail = len(rest)-4, 4
-		} else {
-			return nil, s, 0
-		}
+	switch {
+	case bytes.HasPrefix(rest, []byte("---\n")):
+		end, tail = 0, 4 // an empty front matter: the closing --- is the first line of rest
+	case bytes.Equal(rest, []byte("---")):
+		end, tail = 0, 3
+	case end >= 0:
+	case bytes.HasSuffix(rest, []byte("\n---")):
+		end, tail = len(rest)-4, 4
+	default:
+		return nil, s, 0
 	}
 	fm = rest[:end]
 	body = rest[end+tail:]
@@ -116,10 +120,20 @@ func inlines(n ast.Node, src []byte, lineOf func(int) int, sb *segBuilder) {
 	}
 }
 
-var mdEscape = regexp.MustCompile("\\\\([!-/:-@\\[-`{-~])")
+// mdEscape finds a backslash escape or a character reference (&name; &#N; &#xH;), whichever starts
+// first, so an escaped ampersand is read before the reference it would begin.
+var mdEscape = regexp.MustCompile("\\\\([!-/:-@\\[-`{-~])|&(?:#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});")
 
-// unescapeMd is the text a reader sees: backslash escapes and character entities resolved.
-func unescapeMd(s string) string { return html.UnescapeString(mdEscape.ReplaceAllString(s, "$1")) }
+// unescapeMd is the text a reader sees: backslash escapes and character references resolved in one
+// pass (CommonMark: \&#105; is the text &#105;, not an i).
+func unescapeMd(s string) string {
+	return mdEscape.ReplaceAllStringFunc(s, func(m string) string {
+		if m[0] == '\\' {
+			return m[1:]
+		}
+		return html.UnescapeString(m)
+	})
+}
 
 // normalizeNewlines turns CRLF and a lone CR into LF, as dh does before it reads a page.
 func normalizeNewlines(b []byte) []byte {

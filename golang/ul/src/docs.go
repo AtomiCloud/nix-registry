@@ -36,7 +36,7 @@ type trInfo struct {
 
 // readFrontMatter reads the three fields ul needs. ok is false for a page whose front matter is
 // missing, is not a mapping, or has no `namespaces` (those are doccheck's to refuse).
-func readFrontMatter(fm []byte) (p page, ok bool) {
+func readFrontMatter(fm []byte, i18n bool) (p page, ok bool) {
 	if len(fm) == 0 {
 		return p, false
 	}
@@ -77,8 +77,8 @@ func readFrontMatter(fm []byte) (p page, ok bool) {
 					}
 				}
 				p.tr = t
-				if t.lang != "" && t.source != "" {
-					ok = true // a translation is read for its source, with or without namespaces
+				if t.lang != "" && t.source != "" && i18n {
+					ok = true // a translation under docs/i18n/ is read for its source, with or without namespaces
 				}
 			}
 		}
@@ -104,7 +104,7 @@ func (l *loaded) loadPages() (pages []*page, probs []Problem, err error) {
 		}
 		fm, body, bodyLine := splitFrontMatter(data)
 		want[rel] = strings.ReplaceAll(string(normalizeNewlines(data)), "\x00", "\ufffd")
-		p, ok := readFrontMatter(fm)
+		p, ok := readFrontMatter(fm, i18n)
 		if !ok {
 			if len(fm) > 0 && strings.HasSuffix(rel, ".dh.md") && !frontMatterParses(fm) {
 				probe = append(probe, rel) // dh refuses it, with its line
@@ -267,7 +267,10 @@ func (l *loaded) docProblems(f *Final) (probs, flags []Problem, err error) {
 			for _, a := range avoid.scanSpans(s.Text) {
 				inside := false
 				for _, sp := range spans {
-					if sp.start <= a.start && a.end <= sp.end && (sp.end-sp.start > a.end-a.start || !sp.plural) {
+					// Equal spans: an exact name wins, and between two plurals the longer base name wins
+					// (Axes is Axe plus s, not the avoided Ax plus es).
+					covers := sp.end-sp.start > a.end-a.start || !sp.plural || (sp.end-sp.start == a.end-a.start && len(sp.name) >= len(a.name))
+					if sp.start <= a.start && a.end <= sp.end && covers {
 						inside = true
 						break
 					}
@@ -360,6 +363,9 @@ func (l *loaded) conceptProblems(f *Final, pages []*page) []Problem {
 		// Every listed namespace that has the name counts, so the order of the list changes nothing.
 		for _, ns := range p.namespaces {
 			if fe := f.nsNames[ns.Name][fold(p.concept)]; fe != nil {
+				if hs := byEntry[fe.ID]; len(hs) > 0 && hs[len(hs)-1].p == p {
+					continue // a namespace listed twice counts the page once
+				}
 				byEntry[fe.ID] = append(byEntry[fe.ID], holder{p, fold(p.concept)})
 			}
 		}
@@ -373,7 +379,7 @@ func (l *loaded) conceptProblems(f *Final, pages []*page) []Problem {
 		hs := byEntry[id]
 		first := hs[0]
 		for _, h := range hs[1:] {
-			if h.fold != first.fold {
+			if h.p != first.p { // two pages, whatever spelling they write the concept in
 				probs = append(probs, Problem{Code: "UL409", File: h.p.rel, Line: max(h.p.conceptLine, 1),
 					Message: fmt.Sprintf("concept %q names the same UL word as concept %q of %s (%s); one page explains one word", h.p.concept, first.p.concept, first.p.rel, f.byID[id].E.Word)})
 			}
@@ -409,7 +415,7 @@ func (l *loaded) overviewPages(f *Final) []*page {
 		}
 		for i := 0; i+1 < len(m.Content); i += 2 {
 			if k, v := resolveNode(m.Content[i]), resolveNode(m.Content[i+1]); k.Value == "intro" && v.Kind == yaml.ScalarNode {
-				p.segs = append(p.segs, introSegs(v)...)
+				p.segs = append(p.segs, introSegs(v, m.Content[i], data)...)
 			}
 		}
 		out = append(out, p)
@@ -417,18 +423,35 @@ func (l *loaded) overviewPages(f *Final) []*page {
 	return out
 }
 
-// introSegs is the text of a scalar, one run per source line of a literal block, so a hit names
-// its own line.
-func introSegs(v *yaml.Node) []Seg {
-	if v.Style&yaml.LiteralStyle == 0 {
-		return []Seg{plainSeg(v.Value, v.Line)}
-	}
+// introSegs is the text of a scalar, one run per source line of a literal or folded block, so a
+// hit names its own line. key is the node of the scalar's key and data the file.
+func introSegs(v, key *yaml.Node, data []byte) []Seg {
 	var sb segBuilder
-	for i, l := range strings.Split(v.Value, "\n") {
-		if strings.TrimSpace(l) != "" {
-			sb.space()
-			sb.add(l, v.Line+1+i)
+	switch {
+	case v.Style&yaml.LiteralStyle != 0:
+		for i, l := range strings.Split(v.Value, "\n") {
+			if strings.TrimSpace(l) != "" {
+				sb.space()
+				sb.add(l, v.Line+1+i)
+			}
 		}
+	case v.Style&yaml.FoldedStyle != 0:
+		// A folded value joins its lines, so the lines are read from the file: those after the header
+		// that are blank or indented deeper than the key.
+		src := strings.Split(string(normalizeNewlines(data)), "\n")
+		for l := v.Line + 1; l <= len(src); l++ {
+			line := src[l-1]
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			if len(line)-len(strings.TrimLeft(line, " ")) < key.Column {
+				break
+			}
+			sb.space()
+			sb.add(strings.TrimSpace(line), l)
+		}
+	default:
+		return []Seg{plainSeg(v.Value, v.Line)}
 	}
 	if s, ok := sb.seg(); ok {
 		return []Seg{s}

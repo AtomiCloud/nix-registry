@@ -30,6 +30,11 @@ func mermaidSegs(src string, first int) []Seg {
 				if kind == "" {
 					continue
 				}
+				// a pie writes its title on the header: pie showData title Pets
+				if m := pieTitleRe.FindStringSubmatch(t); m != nil {
+					add(strings.Trim(strings.TrimSpace(m[1]), "\""), line)
+					continue
+				}
 			}
 			if (kind == "flow" && skipFlow.MatchString(t)) || clickRe.MatchString(t) {
 				continue // styling and click directives hold no label
@@ -37,6 +42,13 @@ func mermaidSegs(src string, first int) []Seg {
 			if kind == "seq" && seqSkip.MatchString(t) {
 				continue
 			}
+			// node metadata, A@{ img: "https://x.test/a.png", label: "Cookware" }: only the label is read
+			t = nodeMetaRe.ReplaceAllStringFunc(t, func(block string) string {
+				for _, v := range metaLabels(block) {
+					add(v, line)
+				}
+				return " "
+			})
 			// quoted labels: "text"
 			rest := t
 			for _, m := range quotedRe.FindAllStringSubmatch(t, -1) {
@@ -118,6 +130,8 @@ func diagramKind(first string) string {
 
 var (
 	quotedRe      = regexp.MustCompile(`"([^"]*)"`)
+	pieTitleRe    = regexp.MustCompile(`(?i)^pie\b.*?\btitle\s+(.+)$`)
+	nodeMetaRe    = regexp.MustCompile(`@\{[^}]*\}`)
 	titleRe       = regexp.MustCompile(`(?i)^\s*(title|section|accTitle|accDescr)\s*:?\s+(.+)$`)
 	clickRe       = regexp.MustCompile(`(?i)^\s*click\b`)
 	skipFlow      = regexp.MustCompile(`(?i)^\s*(classDef|class|style|linkStyle|click|direction|end)\b`)
@@ -138,6 +152,31 @@ var (
 		regexp.MustCompile(`==\s+([^=>|]+?)\s+==>`),
 	}
 )
+
+// metaLabels is the label of a node's @{ ... } metadata: the other keys (img, icon, shape, ...) hold
+// URLs and names, never text a reader reads.
+func metaLabels(block string) []string {
+	body := strings.TrimSuffix(strings.TrimPrefix(block, "@{"), "}")
+	var out []string
+	inQuote, start := false, 0
+	pair := func(s string) {
+		k, v, ok := strings.Cut(s, ":")
+		if ok && strings.EqualFold(strings.TrimSpace(k), "label") {
+			out = append(out, strings.Trim(strings.TrimSpace(v), "\"'"))
+		}
+	}
+	for i, r := range body {
+		switch {
+		case r == '"':
+			inQuote = !inQuote
+		case r == ',' && !inQuote:
+			pair(body[start:i])
+			start = i + 1
+		}
+	}
+	pair(body[start:])
+	return out
+}
 
 // splitStatements splits a line at the semicolons outside double quotes: mermaid allows several
 // statements on one line.

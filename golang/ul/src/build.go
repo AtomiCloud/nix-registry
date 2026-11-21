@@ -412,7 +412,9 @@ func (t *trie) scanSpans(s string) []span {
 					take(j+3, string(rs[i:j+1]), true, n.ents)
 				}
 			default:
-				if hasAt(j+1, "s") {
+				// a name that ends in a consonant and y has -ies, never -s (Cities, not Citys)
+				consonantY := last == 'y' && j > i && !isVowel(rs[j-1])
+				if !consonantY && hasAt(j+1, "s") {
 					take(j+2, string(rs[i:j+1]), true, n.ents)
 				}
 			}
