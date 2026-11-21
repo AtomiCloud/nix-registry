@@ -149,10 +149,13 @@ func LoadInRoot(dir, root string) (*File, error) {
 func loadInRoot(dir, root string) (*File, error) {
 	path := filepath.Join(dir, FileName)
 	b, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
+	if os.IsNotExist(err) && absent(path) {
 		// A feature folder (observability/<feature>) has no obs.yaml of its own: the nearest enclosing
 		// observability folder's is read instead (File.Inherited says so). None: the built-in values.
-		enc := enclosingInRoot(dir, root)
+		enc, eerr := enclosingChecked(dir, root)
+		if eerr != nil {
+			return nil, eerr
+		}
 		if enc == "" {
 			return nil, nil
 		}
@@ -182,22 +185,32 @@ func enclosing(dir string) string {
 }
 
 func enclosingInRoot(dir, root string) string {
+	p, _ := enclosingChecked(dir, root)
+	return p
+}
+
+func absent(file string) bool {
+	_, err := os.Lstat(file)
+	return os.IsNotExist(err)
+}
+
+func enclosingChecked(dir, root string) (string, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
-		return ""
+		return "", nil
 	}
 	if root != "" {
 		root, err = filepath.Abs(root)
 		if err != nil {
-			return ""
+			return "", nil
 		}
 		root, err = filepath.EvalSymlinks(root)
 		if err != nil {
-			return ""
+			return "", nil
 		}
 		abs, err = filepath.EvalSymlinks(abs)
 		if err != nil || !insideRepo(abs, root) {
-			return ""
+			return "", nil
 		}
 	} else {
 		for d := abs; ; d = filepath.Dir(d) {
@@ -206,7 +219,7 @@ func enclosingInRoot(dir, root string) string {
 				break
 			}
 			if filepath.Dir(d) == d {
-				return "" // no Git repository: no folder above is this repository's
+				return "", nil // no Git repository: no folder above is this repository's
 			}
 		}
 	}
@@ -218,23 +231,30 @@ func enclosingInRoot(dir, root string) string {
 			continue
 		}
 		p := filepath.Join(d, FileName)
-		if st, err := os.Stat(p); err != nil || !st.Mode().IsRegular() {
+		st, err := os.Stat(p)
+		if err != nil {
+			if os.IsNotExist(err) && absent(p) {
+				continue
+			}
+			return "", err
+		}
+		if !st.Mode().IsRegular() {
 			continue
 		}
 		if !insideRepo(p, root) {
 			continue // a symlink to a file outside the repository is not this repository's obs.yaml
 		}
 		if filepath.IsAbs(dir) {
-			return p
+			return p, nil
 		}
 		if wd, err := os.Getwd(); err == nil {
 			if rel, err := filepath.Rel(wd, p); err == nil {
-				return rel
+				return rel, nil
 			}
 		}
-		return p
+		return p, nil
 	}
-	return ""
+	return "", nil
 }
 
 // Parse parses the bytes of an obs.yaml read from path.

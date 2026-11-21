@@ -1067,6 +1067,7 @@ table, its structural checks, and the "no severity field" rule):
 | `flat-alert-yaml`, `flat-alert-documents`      | a file that reads as a tier file (top-level tier keys, no `kind`) is not valid YAML, or is followed by another document (the first document decides: a tier file followed by a ConfigMap is a tier file with trailing documents); `obs live incidents` stops on it (exit 2) |
 | `flat-alert-panel`                         | `panel` is present but not an integer (`panel: null`, an empty `panel:`, a string, a float or a bool); leave the key out for none |
 | `flat-alert-identity`                      | platform or service unknown (above)                                                                      |
+| `flat-alert-uid`                           | the built uid contains a character outside `A-Z`, `a-z`, `0-9`, `_`, `-` (the finding names the uid and slug) |
 | `flat-alert-uid-length`                    | the uid is over 40 characters (Grafana's limit)                                                          |
 
 `obs live incidents` also treats the sibling `alerts/<slug>/runbook.md` as the flat rule's runbook (no `alert_without_runbook`),
@@ -1098,10 +1099,10 @@ obs test --all
 Generation runs once per discovered contract folder, with one summary line naming that contract.
 `obs check --all` and `obs test --all` also visit observability folders that hold `alerts/` or
 `dashboards/` without a contract, so shared service dashboards and alerts participate in the CI gate.
-Their summary names the folder. At least one contract is still required.
+Their summary names the folder. At least one contract is required except for a `gen --all` run that only reports orphaned files.
 Failures retain their diagnostics and do not prevent the remaining folders from running. Exit 0 means
 every folder passed, 1 means a check failed, and 2 means an input or enumeration error. No contracts
-found is an error, never a successful zero-check run. The CI static-check recipe is `obs check --all`.
+found and no orphans reported is an error, never a successful zero-check run. The CI static-check recipe is `obs check --all`.
 Run `--all` from the repository root, including inside a Docker context or Git-less export. The start
 folder is the current directory unless `--dir` is explicitly supplied; the default `observability/`
 path cannot select a nested repository or submodule, which remains a boundary. Outside
@@ -1110,10 +1111,26 @@ header, identity calculation and enclosing `observability/obs.yaml` lookup, with
 from each module. Explicit `--dir` chooses the repository/export root. Discovery and each folder's loads share the fixture/dependency, Git-ignore,
 nested-repository and chart-copy skips: ignored contract files, alert folders and dashboards do not
 become candidates or get read through a shared folder. Existing options are forwarded to each run.
+Payload folders (`alerts/`, `dashboards/`) and their descendants are never feature candidates,
+including a flat alert slug named `dashboards`. Symlinked `contract.yaml` files are followed when their
+regular target is inside the repository/export scope; dangling links, loops and links outside that
+scope are input errors (exit 2) naming the path. Eligible unreadable entries are errors after pruning,
+not absent configuration or payloads.
+Git-ignore filtering requires both Git and checkout metadata. A Git-less export must leave out ignored
+build and chart copies; any copies included in the export count and can produce findings such as `[metric-clash]`.
 Cross-contract metric-name, query and
 rule-uid checks use that same scope in `--all` mode, including a complete Git-less export. The existing
 single-folder commands keep their discovery behavior. Use separate `--dir` runs for
 `obs test --out`, `--steps` or `--recorded`: `--all` refuses a shared file export that would be overwritten.
+
+After renaming or deleting a feature, run `obs gen --all`, then delete the listed orphaned files before
+the application boots. Generation reports exact paths with `[gen-orphan]` and "remove this file yourself";
+it never deletes files. `gen --check --all` fails on these files. A file is reported only when it has a
+valid generated header and its owner is absent (`Lstat` reports ENOENT) under every plausible writing
+base: the generated file's Git root and every project-marker ancestor, including project-relative
+headers from before a Git import. Live owners outside discovery and unresolved owners are kept silently.
+`--lang` limits the report to selected language outputs (shared YAML artifacts still participate), and
+an invalid language is refused before any discovery or generation work.
 
 Every 0.5 command, flag and output stays. For 57 of the 58 cases in `tests/compat.sh` the output is byte for byte the 0.5 output (the one that changed is `query-static` `bad-flat-alert`, now `ok-flat-alert`: a valid flat file is no longer refused), and a repository with one contract (or one contract per `<app>/observability/`) prints what it printed in 0.5, unless one of the findings below applies. New:
 

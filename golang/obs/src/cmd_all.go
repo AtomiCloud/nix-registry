@@ -50,7 +50,7 @@ func runAll(cmd string, fs *flag.FlagSet, dir string, stdout, stderr io.Writer, 
 		fmt.Fprintf(stderr, "%s --all: %v\n", cmd, err)
 		return 2
 	}
-	if len(paths) == 0 {
+	if len(paths) == 0 && cmd != "obs gen" && cmd != "obs gen --check" {
 		fmt.Fprintf(stderr, "%s --all: no contracts found from %s\n", cmd, dir)
 		return 2
 	}
@@ -86,8 +86,8 @@ func runAll(cmd string, fs *flag.FlagSet, dir string, stdout, stderr io.Writer, 
 				result = rc
 			}
 			_, _ = stdout.Write(out.Bytes())
-			_, _ = stderr.Write(errb.Bytes())
 		}
+		_, _ = stderr.Write(errb.Bytes())
 		label := scope.Rel(folder) + "/"
 		for _, file := range paths {
 			if filepath.Dir(file) == folder {
@@ -97,12 +97,36 @@ func runAll(cmd string, fs *flag.FlagSet, dir string, stdout, stderr io.Writer, 
 		}
 		fmt.Fprintf(stdout, "%s --all: %s: %s\n", cmd, label, status)
 	}
+	reported := 0
+	if cmd == "obs gen" || cmd == "obs gen --check" {
+		orphans, err := gen.MissingOwners(scope, paths, fs.Lookup("lang").Value.String())
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 2
+		}
+		checking := fs.Lookup("check").Value.String() == "true"
+		reported = len(orphans)
+		for _, orphan := range orphans {
+			if checking {
+				fmt.Fprintf(stdout, "FAIL %s: [gen-orphan] generated file names missing contract %s; remove this file yourself\n", scope.Rel(orphan.File), orphan.Contract)
+				if result < 1 {
+					result = 1
+				}
+			} else {
+				fmt.Fprintf(stdout, "%s: [gen-orphan] generated file names missing contract %s; remove this file yourself\n", scope.Rel(orphan.File), orphan.Contract)
+			}
+		}
+	}
+	if len(paths) == 0 && reported == 0 {
+		fmt.Fprintf(stderr, "%s --all: no contracts found from %s\n", cmd, dir)
+		return 2
+	}
 	return result
 }
 
 func loadScopedFiles(dir string, scope *contract.Scope) (*files.Set, error) {
 	if scope == nil {
-		return files.Load(dir)
+		return files.LoadSkip(dir, contract.PayloadSkip(dir, nil))
 	}
 	return files.LoadScoped(dir, func(file string) bool { return scope.Skips(dir, file) }, scope.Root)
 }

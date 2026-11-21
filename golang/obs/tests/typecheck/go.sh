@@ -19,6 +19,10 @@ printf 'module example.com/app\n\ngo 1.24\n' >"$work/go.mod"
 obs_setup_stub go "$work"
 cd "$work"
 fail=0
+if out=$(cd interfaces-stub && "$GO" test ./... 2>&1); then echo "PASS stub repeat treats nil and empty maps equally"; else
+  echo "FAIL stub repeat: $out"
+  fail=1
+fi
 cp -f "$g/good.go.txt" main.go
 if out=$("$GO" vet ./... 2>&1) && out=$("$GO" run . 2>&1) && grep -q 'stripe checkout.charge.failed error' <<<"$out"; then echo "PASS good.go builds, runs and refuses shard 16"; else
   echo "FAIL good.go: $out"

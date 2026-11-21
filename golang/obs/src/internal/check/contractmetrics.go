@@ -119,10 +119,12 @@ func (m matcherVars) isVar(lf metricsql.LabelFilter) bool {
 }
 
 // labelScope is what a subtree's output series may carry: the labels of the contract metrics it
-// selects, plus the labels its label functions made. judged is false when it selects no contract metric.
+// selects, plus labels its label functions made. External branches keep an open
+// label scope even when a union also selects a declared metric.
 type labelScope struct {
-	labels map[string]bool
-	judged bool
+	labels  map[string]bool
+	judged  bool
+	unknown bool
 }
 
 func (s *labelScope) merge(o labelScope) {
@@ -133,6 +135,7 @@ func (s *labelScope) merge(o labelScope) {
 		s.labels[l] = true
 	}
 	s.judged = s.judged || o.judged
+	s.unknown = s.unknown || o.unknown
 }
 
 func (s *labelScope) add(l string) {
@@ -206,10 +209,14 @@ func (mc *metricChecker) walk(e metricsql.Expr) labelScope {
 		}
 		mc.grouping(t.Modifier.Args, sc)
 	case *metricsql.BinaryOpExpr:
-		sc.merge(mc.walk(t.Left))
-		sc.merge(mc.walk(t.Right))
+		left, right := mc.walk(t.Left), mc.walk(t.Right)
+		sc.merge(left)
+		sc.merge(right)
 		mc.grouping(t.GroupModifier.Args, sc)
 		mc.grouping(t.JoinModifier.Args, sc)
+		if strings.EqualFold(t.Op, "unless") {
+			return left
+		}
 	}
 	return sc
 }
@@ -225,7 +232,7 @@ func (mc *metricChecker) labelFunc(fe *metricsql.FuncExpr, sc *labelScope) {
 		input = mc.scopeOf(fe.Args[0])
 	}
 	for _, l := range reads {
-		if input.judged && !input.labels[l] {
+		if input.judged && !input.unknown && !input.labels[l] {
 			mc.r.add(Fail, mc.q.File, mc.q.Where, "contract-undeclared-label",
 				"%s reads label %q, which the series it takes do not have in the contract%s", fe.Name, l, labelHint(l, input.labels))
 		}
@@ -243,7 +250,7 @@ func (mc *metricChecker) scopeOf(e metricsql.Expr) labelScope {
 
 // grouping judges `by (...)`, `without (...)`, `on (...)`, `ignoring (...)`, `group_left (...)`.
 func (mc *metricChecker) grouping(args []string, sc labelScope) {
-	if !sc.judged {
+	if !sc.judged || sc.unknown {
 		return
 	}
 	for _, a := range args {
@@ -284,6 +291,9 @@ func (mc *metricChecker) selector(me *metricsql.MetricExpr) labelScope {
 		case name != "":
 			sm, ok := mc.c.Lookup(name)
 			if !ok {
+				if mc.repo != nil {
+					sc.unknown = true
+				}
 				if !mc.seen[name] {
 					mc.seen[name] = true
 					if mc.repo != nil {
@@ -313,6 +323,7 @@ func (mc *metricChecker) selector(me *metricsql.MetricExpr) labelScope {
 				}
 			}
 			if len(matched) == 0 && mc.repo != nil {
+				sc.unknown = true
 				if !mc.seen["~"+nameRe] {
 					mc.seen["~"+nameRe] = true
 					mc.r.add(Note, mc.q.File, mc.q.Where, "contract-name-unknown",

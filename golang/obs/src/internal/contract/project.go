@@ -86,6 +86,26 @@ func ProjectRoot(dir string) string {
 	return projectRoot(dir, home)
 }
 
+// ProjectMarkerRoots lists every actual project marker above dir, including
+// markers from before a source export was imported into a Git repository.
+func ProjectMarkerRoots(dir string) []string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return nil
+	}
+	home := HomeBoundary(abs)
+	var roots []string
+	for folder := abs; ; folder = filepath.Dir(folder) {
+		if projectMarker(folder) {
+			roots = append(roots, folder)
+		}
+		if folder == home || filepath.Dir(folder) == folder {
+			break
+		}
+	}
+	return roots
+}
+
 func projectRoot(dir, home string) string {
 	if home != "" {
 		home = filepath.Clean(home)
@@ -143,10 +163,10 @@ func projectMarker(dir string) bool {
 			return true
 		}
 	}
-	for _, pattern := range []string{"*.sln", "*.slnx", "*.csproj"} {
-		matches, _ := filepath.Glob(filepath.Join(dir, pattern))
-		for _, file := range matches {
-			if st, err := os.Stat(file); err == nil && st.Mode().IsRegular() {
+	entries, _ := os.ReadDir(dir)
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".sln") || strings.HasSuffix(entry.Name(), ".slnx") || strings.HasSuffix(entry.Name(), ".csproj") {
+			if st, err := os.Stat(filepath.Join(dir, entry.Name())); err == nil && st.Mode().IsRegular() {
 				return true
 			}
 		}

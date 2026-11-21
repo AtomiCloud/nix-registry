@@ -51,21 +51,9 @@ func runGenScope(args []string, stdout, stderr io.Writer, scope *contract.Scope)
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if *all {
-		return runAll(func() string {
-			if *check {
-				return "obs gen --check"
-			}
-			return "obs gen"
-		}(), fs, *dir, stdout, stderr, runGenScope)
-	}
 	cmd := "obs gen"
 	if *check {
 		cmd = "obs gen --check"
-	}
-	c, rc := loadContract(*dir, cmd, stdout, stderr, scope)
-	if c == nil {
-		return rc
 	}
 	var want []string
 	if *langs != "" {
@@ -77,6 +65,18 @@ func runGenScope(args []string, stdout, stderr io.Writer, scope *contract.Scope)
 			}
 			want = append(want, l)
 		}
+	}
+	if *all {
+		return runAll(func() string {
+			if *check {
+				return "obs gen --check"
+			}
+			return "obs gen"
+		}(), fs, *dir, stdout, stderr, runGenScope)
+	}
+	c, rc := loadContract(*dir, cmd, stdout, stderr, scope)
+	if c == nil {
+		return rc
 	}
 	// A `generate:` target with no generator in this build is an input error, not a silent skip.
 	for _, t := range c.Generate {

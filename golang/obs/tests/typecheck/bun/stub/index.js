@@ -44,14 +44,29 @@ exports.register = tables => {
   };
   try {
     if (poisoned) return refuse('the port is already poisoned');
-    if (closed) return refuse('contract "' + tables.contract + '" registered after the first signal');
-    const previous = contracts.get(tables.contract);
+    if (closed) return refuse('registered after the first signal');
+    // Read caller properties once, then clone before comparing or checking owners.
+    const input = {
+      contract: tables.contract,
+      hash: tables.hash,
+      metrics: tables.metrics,
+      events: tables.events,
+      spans: tables.spans,
+    };
+    const copy = deepFreeze(structuredClone(input));
+    if (typeof copy.contract !== 'string' || !copy.contract || typeof copy.hash !== 'string')
+      return refuse('invalid contract identity');
+    for (const which of ['metrics', 'events', 'spans']) {
+      if (input[which] != null && (typeof input[which] !== 'object' || Array.isArray(input[which])))
+        return refuse('invalid registration table contents');
+    }
+    const previous = contracts.get(copy.contract);
     if (previous) {
-      if (!isDeepStrictEqual(previous, tables))
-        return refuse('contract "' + tables.contract + '" reused with a different hash or table');
+      if (!isDeepStrictEqual(previous, copy))
+        return refuse('contract "' + copy.contract + '" reused with a different hash or table');
     } else {
       for (const which of ['metrics', 'events', 'spans']) {
-        for (const name of Object.keys(tables[which] || {})) {
+        for (const name of Object.keys(copy[which] || {})) {
           if (owners.has(name))
             return refuse(
               'signal "' +
@@ -59,19 +74,18 @@ exports.register = tables => {
                 '" is owned by both contract "' +
                 owners.get(name) +
                 '" and contract "' +
-                tables.contract +
+                copy.contract +
                 '"',
             );
         }
       }
-      const copy = deepFreeze(structuredClone(tables));
-      contracts.set(tables.contract, copy);
+      contracts.set(copy.contract, copy);
       for (const which of ['metrics', 'events', 'spans']) {
-        for (const name of Object.keys(copy[which] || {})) owners.set(name, tables.contract);
+        for (const name of Object.keys(copy[which] || {})) owners.set(name, copy.contract);
         Object.assign(snapshot[which], copy[which]);
       }
     }
-    for (const which of ['metrics', 'events', 'spans']) if (tables[which]) registered[which].add(tables[which]);
+    for (const which of ['metrics', 'events', 'spans']) if (input[which]) registered[which].add(input[which]);
     return ok(undefined);
   } catch {
     return refuse('invalid registration table contents');

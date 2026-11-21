@@ -250,6 +250,8 @@ func TestChartCopiesAtTheRootAndBesideAnApp(t *testing.T) {
 // Discover skips the same copies as Folders: a whole observability folder (contract included) under a chart's files/
 // or under a folder git ignores is not a second contract.
 func TestDiscoverSkipsChartAndIgnoredCopies(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not installed")
 	}

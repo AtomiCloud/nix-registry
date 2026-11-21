@@ -90,9 +90,20 @@ func discoverAt(abs, root string, includeOwn bool, scopes ...*Scope) ([]string, 
 	} else {
 		skip = newWalkSkip(root, abs)
 	}
+	if scope != nil {
+		if _, err := rootContractBytes(root, scope); err != nil {
+			return nil, err
+		}
+	}
 	rootObs := rootIsObservability(root, scope)
 	var out []string
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if skip.ignored[p] {
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if err != nil {
 			cause := err
 			var pe *fs.PathError
@@ -109,10 +120,19 @@ func discoverAt(abs, root string, includeOwn bool, scopes ...*Scope) ([]string, 
 			if skip.dir(p, d.Name()) {
 				return filepath.SkipDir
 			}
+			if payloadDir(root, p, rootObs) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
-		if d.Name() == "contract.yaml" && d.Type().IsRegular() && (includeOwn || (p != own && !sameInfo(ownInfo, p))) && !skip.ignored[p] && belowObservability(root, filepath.Dir(p), rootObs, true) {
-			out = append(out, p)
+		if d.Name() == "contract.yaml" && belowObservability(root, filepath.Dir(p), rootObs, true) {
+			regular, err := contractEntry(root, p, d)
+			if err != nil {
+				return err
+			}
+			if regular && (includeOwn || (p != own && !sameInfo(ownInfo, p))) {
+				out = append(out, p)
+			}
 		}
 		return nil
 	})
@@ -200,7 +220,13 @@ func rootIsObservability(root string, scopes ...*Scope) bool {
 	if scope.Skips(root, filepath.Join(root, "contract.yaml")) {
 		return false
 	}
-	b, err := os.ReadFile(filepath.Join(root, "contract.yaml"))
+	var b []byte
+	var err error
+	if scope == nil {
+		b, err = os.ReadFile(filepath.Join(root, "contract.yaml"))
+	} else {
+		b, err = rootContractBytes(root, scope)
+	}
 	if err != nil {
 		return false
 	}
@@ -217,6 +243,32 @@ func rootIsObservability(root string, scopes ...*Scope) bool {
 		}
 	}
 	return false
+}
+
+func rootContractBytes(root string, scope *Scope) ([]byte, error) {
+	file := filepath.Join(root, "contract.yaml")
+	if scope.Skips(root, file) {
+		return nil, nil
+	}
+	info, err := os.Lstat(file)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("contract discovery: cannot read %s: %w", file, err)
+	}
+	regular, err := contractEntry(root, file, fs.FileInfoToDirEntry(info))
+	if err != nil {
+		return nil, err
+	}
+	if !regular {
+		return nil, nil
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("contract discovery: cannot read %s: %w", file, err)
+	}
+	return b, nil
 }
 
 // belowObservability is true when dir is an observability folder of the repository: a folder with a repo-relative

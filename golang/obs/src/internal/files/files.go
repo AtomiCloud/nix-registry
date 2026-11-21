@@ -88,23 +88,18 @@ type Set struct {
 func Load(dir string) (*Set, error) { return LoadSkip(dir, nil) }
 
 // Walk lists the files below root (an alerts/ or dashboards/ folder) that end in one of suffixes, sorted: the one
-// walk every reader of those folders uses. With skip nil a folder it cannot read is silently left out, as Load always
-// did. With skip not nil a path for which skip is true is pruned before it is read (a folder gets filepath.SkipDir, a
-// file is left out), and a folder that cannot be read and is not pruned is an error naming it.
+// walk every reader uses. Pruned paths are never read; an eligible unreadable path is an error.
 func Walk(root string, suffixes []string, skip func(path string) bool) ([]string, error) {
 	var paths []string
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			if skip == nil {
-				return nil
-			}
-			return fmt.Errorf("cannot read %s: %w", p, errors.Unwrap(err))
-		}
 		if skip != nil && skip(p) {
-			if d.IsDir() {
+			if d != nil && d.IsDir() {
 				return filepath.SkipDir
 			}
 			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("cannot read %s: %w", p, err)
 		}
 		if d.IsDir() {
 			return nil
@@ -141,11 +136,19 @@ func LoadScoped(dir string, skip func(path string) bool, root string) (*Set, err
 	if !st.IsDir() {
 		return nil, fmt.Errorf("%s: not a directory", dir)
 	}
-	s := &Set{Dir: dir, ident: resolveIdentity(dir, root)}
+	s := &Set{Dir: dir, ident: resolveIdentity(dir, root, skip)}
 	for _, sub := range []string{"alerts", "dashboards"} {
 		root := filepath.Join(dir, sub)
-		if _, err := os.Stat(root); err != nil {
+		if skip != nil && skip(root) {
 			continue
+		}
+		if _, err := os.Stat(root); err != nil {
+			if os.IsNotExist(err) {
+				if _, lerr := os.Lstat(root); os.IsNotExist(lerr) {
+					continue
+				}
+			}
+			return nil, err
 		}
 		suffixes := []string{".yaml", ".yml"}
 		if sub == "dashboards" {
@@ -160,8 +163,7 @@ func LoadScoped(dir string, skip func(path string) bool, root string) (*Set, err
 			rel = filepath.ToSlash(rel)
 			b, err := os.ReadFile(p)
 			if err != nil {
-				s.Problems = append(s.Problems, Problem{File: rel, Msg: err.Error()})
-				continue
+				return nil, err
 			}
 			if sub == "alerts" {
 				s.Alerts++
