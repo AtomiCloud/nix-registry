@@ -1,0 +1,89 @@
+{
+  "ast": 1,
+  "format": 8,
+  "source": "---\ntitle: Lines\nconcept: lines\ndescription: An avoided word on two lines of one paragraph, and labels that differ in case.\nnamespaces:\n  - example.org/cooking/kitchen\n---\n\nUse the Frying pan, never a griddle\nand never a second griddle\non the next line.\n\n```chart\nkind: line\ntitle: Counts\ny: { label: Griddle }\nx: { label: griddle, values: [1, 2, 3] }\nseries:\n  - name: Counts\n    data: [1, 2, 3]\n```\n",
+  "path": "docs/domain/kitchen/implementation/lines.dh.md",
+  "frontMatter": {
+    "title": "Lines",
+    "concept": "lines",
+    "description": "An avoided word on two lines of one paragraph, and labels that differ in case.",
+    "namespaces": [
+      "example.org/cooking/kitchen"
+    ]
+  },
+  "title": "Lines",
+  "banner": null,
+  "blocks": [
+    {
+      "type": "markdown",
+      "line": 8,
+      "md": [
+        {
+          "t": "p",
+          "c": [
+            {
+              "t": "text",
+              "v": "Use the Frying pan, never a griddle\nand never a second griddle\non the next line."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "chart",
+      "id": null,
+      "line": 13,
+      "attrs": {},
+      "llm": "Chart (line): Counts\n\n| griddle | Counts |\n| --- | --- |\n| 1 | 1 |\n| 2 | 2 |\n| 3 | 3 |",
+      "llmKind": "data",
+      "chart": {
+        "kind": "line",
+        "title": "Counts",
+        "y": {
+          "label": "Griddle"
+        },
+        "x": {
+          "label": "griddle",
+          "values": [
+            1,
+            2,
+            3
+          ]
+        },
+        "series": [
+          {
+            "name": "Counts",
+            "data": [
+              1,
+              2,
+              3
+            ]
+          }
+        ]
+      },
+      "controls": [],
+      "initial": {
+        "x": [
+          1,
+          2,
+          3
+        ],
+        "series": [
+          {
+            "name": "Counts",
+            "data": [
+              1,
+              2,
+              3
+            ]
+          }
+        ],
+        "vars": {}
+      }
+    }
+  ],
+  "headings": [],
+  "problems": [],
+  "highlighted": false,
+  "llm": "---\ntitle: Lines\nconcept: lines\ndescription: An avoided word on two lines of one paragraph, and labels that differ in case.\nnamespaces:\n  - example.org/cooking/kitchen\nsource: docs/domain/kitchen/implementation/lines.dh.md\n---\n<!-- Made by dh llm from the source; nobody edits this file. -->\n\nUse the Frying pan, never a griddle\nand never a second griddle\non the next line.\n\nChart (line): Counts\n\n| griddle | Counts |\n| --- | --- |\n| 1 | 1 |\n| 2 | 2 |\n| 3 | 3 |\n"
+}

@@ -17,20 +17,21 @@ type JNamespace struct {
 }
 
 type JWord struct {
-	ID         string   `json:"id"`
-	Word       string   `json:"word"`
-	Namespace  string   `json:"namespace"`
-	Breadcrumb []string `json:"breadcrumb"`
-	Aliases    []string `json:"aliases"`
-	Desc       string   `json:"desc"`
-	Details    string   `json:"details"`
-	Avoid      []string `json:"avoid"`
-	See        []string `json:"see"`
-	Mentions   []string `json:"mentions"`
-	Status     string   `json:"status"`
-	ReplacedBy *string  `json:"replacedBy"`
-	File       string   `json:"file"`
-	Line       int      `json:"line"`
+	ID           string            `json:"id"`
+	Word         string            `json:"word"`
+	Namespace    string            `json:"namespace"`
+	Breadcrumb   []string          `json:"breadcrumb"`
+	Aliases      []string          `json:"aliases"`
+	Desc         string            `json:"desc"`
+	Details      string            `json:"details"`
+	Avoid        []string          `json:"avoid"`
+	See          []string          `json:"see"`
+	Mentions     []string          `json:"mentions"`
+	Status       string            `json:"status"`
+	ReplacedBy   *string           `json:"replacedBy"`
+	Translations map[string]string `json:"translations,omitempty"`
+	File         string            `json:"file"`
+	Line         int               `json:"line"`
 }
 
 type Report struct {
@@ -62,6 +63,12 @@ func (fe *FEntry) jword() JWord {
 		Aliases: names(fe.E.Aliases), Desc: fe.E.Desc, Details: fe.E.Details, Avoid: names(fe.E.Avoid),
 		See: nonNil(fe.See), Mentions: nonNil(fe.Mentions), Status: fe.E.Status,
 		File: fe.File, Line: fe.E.WordLine,
+	}
+	if len(fe.E.Translations) > 0 {
+		w.Translations = map[string]string{}
+		for _, t := range fe.E.Translations {
+			w.Translations[t.Lang] = t.Term
+		}
 	}
 	if fe.ReplacedBy != "" {
 		s := fe.ReplacedBy

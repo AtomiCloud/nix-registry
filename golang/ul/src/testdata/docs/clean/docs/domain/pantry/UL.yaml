@@ -1,0 +1,7 @@
+namespace: example.org/cooking/pantry
+premise: Made-up example; where food waits
+language:
+  Shelf:
+    desc: A flat board in the pantry that holds jars.
+  Oven:
+    desc: The pantry's own name for a warm cupboard.

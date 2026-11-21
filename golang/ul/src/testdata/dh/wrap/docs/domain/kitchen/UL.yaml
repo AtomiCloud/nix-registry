@@ -1,0 +1,17 @@
+namespace: example.org/cooking/kitchen
+premise: Made-up example; the tools of a kitchen
+language:
+  Frying pan:
+    aliases: [Fry pan]
+    desc: A flat pan for frying food on a hob.
+    avoid: [griddle]
+    translations:
+      es: sartén
+  Oven:
+    desc: A closed box that cooks food with dry heat.
+    translations:
+      es: horno
+  Skillet:
+    desc: Old name in this book for a Frying pan.
+    status: retired
+    replacedBy: Frying pan

@@ -35,6 +35,7 @@ type Final struct {
 	NS       []*FNS
 	Entries  []*FEntry // by namespace, then word
 	Problems []Problem
+	Flags    []Problem // rules that warn and pass (UL406); only ul check shows them
 
 	byID    map[string]*FEntry
 	nameIdx map[string][]*FEntry          // lower-case word or alias -> distinct entries
@@ -79,6 +80,7 @@ func buildFinal(root string, repo []*Doc, base []Problem) *Final {
 
 	f.buildIndexes()
 	f.checkNames(problem)
+	f.flagSameWord()
 	f.resolveRefs(problem)
 	f.computeMentions()
 	slices.SortStableFunc(f.Problems, func(a, b Problem) int {
@@ -336,5 +338,132 @@ func (f *Final) computeMentions() {
 			fe.Mentions = append(fe.Mentions, id)
 		}
 		slices.Sort(fe.Mentions)
+	}
+}
+
+// span is one whole-word name found in a text: rune offsets [start, end). name is the name as
+// defined (lower case, without a plural ending); plural says the text wrote it with one.
+type span struct {
+	start, end int
+	name       string
+	plural     bool
+	ents       []*FEntry
+}
+
+func isVowel(r rune) bool { return strings.ContainsRune("aeiou", r) }
+
+// scanSpans finds the longest whole-word name at each position, with where it sits. A name also
+// matches with a plural ending as English writes it: -es after a name that ends in s, x, z, ch
+// or sh, -ies for a name that ends in a consonant and y, -s after any other name (so "conflict
+// resolvers" is the name "conflict resolver"). The longest match wins; at the same end the exact
+// name beats a plural, and between two plurals the longer name wins.
+func (t *trie) scanSpans(s string) []span {
+	rs := foldRunes(s)
+	var out []span
+	atEnd := func(k int) bool { return k == len(rs) || !isWordRune(rs[k]) }
+	hasAt := func(k int, suffix string) bool {
+		x := 0
+		for _, r := range suffix {
+			if k+x >= len(rs) || rs[k+x] != r {
+				return false
+			}
+			x++
+		}
+		return atEnd(k + x)
+	}
+	for i := 0; i < len(rs); {
+		if i > 0 && isWordRune(rs[i-1]) {
+			i++
+			continue
+		}
+		n := t
+		best := -1
+		bestName, bestPlural := "", false
+		var bestEnts []*FEntry
+		take := func(end int, name string, plural bool, ents []*FEntry) {
+			if end > best || (end == best && (!plural || bestPlural)) {
+				best, bestName, bestPlural, bestEnts = end, name, plural, ents
+			}
+		}
+		for j := i; j < len(rs); j++ {
+			// n is the node after rs[i..j-1]: a name that ends in a consonant and y, written as "ies"
+			if j > i && !isVowel(rs[j-1]) {
+				if c := n.next['y']; c != nil && len(c.ents) > 0 && hasAt(j, "ies") {
+					take(j+3, string(rs[i:j])+"y", true, c.ents)
+				}
+			}
+			n = n.next[rs[j]]
+			if n == nil {
+				break
+			}
+			if len(n.ents) == 0 {
+				continue
+			}
+			last := rs[j]
+			two := ""
+			if j > i {
+				two = string(rs[j-1 : j+1])
+			}
+			switch {
+			case atEnd(j + 1):
+				take(j+1, string(rs[i:j+1]), false, n.ents)
+			case last == 's' || last == 'x' || last == 'z' || two == "ch" || two == "sh":
+				if hasAt(j+1, "es") {
+					take(j+3, string(rs[i:j+1]), true, n.ents)
+				}
+			default:
+				// a name that ends in a consonant and y has -ies, never -s (Cities, not Citys)
+				consonantY := last == 'y' && j > i && !isVowel(rs[j-1])
+				if !consonantY && hasAt(j+1, "s") {
+					take(j+2, string(rs[i:j+1]), true, n.ents)
+				}
+			}
+		}
+		if best > 0 {
+			out = append(out, span{i, best, bestName, bestPlural, bestEnts})
+			i = best
+		} else {
+			i++
+		}
+	}
+	return out
+}
+
+// nameTrie holds every word and alias of the final UL.
+func (f *Final) nameTrie() *trie {
+	root := &trie{}
+	for _, fe := range f.Entries {
+		root.insert(fe.E.Word, fe)
+		for _, a := range fe.E.Aliases {
+			root.insert(a.Name, fe)
+		}
+	}
+	return root
+}
+
+// flagSameWord: UL406, a flag. The same word or alias (any case) defined in two namespaces,
+// retired words included. Both are kept (the same-word rule); the later one is flagged.
+func (f *Final) flagSameWord() {
+	keys := make([]string, 0, len(f.nameIdx))
+	for k := range f.nameIdx {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		ents := f.nameIdx[k]
+		for _, fe := range ents[1:] {
+			if fe.NS == ents[0].NS {
+				continue
+			}
+			name, line := fe.E.Word, fe.E.WordLine
+			if fold(fe.E.Word) != k {
+				for _, a := range fe.E.Aliases {
+					if fold(a.Name) == k {
+						name, line = a.Name, a.Line
+					}
+				}
+			}
+			f.Flags = append(f.Flags, Problem{Code: "UL406", File: fe.File, Line: max(line, 1), Message: fmt.Sprintf("%q is also defined in %s; one repo should not define a word twice", name, ents[0].NS.Namespace)})
+		}
 	}
 }
