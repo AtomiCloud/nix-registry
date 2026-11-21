@@ -1099,10 +1099,10 @@ obs test --all
 Generation runs once per discovered contract folder, with one summary line naming that contract.
 `obs check --all` and `obs test --all` also visit observability folders that hold `alerts/` or
 `dashboards/` without a contract, so shared service dashboards and alerts participate in the CI gate.
-Their summary names the folder. At least one contract is required except for a `gen --all` run that only cleans up orphaned files.
+Their summary names the folder. At least one contract is required except for a `gen --all` run that only reports orphaned files.
 Failures retain their diagnostics and do not prevent the remaining folders from running. Exit 0 means
 every folder passed, 1 means a check failed, and 2 means an input or enumeration error. No contracts
-found and no cleanup performed is an error, never a successful zero-check run. The CI static-check recipe is `obs check --all`.
+found and no orphans reported is an error, never a successful zero-check run. The CI static-check recipe is `obs check --all`.
 Run `--all` from the repository root, including inside a Docker context or Git-less export. The start
 folder is the current directory unless `--dir` is explicitly supplied; the default `observability/`
 path cannot select a nested repository or submodule, which remains a boundary. Outside
@@ -1123,13 +1123,14 @@ rule-uid checks use that same scope in `--all` mode, including a complete Git-le
 single-folder commands keep their discovery behavior. Use separate `--dir` runs for
 `obs test --out`, `--steps` or `--recorded`: `--all` refuses a shared file export that would be overwritten.
 
-After renaming or deleting a feature, run `obs gen --all`: it deletes and reports in-scope files with
-a valid obs-generated header whose owner contract is verifiably absent (`Lstat` reports ENOENT).
-The owner is resolved from the generated file's Git root or topmost project marker, independently of
-the current `--all` start folder. A live owner outside discovery is kept. Unresolvable ownership is
-reported as `[gen-orphan]` and kept for review; `gen --check --all` fails on it. `--lang` limits cleanup
-to the selected language outputs (shared YAML artifacts still participate). Files without a valid
-generated header are left alone. This removes old registration tables before the application boots.
+After renaming or deleting a feature, run `obs gen --all`, then delete the listed orphaned files before
+the application boots. Generation reports exact paths with `[gen-orphan]` and "remove this file yourself";
+it never deletes files. `gen --check --all` fails on these files. A file is reported only when it has a
+valid generated header and its owner is absent (`Lstat` reports ENOENT) under every plausible writing
+base: the generated file's Git root and every project-marker ancestor, including project-relative
+headers from before a Git import. Live owners outside discovery and unresolved owners are kept silently.
+`--lang` limits the report to selected language outputs (shared YAML artifacts still participate), and
+an invalid language is refused before any discovery or generation work.
 
 Every 0.5 command, flag and output stays. For 57 of the 58 cases in `tests/compat.sh` the output is byte for byte the 0.5 output (the one that changed is `query-static` `bad-flat-alert`, now `ok-flat-alert`: a valid flat file is no longer refused), and a repository with one contract (or one contract per `<app>/observability/`) prints what it printed in 0.5, unless one of the findings below applies. New:
 

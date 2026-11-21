@@ -13,7 +13,7 @@ import (
 	"github.com/AtomiCloud/obs/internal/contract"
 )
 
-type Orphan struct{ File, Contract, Unresolved string }
+type Orphan struct{ File, Contract string }
 
 var ownerHash = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
@@ -97,50 +97,39 @@ func MissingOwners(scope *contract.Scope, contracts []string, langs ...string) (
 		if owners[owner] {
 			return nil
 		} // Positive ownership of a current --all header.
-		gone, reason := missingHeaderOwner(file, owner)
-		if gone || reason != "" {
-			out = append(out, Orphan{File: file, Contract: owner, Unresolved: reason})
+		if missingHeaderOwner(file, owner) {
+			out = append(out, Orphan{File: file, Contract: owner})
 		}
 		return nil
 	})
 	return out, err
 }
 
-// Resolve historical single-folder headers from the generated file's ancestry,
-// never from the current --all selection. Existing owner candidates are positive
-// evidence only: they can prevent deletion, never prove that an owner is gone.
-func missingHeaderOwner(file, owner string) (bool, string) {
+// Headers written before a Git import can be project-relative. Only report
+// absence when every plausible writing base says ENOENT; uncertainty is kept.
+func missingHeaderOwner(file, owner string) bool {
 	dir := filepath.Dir(file)
-	base := GitRoot(dir)
-	git := base != ""
-	if !git {
-		base = contract.MarkedProjectRoot(dir)
+	bases := contract.ProjectMarkerRoots(dir)
+	if git := GitRoot(dir); git != "" {
+		bases = append(bases, git)
 	}
-	if base == "" {
-		return false, "cannot resolve header owner base: no Git root or project marker"
+	if len(bases) == 0 {
+		return false
 	}
-	candidate := filepath.Join(base, filepath.FromSlash(owner))
-	if _, err := os.Lstat(candidate); err == nil {
-		return false, ""
-	} else if !os.IsNotExist(err) {
-		return false, fmt.Sprintf("cannot resolve header owner %s: %v", candidate, err)
-	}
-	if !git {
-		// Older --all headers may use an enclosing export boundary without a
-		// marker. Its presence is never used as evidence for deleting a file.
-		for ancestor := dir; ; ancestor = filepath.Dir(ancestor) {
-			other := filepath.Join(ancestor, filepath.FromSlash(owner))
-			if other != candidate {
-				if _, err := os.Lstat(other); err == nil {
-					return false, fmt.Sprintf("header owner base is uncertain: %s is absent, but %s exists", candidate, other)
-				} else if !os.IsNotExist(err) {
-					return false, fmt.Sprintf("cannot resolve header owner %s: %v", other, err)
-				}
-			}
-			if filepath.Dir(ancestor) == ancestor {
-				break
-			}
+	for _, base := range bases {
+		if _, err := os.Lstat(filepath.Join(base, filepath.FromSlash(owner))); !os.IsNotExist(err) {
+			return false
 		}
 	}
-	return true, ""
+	// An old --all export may have had an unmarked enclosing root. Positive
+	// evidence at another ancestor prevents a false orphan; it never proves absence.
+	for ancestor := dir; ; ancestor = filepath.Dir(ancestor) {
+		if _, err := os.Lstat(filepath.Join(ancestor, filepath.FromSlash(owner))); !os.IsNotExist(err) {
+			return false
+		}
+		if filepath.Dir(ancestor) == ancestor {
+			break
+		}
+	}
+	return true
 }

@@ -86,13 +86,24 @@ func ProjectRoot(dir string) string {
 	return projectRoot(dir, home)
 }
 
-// MarkedProjectRoot is the topmost actual project marker, with no layout fallback.
-func MarkedProjectRoot(dir string) string {
-	root := ProjectRoot(dir)
-	if projectMarker(root) {
-		return root
+// ProjectMarkerRoots lists every actual project marker above dir, including
+// markers from before a source export was imported into a Git repository.
+func ProjectMarkerRoots(dir string) []string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return nil
 	}
-	return ""
+	home := HomeBoundary(abs)
+	var roots []string
+	for folder := abs; ; folder = filepath.Dir(folder) {
+		if projectMarker(folder) {
+			roots = append(roots, folder)
+		}
+		if folder == home || filepath.Dir(folder) == folder {
+			break
+		}
+	}
+	return roots
 }
 
 func projectRoot(dir, home string) string {

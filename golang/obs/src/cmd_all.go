@@ -72,45 +72,6 @@ func runAll(cmd string, fs *flag.FlagSet, dir string, stdout, stderr io.Writer, 
 		}
 	})
 	result := 0
-	deleted := 0
-	if cmd == "obs gen" || cmd == "obs gen --check" {
-		orphans, err := gen.MissingOwners(scope, paths, fs.Lookup("lang").Value.String())
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 2
-		}
-		checking := fs.Lookup("check").Value.String() == "true"
-		for _, orphan := range orphans {
-			if orphan.Unresolved != "" {
-				fmt.Fprintf(stdout, "%s: [gen-orphan] %s (header contract %s); kept for review\n", scope.Rel(orphan.File), orphan.Unresolved, orphan.Contract)
-				if checking {
-					result = 1
-				}
-				continue
-			}
-			if checking {
-				fmt.Fprintf(stdout, "FAIL %s: [gen-orphan] generated file names missing contract %s; run obs gen --all\n", scope.Rel(orphan.File), orphan.Contract)
-				result = 1
-			} else {
-				if err := os.Remove(orphan.File); err != nil {
-					fmt.Fprintln(stderr, err)
-					return 2
-				}
-				fmt.Fprintf(stdout, "deleted %s (missing contract %s)\n", scope.Rel(orphan.File), orphan.Contract)
-				deleted++
-			}
-		}
-	}
-	if len(paths) == 0 {
-		if deleted > 0 {
-			return 0
-		}
-		if result != 0 {
-			return result
-		}
-		fmt.Fprintf(stderr, "%s --all: no contracts found from %s\n", cmd, dir)
-		return 2
-	}
 	for _, folder := range folders {
 		var out, errb bytes.Buffer
 		selected := append(append([]string(nil), args...), "--dir="+folder)
@@ -135,6 +96,30 @@ func runAll(cmd string, fs *flag.FlagSet, dir string, stdout, stderr io.Writer, 
 			}
 		}
 		fmt.Fprintf(stdout, "%s --all: %s: %s\n", cmd, label, status)
+	}
+	reported := 0
+	if cmd == "obs gen" || cmd == "obs gen --check" {
+		orphans, err := gen.MissingOwners(scope, paths, fs.Lookup("lang").Value.String())
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 2
+		}
+		checking := fs.Lookup("check").Value.String() == "true"
+		reported = len(orphans)
+		for _, orphan := range orphans {
+			if checking {
+				fmt.Fprintf(stdout, "FAIL %s: [gen-orphan] generated file names missing contract %s; remove this file yourself\n", scope.Rel(orphan.File), orphan.Contract)
+				if result < 1 {
+					result = 1
+				}
+			} else {
+				fmt.Fprintf(stdout, "%s: [gen-orphan] generated file names missing contract %s; remove this file yourself\n", scope.Rel(orphan.File), orphan.Contract)
+			}
+		}
+	}
+	if len(paths) == 0 && reported == 0 {
+		fmt.Fprintf(stderr, "%s --all: no contracts found from %s\n", cmd, dir)
+		return 2
 	}
 	return result
 }

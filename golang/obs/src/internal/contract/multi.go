@@ -90,8 +90,10 @@ func discoverAt(abs, root string, includeOwn bool, scopes ...*Scope) ([]string, 
 	} else {
 		skip = newWalkSkip(root, abs)
 	}
-	if _, err := rootContractBytes(root, scope); err != nil {
-		return nil, err
+	if scope != nil {
+		if _, err := rootContractBytes(root, scope); err != nil {
+			return nil, err
+		}
 	}
 	rootObs := rootIsObservability(root, scope)
 	var out []string
@@ -218,7 +220,13 @@ func rootIsObservability(root string, scopes ...*Scope) bool {
 	if scope.Skips(root, filepath.Join(root, "contract.yaml")) {
 		return false
 	}
-	b, err := rootContractBytes(root, scope)
+	var b []byte
+	var err error
+	if scope == nil {
+		b, err = os.ReadFile(filepath.Join(root, "contract.yaml"))
+	} else {
+		b, err = rootContractBytes(root, scope)
+	}
 	if err != nil {
 		return false
 	}
