@@ -13,7 +13,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AtomiCloud/obs/internal/contract"
 	"github.com/AtomiCloud/obs/internal/files"
+	"github.com/AtomiCloud/obs/internal/ruleids"
 	"github.com/AtomiCloud/obs/internal/seed"
 	"github.com/AtomiCloud/obs/internal/tempoalert"
 	"github.com/VictoriaMetrics/metricsql"
@@ -50,6 +52,7 @@ type Query struct {
 }
 
 type Project struct {
+	Scope           *contract.Scope
 	Dir             string
 	Seed            seed.Seed
 	Incidents       []Incident
@@ -59,12 +62,20 @@ type Project struct {
 }
 
 func loadProject(dir, seedPath string, allowEmptyExpect bool) (*Project, error) {
-	set, err := files.Load(dir)
+	return loadProjectScope(dir, seedPath, allowEmptyExpect, nil)
+}
+
+func loadProjectScope(dir, seedPath string, allowEmptyExpect bool, scope *contract.Scope) (*Project, error) {
+	root := ""
+	if scope != nil {
+		root = scope.Root
+	}
+	set, err := files.LoadScoped(dir, contract.PayloadSkip(dir, scope), root)
 	if err != nil {
 		return nil, err
 	}
 	if len(set.Problems) > 0 {
-		return nil, fmt.Errorf("%s: %s", set.Problems[0].File, set.Problems[0].Msg)
+		return nil, fmt.Errorf("%s: %s", set.Problems[0].File, set.Problems[0].Text())
 	}
 	if len(set.Rules) == 0 {
 		return nil, fmt.Errorf("%s/alerts: no GrafanaAlertRuleGroup rules", dir)
@@ -84,7 +95,7 @@ func loadProject(dir, seedPath string, allowEmptyExpect bool) (*Project, error) 
 	if err != nil {
 		return nil, err
 	}
-	p := &Project{Dir: dir, Seed: *sd, Incidents: incs, Files: map[string][]byte{}, Gap: 30 * time.Minute}
+	p := &Project{Dir: dir, Scope: scope, Seed: *sd, Incidents: incs, Files: map[string][]byte{}, Gap: 30 * time.Minute}
 	p.Files["seed.yaml"], err = os.ReadFile(seedPath)
 	if err != nil {
 		return nil, err
@@ -303,4 +314,44 @@ func ptrs(is []Incident) []*Incident {
 		out[i] = &is[i]
 	}
 	return out
+}
+
+// RepoRuleIDs fails when a rule uid of this project is also defined in another observability folder of the
+// repository (a feature's own folder next to this one): Grafana keeps one rule per uid. A repository with one
+// observability folder, or a folder outside any Git repository, has nothing to compare with. The error names
+// both alert files (relative to the Git root), one clash a line.
+func RepoRuleIDs(p *Project) error {
+	return repoRuleIDs(p, nil)
+}
+
+func repoRuleIDs(p *Project, scope *contract.Scope) error {
+	others, skip, err := ruleids.OthersInScope(p.Dir, scope)
+	if err != nil {
+		return err
+	}
+	if len(others) == 0 {
+		return nil
+	}
+	var mine []ruleids.Rule
+	mineFiles := map[string]bool{}
+	absDir, err := filepath.Abs(p.Dir) // the prune set is by absolute path: --dir observability/friend is the normal form
+	if err != nil {
+		return err
+	}
+	for _, a := range append(append([]Alert(nil), p.Alerts...), p.Records...) {
+		if skip.Skips(absDir, filepath.Join(absDir, a.File)) {
+			continue // an ignored or nested-repository copy inside this folder: not a definition (the local parser is unchanged)
+		}
+		file := scope.Rel(filepath.Join(p.Dir, a.File))
+		mine = append(mine, ruleids.Rule{ID: a.ID, File: file})
+		mineFiles[file] = true
+	}
+	var msgs []string
+	for _, c := range ruleids.Find(append(others, mine...), mineFiles) {
+		msgs = append(msgs, c.String())
+	}
+	if len(msgs) > 0 {
+		return fmt.Errorf("%s", strings.Join(msgs, "\n"))
+	}
+	return nil
 }

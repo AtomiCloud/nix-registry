@@ -23,6 +23,27 @@ func load(t *testing.T) *contract.Contract {
 
 func TestGolden(t *testing.T) { gentest.Golden(t, "bun") }
 
+func TestExportsArePublicForKnip(t *testing.T) {
+	s, err := Render(load(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(s, "\n")
+	exports := 0
+	for i, line := range lines {
+		if !strings.HasPrefix(line, "export ") {
+			continue
+		}
+		exports++
+		if i == 0 || lines[i-1] != "/** @public */" {
+			t.Errorf("knip would report generated export as unused: %s", line)
+		}
+	}
+	if exports < 10 {
+		t.Fatalf("expected the full generated API, got %d exports", exports)
+	}
+}
+
 func TestDeterministic(t *testing.T) {
 	a, _ := Render(load(t))
 	b, _ := Render(load(t))

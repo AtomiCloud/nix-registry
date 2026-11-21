@@ -1,0 +1,9 @@
+title: Failed charge log lines
+datasource: logs
+expr: |
+  _time:5m {durian.cloud.service="checkout"} severity_text:ERROR "durian.cloud/event":in("checkout.charge.failed")
+    | stats count() errors
+    | filter errors:>100000
+for: 5m
+summary: 'Failed charges are being logged'
+description: 'Read the failing lines in the logs dashboard first.'

@@ -19,9 +19,9 @@ import (
 	"time"
 )
 
-// Read-only guarantee. Every request obs live sends goes through ReadOnly first: only GET and
-// POST, and only the query endpoints of the stores (a POST is only ever the form encoding of a
-// query that is too long for a URL). Anything else is refused before the network is touched,
+// Read-only guarantee. Every request obs live sends goes through ReadOnly first. The client sends
+// only GET; the guard still lets a POST to a store query path pass (the form encoding of a query
+// that is too long for a URL), but nothing sends one. Anything else is refused before the network is touched,
 // and a test asserts that a fake store never receives another method or path.
 var (
 	// metrics (VictoriaMetrics / Prometheus), logs (VictoriaLogs), traces (Tempo): GET or POST.
@@ -48,7 +48,7 @@ func ReadOnly(method, path string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("read-only guard: refused %s %s (obs live only sends GET or POST to the stores' query endpoints)", method, path)
+	return fmt.Errorf("read-only guard: refused %s %s (obs live only sends GET to the stores' query endpoints)", method, path)
 }
 
 // baseURL parses a target address and refuses anything that is not a plain http(s) address: user

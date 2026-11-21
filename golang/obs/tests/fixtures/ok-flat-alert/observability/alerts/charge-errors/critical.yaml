@@ -1,0 +1,7 @@
+title: Charge errors high
+datasource: metrics
+expr: 'sum(rate(checkout_charges_total{outcome="error"}[5m])) > 1000'
+for: 5m
+summary: 'Charges failing at {{ $values.A.Value }} per second'
+description: 'Check the payment provider status page, then recent deploys.'
+panel: 2

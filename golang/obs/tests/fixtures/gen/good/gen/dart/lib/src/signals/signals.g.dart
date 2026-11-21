@@ -493,11 +493,16 @@ const eventTable = <String, String>{
   'checkout.worker.started': 'debug',
 };
 
-/// Builds the telemetry port from this contract's tables, once per process (call it at
-/// start-up). Any other install, earlier or later, poisons the port: it refuses every
-/// signal until restart.
-Result<DurianSignalPort> installSignals() =>
-    DurianSignalPort.install(metrics: metricTable, events: eventTable);
+/// Merges this contract's tables at boot, before the first signal.
+/// Duplicate names, changed contracts and late installs poison the port.
+Result<DurianSignalPort> installSignals() => DurianSignalPort.install(
+  contract: 'checkout_signals:observability/contract.yaml',
+  hash:
+      'sha256:9129ac662e5875890cc17bf5204b61c434716b9df86e6a05575befa205924c2d',
+  metrics: metricTable,
+  events: eventTable,
+  spans: spanTable,
+);
 
 // ---- spans ----
 

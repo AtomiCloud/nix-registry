@@ -1,0 +1,3 @@
+# platform and service name the rule uid of a flat alert tier file: <platform>-<service>-<slug>-<severity>.
+# (service comes from contract.yaml here; platform has no other home.)
+platform: payments

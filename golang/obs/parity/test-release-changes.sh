@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE
 script=$(cd "$(dirname "$0")" && pwd)/release-changes.sh
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT

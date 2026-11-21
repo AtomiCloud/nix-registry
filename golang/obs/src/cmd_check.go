@@ -10,8 +10,8 @@ import (
 
 	"github.com/AtomiCloud/obs/internal/check"
 	"github.com/AtomiCloud/obs/internal/contract"
-	"github.com/AtomiCloud/obs/internal/files"
 	"github.com/AtomiCloud/obs/internal/gen"
+	"github.com/AtomiCloud/obs/internal/ruleids"
 )
 
 // runCheck is `obs check` (concept section 11.4), the static check of the observability folder in
@@ -24,8 +24,13 @@ import (
 //	queries   every alert and dashboard query parsed by the embedded engines and checked against the
 //	          contract (each finding keeps its rule id); a folder with no queries is fine
 func runCheck(args []string, stdout, stderr io.Writer) int {
+	return runCheckScope(args, stdout, stderr, nil)
+}
+
+func runCheckScope(args []string, stdout, stderr io.Writer, scope *contract.Scope) int {
 	fs := flag.NewFlagSet("obs check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	all := fs.Bool("all", false, "run once per discovered contract, using repository discovery skips")
 	dir := fs.String("dir", "observability", "the observability folder (holds contract.yaml)")
 	pods := fs.Int("pods", 1, "pods per landscape, for the worst case x pods line (from the landscape config)")
 	landscapes := fs.Int("landscapes", 1, "landscapes that share the log store, for the stream count")
@@ -36,6 +41,9 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 	tempoConfig := fs.String("tempo-config", "", "Tempo config file whose query_frontend end cutoff and metrics limits trace panels run under; overrides obs.yaml thresholds.traces (default Tempo 3.1.1: 30s, 24h, 10000)")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if *all {
+		return runAll("obs check", fs, *dir, stdout, stderr, runCheckScope)
 	}
 	if *pods < 1 || *landscapes < 1 {
 		fmt.Fprintln(stderr, "obs check: --pods and --landscapes must be at least 1")
@@ -51,7 +59,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "obs check: --event-rule %q: want auto, on or off\n", *eventRule)
 		return 2
 	}
-	of, ok := loadObsYaml(*dir, "obs check", stderr)
+	of, ok := loadObsYaml(*dir, "obs check", stderr, scope)
 	if !ok {
 		return 2
 	}
@@ -63,7 +71,9 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 	// that exists but cannot be read (a symlink loop, a dangling symlink, a permission error) stops the run with exit 2,
 	// as obs 0.4 did.
 	noContract := false
-	if _, serr := os.Lstat(filepath.Join(*dir, "contract.yaml")); serr != nil {
+	if scope.Skips(*dir, filepath.Join(*dir, "contract.yaml")) {
+		noContract = true
+	} else if _, serr := os.Lstat(filepath.Join(*dir, "contract.yaml")); serr != nil {
 		if !os.IsNotExist(serr) {
 			fmt.Fprintf(stderr, "obs check: %v\n", serr)
 			return 2
@@ -77,7 +87,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		// Not loadContract: that prints its own "obs check: FAILED" line, and this command has one summary.
 		cpath := filepath.Join(*dir, "contract.yaml")
 		var err error
-		c, err = contract.Load(cpath)
+		c, err = contract.LoadInScope(cpath, scope)
 		if err != nil {
 			fmt.Fprintf(stderr, "obs check: %v\n", err)
 			return 2
@@ -110,13 +120,13 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		var others []*contract.Contract
 		otherFails := 0
 		if *contracts == "auto" {
-			found, derr := contract.Discover(*dir)
+			found, derr := contract.DiscoverInScope(*dir, scope)
 			if derr != nil {
 				fmt.Fprintf(stdout, "FAIL %s\n", derr)
 				otherFails++
 			}
 			for _, p := range found {
-				oc, err := contract.Load(p)
+				oc, err := contract.LoadInScope(p, scope)
 				if err != nil {
 					fmt.Fprintf(stdout, "FAIL %s\n", strings.ReplaceAll(err.Error(), p, contract.RelPath(p)))
 					otherFails++
@@ -137,17 +147,50 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 				otherFails++
 			}
 		}
+		targetContracts := append([]*contract.Contract{c}, others...)
+		if *contracts == "auto" && gen.GitRoot(*dir) == "" && scope == nil {
+			// Generation-only sibling scope for source exports; metric/query
+			// discovery retains its existing repository semantics.
+			paths, err := gen.TargetContractPaths(c)
+			if err != nil {
+				fmt.Fprintf(stdout, "FAIL %v\n", err)
+				otherFails++
+			}
+			for _, file := range paths {
+				other, err := contract.LoadInScope(file, scope)
+				if err != nil {
+					fmt.Fprintf(stdout, "FAIL %v\n", err)
+					otherFails++
+					continue
+				}
+				if issues := other.Validate(); len(issues) > 0 {
+					for _, issue := range issues {
+						fmt.Fprintf(stdout, "FAIL %s %s\n", file, issue)
+					}
+					otherFails += len(issues)
+					continue
+				}
+				targetContracts = append(targetContracts, other)
+			}
+		}
+		for _, issue := range gen.TargetClashes(targetContracts) {
+			fmt.Fprintf(stdout, "FAIL %s\n", issue)
+			otherFails++
+		}
 		if otherFails > 0 {
 			contractFails += otherFails
 			reasons = append(reasons, fmt.Sprintf("%d contract failures in the repository's other contracts or across contracts", otherFails))
 		} else {
 			total := printMetrics(c, *pods, stdout)
 			fmt.Fprintf(stdout, "metrics total: worst case %d series per landscape\n", total)
+			totals := map[string]int64{c.Service: total}
 			for _, oc := range others {
 				fmt.Fprintf(stdout, "contract %s (service %s, read with this one):\n", gen.ContractPath(oc), oc.Service)
 				ot := printMetrics(oc, *pods, stdout)
 				fmt.Fprintf(stdout, "metrics total (%s): worst case %d series per landscape\n", oc.Service, ot)
+				totals[oc.Service] += ot
 			}
+			printServiceTotals(append([]*contract.Contract{c}, others...), totals, *landscapes, stdout)
 			fmt.Fprintf(stdout, "log streams: worst case %d (service %s x %d landscapes x modules %d; log events add no streams)\n",
 				c.StreamCount(*landscapes), c.Service, *landscapes, maxInt(len(c.Modules), 1))
 			fmt.Fprintf(stdout, "events=%v\n", c.EventNames())
@@ -156,13 +199,28 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// Two features shipping one rule uid: Grafana keeps one. Read every observability folder of the repository.
+	if *contracts == "auto" {
+		clashes, rerr := ruleids.AllInScope(*dir, scope)
+		if rerr != nil {
+			fmt.Fprintf(stdout, "FAIL %s\n", rerr)
+			reasons = append(reasons, "alert rule ids across the repository could not be read")
+		}
+		for _, cl := range clashes {
+			fmt.Fprintf(stdout, "FAIL %s\n", cl)
+		}
+		if len(clashes) > 0 {
+			reasons = append(reasons, fmt.Sprintf("%d alert rule id clashes across the repository", len(clashes)))
+		}
+	}
+
 	// The queries half: what `obs query --static` does (cmd_parts.go), on the same folder.
-	set, err := files.Load(*dir)
+	set, err := loadScopedFiles(*dir, scope)
 	if err != nil {
 		fmt.Fprintf(stderr, "obs check: %v\n", err)
 		return 2
 	}
-	qo := check.Options{Dir: *dir, VLSettings: *vlSettings, TempoConfig: *tempoConfig, Names: *names, EventRule: *eventRule, Obs: of, Out: stdout, NoOtherContracts: *contracts == "none", AllowEmpty: true}
+	qo := check.Options{Dir: *dir, VLSettings: *vlSettings, TempoConfig: *tempoConfig, Names: *names, EventRule: *eventRule, Obs: of, Out: stdout, NoOtherContracts: *contracts == "none", Scope: scope, AllowEmpty: true}
 	rep, _ := queryReport(set, qo, false)
 	if contractFails > 0 {
 		// The contract problems were printed above; the query rules must not print them again.
@@ -224,6 +282,34 @@ func printMetrics(c *contract.Contract, pods int, stdout io.Writer) int64 {
 		fmt.Fprintf(stdout, "metric %s (%s): worst case %d series, %s; %s\n", n, m.Kind, w, budget, podsNote)
 	}
 	return total
+}
+
+// printServiceTotals prints, for every service that several contracts share, the service's total series and
+// log streams across them (the per-contract lines above stay). A service of one contract prints nothing: the
+// output of a repository without a shared service is the same as before. The contract has no service-level
+// budget (budgets are per metric, concept 3.2), so the service total is information; each metric is still
+// judged against its own budget.
+func printServiceTotals(cs []*contract.Contract, totals map[string]int64, landscapes int, stdout io.Writer) {
+	by := map[string][]*contract.Contract{}
+	var order []string
+	for _, c := range cs {
+		if _, seen := by[c.Service]; !seen {
+			order = append(order, c.Service)
+		}
+		by[c.Service] = append(by[c.Service], c)
+	}
+	for _, svc := range order {
+		group := by[svc]
+		if len(group) < 2 {
+			continue
+		}
+		var files []string
+		for _, c := range group {
+			files = append(files, gen.ContractPath(c))
+		}
+		fmt.Fprintf(stdout, "service total (%s, %d contracts: %s): worst case %d series per landscape; log streams worst case %d (%d landscapes x the distinct modules of the contracts); no service-level budget in a contract: each metric is judged on its own budget\n",
+			svc, len(group), strings.Join(files, ", "), totals[svc], contract.ServiceStreamCount(group, landscapes), landscapes)
+	}
 }
 
 // printWarnings prints the contract's warnings (a source: entry that does not say who uses it); they do not fail the check.

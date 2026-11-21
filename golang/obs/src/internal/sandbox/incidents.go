@@ -68,7 +68,7 @@ func AnnotateReplay(ctx context.Context, hc *http.Client, grafana string, uids [
 // not backfill historical state when loading historical samples.
 func ProvisionAlerts(ctx context.Context, hc *http.Client, grafana, project string, set *files.Set) error {
 	if len(set.Problems) > 0 {
-		return fmt.Errorf("%s: %s", set.Problems[0].File, set.Problems[0].Msg)
+		return fmt.Errorf("%s: %s", set.Problems[0].File, set.Problems[0].Text())
 	}
 	folder := "obs-" + project
 	if len(set.Rules) == 0 {
@@ -152,6 +152,11 @@ func ProvisionAlerts(ctx context.Context, hc *http.Client, grafana, project stri
 		}
 		rule := map[string]any{"uid": uid, "title": title, "condition": r.Condition, "for": forDuration, "noDataState": noData, "execErrState": execErr,
 			"folderUID": folder, "ruleGroup": name, "data": data, "labels": r.Labels}
+		if rr.Flat {
+			// A flat tier file's summary, description and panel link ride along, as the chart renders them.
+			// (A CR's annotations were never provisioned in 0.5; that stays.)
+			rule["annotations"] = r.Annotations
+		}
 		if r.KeepFiringFor != "" {
 			rule["keep_firing_for"] = r.KeepFiringFor
 		}

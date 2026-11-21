@@ -282,3 +282,59 @@ func lev(a, b string) int {
 	}
 	return prev[len(rb)]
 }
+
+// nearSuffixes are the unit and kind suffixes a stored name may carry; a slip in one of them is a near miss.
+var nearSuffixes = []string{"_total", "_seconds", "_bytes", "_ratio", "_bucket", "_sum", "_count"}
+
+// nearCanon is a metric name with its dots and dashes made underscores, repeated underscores made one and the
+// kind or unit suffixes taken off: two names with one canon differ only by a separator or a suffix.
+func nearCanon(n string) string {
+	n = strings.NewReplacer(".", "_", "-", "_").Replace(strings.ToLower(n))
+	for strings.Contains(n, "__") {
+		n = strings.ReplaceAll(n, "__", "_")
+	}
+	for again := true; again; {
+		again = false
+		for _, suf := range nearSuffixes {
+			if t, ok := strings.CutSuffix(n, suf); ok && t != "" {
+				n, again = t, true
+			}
+		}
+	}
+	return n
+}
+
+// NearMiss returns the declared name that word is a slip of, or "". A slip is the same name but for a small typo
+// (edit distance at most 2, and at most a quarter of the name's length), or but for a separator (a dot for an
+// underscore) or a unit or kind suffix (_total, _seconds, ...). The first word of the name (up to its first
+// underscore or dot) must be the same: a metric of another application whose name is close to a declared one is
+// not a misspelling of it, and a name with no such word (up, kube_...) is never one. Used where a name that is in
+// no contract is allowed (a folder with no contract of its own): only a likely typo of a declared name fails there.
+func NearMiss(word string, candidates []string) string {
+	ns := nearNamespace(word)
+	if ns == "" {
+		return ""
+	}
+	limit := min(2, len(word)/4)
+	best, bd := "", limit+1
+	for _, c := range candidates {
+		if c == word || nearNamespace(c) != ns {
+			continue
+		}
+		if nearCanon(word) == nearCanon(c) {
+			return c
+		}
+		if d := lev(word, c); d < bd {
+			best, bd = c, d
+		}
+	}
+	return best
+}
+
+// nearNamespace is the first word of a metric name: the text before its first underscore or dot ("" when none).
+func nearNamespace(n string) string {
+	if i := strings.IndexAny(n, "_."); i > 0 {
+		return strings.ToLower(n[:i])
+	}
+	return ""
+}

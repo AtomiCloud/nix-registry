@@ -31,7 +31,7 @@ func HeaderLines(c *contract.Contract) []string {
 // from a service subdirectory. With no .git it is relative to the folder that holds
 // the observability folder (the project folder), whatever the working directory.
 // Synthetic contracts (no file on disk) keep their supplied logical filename.
-func ContractPath(c *contract.Contract) string { return contract.RelPath(c.File) }
+func ContractPath(c *contract.Contract) string { return c.Rel() }
 
 // GitRoot is the nearest folder at or above dir that holds .git, or "" outside a Git repository.
 func GitRoot(dir string) string {

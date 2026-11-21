@@ -11,8 +11,8 @@ obs_setup_stub() {
     cp -r --no-preserve=mode "$stubs/go/stub/." "$d/interfaces-stub/"
     cat >>"$d/go.mod" <<'MOD'
 
-require github.com/ProtoDurian/diene.go-interfaces v0.0.0
-replace github.com/ProtoDurian/diene.go-interfaces => ./interfaces-stub
+require github.com/AtomiCloud/diene.go-interfaces v0.0.0
+replace github.com/AtomiCloud/diene.go-interfaces => ./interfaces-stub
 MOD
     ;;
   bun)
@@ -46,3 +46,8 @@ YAML
     ;;
   esac
 }
+
+# Each scenario runs in a fresh process: poison/registration closure lasts until restart.
+# shellcheck disable=SC2034 # consumed by the four compiler scripts
+obs_port_cases=(merged repeat changed-hash changed-table duplicate-metric duplicate-event duplicate-span cross-kind late late-span fresh-forgery refused-metric refused-event refused-span)
+obs_port_hash() { sed -n 's|^// contract-hash: ||p' "$1"; }

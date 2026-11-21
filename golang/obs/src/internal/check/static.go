@@ -20,7 +20,11 @@ const eventField = "durian.cloud/event"
 func Static(set *files.Set, o Options) *Report {
 	r := newReport()
 	for _, p := range set.Problems {
-		r.add(Fail, p.File, "", "file", "%s", p.Msg)
+		rule := p.Rule
+		if rule == "" {
+			rule = "file"
+		}
+		r.add(Fail, p.File, "", rule, "%s", p.Msg)
 	}
 	if !o.AllowEmpty && set.Alerts == 0 && len(set.Dashboards) == 0 && len(set.Problems) == 0 {
 		r.add(Fail, o.Dir, "", "empty", "no alerts/**/*.yaml and no dashboards/**/*.json found")
@@ -29,10 +33,14 @@ func Static(set *files.Set, o Options) *Report {
 	for _, p := range problems {
 		r.add(Fail, o.contractPath(), "", "contract", "%s", p)
 	}
-	if c != nil && o.SpanAttributes == nil {
+	if c != nil && o.SpanAttributes == nil && !o.metricsOnly {
 		o.SpanAttributes = c // the contract names the span attributes a TraceQL query may read
 	}
 	eventOn := o.eventRuleOn()
+	logC := c // the contract of logs and events: the merged names of a folder with no contract have none
+	if o.metricsOnly {
+		logC = nil
+	}
 	if c != nil {
 		for _, d := range set.Dashboards {
 			contractVariables(r, d, c)
@@ -58,7 +66,7 @@ func Static(set *files.Set, o Options) *Report {
 			staticMetrics(r, q, o, c)
 		case files.Logs:
 			r.Counts["logs"]++
-			staticLogs(r, q, o, eventOn, c)
+			staticLogs(r, q, o, eventOn, logC)
 		}
 	}
 	return r
@@ -143,7 +151,11 @@ func staticMetrics(r *Report, q *files.Query, o Options, c *contract.Contract) {
 			"%s(...) has no [window]: the window then comes from the query step; write [5m] or similar", f)
 	}
 	if c != nil {
-		contractMetrics(r, q, e, c)
+		if o.metricsOnly {
+			contractMetricsIn(r, q, e, c, o.repoFiles)
+		} else {
+			contractMetrics(r, q, e, c)
+		}
 	}
 	if o.Names {
 		m, l := metricNames(e)

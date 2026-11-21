@@ -1,0 +1,96 @@
+package main
+
+import (
+	"context"
+	billing "example.com/app/billing"
+	"example.com/app/signals"
+	"fmt"
+	obs "github.com/AtomiCloud/diene.go-interfaces/obs"
+	"os"
+	"strings"
+	"time"
+)
+
+func check(ok bool, why any) {
+	if !ok {
+		panic(why)
+	}
+}
+func main() {
+	scenario := os.Args[1]
+	t := obs.DurianSignalTables{Contract: "example.com/checkout:observability/contract.yaml", Hash: "sha256:HASH", Metrics: signals.MetricTable, Events: signals.EventTable, Spans: signals.SpanTable}
+	switch scenario {
+	case "refused-metric", "refused-event", "refused-span":
+		var refused error
+		switch scenario {
+		case "refused-metric":
+			refused = obs.Add(context.Background(), obs.NewCounter[struct{}]("not.in.contract"), struct{}{})
+		case "refused-event":
+			refused = obs.Error(context.Background(), obs.NewEvent[obs.ErrorLevel]("not.in.contract"))
+		case "refused-span":
+			refused = obs.StartSpan(context.Background(), obs.NewSpan[struct{}]("checkout.queue.consume", "consumer"), struct{}{})
+		}
+		check(refused != nil, "first signal must be refused")
+		check(obs.Register(obs.DurianSignalTables{Contract: "boot-extra:contract.yaml", Hash: "x", Events: map[string]string{"boot.extra": "error"}}) == nil, "refused signal must leave registration open")
+		check(obs.Error(context.Background(), signals.ChargeFailed) == nil, "real signal after boot registration")
+		check(obs.Dropped("register") == 0 && obs.Dropped("poisoned") == 0, "no poison after refused signal")
+	case "merged":
+		check(obs.Error(context.Background(), signals.ChargeFailed) == nil, "checkout event")
+		check(obs.Error(context.Background(), billing.ChargeFailed) == nil, "billing event")
+		check(obs.Add(context.Background(), signals.CheckoutInvoices, signals.CheckoutInvoicesLabels{BillingDay: signals.NewBillingDay(time.Date(2026, 11, 17, 0, 0, 0, 0, time.UTC)), Provider: signals.ProviderStripe}) == nil, "checkout metric")
+		check(obs.Add(context.Background(), billing.BillingCharges, billing.BillingChargesLabels{Provider: billing.ProviderStripe}) == nil, "billing metric")
+	case "repeat":
+		check(obs.Register(t) == nil, "same id/hash/content must be no-op")
+	case "changed-hash":
+		t.Hash = "changed"
+	case "changed-table":
+		t.Events = map[string]string{"other.event": "error"}
+	case "duplicate-metric":
+		t.Contract = "other:contract.yaml"
+		t.Metrics = map[string]obs.DurianSignalMetricInfo{"checkout.charges": {Kind: "counter"}}
+		t.Events = nil
+		t.Spans = nil
+	case "duplicate-event":
+		t.Contract = "other:contract.yaml"
+		t.Metrics = nil
+		t.Events = map[string]string{"checkout.charge.failed": "error"}
+		t.Spans = nil
+	case "duplicate-span":
+		t.Contract = "other:contract.yaml"
+		t.Metrics = nil
+		t.Events = nil
+		t.Spans = map[string]obs.DurianSignalSpanInfo{"checkout.charge": {}}
+	case "cross-kind":
+		t.Contract = "other:contract.yaml"
+		t.Metrics = nil
+		t.Events = map[string]string{"checkout.charge": "error"}
+		t.Spans = nil
+	case "late-span":
+		check(obs.StartSpan(context.Background(), signals.CheckoutQueueConsume, signals.CheckoutQueueConsumeAttrs{OrderId: "o"}) == nil, "first span")
+		t.Contract = "late:contract.yaml"
+		t.Metrics = nil
+		t.Events = nil
+		t.Spans = nil
+	case "late":
+		check(obs.Error(context.Background(), billing.ChargeFailed) == nil, "first signal")
+		t.Contract = "late:contract.yaml"
+		t.Metrics = nil
+		t.Events = nil
+		t.Spans = nil
+	case "fresh-forgery":
+		t = obs.DurianSignalTables{Contract: "forged:contract.yaml", Hash: "forged", Events: map[string]string{"forged.fresh": "error"}}
+		check(obs.Register(t) == nil, "fresh names admitted before first signal")
+		check(obs.Error(context.Background(), obs.NewEvent[obs.ErrorLevel]("forged.fresh")) == nil, "fresh forgery admitted: lint only")
+	}
+	if scenario != "merged" && scenario != "repeat" && scenario != "fresh-forgery" && !strings.HasPrefix(scenario, "refused-") {
+		err := obs.Register(t)
+		check(err != nil, "registration accepted")
+		if strings.HasPrefix(scenario, "duplicate") || scenario == "cross-kind" {
+			check(strings.Contains(err.Error(), "example.com/checkout:observability/contract.yaml") && strings.Contains(err.Error(), "other:contract.yaml"), err)
+		}
+		check(obs.Error(context.Background(), signals.ChargeFailed) != nil, "must poison checkout")
+		check(obs.Error(context.Background(), billing.ChargeFailed) != nil, "must poison billing")
+		check(obs.Dropped("register") == 1 && obs.Dropped("poisoned") == 2, "counts")
+	}
+	fmt.Println("PASS multi", scenario)
+}
