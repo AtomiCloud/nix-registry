@@ -28,7 +28,7 @@ func (generator) Files(c *contract.Contract, o gen.Options) ([]gen.File, error) 
 	}
 	interfaces := o.Interfaces
 	if interfaces == "" {
-		interfaces = "github.com/ProtoDurian/diene.go-interfaces/obs"
+		interfaces = "github.com/AtomiCloud/diene.go-interfaces/obs"
 	}
 	w := &writer{c: c, interfaces: interfaces, packageID: o.PackageID, contractID: o.ContractID, declared: map[string]string{}}
 	src := w.render(pkg)

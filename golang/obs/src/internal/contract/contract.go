@@ -191,6 +191,7 @@ type Span struct {
 
 // Target is one generated output: a language, where it goes, and its options.
 type Target struct {
+	Scope   *Scope `yaml:"-" json:"-"`
 	Lang    string `yaml:"lang"`
 	Out     string `yaml:"out"`               // folder, relative to the repo root (the folder holding observability/)
 	Package string `yaml:"package,omitempty"` // go package / dart library
@@ -203,6 +204,7 @@ type Target struct {
 
 // Contract is the parsed contract.yaml.
 type Contract struct {
+	Scope    *Scope            `yaml:"-" json:"-"`
 	Service  string            `yaml:"service"`
 	Modules  []string          `yaml:"modules,omitempty"`
 	PodKeys  []string          `yaml:"pod_keys,omitempty"`

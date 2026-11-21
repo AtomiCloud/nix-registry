@@ -34,6 +34,8 @@ type Options struct {
 	// NoOtherContracts turns off reading the repository's other observability/contract.yaml files
 	// (--contracts none). By default every one is read, so a dashboard may use a metric another contract declares.
 	NoOtherContracts bool
+	// Scope is the single root/filter set selected by a repository-wide command.
+	Scope *contract.Scope
 	// metricsOnly is set by loadContract when Contract is the merged view of the repository's contracts for a folder
 	// with none of its own: metric names are checked against it, logs, spans and events are not.
 	metricsOnly bool
@@ -48,6 +50,9 @@ type Options struct {
 func (o *Options) contractPath() string { return filepath.Join(o.Dir, "contract.yaml") }
 
 func (o *Options) hasContract() bool {
+	if o.Scope.Skips(o.Dir, o.contractPath()) {
+		return false
+	}
 	_, err := os.Stat(o.contractPath())
 	return err == nil
 }

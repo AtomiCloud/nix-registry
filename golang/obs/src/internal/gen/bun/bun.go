@@ -416,5 +416,14 @@ func renderWithOptions(c *contract.Contract, o gen.Options) (string, error) {
 	b.WriteString("\n// Merges this contract's tables at boot; duplicate names, changed contracts and late\n")
 	b.WriteString("// registration poison the port until restart.\n")
 	render(&b, 0, "durianSignalRegister(", obj{members: tables}, ");")
-	return b.String(), nil
+	// Generated API declarations are public entry points even when this app only
+	// consumes a subset. Knip reads this tag instead of reporting them as unused.
+	var public strings.Builder
+	for _, line := range strings.SplitAfter(b.String(), "\n") {
+		if strings.HasPrefix(line, "export ") {
+			public.WriteString("/** @public */\n")
+		}
+		public.WriteString(line)
+	}
+	return public.String(), nil
 }

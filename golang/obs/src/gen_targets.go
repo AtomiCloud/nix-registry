@@ -14,7 +14,7 @@ func generationTargetIssues(primary *contract.Contract, langs []string) ([]strin
 	}
 	contracts := []*contract.Contract{primary}
 	for _, file := range paths {
-		other, err := contract.Load(file)
+		other, err := contract.LoadInScope(file, primary.Scope)
 		if err != nil {
 			continue // obs check diagnoses invalid siblings; gen keeps its 0.5 scope
 		}

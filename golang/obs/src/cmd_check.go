@@ -10,7 +10,6 @@ import (
 
 	"github.com/AtomiCloud/obs/internal/check"
 	"github.com/AtomiCloud/obs/internal/contract"
-	"github.com/AtomiCloud/obs/internal/files"
 	"github.com/AtomiCloud/obs/internal/gen"
 	"github.com/AtomiCloud/obs/internal/ruleids"
 )
@@ -25,8 +24,13 @@ import (
 //	queries   every alert and dashboard query parsed by the embedded engines and checked against the
 //	          contract (each finding keeps its rule id); a folder with no queries is fine
 func runCheck(args []string, stdout, stderr io.Writer) int {
+	return runCheckScope(args, stdout, stderr, nil)
+}
+
+func runCheckScope(args []string, stdout, stderr io.Writer, scope *contract.Scope) int {
 	fs := flag.NewFlagSet("obs check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	all := fs.Bool("all", false, "run once per discovered contract, using repository discovery skips")
 	dir := fs.String("dir", "observability", "the observability folder (holds contract.yaml)")
 	pods := fs.Int("pods", 1, "pods per landscape, for the worst case x pods line (from the landscape config)")
 	landscapes := fs.Int("landscapes", 1, "landscapes that share the log store, for the stream count")
@@ -37,6 +41,9 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 	tempoConfig := fs.String("tempo-config", "", "Tempo config file whose query_frontend end cutoff and metrics limits trace panels run under; overrides obs.yaml thresholds.traces (default Tempo 3.1.1: 30s, 24h, 10000)")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if *all {
+		return runAll("obs check", fs, *dir, stdout, stderr, runCheckScope)
 	}
 	if *pods < 1 || *landscapes < 1 {
 		fmt.Fprintln(stderr, "obs check: --pods and --landscapes must be at least 1")
@@ -52,7 +59,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "obs check: --event-rule %q: want auto, on or off\n", *eventRule)
 		return 2
 	}
-	of, ok := loadObsYaml(*dir, "obs check", stderr)
+	of, ok := loadObsYaml(*dir, "obs check", stderr, scope)
 	if !ok {
 		return 2
 	}
@@ -64,7 +71,9 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 	// that exists but cannot be read (a symlink loop, a dangling symlink, a permission error) stops the run with exit 2,
 	// as obs 0.4 did.
 	noContract := false
-	if _, serr := os.Lstat(filepath.Join(*dir, "contract.yaml")); serr != nil {
+	if scope.Skips(*dir, filepath.Join(*dir, "contract.yaml")) {
+		noContract = true
+	} else if _, serr := os.Lstat(filepath.Join(*dir, "contract.yaml")); serr != nil {
 		if !os.IsNotExist(serr) {
 			fmt.Fprintf(stderr, "obs check: %v\n", serr)
 			return 2
@@ -78,7 +87,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		// Not loadContract: that prints its own "obs check: FAILED" line, and this command has one summary.
 		cpath := filepath.Join(*dir, "contract.yaml")
 		var err error
-		c, err = contract.Load(cpath)
+		c, err = contract.LoadInScope(cpath, scope)
 		if err != nil {
 			fmt.Fprintf(stderr, "obs check: %v\n", err)
 			return 2
@@ -111,13 +120,13 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		var others []*contract.Contract
 		otherFails := 0
 		if *contracts == "auto" {
-			found, derr := contract.Discover(*dir)
+			found, derr := contract.DiscoverInScope(*dir, scope)
 			if derr != nil {
 				fmt.Fprintf(stdout, "FAIL %s\n", derr)
 				otherFails++
 			}
 			for _, p := range found {
-				oc, err := contract.Load(p)
+				oc, err := contract.LoadInScope(p, scope)
 				if err != nil {
 					fmt.Fprintf(stdout, "FAIL %s\n", strings.ReplaceAll(err.Error(), p, contract.RelPath(p)))
 					otherFails++
@@ -139,7 +148,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 		targetContracts := append([]*contract.Contract{c}, others...)
-		if *contracts == "auto" && gen.GitRoot(*dir) == "" {
+		if *contracts == "auto" && gen.GitRoot(*dir) == "" && scope == nil {
 			// Generation-only sibling scope for source exports; metric/query
 			// discovery retains its existing repository semantics.
 			paths, err := gen.TargetContractPaths(c)
@@ -148,7 +157,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 				otherFails++
 			}
 			for _, file := range paths {
-				other, err := contract.Load(file)
+				other, err := contract.LoadInScope(file, scope)
 				if err != nil {
 					fmt.Fprintf(stdout, "FAIL %v\n", err)
 					otherFails++
@@ -192,7 +201,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 
 	// Two features shipping one rule uid: Grafana keeps one. Read every observability folder of the repository.
 	if *contracts == "auto" {
-		clashes, rerr := ruleids.All(*dir)
+		clashes, rerr := ruleids.AllInScope(*dir, scope)
 		if rerr != nil {
 			fmt.Fprintf(stdout, "FAIL %s\n", rerr)
 			reasons = append(reasons, "alert rule ids across the repository could not be read")
@@ -206,12 +215,12 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// The queries half: what `obs query --static` does (cmd_parts.go), on the same folder.
-	set, err := files.Load(*dir)
+	set, err := loadScopedFiles(*dir, scope)
 	if err != nil {
 		fmt.Fprintf(stderr, "obs check: %v\n", err)
 		return 2
 	}
-	qo := check.Options{Dir: *dir, VLSettings: *vlSettings, TempoConfig: *tempoConfig, Names: *names, EventRule: *eventRule, Obs: of, Out: stdout, NoOtherContracts: *contracts == "none", AllowEmpty: true}
+	qo := check.Options{Dir: *dir, VLSettings: *vlSettings, TempoConfig: *tempoConfig, Names: *names, EventRule: *eventRule, Obs: of, Out: stdout, NoOtherContracts: *contracts == "none", Scope: scope, AllowEmpty: true}
 	rep, _ := queryReport(set, qo, false)
 	if contractFails > 0 {
 		// The contract problems were printed above; the query rules must not print them again.

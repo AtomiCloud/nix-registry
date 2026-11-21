@@ -39,6 +39,9 @@ func dotnetRootCandidate(c *contract.Contract) bool {
 }
 
 func dotnetContractPath(c *contract.Contract) string {
+	if c.Scope != nil {
+		return c.Rel()
+	}
 	if GitRoot(filepath.Dir(c.File)) == "" {
 		// Synthetic contracts keep their supplied logical paths.
 		if _, err := os.Stat(c.File); err == nil {
@@ -62,7 +65,7 @@ func DotnetNamespace(c *contract.Contract, namespace string) string {
 	if _, err := os.Stat(c.File); err == nil {
 		found, _ := TargetContractPaths(c)
 		for _, file := range found {
-			other, err := contract.Load(file)
+			other, err := contract.LoadInScope(file, c.Scope)
 			if err == nil && len(other.Validate()) == 0 && ValidGenerateConfig(other) {
 				cs = append(cs, other)
 			}
@@ -156,11 +159,15 @@ func TargetClashesForLanguages(cs []*contract.Contract, primary *contract.Contra
 				continue
 			}
 			current := owner{names[c], target.Lang, c}
+			if err := checkDotnetAssembly(Root(filepath.Dir(c.File), c.Scope), target); err != nil {
+				issues = append(issues, fmt.Sprintf("[generate-assembly] contract %s: %v", current.file, err))
+				continue
+			}
 			if err := CheckInterfaces(target.Lang, target.Interfaces); err != nil {
 				issues = append(issues, fmt.Sprintf("[generate-interfaces] contract %s: %v", current.file, err))
 				continue
 			}
-			if err := checkOut(Root(filepath.Dir(c.File)), GitRoot(filepath.Dir(c.File)), target.Lang, target.Out); err != nil {
+			if err := checkOut(Root(filepath.Dir(c.File), c.Scope), targetScopeRoot(filepath.Dir(c.File), target), target.Lang, target.Out); err != nil {
 				issues = append(issues, fmt.Sprintf("[generate-out] contract %s: %v", current.file, err))
 				continue
 			}
@@ -175,7 +182,7 @@ func TargetClashesForLanguages(cs []*contract.Contract, primary *contract.Contra
 					identities[id] = current
 				}
 			}
-			written := filepath.Join(Root(filepath.Dir(c.File)), filepath.FromSlash(target.Out))
+			written := filepath.Join(Root(filepath.Dir(c.File), c.Scope), filepath.FromSlash(target.Out))
 			destination, err := resolvedPath(written)
 			if err != nil {
 				issues = append(issues, fmt.Sprintf("[generate-out] contract %s out: %q: %v", current.file, target.Out, err))

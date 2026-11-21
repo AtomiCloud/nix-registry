@@ -20,7 +20,7 @@ func loadContract(o *Options) (c *contract.Contract, problems []string) {
 	if !o.hasContract() {
 		return loadRepoNames(o)
 	}
-	c, err := contract.Load(o.contractPath())
+	c, err := contract.LoadInScope(o.contractPath(), o.Scope)
 	if err != nil {
 		return nil, []string{err.Error()}
 	}
@@ -36,12 +36,12 @@ func loadContract(o *Options) (c *contract.Contract, problems []string) {
 	}
 	// The repository's other contracts: a box dashboard reads the cluster contract's metrics.
 	var others []*contract.Contract
-	found, derr := contract.Discover(o.Dir)
+	found, derr := contract.DiscoverInScope(o.Dir, o.Scope)
 	if derr != nil {
 		problems = append(problems, derr.Error())
 	}
 	for _, p := range found {
-		oc, err := contract.Load(p)
+		oc, err := contract.LoadInScope(p, o.Scope)
 		if err != nil {
 			problems = append(problems, strings.ReplaceAll(err.Error(), p, contract.RelPath(p)))
 			continue
@@ -157,14 +157,14 @@ func loadRepoNames(o *Options) (*contract.Contract, []string) {
 	if o.NoOtherContracts {
 		return nil, nil
 	}
-	found, derr := contract.Discover(o.Dir)
+	found, derr := contract.DiscoverInScope(o.Dir, o.Scope)
 	var problems []string
 	if derr != nil {
 		problems = append(problems, derr.Error())
 	}
 	var others []*contract.Contract
 	for _, p := range found {
-		oc, err := contract.Load(p)
+		oc, err := contract.LoadInScope(p, o.Scope)
 		if err != nil {
 			problems = append(problems, strings.ReplaceAll(err.Error(), p, contract.RelPath(p)))
 			continue
@@ -191,6 +191,6 @@ func loadRepoNames(o *Options) (*contract.Contract, []string) {
 	for _, oc := range others {
 		o.repoFiles = append(o.repoFiles, oc.Rel())
 	}
-	o.Contract = contract.Merge(&contract.Contract{File: o.contractPath()}, others)
+	o.Contract = contract.Merge(&contract.Contract{File: o.contractPath(), Scope: o.Scope}, others)
 	return o.Contract, nil
 }
