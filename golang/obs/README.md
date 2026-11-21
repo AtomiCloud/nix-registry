@@ -1118,6 +1118,9 @@ scope are input errors (exit 2) naming the path. Eligible unreadable entries are
 not absent configuration or payloads.
 Git-ignore filtering requires both Git and checkout metadata. A Git-less export must leave out ignored
 build and chart copies; any copies included in the export count and can produce findings such as `[metric-clash]`.
+Git subprocesses use the repository selected by obs. Inherited `GIT_DIR` and `GIT_WORK_TREE` do not
+retarget them. An inherited `GIT_INDEX_FILE` is kept when `GIT_DIR` is unset or resolves to that
+repository's Git directory, so a hook can keep its staged index; a foreign repository's index is dropped.
 Cross-contract metric-name, query and
 rule-uid checks use that same scope in `--all` mode, including a complete Git-less export. The existing
 single-folder commands keep their discovery behavior. Use separate `--dir` runs for
