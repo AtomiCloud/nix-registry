@@ -188,7 +188,7 @@ func isFlat(m map[string]any) bool {
 // finds for a folder is the one read here): `platform:` and `service:`. When obs.yaml has no
 // `service:`, the contract's `service:` (<dir>/contract.yaml) is used. A missing, unreadable or
 // invalid file is no value; the loader's own error is reported by the command that loads it.
-func resolveIdentity(dir, root string) FlatIdentity {
+func resolveIdentity(dir, root string, skip func(string) bool) FlatIdentity {
 	id := FlatIdentity{ObsPath: filepath.Join(dir, obsyaml.FileName), ContractPath: filepath.Join(dir, "contract.yaml")}
 	var f *obsyaml.File
 	if root != "" {
@@ -205,7 +205,7 @@ func resolveIdentity(dir, root string) FlatIdentity {
 			id.Service, id.ServiceFrom = f.Service, f.Path+" service"
 		}
 	}
-	if id.Service == "" {
+	if id.Service == "" && (skip == nil || !skip(id.ContractPath)) {
 		if b, err := os.ReadFile(filepath.Join(dir, "contract.yaml")); err == nil {
 			var m struct {
 				Service string `yaml:"service"`
@@ -322,6 +322,12 @@ func (s *Set) readFlat(rel string, m map[string]any) {
 		return
 	}
 	uid := id.Platform + "-" + id.Service + "-" + slug + "-" + sev
+	if strings.IndexFunc(uid, func(r rune) bool {
+		return !(r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_' || r == '-')
+	}) >= 0 {
+		s.flatProblem(rel, "flat-alert-uid", "rule uid %q for slug %q must use only A-Z, a-z, 0-9, underscore or hyphen", uid, slug)
+		return
+	}
 	if n := len(uid); n > 40 {
 		s.flatProblem(rel, "flat-alert-uid-length", "rule uid %q is %d characters; Grafana's limit is 40 (platform %s, service %s, slug %s, severity %s)", uid, n, id.Platform, id.Service, slug, sev)
 		return

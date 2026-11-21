@@ -86,4 +86,8 @@ for scenario in "${obs_port_cases[@]}" invalid-registration; do
     fail=1
   fi
 done
+if out=$("$DART" run "$g/stub-test.dart" 2>&1); then echo "$out"; else
+  echo "FAIL stub exact span key list: $out"
+  fail=1
+fi
 exit $fail

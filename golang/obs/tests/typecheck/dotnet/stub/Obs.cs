@@ -259,7 +259,7 @@ public static class Port
             var fingerprint = System.Text.Json.JsonSerializer.Serialize(new
             {
                 contract.Hash,
-                Metrics = copiedMetrics.OrderBy(x => x.Key).Select(x => new
+                Metrics = copiedMetrics.OrderBy(x => x.Key, StringComparer.Ordinal).Select(x => new
                 {
                     x.Key,
                     x.Value.Kind,
@@ -268,11 +268,11 @@ public static class Port
                     x.Value.AcrossPods,
                     x.Value.PerPod,
                     x.Value.Keys,
-                    Values = x.Value.Values?.OrderBy(v => v.Key).Select(v => new { v.Key, v.Value }),
-                    Ranges = x.Value.Ranges?.OrderBy(v => v.Key).Select(v => new { v.Key, v.Value })
+                    Values = x.Value.Values?.OrderBy(v => v.Key, StringComparer.Ordinal).Select(v => new { v.Key, v.Value }),
+                    Ranges = x.Value.Ranges?.OrderBy(v => v.Key, StringComparer.Ordinal).Select(v => new { v.Key, v.Value })
                 }),
-                Events = copiedEvents.OrderBy(x => x.Key),
-                Spans = copiedSpans.OrderBy(x => x.Key)
+                Events = copiedEvents.OrderBy(x => x.Key, StringComparer.Ordinal),
+                Spans = copiedSpans.OrderBy(x => x.Key, StringComparer.Ordinal)
             });
             if (Contracts.TryGetValue(contract.Id, out var previous))
                 return previous == fingerprint ? Result<bool, string>.Ok(true) : Refuse($"contract {contract.Id} reused with a different hash or table");

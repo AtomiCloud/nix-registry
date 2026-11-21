@@ -418,7 +418,9 @@ final class DurianSignalPort {
     }
     final entries = labels.entries;
     final keys = entries.keys.toList();
-    if (keys.join(' ') != info.keys.join(' ')) {
+    if (keys.length != info.keys.length ||
+        !Iterable<int>.generate(keys.length)
+            .every((i) => keys[i] == info.keys[i])) {
       return p._drop(
         'unknown_key',
         'metric "$name" labels [${keys.join(' ')}] are not its generated keys [${info.keys.join(' ')}]',
@@ -459,7 +461,10 @@ final class DurianSignalPort {
       final info = p._spans[span.name];
       if (info == null || info.kind != span.kind)
         return p._drop('unknown_span', 'unknown span name or kind');
-      if (attrs.entries.keys.join(' ') != info.keys.join(' '))
+      final keys = attrs.entries.keys.toList();
+      if (keys.length != info.keys.length ||
+          !Iterable<int>.generate(keys.length)
+              .every((i) => keys[i] == info.keys[i]))
         return p._drop(
           'unknown_key',
           'span attributes differ from generated keys',

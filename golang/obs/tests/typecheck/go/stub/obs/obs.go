@@ -240,7 +240,7 @@ func Register(t DurianSignalTables) error {
 		return refuse("contract %q registered after the first signal", t.Contract)
 	}
 	if previous, ok := contracts[t.Contract]; ok {
-		if reflect.DeepEqual(previous, t) {
+		if equalTables(previous, t) {
 			return nil
 		}
 		return refuse("contract %q reused with a different hash or table", t.Contract)
@@ -283,6 +283,14 @@ func Register(t DurianSignalTables) error {
 		owners[n] = t.Contract
 	}
 	return nil
+}
+
+func equalTables(a, b DurianSignalTables) bool {
+	return a.Contract == b.Contract && a.Hash == b.Hash && maps.Equal(a.Events, b.Events) &&
+		maps.EqualFunc(a.Metrics, b.Metrics, func(x, y DurianSignalMetricInfo) bool {
+			return x.Kind == y.Kind && x.Unit == y.Unit && x.Budget == y.Budget && x.AcrossPods == y.AcrossPods && x.PerPod == y.PerPod &&
+				slices.Equal(x.Keys, y.Keys) && reflect.DeepEqual(x.Labels, y.Labels) && maps.Equal(x.Ranges, y.Ranges) && maps.EqualFunc(x.Values, y.Values, slices.Equal[[]string])
+		}) && maps.EqualFunc(a.Spans, b.Spans, func(x, y DurianSignalSpanInfo) bool { return x.Kind == y.Kind && slices.Equal(x.Keys, y.Keys) })
 }
 
 // Dropped is the dropped.<reason> counter (unknown_event, unknown_metric, unknown_key, unknown_value,

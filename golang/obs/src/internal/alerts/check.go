@@ -161,7 +161,7 @@ func run(o Options, stdout, stderr io.Writer, res *RunResult) int {
 	if o.Scope != nil {
 		root = o.Scope.Root
 	}
-	set, err := files.LoadScoped(o.Dir, nil, root)
+	set, err := files.LoadScoped(o.Dir, contract.PayloadSkip(o.Dir, o.Scope), root)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2

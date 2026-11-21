@@ -70,7 +70,7 @@ func loadProjectScope(dir, seedPath string, allowEmptyExpect bool, scope *contra
 	if scope != nil {
 		root = scope.Root
 	}
-	set, err := files.LoadScoped(dir, func(file string) bool { return scope.Skips(dir, file) }, root)
+	set, err := files.LoadScoped(dir, contract.PayloadSkip(dir, scope), root)
 	if err != nil {
 		return nil, err
 	}

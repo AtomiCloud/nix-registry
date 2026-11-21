@@ -143,10 +143,10 @@ func projectMarker(dir string) bool {
 			return true
 		}
 	}
-	for _, pattern := range []string{"*.sln", "*.slnx", "*.csproj"} {
-		matches, _ := filepath.Glob(filepath.Join(dir, pattern))
-		for _, file := range matches {
-			if st, err := os.Stat(file); err == nil && st.Mode().IsRegular() {
+	entries, _ := os.ReadDir(dir)
+	for _, entry := range entries {
+		if strings.HasSuffix(entry.Name(), ".sln") || strings.HasSuffix(entry.Name(), ".slnx") || strings.HasSuffix(entry.Name(), ".csproj") {
+			if st, err := entry.Info(); err == nil && st.Mode().IsRegular() {
 				return true
 			}
 		}

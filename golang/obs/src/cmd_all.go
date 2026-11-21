@@ -50,7 +50,7 @@ func runAll(cmd string, fs *flag.FlagSet, dir string, stdout, stderr io.Writer, 
 		fmt.Fprintf(stderr, "%s --all: %v\n", cmd, err)
 		return 2
 	}
-	if len(paths) == 0 {
+	if len(paths) == 0 && cmd != "obs gen" && cmd != "obs gen --check" {
 		fmt.Fprintf(stderr, "%s --all: no contracts found from %s\n", cmd, dir)
 		return 2
 	}
@@ -72,6 +72,33 @@ func runAll(cmd string, fs *flag.FlagSet, dir string, stdout, stderr io.Writer, 
 		}
 	})
 	result := 0
+	if cmd == "obs gen" || cmd == "obs gen --check" {
+		orphans, err := gen.MissingOwners(scope, paths)
+		if err != nil {
+			fmt.Fprintln(stderr, err)
+			return 2
+		}
+		checking := fs.Lookup("check").Value.String() == "true"
+		for _, orphan := range orphans {
+			if checking {
+				fmt.Fprintf(stdout, "FAIL %s: [gen-orphan] generated file names missing contract %s; run obs gen --all\n", scope.Rel(orphan.File), orphan.Contract)
+				result = 1
+			} else {
+				if err := os.Remove(orphan.File); err != nil {
+					fmt.Fprintln(stderr, err)
+					return 2
+				}
+				fmt.Fprintf(stdout, "deleted %s (missing contract %s)\n", scope.Rel(orphan.File), orphan.Contract)
+			}
+		}
+	}
+	if len(paths) == 0 {
+		if result != 0 {
+			return result
+		}
+		fmt.Fprintf(stderr, "%s --all: no contracts found from %s\n", cmd, dir)
+		return 2
+	}
 	for _, folder := range folders {
 		var out, errb bytes.Buffer
 		selected := append(append([]string(nil), args...), "--dir="+folder)
@@ -86,8 +113,8 @@ func runAll(cmd string, fs *flag.FlagSet, dir string, stdout, stderr io.Writer, 
 				result = rc
 			}
 			_, _ = stdout.Write(out.Bytes())
-			_, _ = stderr.Write(errb.Bytes())
 		}
+		_, _ = stderr.Write(errb.Bytes())
 		label := scope.Rel(folder) + "/"
 		for _, file := range paths {
 			if filepath.Dir(file) == folder {
@@ -102,7 +129,7 @@ func runAll(cmd string, fs *flag.FlagSet, dir string, stdout, stderr io.Writer, 
 
 func loadScopedFiles(dir string, scope *contract.Scope) (*files.Set, error) {
 	if scope == nil {
-		return files.Load(dir)
+		return files.LoadSkip(dir, contract.PayloadSkip(dir, nil))
 	}
 	return files.LoadScoped(dir, func(file string) bool { return scope.Skips(dir, file) }, scope.Root)
 }

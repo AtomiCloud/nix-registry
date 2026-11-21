@@ -52,6 +52,10 @@ if [ -z "$NODE" ] || [ ! -x "$NODE" ]; then
   echo "FAIL no node found (neither on PATH nor in the tsc wrapper): the forge cases cannot run"
   exit 1
 fi
+if out=$("$NODE" "$g/stub-test.cjs" "$work/node_modules/@atomicloud/diene.interfaces/index.js" 2>&1); then echo "$out"; else
+  echo "FAIL stub registration controls: $out"
+  fail=1
+fi
 printf '{"type":"commonjs"}\n' >package.json
 emit=(--strict --noUncheckedIndexedAccess --exactOptionalPropertyTypes --target es2022 --module commonjs --moduleResolution node10 --skipLibCheck --outDir out)
 runcase() { # file -> stdout+stderr of node; exit status of compile or run

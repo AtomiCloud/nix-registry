@@ -93,6 +93,12 @@ func discoverAt(abs, root string, includeOwn bool, scopes ...*Scope) ([]string, 
 	rootObs := rootIsObservability(root, scope)
 	var out []string
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+		if skip.ignored[p] {
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		if err != nil {
 			cause := err
 			var pe *fs.PathError
@@ -109,10 +115,19 @@ func discoverAt(abs, root string, includeOwn bool, scopes ...*Scope) ([]string, 
 			if skip.dir(p, d.Name()) {
 				return filepath.SkipDir
 			}
+			if payloadDir(root, p, rootObs) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
-		if d.Name() == "contract.yaml" && d.Type().IsRegular() && (includeOwn || (p != own && !sameInfo(ownInfo, p))) && !skip.ignored[p] && belowObservability(root, filepath.Dir(p), rootObs, true) {
-			out = append(out, p)
+		if d.Name() == "contract.yaml" && belowObservability(root, filepath.Dir(p), rootObs, true) {
+			regular, err := contractEntry(root, p, d)
+			if err != nil {
+				return err
+			}
+			if regular && (includeOwn || (p != own && !sameInfo(ownInfo, p))) {
+				out = append(out, p)
+			}
 		}
 		return nil
 	})

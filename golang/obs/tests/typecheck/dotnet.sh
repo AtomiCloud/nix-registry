@@ -230,4 +230,17 @@ XML
     fi
   done
 fi
+# Changing the process culture must never change an identical registration.
+mkdir -p "$work/stub-check"
+cp "$g/stub-test.cs" "$work/stub-check/Program.cs"
+cat >"$work/stub-check/Signals.csproj" <<'XML'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType><ImplicitUsings>enable</ImplicitUsings></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../good/interfaces-stub/Obs.csproj" /></ItemGroup>
+</Project>
+XML
+if out=$(build "$work/stub-check/Signals.csproj") && run=$("$DOTNET" "$work/stub-check/bin/Debug/net10.0/Signals.dll" 2>&1); then echo "$run"; else
+  echo "FAIL stub ordinal registration: ${out:-} ${run:-}"
+  fail=1
+fi
 exit $fail

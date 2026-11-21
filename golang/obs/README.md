@@ -1067,6 +1067,7 @@ table, its structural checks, and the "no severity field" rule):
 | `flat-alert-yaml`, `flat-alert-documents`      | a file that reads as a tier file (top-level tier keys, no `kind`) is not valid YAML, or is followed by another document (the first document decides: a tier file followed by a ConfigMap is a tier file with trailing documents); `obs live incidents` stops on it (exit 2) |
 | `flat-alert-panel`                         | `panel` is present but not an integer (`panel: null`, an empty `panel:`, a string, a float or a bool); leave the key out for none |
 | `flat-alert-identity`                      | platform or service unknown (above)                                                                      |
+| `flat-alert-uid`                           | the built uid contains a character outside `A-Z`, `a-z`, `0-9`, `_`, `-` (the finding names the uid and slug) |
 | `flat-alert-uid-length`                    | the uid is over 40 characters (Grafana's limit)                                                          |
 
 `obs live incidents` also treats the sibling `alerts/<slug>/runbook.md` as the flat rule's runbook (no `alert_without_runbook`),
@@ -1110,10 +1111,22 @@ header, identity calculation and enclosing `observability/obs.yaml` lookup, with
 from each module. Explicit `--dir` chooses the repository/export root. Discovery and each folder's loads share the fixture/dependency, Git-ignore,
 nested-repository and chart-copy skips: ignored contract files, alert folders and dashboards do not
 become candidates or get read through a shared folder. Existing options are forwarded to each run.
+Payload folders (`alerts/`, `dashboards/`) and their descendants are never feature candidates,
+including a flat alert slug named `dashboards`. Symlinked `contract.yaml` files are followed when their
+regular target is inside the repository/export scope; dangling links, loops and links outside that
+scope are input errors (exit 2) naming the path. Eligible unreadable entries are errors after pruning,
+not absent configuration or payloads.
+Git-ignore filtering requires both Git and checkout metadata. A Git-less export must leave out ignored
+build and chart copies; any copies included in the export count and can produce findings such as `[metric-clash]`.
 Cross-contract metric-name, query and
 rule-uid checks use that same scope in `--all` mode, including a complete Git-less export. The existing
 single-folder commands keep their discovery behavior. Use separate `--dir` runs for
 `obs test --out`, `--steps` or `--recorded`: `--all` refuses a shared file export that would be overwritten.
+
+After renaming or deleting a feature, run `obs gen --all`: it deletes and reports in-scope files with
+a valid obs-generated header whose contract path is no longer discovered. `obs gen --check --all`
+reports these as `[gen-orphan]`, naming the generated file and missing contract. Files without a valid
+generated header are left alone. This removes old registration tables before the application boots.
 
 Every 0.5 command, flag and output stays. For 57 of the 58 cases in `tests/compat.sh` the output is byte for byte the 0.5 output (the one that changed is `query-static` `bad-flat-alert`, now `ok-flat-alert`: a valid flat file is no longer refused), and a repository with one contract (or one contract per `<app>/observability/`) prints what it printed in 0.5, unless one of the findings below applies. New:
 
