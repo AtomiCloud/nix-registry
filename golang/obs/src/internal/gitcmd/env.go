@@ -31,7 +31,7 @@ func absoluteDir(env []string, args ...string) (string, error) {
 	cmd := exec.Command("git", append(args, "rev-parse", "--absolute-git-dir")...)
 	cmd.Env = env
 	out, err := cmd.Output()
-	return strings.TrimSpace(string(out)), err
+	return strings.TrimRight(string(out), "\r\n"), err
 }
 
 func filtered(parent []string, keepIndex bool) []string {
