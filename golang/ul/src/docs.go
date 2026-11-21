@@ -383,7 +383,7 @@ func (l *loaded) conceptProblems(f *Final, pages []*page) []Problem {
 		hs := byEntry[id]
 		first := hs[0]
 		for _, h := range hs[1:] {
-			if h.p != first.p { // two pages, whatever spelling they write the concept in
+			if h.fold != first.fold { // equal spellings are doccheck's (delta 8.1)
 				probs = append(probs, Problem{Code: "UL409", File: h.p.rel, Line: max(h.p.conceptLine, 1),
 					Message: fmt.Sprintf("concept %q names the same UL word as concept %q of %s (%s); one page explains one word", h.p.concept, first.p.concept, first.p.rel, f.byID[id].E.Word)})
 			}

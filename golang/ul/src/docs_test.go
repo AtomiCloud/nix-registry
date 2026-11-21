@@ -541,14 +541,15 @@ func TestTranslationFieldAdmitsOnlyI18nPages(t *testing.T) {
 	}
 }
 
-// Two pages that write the concept the same way are two pages for one word (UL409); one page
-// that lists a namespace twice is one page.
+// Two pages that write the concept the same way are doccheck's to refuse, not UL409; one page that
+// lists a namespace twice is one page.
 func TestConceptSameSpellingTwoPages(t *testing.T) {
 	dir := cleanWith(t, map[string]string{
 		"docs/a.md": "---\ntitle: A\nconcept: Frying pan\n" + kitchenNSLine + "\n---\n\nThe Frying pan.\n",
 	})
-	if code, out, _ := docsCheck(t, dir); code != 1 || strings.Count(out, "UL409") != 1 || !strings.Contains(out, "one page explains one word") {
-		t.Fatalf("exit %d\n%s", code, out)
+	// equal spellings are doccheck's to refuse (delta 8.1), not ul's
+	if code, out, errs := docsCheck(t, dir); code != 0 || strings.Contains(out, "UL409") {
+		t.Fatalf("exit %d\n%s%s", code, out, errs)
 	}
 	dir = cleanWith(t, map[string]string{
 		"docs/c.md": "---\ntitle: C\nconcept: Oven\nnamespaces: [example.org/cooking/kitchen, example.org/cooking/kitchen]\n---\n\nThe Oven.\n",
@@ -613,23 +614,25 @@ func TestPluralConsonantYAndAvoidTie(t *testing.T) {
 	}
 }
 
-// A translation holds the fixed term as a word of its own, with a plural ending allowed: not
-// inside another word.
-func TestFixedTermIsAWord(t *testing.T) {
+// A fixed term is found as text ignoring case, not as a whole word (delta 8.2): compound words
+// (Backofen holds Ofen), words with other endings and scripts written without spaces all pass.
+func TestFixedTermIsText(t *testing.T) {
 	for _, c := range []struct {
-		body string
-		ok   bool
+		lang, body string
+		ok         bool
 	}{
-		{"Un horno.", true}, {"Los hornos.", true}, {"El HORNO.", true},
-		{"Un hornofrito.", false}, {"Un ahorno.", false},
+		{"de", "Der Backofen heizt.", true}, {"de", "Der OFEN heizt.", true}, {"de", "Der Herd heizt.", false},
+		{"es", "Los hornos.", true}, {"es", "Un hornofrito.", true}, {"es", "Una cocina.", false},
+		{"zh-Hans", "使用烤箱加热。", true}, {"zh-Hans", "使用加热。", false},
 	} {
 		dir := cleanWith(t, map[string]string{
-			"docs/o.md":         "---\ntitle: O\n" + kitchenNSLine + "\n---\n\nThe Oven.\n",
-			"docs/i18n/es/o.md": "---\ntitle: O\ntranslation:\n  lang: es\n  source: ../../o.md\n---\n\n" + c.body + "\n",
+			"docs/o.md":        "---\ntitle: O\n" + kitchenNSLine + "\n---\n\nThe Oven.\n",
+			"docs/i18n/x/o.md": "---\ntitle: O\ntranslation:\n  lang: " + c.lang + "\n  source: ../../o.md\n---\n\n" + c.body + "\n",
 		})
+		rewrite(t, dir, clnUL, "      es: horno\n", "      es: horno\n      de: Ofen\n")
 		code, out, errs := docsCheck(t, dir, "--translations", "fixed")
-		if c.ok && code != 0 || !c.ok && (code != 1 || !strings.Contains(out, "docs/i18n/es/o.md:3: UL502")) {
-			t.Errorf("%q: exit %d\n%s%s", c.body, code, out, errs)
+		if c.ok && code != 0 || !c.ok && (code != 1 || !strings.Contains(out, "docs/i18n/x/o.md:3: UL502")) {
+			t.Errorf("%s %q: exit %d\n%s%s", c.lang, c.body, code, out, errs)
 		}
 	}
 }
@@ -658,34 +661,14 @@ func TestEnglishNameIsAWord(t *testing.T) {
 }
 
 // UL409 counts the word UL408 resolves for a context page, whether or not the page lists the
-// namespace: two such pages for one word are two pages for it.
+// namespace: a name and its alias on two such pages are two spellings of one word.
 func TestConceptDuplicateWithoutListedNamespace(t *testing.T) {
 	dir := cleanWith(t, map[string]string{
-		"docs/domain/kitchen/model/o1.md": "---\ntitle: O1\nconcept: Oven\nnamespaces: []\n---\n\nA box.\n",
-		"docs/domain/kitchen/model/o2.md": "---\ntitle: O2\nconcept: Oven\nnamespaces: []\n---\n\nAnother box.\n",
+		"docs/domain/kitchen/model/o1.md": "---\ntitle: O1\nconcept: Frying pan\nnamespaces: []\n---\n\nA box.\n",
+		"docs/domain/kitchen/model/o2.md": "---\ntitle: O2\nconcept: Fry pan\nnamespaces: []\n---\n\nAnother box.\n",
 	})
 	code, out, _ := docsCheck(t, dir)
 	if code != 1 || strings.Count(out, "UL409") != 1 || strings.Contains(out, "UL408") {
 		t.Fatalf("exit %d\n%s", code, out)
-	}
-}
-
-// A fixed term in a script written without spaces (Chinese here) is found between other
-// characters, while a Latin term is still a word of its own.
-func TestFixedTermUnspacedScript(t *testing.T) {
-	for _, c := range []struct {
-		body string
-		ok   bool
-	}{
-		{"使用烤箱加热。", true}, {"烤箱", true}, {"使用加热。", false},
-	} {
-		dir := cleanWith(t, map[string]string{
-			"docs/o.md":         "---\ntitle: O\n" + kitchenNSLine + "\n---\n\nThe Oven.\n",
-			"docs/i18n/zh/o.md": "---\ntitle: O\ntranslation:\n  lang: zh-Hans\n  source: ../../o.md\n---\n\n" + c.body + "\n",
-		})
-		code, out, errs := docsCheck(t, dir)
-		if c.ok && code != 0 || !c.ok && (code != 1 || !strings.Contains(out, "docs/i18n/zh/o.md:3: UL502")) {
-			t.Errorf("%q: exit %d\n%s%s", c.body, code, out, errs)
-		}
 	}
 }
