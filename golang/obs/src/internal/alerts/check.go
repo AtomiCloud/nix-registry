@@ -44,6 +44,8 @@ type Options struct {
 	// NoOtherContracts is `obs test --contracts none`: the static check reads this folder's contract only, not the
 	// repository's other observability/contract.yaml files. `obs alerts` leaves it false.
 	NoOtherContracts bool
+	// ProjectScope extends --all checks to source exports without changing obs alerts.
+	ProjectScope bool
 }
 
 // TempoAlertingNote is printed once per obs alerts run that has trace rules.
@@ -103,7 +105,7 @@ func run(o Options, stdout, stderr io.Writer, res *RunResult) int {
 		return 2
 	}
 	if !o.NoOtherContracts { // one rule uid in two features: Grafana keeps one (the other observability folders are read)
-		if err := RepoRuleIDs(p); err != nil {
+		if err := repoRuleIDs(p, o.ProjectScope); err != nil {
 			fmt.Fprintln(stderr, "obs alerts:", err)
 			return 2
 		}
@@ -167,7 +169,7 @@ func run(o Options, stdout, stderr io.Writer, res *RunResult) int {
 		}
 	}
 	set.Queries, set.Dashboards = queries, nil
-	rep := check.Static(set, check.Options{Dir: o.Dir, EventRule: o.EventRule, NoOtherContracts: o.NoOtherContracts})
+	rep := check.Static(set, check.Options{Dir: o.Dir, EventRule: o.EventRule, NoOtherContracts: o.NoOtherContracts, ProjectScope: o.ProjectScope})
 	rep.Print(stdout)
 	if rep.Failures() > 0 {
 		return 1

@@ -34,3 +34,24 @@ func TestMultipleProjectIdentityErrorKeepsTargetHint(t *testing.T) {
 		t.Fatalf("ambiguous identity needs the target and override hint: %v", err)
 	}
 }
+
+func TestGoWorkspaceOverrideRetainsExportIdentity(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "go.work"), []byte("go 1.27.4\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	for _, feature := range []string{"orders", "billing"} {
+		dir := filepath.Join(root, "apps", feature, "observability")
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "contract.yaml"), []byte("service: shop\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		id, err := RegistrationIdentity(dir, contract.Target{Lang: "go", Out: "gen", PackageID: "shared"})
+		want := "shared:apps/" + feature + "/observability/contract.yaml"
+		if err != nil || id != want {
+			t.Errorf("workspace override: got %q (%v), want %q", id, err, want)
+		}
+	}
+}

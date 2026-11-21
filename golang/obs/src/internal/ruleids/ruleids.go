@@ -48,11 +48,16 @@ func Others(dir string) ([]Rule, error) {
 // OthersSkip is Others and the prune set it used, so the caller can apply the same rule to the rules of dir itself
 // (contract.RepoSkip.Skips(dir, file)). The set is nil outside a Git repository.
 func OthersSkip(dir string) ([]Rule, *contract.RepoSkip, error) {
+	return OthersScopeSkip(dir, false)
+}
+
+// OthersScopeSkip extends the same uid check to source exports in --all mode.
+func OthersScopeSkip(dir string, project bool) ([]Rule, *contract.RepoSkip, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, nil, err
 	}
-	folders, skip, err := contract.FoldersSkip(abs)
+	folders, skip, err := contract.FoldersScopeSkip(abs, project)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -74,11 +79,16 @@ func OthersSkip(dir string) ([]Rule, *contract.RepoSkip, error) {
 // them. Nothing is returned for a dir with no other folder: a repository with one observability folder is checked
 // by the per-folder duplicate check alone.
 func All(dir string) ([]Clash, error) {
+	return AllScope(dir, false)
+}
+
+// AllScope uses the same project boundary as repository-wide commands.
+func AllScope(dir string, project bool) ([]Clash, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
 	}
-	folders, skip, err := contract.FoldersSkip(abs)
+	folders, skip, err := contract.FoldersScopeSkip(abs, project)
 	if err != nil {
 		return nil, err
 	}

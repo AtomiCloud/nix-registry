@@ -114,7 +114,7 @@ func owningProject(root string, target contract.Target) (string, error) {
 	if git := GitRoot(root); git != "" {
 		return resolvedPath(git)
 	}
-	return resolvedPath(root)
+	return resolvedPath(contract.ProjectRoot(root))
 }
 
 func literalMSBuild(value string) string {
@@ -138,6 +138,10 @@ func packageManifest(root string, target contract.Target) (string, string, error
 		return fail(err)
 	}
 	boundary := GitRoot(root)
+	home := ""
+	if boundary == "" {
+		home = contract.HomeBoundary(start)
+	}
 	if boundary != "" {
 		boundary, err = resolvedPath(boundary)
 		if err != nil {
@@ -148,6 +152,9 @@ func packageManifest(root string, target contract.Target) (string, string, error
 		}
 	}
 	for dir := start; ; dir = filepath.Dir(dir) {
+		if dir == home && dir != start {
+			break
+		}
 		name := ""
 		switch target.Lang {
 		case "go":
@@ -179,7 +186,7 @@ func packageManifest(root string, target contract.Target) (string, string, error
 				return fail(e)
 			}
 		}
-		if dir == boundary || filepath.Dir(dir) == dir {
+		if dir == boundary || dir == home || filepath.Dir(dir) == dir {
 			break
 		}
 	}

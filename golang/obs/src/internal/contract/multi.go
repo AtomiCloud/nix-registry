@@ -67,6 +67,15 @@ func DiscoverProject(dir string) ([]string, error) {
 	return discoverAt(abs, ProjectRoot(abs), false)
 }
 
+// DiscoverScope uses project discovery in a source export only when requested
+// by a repository-wide command. Existing single-folder commands stay Git-only.
+func DiscoverScope(dir string, project bool) ([]string, error) {
+	if project && gitRoot(dir) == "" {
+		return DiscoverProject(dir)
+	}
+	return Discover(dir)
+}
+
 func discoverAt(abs, root string, includeOwn bool) ([]string, error) {
 	if inTestDir(root, abs) {
 		return nil, nil
@@ -265,11 +274,20 @@ func (r *RepoSkip) Skips(folder, p string) bool {
 // FoldersSkip is Folders and the prune set it used (nil when dir has no repository), so a reader of the files below
 // those folders applies the same ignore, nested-repository and copy rules without asking git again.
 func FoldersSkip(dir string) ([]string, *RepoSkip, error) {
+	return FoldersScopeSkip(dir, false)
+}
+
+// FoldersScopeSkip includes contract-less dashboard folders for repository-wide
+// commands, and uses the project boundary when the source export has no Git.
+func FoldersScopeSkip(dir string, project bool) ([]string, *RepoSkip, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, nil, fmt.Errorf("observability folders: %w", err)
 	}
 	root := gitRoot(abs)
+	if root == "" && project {
+		root = ProjectRoot(abs)
+	}
 	if root == "" || inTestDir(root, abs) {
 		return nil, nil, nil
 	}
@@ -297,12 +315,19 @@ func FoldersSkip(dir string) ([]string, *RepoSkip, error) {
 		}
 		st, serr := os.Stat(filepath.Join(p, "contract.yaml"))
 		hasContract := serr == nil && st.Mode().IsRegular()
-		if !belowObservability(root, p, rootObs, hasContract) {
+		hasData := false
+		for _, name := range []string{"alerts", "dashboards"} {
+			if name == "dashboards" && !project {
+				continue
+			}
+			if st, err := os.Stat(filepath.Join(p, name)); err == nil && st.IsDir() {
+				hasData = true
+			}
+		}
+		if !belowObservability(root, p, rootObs, hasContract || (project && hasData)) {
 			return nil
 		}
-		if hasContract {
-			out = append(out, p)
-		} else if st, serr := os.Stat(filepath.Join(p, "alerts")); serr == nil && st.IsDir() {
+		if hasContract || hasData {
 			out = append(out, p)
 		}
 		return nil

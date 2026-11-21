@@ -864,9 +864,11 @@ In a Git repository `out:` may point anywhere under the Git root (for example
 Git root. An `out:` that leaves the Git root, or is absolute, is refused before anything is written; the
 check is made on the written path and on its resolved path, so a symlink in `out:` cannot lead outside.
 With no `.git`, `out:` may not use `..` or a symlink that leads out of that output base. Headers use the
-topmost ancestor containing a project marker (`.sln`, `.csproj`, `go.mod`, `package.json`, `pubspec.yaml`),
+topmost ancestor below the home directory containing a project marker (`.sln`, `.slnx`, `.csproj`,
+`flake.nix`, `go.work`, `go.mod`, `package.json`, `pubspec.yaml`),
 or the observability project's base when there is no marker. Feature paths stay distinct, and a complete
 source export with its project marker can run `obs gen --check` or regenerate without an empty `.git` workaround.
+A Docker build context must be the repository root for `obs gen --check` to match the checkout.
 Each generated-file destination must be a regular file or absent. A symlink at the file itself,
 including a dangling symlink, is refused before any file is written. Directory aliases are allowed
 within the permitted root; full destinations are resolved through existing ancestors (including a
@@ -883,7 +885,8 @@ It is the package's stable identity,
 not the feature name or the generated namespace. Manifest edits change generated registration too;
 `obs gen --check` detects that drift even when the contract hash stays the same.
 The walk follows the resolved `out:` directory's ancestors and stops at the resolved Git root.
-Without `.git`, it walks up without a bound, so a manifest above the project can be picked up.
+Without `.git`, it walks upward to the home-directory boundary (the home folder itself is not read),
+so a manifest between the project and that boundary can be picked up.
 Use `package_id:` to pin the identity outside Git or when the owning manifest is unavailable.
 
 Each `generate:` target accepts optional `interfaces:` to override its dependency import. The merged-port
@@ -906,9 +909,12 @@ project can collect every feature without a hand-kept list:
 ```
 
 The app's project removes `Modules/*/Signals/*.g.cs` from its own `Compile` items and references the
-Signals project. `obs gen`/`obs check` report `[generate-assembly]` when the nearby project may compile
-the file with another assembly name; a matching unconditional `Compile Remove` is honored. The static
-check reads SDK defaults and literal `Compile Include`/`Remove`, not the MSBuild import graph. A computed
+Signals project. `obs gen`/`obs check` report `[generate-assembly]` when a project in repository/project
+scope may compile the file with another assembly name: SDK defaults under that project and literal
+`Compile Include` entries in other projects are checked, independently of the package-identity manifest.
+A matching unconditional `Compile Remove` is honored, including in the nearest `Directory.Build.props`
+between the project and the scope root. The static check reads SDK defaults and literal
+`Compile Include`/`Remove`, not the full MSBuild import graph. A computed
 or conditional assembly name that cannot be verified requires a literal `AssemblyName` of `Signals`.
 Package identity still comes from the nearest manifest at `out:`; this may be the app project even
 when the separate Signals project compiles the file. Use `package_id:` to pin identity if needed.
@@ -950,7 +956,7 @@ they test that recording the first span also closes registration and poisons any
 
 | Language | Default `interfaces`                             | In the goal                                                                                                                                                                                                                         | Assumed, not in goal                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | -------- | ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Go       | `github.com/AtomiCloud/diene.go-interfaces/obs` | module `ProtoDurian/diene.go-interfaces`; `obs.Add`, `obs.Int[Spec]`, `obs.NewInt`, `obs.AtTime` with an error return; `obs.Error(ctx, Event[Error], ...)`; `obs.Register(DurianSignalTables{Contract, Hash, ...})`, merged boot registration and poison rules | the `/obs` package path; `IntSpec` `Name/Min/Max/Unit` (int64); `Int.Valid`; `Level` and the six markers; `NewEvent/NewCounter/NewHistogram/NewGauge/NewSpan`; `DurianSignal*` carriers and info rows (`Labels`, `Values`, `Ranges`); `Field`; `Record/Set/Warn/Info`; fixture `StartSpan`; exact `DurianSignalTables` map/row fields; `Dropped(reason)`                                                                        |
+| Go       | `github.com/AtomiCloud/diene.go-interfaces/obs` | `obs.Add`, `obs.Int[Spec]`, `obs.NewInt`, `obs.AtTime` with an error return; `obs.Error(ctx, Event[Error], ...)`; `obs.Register(DurianSignalTables{Contract, Hash, ...})`, merged boot registration and poison rules | the `/obs` package path; `IntSpec` `Name/Min/Max/Unit` (int64); `Int.Valid`; `Level` and the six markers; `NewEvent/NewCounter/NewHistogram/NewGauge/NewSpan`; `DurianSignal*` carriers and info rows (`Labels`, `Values`, `Ranges`); `Field`; `Record/Set/Warn/Info`; fixture `StartSpan`; exact `DurianSignalTables` map/row fields; `Dropped(reason)`                                                                        |
 | Bun      | `@atomicloud/diene.interfaces`                   | `counter(name, labels)`; `log.error(ev, fields?, err?)`; `bounded(spec, n): Result`; `Tracer`/`Span`, `DurianSignalSpanTable`; `register({contract, hash, metrics, events, spans})`, merged boot registration and registered-object binding | `metrics(table)`, `histogram/gauge`, `MetricTable` (with `values`, `ranges`); `logger(eventTable)`, `EventTable`, `Level`; `dropped()`; `tracer(table)`; `Bounded<N>`; a synchronous `{ok, value}` Result (the published Result is promise-based)                                                                                                                    |
 | .NET     | `AtomiCloud.Diene.Interfaces`                    | `Port.Add(Names.X, new XLabels(...))`; `Int<Spec>.Of(n)` returning a `Result` (package `AtomiCloud.Diene.Result`: struct `Result<T, E>`, `Ok/Err`, `IsSuccess`); `Log.Error(Event<ErrorLevel>, ...)`; internal carrier constructors; per-contract `Port.Install`, merged boot registration and poison rules | namespace `AtomiCloud.Diene.Result` and `Value/Error`; `IDurianSignal*` interfaces, `Valid/Wire`; `AtTime`; `DurianSignalDate`; label attribute and info rows; `Port.Record/Set/Dropped`; fixture `Port.StartSpan`; `Port.Install(SignalTables.Contract, SignalTables.Metrics, SignalTables.EventLevels, SignalTables.Spans)` returning a Result; `DurianSignalContract(Id, Hash)`; info row `Values`/`Ranges`; `Log.Warn`                                                                                                                                                                                                              |
 | Dart     | `diene_interfaces`                               | `checkoutCharges.add(XLabels(...))`; `error(Event<ErrorLevel>, ...)`; enums; extension types; `shardSpec.of(n)` returning a `Result`; `entries` getter; generated `installSignals()` and `DurianSignalPort.install`, merged boot registration and poison rules | barrel `diene_interfaces.dart`; `DurianSignalWire/Labels/Metric`, carrier bases and constructors; `DurianSignalBoundSpec` and `atTime`; sealed level markers; exact `install(contract:, hash:, metrics:, events:, spans:)` named arguments and Result shape; `add/record/set/dropped`; fixture `startSpan`; `warn/info`; info rows (`labels` Type, `values`, `ranges`); local `Result/DurianSignalOk/DurianSignalErr` in place of `diene_result` |
@@ -985,13 +991,18 @@ obs check --all
 obs test --all
 ```
 
-Each command runs once per discovered contract folder, with one summary line naming that contract.
+Generation runs once per discovered contract folder, with one summary line naming that contract.
+`obs check --all` and `obs test --all` also visit observability folders that hold `alerts/` or
+`dashboards/` without a contract, so shared service dashboards and alerts participate in the CI gate.
+Their summary names the folder. At least one contract is still required.
 Failures retain their diagnostics and do not prevent the remaining folders from running. Exit 0 means
 every folder passed, 1 means a check failed, and 2 means an input or enumeration error. No contracts
 found is an error, never a successful zero-check run. The CI static-check recipe is `obs check --all`.
 Discovery shares the normal fixture/dependency, Git-ignore, nested-repository and chart-copy skips;
 outside Git it scans the topmost project folder described above. `--dir` chooses the repository/project
-to enumerate, and existing options are forwarded to each run. Use separate `--dir` runs for
+to enumerate, and existing options are forwarded to each run. Cross-contract metric-name, query and
+rule-uid checks use that same scope in `--all` mode, including a complete Git-less export. The existing
+single-folder commands keep their discovery behavior. Use separate `--dir` runs for
 `obs test --out`, `--steps` or `--recorded`: `--all` refuses a shared file export that would be overwritten.
 
 Every 0.5 command, flag and output stays. For the 58 cases in `tests/compat.sh` the output is byte for byte the 0.5 output, and a repository with one contract (or one contract per `<app>/observability/`) prints what it printed in 0.5, unless one of the findings below applies. New:
@@ -2657,7 +2668,7 @@ source) where its section says so.
 **Commands and builds**
 
 - **Knip itself on generated Bun output.** The generator test scans every export for knip's `@public` tag; it does not run the knip CLI against an application.
-- **Full MSBuild evaluation for the Signals assembly check.** Compiler fixtures prove the `Signals` assembly succeeds and an app assembly fails. The static project check covers SDK defaults and literal compile items, not imported build files, arbitrary conditions or computed properties.
+- **Full MSBuild evaluation for the Signals assembly check.** Compiler fixtures prove the `Signals` assembly succeeds and an app assembly fails. The static project check covers SDK defaults, literal compile items and the nearest Directory.Build.props, not arbitrary additional imports, conditions or computed properties.
 
 - **`obs live` on dev, stage and prod.** No access to any of them; only the local sandbox was read for real (and recorded). The edge cases (two landscapes, a label outside the type, a failing query, an alert that fired before the window, redirects) are tested on hand-written payloads in the shapes the sandbox recorded. Not run against a real remote store: auth headers from the environment on a real gateway, and a very large metrics store (the points/min queries are one `count_over_time` per stored metric name and the series read is one `/api/v1/series` call; a store with more series than its `-search.maxSeries` answers an error, which obs reports as exit 2).
 - **`obs live incidents`: what the recording does not hold.** The recorded Grafana state history holds a real Normal -> Pending and Normal -> Alerting change; its tag-only payload now proves a firing observation, with unknown spans. Optional lossless label maps, Alerting -> Normal, Recovering, overlapping instances, absent transitions, title/ID collisions, future windows and capped responses are tested on synthetic payloads. There is no current-state GET in the command or the incident recording. The `ALERTS` grouped list and raw range-selector path (a vmalert-style ruler) are tested on fake stores only, including bounded per-window reads, responses exceeding 64 MiB, merged chunk evidence and a carried-forward evaluation point that must not count as firing inside a later window.

@@ -25,6 +25,10 @@ import (
 //	queries   every alert and dashboard query parsed by the embedded engines and checked against the
 //	          contract (each finding keeps its rule id); a folder with no queries is fine
 func runCheck(args []string, stdout, stderr io.Writer) int {
+	return runCheckScope(args, stdout, stderr, false)
+}
+
+func runCheckScope(args []string, stdout, stderr io.Writer, projectScope bool) int {
 	fs := flag.NewFlagSet("obs check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	all := fs.Bool("all", false, "run once per discovered contract, using repository discovery skips")
@@ -40,7 +44,9 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *all {
-		return runAll("obs check", fs, *dir, stdout, stderr, runCheck)
+		return runAll("obs check", fs, *dir, stdout, stderr, func(args []string, out, err io.Writer) int {
+			return runCheckScope(args, out, err, true)
+		})
 	}
 	if *pods < 1 || *landscapes < 1 {
 		fmt.Fprintln(stderr, "obs check: --pods and --landscapes must be at least 1")
@@ -115,7 +121,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		var others []*contract.Contract
 		otherFails := 0
 		if *contracts == "auto" {
-			found, derr := contract.Discover(*dir)
+			found, derr := contract.DiscoverScope(*dir, projectScope)
 			if derr != nil {
 				fmt.Fprintf(stdout, "FAIL %s\n", derr)
 				otherFails++
@@ -143,7 +149,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 			}
 		}
 		targetContracts := append([]*contract.Contract{c}, others...)
-		if *contracts == "auto" && gen.GitRoot(*dir) == "" {
+		if *contracts == "auto" && gen.GitRoot(*dir) == "" && !projectScope {
 			// Generation-only sibling scope for source exports; metric/query
 			// discovery retains its existing repository semantics.
 			paths, err := gen.TargetContractPaths(c)
@@ -196,7 +202,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 
 	// Two features shipping one rule uid: Grafana keeps one. Read every observability folder of the repository.
 	if *contracts == "auto" {
-		clashes, rerr := ruleids.All(*dir)
+		clashes, rerr := ruleids.AllScope(*dir, projectScope)
 		if rerr != nil {
 			fmt.Fprintf(stdout, "FAIL %s\n", rerr)
 			reasons = append(reasons, "alert rule ids across the repository could not be read")
@@ -215,7 +221,7 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "obs check: %v\n", err)
 		return 2
 	}
-	qo := check.Options{Dir: *dir, VLSettings: *vlSettings, TempoConfig: *tempoConfig, Names: *names, EventRule: *eventRule, Obs: of, Out: stdout, NoOtherContracts: *contracts == "none", AllowEmpty: true}
+	qo := check.Options{Dir: *dir, VLSettings: *vlSettings, TempoConfig: *tempoConfig, Names: *names, EventRule: *eventRule, Obs: of, Out: stdout, NoOtherContracts: *contracts == "none", ProjectScope: projectScope, AllowEmpty: true}
 	rep, _ := queryReport(set, qo, false)
 	if contractFails > 0 {
 		// The contract problems were printed above; the query rules must not print them again.

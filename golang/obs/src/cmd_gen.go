@@ -86,7 +86,7 @@ func runGen(args []string, stdout, stderr io.Writer) int {
 		for _, issue := range issues {
 			fmt.Fprintf(stdout, "FAIL %s\n", issue)
 		}
-		fmt.Fprintf(stdout, "%s: FAILED: %d generation target clashes\n", cmd, len(issues))
+		fmt.Fprintf(stdout, "%s: FAILED: %d generation target failures\n", cmd, len(issues))
 		return 1
 	}
 	outs, err := gen.Plan(c, *dir, want)

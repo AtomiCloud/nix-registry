@@ -34,6 +34,8 @@ type Options struct {
 	// NoOtherContracts turns off reading the repository's other observability/contract.yaml files
 	// (--contracts none). By default every one is read, so a dashboard may use a metric another contract declares.
 	NoOtherContracts bool
+	// ProjectScope extends repository-wide commands to a Git-less source export.
+	ProjectScope bool
 	// metricsOnly is set by loadContract when Contract is the merged view of the repository's contracts for a folder
 	// with none of its own: metric names are checked against it, logs, spans and events are not.
 	metricsOnly bool

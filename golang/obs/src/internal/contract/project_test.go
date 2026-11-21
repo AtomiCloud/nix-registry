@@ -29,3 +29,25 @@ func TestStandaloneOutputBaseStopsAtProjectBoundary(t *testing.T) {
 		}
 	}
 }
+
+func TestProjectRootDoesNotReadHomeMarkers(t *testing.T) {
+	outer := t.TempDir()
+	home := filepath.Join(outer, "home")
+	root := filepath.Join(home, "projects", "shop")
+	dir := filepath.Join(root, "orders", "observability")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for file, body := range map[string]string{
+		filepath.Join(outer, "package.json"): `{"name":"unrelated-parent"}`,
+		filepath.Join(home, "package.json"):  `{"name":"unrelated-home"}`,
+		filepath.Join(root, "go.mod"):        "module example.com/shop\n",
+	} {
+		if err := os.WriteFile(file, []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := projectRoot(dir, home); got != root {
+		t.Errorf("home and above-home markers must not widen discovery: got %s, want %s", got, root)
+	}
+}

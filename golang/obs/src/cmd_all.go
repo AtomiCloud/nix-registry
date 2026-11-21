@@ -32,6 +32,17 @@ func runAll(cmd string, fs *flag.FlagSet, dir string, stdout, stderr io.Writer, 
 		fmt.Fprintf(stderr, "%s --all: no contracts found from %s\n", cmd, dir)
 		return 2
 	}
+	var folders []string
+	for _, file := range paths {
+		folders = append(folders, filepath.Dir(file))
+	}
+	if cmd == "obs check" || cmd == "obs test" {
+		folders, _, err = contract.FoldersScopeSkip(dir, true)
+		if err != nil {
+			fmt.Fprintf(stderr, "%s --all: %v\n", cmd, err)
+			return 2
+		}
+	}
 	var args []string
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name != "all" && f.Name != "dir" {
@@ -39,9 +50,9 @@ func runAll(cmd string, fs *flag.FlagSet, dir string, stdout, stderr io.Writer, 
 		}
 	})
 	result := 0
-	for _, file := range paths {
+	for _, folder := range folders {
 		var out, errb bytes.Buffer
-		selected := append(append([]string(nil), args...), "--dir="+filepath.Dir(file))
+		selected := append(append([]string(nil), args...), "--dir="+folder)
 		rc := runner(selected, &out, &errb)
 		status := "ok"
 		if rc != 0 {
@@ -55,7 +66,14 @@ func runAll(cmd string, fs *flag.FlagSet, dir string, stdout, stderr io.Writer, 
 			_, _ = stdout.Write(out.Bytes())
 			_, _ = stderr.Write(errb.Bytes())
 		}
-		fmt.Fprintf(stdout, "%s --all: %s: %s\n", cmd, contract.RelPath(file), status)
+		label := contract.RelPath(folder) + "/"
+		for _, file := range paths {
+			if filepath.Dir(file) == folder {
+				label = contract.RelPath(file)
+				break
+			}
+		}
+		fmt.Fprintf(stdout, "%s --all: %s: %s\n", cmd, label, status)
 	}
 	return result
 }

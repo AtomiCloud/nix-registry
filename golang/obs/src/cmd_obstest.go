@@ -26,6 +26,10 @@ import (
 // Exit 0 when every part passes, 1 when a part failed, 2 on a usage or input error. The old commands
 // stay (their output is unchanged); this is their grouped form.
 func runTest(args []string, stdout, stderr io.Writer) int {
+	return runTestScope(args, stdout, stderr, false)
+}
+
+func runTestScope(args []string, stdout, stderr io.Writer, projectScope bool) int {
 	fs := flag.NewFlagSet("obs test", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	all := fs.Bool("all", false, "run once per discovered contract, using repository discovery skips")
@@ -45,7 +49,9 @@ func runTest(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	if *all {
-		return runAll("obs test", fs, *dir, stdout, stderr, runTest)
+		return runAll("obs test", fs, *dir, stdout, stderr, func(args []string, out, err io.Writer) int {
+			return runTestScope(args, out, err, true)
+		})
 	}
 	if fs.NArg() != 0 || *workers < 0 {
 		fmt.Fprintln(stderr, "obs test: unexpected argument or negative --workers")
@@ -95,7 +101,7 @@ func runTest(args []string, stdout, stderr io.Writer) int {
 	}
 
 	// 1. queries: obs query --live
-	co := check.Options{Dir: *dir, SeedPath: *seedPath, VLSettings: *vlSettings, TempoConfig: *tempoConfig, Base: *base, Names: *names, EventRule: *eventRule, Obs: of, Out: stdout, NoOtherContracts: *contracts == "none", AllowEmpty: true}
+	co := check.Options{Dir: *dir, SeedPath: *seedPath, VLSettings: *vlSettings, TempoConfig: *tempoConfig, Base: *base, Names: *names, EventRule: *eventRule, Obs: of, Out: stdout, NoOtherContracts: *contracts == "none", ProjectScope: projectScope, AllowEmpty: true}
 	rep, err := queryReport(set, co, true)
 	if err != nil {
 		fmt.Fprintf(stderr, "obs test: queries: %v\n", err)
@@ -116,7 +122,7 @@ func runTest(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "note: no alert rules under %s/alerts: obs alerts has nothing to run\n", *dir)
 		part("alerts", "0 alerts", 0)
 	} else {
-		ao := alerts.Options{Dir: *dir, SeedPath: *seedPath, Out: *out, Steps: *steps, Recorded: *recorded, VLSettings: *vlSettings, TempoConfig: *tempoConfig, Obs: of, Base: *base, Workers: *workers, EventRule: *eventRule, AllowEmptyExpect: true, NoOtherContracts: *contracts == "none"}
+		ao := alerts.Options{Dir: *dir, SeedPath: *seedPath, Out: *out, Steps: *steps, Recorded: *recorded, VLSettings: *vlSettings, TempoConfig: *tempoConfig, Obs: of, Base: *base, Workers: *workers, EventRule: *eventRule, AllowEmptyExpect: true, NoOtherContracts: *contracts == "none", ProjectScope: projectScope}
 		var rc int
 		res, rc = alerts.CheckResult(ao, stdout, stderr)
 		total := "the run stopped before its verdicts"

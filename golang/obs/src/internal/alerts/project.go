@@ -312,7 +312,11 @@ func ptrs(is []Incident) []*Incident {
 // observability folder, or a folder outside any Git repository, has nothing to compare with. The error names
 // both alert files (relative to the Git root), one clash a line.
 func RepoRuleIDs(p *Project) error {
-	others, skip, err := ruleids.OthersSkip(p.Dir)
+	return repoRuleIDs(p, false)
+}
+
+func repoRuleIDs(p *Project, projectScope bool) error {
+	others, skip, err := ruleids.OthersScopeSkip(p.Dir, projectScope)
 	if err != nil {
 		return err
 	}

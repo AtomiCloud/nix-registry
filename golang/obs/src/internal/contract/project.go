@@ -1,8 +1,11 @@
 package contract
 
 import (
+	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // OutputBase is the folder holding the nearest observability/ ancestor. Both
@@ -34,16 +37,53 @@ func OutputBase(dir string) string {
 	return filepath.Dir(abs)
 }
 
+// ProjectFiles finds source project files using the repository discovery skips.
+// It does not require an observability folder around the project itself.
+func ProjectFiles(dir, suffix string) ([]string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, err
+	}
+	root := gitRoot(abs)
+	if root == "" {
+		root = ProjectRoot(abs)
+	}
+	skip := newWalkSkip(root, abs)
+	var files []string
+	err = filepath.WalkDir(root, func(file string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return fmt.Errorf("project discovery: cannot read %s: %w", file, err)
+		}
+		if entry.IsDir() {
+			if skip.dir(file, entry.Name()) {
+				return filepath.SkipDir
+			}
+		} else if entry.Type().IsRegular() && strings.HasSuffix(entry.Name(), suffix) && !skip.ignored[file] {
+			files = append(files, file)
+		}
+		return nil
+	})
+	return files, err
+}
+
 // ProjectRoot is the topmost ancestor containing a project marker, independent
 // of Git and of evaluating a package identity. It is also the source-export
 // discovery/header boundary. With no marker, stay within the selected project.
 func ProjectRoot(dir string) string {
+	home, _ := os.UserHomeDir()
+	return projectRoot(dir, home)
+}
+
+func projectRoot(dir, home string) string {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		abs = dir
 	}
 	root := abs
 	for folder := abs; ; folder = filepath.Dir(folder) {
+		if folder == home {
+			break
+		}
 		if filepath.Base(folder) == "observability" {
 			root = filepath.Dir(folder)
 			break
@@ -53,6 +93,9 @@ func ProjectRoot(dir string) string {
 		}
 	}
 	for folder := abs; ; folder = filepath.Dir(folder) {
+		if folder == home {
+			break
+		}
 		if projectMarker(folder) {
 			root = folder
 		}
@@ -63,13 +106,31 @@ func ProjectRoot(dir string) string {
 	return root
 }
 
+// HomeBoundary is the last ancestor a Git-less manifest walk may approach.
+// A home-level manifest is not a manifest of a project below it.
+func HomeBoundary(dir string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	rel, err := filepath.Rel(home, abs)
+	if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return home
+	}
+	return ""
+}
+
 func projectMarker(dir string) bool {
-	for _, name := range []string{"go.mod", "package.json", "pubspec.yaml"} {
+	for _, name := range []string{"flake.nix", "go.work", "go.mod", "package.json", "pubspec.yaml"} {
 		if st, err := os.Stat(filepath.Join(dir, name)); err == nil && st.Mode().IsRegular() {
 			return true
 		}
 	}
-	for _, pattern := range []string{"*.sln", "*.csproj"} {
+	for _, pattern := range []string{"*.sln", "*.slnx", "*.csproj"} {
 		matches, _ := filepath.Glob(filepath.Join(dir, pattern))
 		for _, file := range matches {
 			if st, err := os.Stat(file); err == nil && st.Mode().IsRegular() {
