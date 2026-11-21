@@ -155,9 +155,6 @@ func packageManifest(root string, target contract.Target) (string, string, error
 		}
 	}
 	for dir := start; ; dir = filepath.Dir(dir) {
-		if dir == home && dir != start {
-			break
-		}
 		name := ""
 		switch target.Lang {
 		case "go":

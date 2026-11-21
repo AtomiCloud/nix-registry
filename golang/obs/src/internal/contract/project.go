@@ -36,7 +36,7 @@ func OutputBase(dir string, scopes ...*Scope) string {
 			break
 		}
 	}
-	if rootIsObservability(boundary,scopes...) {
+	if rootIsObservability(boundary, scopes...) {
 		return boundary
 	}
 	return filepath.Dir(abs)
@@ -87,6 +87,9 @@ func ProjectRoot(dir string) string {
 }
 
 func projectRoot(dir, home string) string {
+	if home != "" {
+		home = filepath.Clean(home)
+	}
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		abs = dir
@@ -105,26 +108,24 @@ func projectRoot(dir, home string) string {
 		}
 	}
 	for folder := abs; ; folder = filepath.Dir(folder) {
-		if folder == home {
-			break
-		}
 		if projectMarker(folder) {
 			root = folder
 		}
-		if filepath.Dir(folder) == folder {
+		if folder == home || filepath.Dir(folder) == folder {
 			break
 		}
 	}
 	return root
 }
 
-// HomeBoundary is the last ancestor a Git-less manifest walk may approach.
-// A home-level manifest is not a manifest of a project below it.
+// HomeBoundary is the last ancestor a Git-less manifest walk may inspect.
+// Home-level markers/manifests count; nothing above the home is read.
 func HomeBoundary(dir string) string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return ""
 	}
+	home = filepath.Clean(home)
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return ""

@@ -78,3 +78,29 @@ func TestAllStandalonePrunesDocsPayloads(t *testing.T) {
 		t.Errorf("an explicit observability path still qualifies: rc=%d %s", rc, output)
 	}
 }
+
+func TestAllExplicitExportDirFromOtherWorkingDirectories(t *testing.T) {
+	parent := t.TempDir()
+	export := filepath.Join(parent, "ex")
+	gen2Write(t, export, "go.mod", "module example.com/export\ngo 1.27.4\n")
+	for _, feature := range []string{"one", "two"} {
+		gen2Write(t, export, "observability/"+feature+"/contract.yaml", "service: shop\nlogs: {Failed: {event: "+feature+".failed, level: error}}\ngenerate: [{lang: go, out: gen/"+feature+"}]\n")
+	}
+	if err := os.Mkdir(filepath.Join(export, ".git"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(export)
+	if rc, output := obs("gen", "--all"); rc != 0 {
+		t.Fatal(output)
+	}
+	if err := os.RemoveAll(filepath.Join(export, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	unrelated := t.TempDir()
+	for _, tc := range []struct{ cwd, dir string }{{parent, "ex"}, {unrelated, export}} {
+		t.Chdir(tc.cwd)
+		if rc, output := obs("gen", "--check", "--all", "--dir", tc.dir); rc != 0 || strings.Count(output, "--all:") != 2 || !strings.Contains(output, "observability/one/contract.yaml") || !strings.Contains(output, "observability/two/contract.yaml") {
+			t.Errorf("cwd=%s --dir=%s: rc=%d %s", tc.cwd, tc.dir, rc, output)
+		}
+	}
+}

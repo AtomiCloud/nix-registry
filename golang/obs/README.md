@@ -867,8 +867,8 @@ With no `.git`, single-folder mode refuses `..` and a symlink that leads out of 
 The `--all` modes instead bound both written and resolved output paths to their fixed repository/export
 scope; `out:` still uses the per-layout base above, and `..` is allowed while staying inside that scope.
 Single-folder headers use the
-topmost ancestor below the home directory containing a project marker (`.sln`, `.slnx`, `.csproj`,
-`flake.nix`, `go.work`, `go.mod`, `package.json`, `pubspec.yaml`),
+topmost ancestor containing a project marker (`.sln`, `.slnx`, `.csproj`,
+`flake.nix`, `go.work`, `go.mod`, `package.json`, `pubspec.yaml`), stopping after the home directory when it is an ancestor,
 or the observability project's base when there is no marker. Feature paths stay distinct, and a complete
 source export with its project marker can run `obs gen --check` or regenerate without an empty `.git` workaround.
 The `--all` modes instead fix the source-export root to the current directory once for every child,
@@ -890,8 +890,8 @@ It is the package's stable identity,
 not the feature name or the generated namespace. Manifest edits change generated registration too;
 `obs gen --check` detects that drift even when the contract hash stays the same.
 The walk follows the resolved `out:` directory's ancestors and stops at the resolved Git root.
-Without `.git`, it walks upward to the home-directory boundary (the home folder itself is not read),
-so a manifest between the project and that boundary can be picked up.
+Without `.git`, a single-folder walk includes home and stops above it when home is an ancestor
+(Docker's `HOME=/root`, `WORKDIR /root` can own the manifests). An `--all` walk stays within its resolved scope.
 Use `package_id:` to pin the identity outside Git or when the owning manifest is unavailable.
 
 Each `generate:` target accepts optional `interfaces:` to override its dependency import. The merged-port

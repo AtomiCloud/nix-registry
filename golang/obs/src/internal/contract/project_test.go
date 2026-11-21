@@ -30,7 +30,7 @@ func TestStandaloneOutputBaseStopsAtProjectBoundary(t *testing.T) {
 	}
 }
 
-func TestProjectRootDoesNotReadHomeMarkers(t *testing.T) {
+func TestProjectRootIncludesHomeButNotParent(t *testing.T) {
 	outer := t.TempDir()
 	home := filepath.Join(outer, "home")
 	root := filepath.Join(home, "projects", "shop")
@@ -47,7 +47,9 @@ func TestProjectRootDoesNotReadHomeMarkers(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := projectRoot(dir, home); got != root {
-		t.Errorf("home and above-home markers must not widen discovery: got %s, want %s", got, root)
+	for _, bound := range []string{home, home + string(os.PathSeparator)} {
+		if got := projectRoot(dir, bound); got != home {
+			t.Errorf("include the home marker and stop above it: got %s, want %s", got, home)
+		}
 	}
 }
