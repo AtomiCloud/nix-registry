@@ -94,13 +94,14 @@ func TestFlatPlatformFromGitRootObsYamlInLayoutTwo(t *testing.T) {
 // Git-root obs.yaml. When the inherited file has no platform, flat-alert-identity names THAT file as the one to write.
 func TestFlatIdentityNamesTheInheritedObsYaml(t *testing.T) {
 	cases := map[string]struct{ inherited, feature string }{
-		"enclosing observability folder": {"App/observability/obs.yaml", "App/observability/Friend/observability"},
-		"Git-root obs.yaml":              {"obs.yaml", "App/Friend/observability"},
+		"layout (i): top observability/obs.yaml": {"observability/obs.yaml", "observability/friend"},
+		"enclosing observability folder":         {"App/observability/obs.yaml", "App/observability/Friend/observability"},
+		"Git-root obs.yaml":                      {"obs.yaml", "App/Friend/observability"},
 	}
 	for name, c := range cases {
 		root := t.TempDir()
 		write(t, root, ".git/HEAD", "ref")
-		write(t, root, c.inherited, "service: zinc\n") // inherited, but no platform
+		write(t, root, c.inherited, "versions:\n  grafana: 13.3.0\n") // inherited, but no platform
 		feature := filepath.Join(root, filepath.FromSlash(c.feature))
 		write(t, feature, "contract.yaml", "service: zinc\n")
 		write(t, feature, "alerts/q/critical.yaml", retryQueueFlat)
@@ -112,6 +113,9 @@ func TestFlatIdentityNamesTheInheritedObsYaml(t *testing.T) {
 		if len(s.Rules) != 0 || len(s.Problems) != 1 || s.Problems[0].Rule != "flat-alert-identity" ||
 			!strings.Contains(s.Problems[0].Msg, "`platform:` in "+inherited) {
 			t.Fatalf("%s: want a finding naming %s: %+v %+v", name, inherited, s.Rules, s.Problems)
+		}
+		if strings.Contains(s.Problems[0].Msg, feature) {
+			t.Fatalf("%s: the finding names the feature folder, not the inherited file: %s", name, s.Problems[0].Msg)
 		}
 		// writing platform there builds the rule: that is the file obs reads for the folder
 		write(t, root, c.inherited, "platform: tracker\n")
