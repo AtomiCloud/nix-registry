@@ -168,6 +168,23 @@ run query --static --dir "$work/lay3/Checkout/observability" --seed "$seed" --ba
 expect "layout (ii): platform from the Git-root obs.yaml of a standalone repository" 0 "obs query --static: ok: 2 queries" \
   "rule payments-checkout-error-logs-warning query A"
 
+# obs check --all: the flat identity is read from the same obs.yaml the scope loaded, with or without .git
+# (an export has none: --all uses the export root as the Git root).
+for v in git nogit; do
+  rm -rf "${work:?}/all-$v"
+  mkdir -p "$work/all-$v/observability/checkout"
+  echo "platform: payments" >"$work/all-$v/observability/obs.yaml" # platform only in the top file (layout (i))
+  cp "$fx/ok-flat-alert/observability/contract.yaml" "$work/all-$v/observability/checkout/contract.yaml"
+  cp -R "$fx/ok-flat-alert/observability/alerts" "$work/all-$v/observability/checkout/alerts"
+  chmod -R u+w "$work/all-$v"
+  if [ "$v" = git ]; then
+    mkdir "$work/all-$v/.git"
+    echo ref >"$work/all-$v/.git/HEAD"
+  fi
+  (cd "$work/all-$v" && run check --all)
+  expect "check --all ($v): flat identity from the scope's obs.yaml" 0 "observability/checkout/contract.yaml: ok"
+done
+
 # for: 1d is a duration for every command: the flat check and obs alerts judge it the same way
 fresh for1d
 sed -i "s|^for: 5m|for: 1d|" "$work/for1d/observability/$crit"

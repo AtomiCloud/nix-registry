@@ -188,9 +188,14 @@ func isFlat(m map[string]any) bool {
 // finds for a folder is the one read here): `platform:` and `service:`. When obs.yaml has no
 // `service:`, the contract's `service:` (<dir>/contract.yaml) is used. A missing, unreadable or
 // invalid file is no value; the loader's own error is reported by the command that loads it.
-func resolveIdentity(dir string) FlatIdentity {
+func resolveIdentity(dir, root string) FlatIdentity {
 	id := FlatIdentity{ObsPath: filepath.Join(dir, obsyaml.FileName), ContractPath: filepath.Join(dir, "contract.yaml")}
-	f, _ := obsyaml.Load(dir)
+	var f *obsyaml.File
+	if root != "" {
+		f, _ = obsyaml.LoadInRoot(dir, root)
+	} else {
+		f, _ = obsyaml.Load(dir)
+	}
 	if f != nil {
 		id.ObsPath = f.Path
 		if f.Platform != "" {

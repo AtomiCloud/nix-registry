@@ -168,7 +168,11 @@ func read(folder string, skip *contract.RepoSkip, scopes ...*contract.Scope) ([]
 	if len(scopes) > 0 {
 		scope = scopes[0]
 	}
-	set, err := files.LoadSkip(folder, func(p string) bool { return skip.Skips(folder, p) }) // pruned before it is read
+	root := ""
+	if scope != nil {
+		root = scope.Root
+	}
+	set, err := files.LoadScoped(folder, func(p string) bool { return skip.Skips(folder, p) }, root) // pruned before it is read
 	if err != nil {
 		return nil, err
 	}

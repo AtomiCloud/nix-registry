@@ -127,6 +127,13 @@ func Walk(root string, suffixes []string, skip func(path string) bool) ([]string
 // LoadSkip is Load whose walks of alerts/ and dashboards/ use skip (see Walk). The repository rule uid scan passes
 // the discovery's prune set, so an ignored or nested-repository copy below a folder is not read at all.
 func LoadSkip(dir string, skip func(path string) bool) (*Set, error) {
+	return LoadScoped(dir, skip, "")
+}
+
+// LoadScoped is LoadSkip for a run of --all: root is the boundary --all resolved (the export root when there is no
+// .git), so the platform and service of a flat tier file come from the same obs.yaml the scope loaded for the
+// folder. "" is the single-folder lookup (the Git root).
+func LoadScoped(dir string, skip func(path string) bool, root string) (*Set, error) {
 	st, err := os.Stat(dir)
 	if err != nil {
 		return nil, err
@@ -134,7 +141,7 @@ func LoadSkip(dir string, skip func(path string) bool) (*Set, error) {
 	if !st.IsDir() {
 		return nil, fmt.Errorf("%s: not a directory", dir)
 	}
-	s := &Set{Dir: dir, ident: resolveIdentity(dir)}
+	s := &Set{Dir: dir, ident: resolveIdentity(dir, root)}
 	for _, sub := range []string{"alerts", "dashboards"} {
 		root := filepath.Join(dir, sub)
 		if _, err := os.Stat(root); err != nil {

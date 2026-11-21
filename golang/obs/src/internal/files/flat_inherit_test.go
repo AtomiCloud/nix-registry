@@ -125,3 +125,21 @@ func TestFlatIdentityNamesTheInheritedObsYaml(t *testing.T) {
 		}
 	}
 }
+
+// A run of --all passes the boundary it resolved: an export without .git has no Git root of its own, so the flat
+// identity must read the obs.yaml through that boundary (the same one the scope loaded), like a clone with .git.
+func TestFlatIdentityUsesTheScopeRootWithoutGit(t *testing.T) {
+	root := t.TempDir() // no .git: an export
+	write(t, root, "observability/obs.yaml", "platform: tracker\n")
+	feature := filepath.Join(root, "observability", "friend")
+	write(t, feature, "contract.yaml", "service: zinc\n")
+	write(t, feature, "alerts/q/critical.yaml", retryQueueFlat)
+	s, err := LoadScoped(feature, nil, root)
+	if err != nil || len(s.Problems) != 0 || len(s.Rules) != 1 || s.Rules[0].Definition.UID != "tracker-zinc-q-critical" {
+		t.Fatalf("with the scope root: %v %+v %+v", err, s.Rules, s.Problems)
+	}
+	// a single-folder run outside a Git repository reads no obs.yaml above the folder
+	if s, _ = Load(feature); len(s.Rules) != 0 || len(s.Problems) != 1 || s.Problems[0].Rule != "flat-alert-identity" {
+		t.Fatalf("single-folder run: %+v %+v", s.Rules, s.Problems)
+	}
+}
