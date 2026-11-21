@@ -1,6 +1,0 @@
-args: query --static --dir bad-flat-alert/observability --seed shared-seed.yaml --base 1700000000
-exit: 1
---- stdout
-FAIL alerts/crash-logs/warning.yaml: [file] kind "": want GrafanaAlertRuleGroup (this is the flat authoring form; obs reads the GrafanaAlertRuleGroup CR a chart renders from it)
-obs query --static: FAILED: 0 queries (), 1 failures, 0 warnings
---- stderr

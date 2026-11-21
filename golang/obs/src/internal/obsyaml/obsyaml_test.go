@@ -368,3 +368,17 @@ func TestNonFiniteToleranceIsRejected(t *testing.T) {
 		}
 	}
 }
+
+// platform: and service: name the rule uid of a flat alert tier file; the loader accepts them, and
+// still refuses a key it does not know, a list where a value goes, and a misspelling.
+func TestPlatformAndServiceKeys(t *testing.T) {
+	mustParse(t, "platform: tracker\nservice: zinc\n"+matching)
+	for doc, token := range map[string]string{
+		"platform: [a, b]\n":  "platform: want one value",
+		"platfrom: tracker\n": "unknown key platfrom",
+	} {
+		if _, err := Parse("observability/obs.yaml", []byte(doc)); err == nil || !strings.Contains(err.Error(), token) {
+			t.Fatalf("%q: want %q, got %v", doc, token, err)
+		}
+	}
+}

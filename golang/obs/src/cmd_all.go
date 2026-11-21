@@ -104,5 +104,5 @@ func loadScopedFiles(dir string, scope *contract.Scope) (*files.Set, error) {
 	if scope == nil {
 		return files.Load(dir)
 	}
-	return files.LoadSkip(dir, func(file string) bool { return scope.Skips(dir, file) })
+	return files.LoadScoped(dir, func(file string) bool { return scope.Skips(dir, file) }, scope.Root)
 }

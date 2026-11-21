@@ -76,8 +76,8 @@ func TestAlertCR(t *testing.T) {
 	if !strings.Contains(pr["alerts/c/warning.yaml"], "more than one YAML document") {
 		t.Errorf("multi-doc: %v", pr)
 	}
-	if !strings.Contains(pr["alerts/d/warning.yaml"], "flat authoring form") {
-		t.Errorf("flat form: %v", pr)
+	if !strings.Contains(pr["alerts/d/warning.yaml"], "platform and service are not known") {
+		t.Errorf("a flat tier file without a platform and service is not built, and says where to write them: %v", pr)
 	}
 }
 

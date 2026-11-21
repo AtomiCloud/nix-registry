@@ -96,12 +96,14 @@ the file, the rule or panel, the rule id in `[brackets]` and the offending name 
 
 `--dir` (default `observability`) holds:
 
-- **`alerts/<slug>/<severity>.yaml`**: one `GrafanaAlertRuleGroup` CR per file (the golden
-  shape in the platform's observability standard, `alerts.md`). obs reads each rule's `data[]`:
+- **`alerts/<slug>/<severity>.yaml`**: either the platform standard's flat tier file (one flat YAML
+  map: `title`, `datasource`, `expr`, `for`, `summary`, `description`, optional `panel`; see
+  [Flat alert tier files](#flat-alert-tier-files)) or one `GrafanaAlertRuleGroup` CR per file. For a CR,
+  obs reads each rule's `data[]`:
   `datasourceUid`, `relativeTimeRange.from`, `model.expr`, `model.queryType`, and
   `model.datasource.type` when present. Grafana expression nodes (`datasourceUid: __expr__`)
-  are not queries and are skipped. A flat authoring file (`title/datasource/expr`) is refused
-  with a pointer to the CR. More than one YAML document in a file is refused.
+  are not queries and are skipped. More than one YAML document in a file is refused. A file that is
+  neither a CR nor a tier file (no `kind`, none of the tier fields) is refused.
 - **`dashboards/**/\*.json`**: dashboard JSON. Panels (also inside collapsed rows), `targets[].expr`,
   `templating.list`, `time.from/to` are read. Annotation queries are not checked.
 - **`seed.yaml`** (`--live` only; `--seed` overrides the path): see below.
@@ -431,7 +433,7 @@ A service may keep one contract per feature instead of one for the whole service
 
 - **Discovery.** A `contract.yaml` belongs to the repository's observability when its folder is named `observability` or is **at any depth below** one (`observability/contract.yaml`, `observability/<feature>/contract.yaml`, `observability/billing/payments/contract.yaml`, `<feature>/observability/contract.yaml`). A `contract.yaml` anywhere else (`docs/`, `config/`) is not read. Folders named `fixtures`, `testdata`, `node_modules`, `vendor`, `.git`, `.direnv`, `.dart_tool` and `.obs-cache` are skipped, and the search is the Git root's: outside a Git repository only `--dir`'s contract is read, as before. Only **paths relative to the Git root** count, never the name of the folder the repository is checked out in (a CI clone is `repo/repo`, a worktree has any name): the same repository gives the same answer wherever it sits. A repository that **is** an observability folder (a standalone observability repository) is recognised by its content: when its top holds an `obs.yaml`, or a `contract.yaml` that reads as an obs contract (a `service:` and one of `metrics:`, `logs:`, `spans:`, `platform_metrics:`; a top-level `contract.yaml` of something else, an OpenAPI file for example, does not count), the Git root counts as an observability folder, and the folders below it count when they hold a `contract.yaml` (an `examples/` or `docs/` folder with only alerts does not). **Copies are not folders:** for discovery (contracts) and for the rule uid check below alike, a folder that git ignores (pruned when the walk reaches it, so it is never read: an unreadable ignored `build/` cannot fail a run; the ignored set comes from one `git ls-files --others --ignored --directory` call, no `git` on the PATH means nothing is ignored, and when git refuses the repository for its ownership, `dubious ownership` in a container CI, one note on stderr says that ignored folders are not skipped) and the `files/` and `templates/` folders of a folder that holds a `Chart.yaml` (a chart's `files/observability/<feature>/...` copy of the alerts, dashboards or whole folders; a chart at the Git root too, whose own source observability folders stay counted) are skipped, and a **nested Git repository or submodule** (a folder with its own `.git`) is its own boundary that the walk does not enter, so a copy is neither a second contract (`[metric-clash]`) nor a second definition of a rule uid. The chart copy step may therefore write into the chart's `files/` (or `templates/`), or into a folder git ignores; a copy anywhere else is a second folder.
 - **`--dir` for a feature.** Every command takes the feature's folder: `obs check --dir observability/friend`, `obs gen --dir App/Modules/Friend/observability`, `obs alerts`, `obs test`. `--dir` is that feature's contract, seed, incidents, alerts and dashboards; the other features' contracts are read with it (`obs check` prints each, `obs query` merges their metrics into the lookup, a metric two features both declare is `[metric-clash]` and names both files), so an alert of one feature may read a metric another feature declares. `--contracts none` keeps this folder's only. The CI recipe is `obs check --all`: it uses the same discovery skips and needs no list or hand-written loop.
-- **`obs.yaml`.** A folder uses its own `obs.yaml`; with none, the nearest **enclosing `observability/` folder's** (`observability/friend` reads `observability/obs.yaml`); with none there, the versions and thresholds built into obs, as in 0.5. The output says which file it read (`obs.yaml <path>: every version it names matches (the enclosing observability folder's: ...)`, and `note: <dir>/obs.yaml not found: using <path>, the enclosing observability folder's` in `obs check`). Only a folder named `observability` below the Git root counts as an enclosing one, and so does the Git root itself when it holds the `obs.yaml` (a standalone observability repository, by content, whatever its checkout folder is called). Only the repository is searched: the Git root (the folder itself, or the nearest ancestor holding `.git`) is the last folder looked at, so an `obs.yaml` of an `observability/` folder above the repository is never read, outside a Git repository none is, and an `obs.yaml` that is a symlink to a file outside the Git root (checked after resolving every link) is not read. **Layout (ii) and a monorepo's apps keep the 0.5 behaviour:** a `<feature>/observability/` folder or an app folder with no `obs.yaml` of its own reads none (the built-in versions and thresholds), never the root `observability/obs.yaml`. When that root file exists and was not used, the command prints **one note on stderr** (`note: observability/obs.yaml exists but <dir>/obs.yaml does not exist, so it is not used: ...; copy observability/obs.yaml to <dir>/obs.yaml or add one`): copy the file into each app folder, or add one.
+- **`obs.yaml`.** The lookup is the same for every folder and every command: the folder's own `obs.yaml`; else the nearest **enclosing folder named `observability`** that holds one (`observability/friend` reads `observability/obs.yaml`; `App/observability/Friend/observability` reads `App/observability/obs.yaml`); else the `obs.yaml` at the **Git root** (a standalone observability repository); else the versions and thresholds built into obs, as in 0.5. Nothing else is read. The output says which file it read (`obs.yaml <path>: every version it names matches (the enclosing observability folder's: ...)`, and `note: <dir>/obs.yaml not found: using <path>, the enclosing observability folder's` in `obs check`). Only a folder named `observability` below the Git root counts as an enclosing one, and so does the Git root itself when it holds the `obs.yaml` (a standalone observability repository, by content, whatever its checkout folder is called). Only the repository is searched: the Git root (the folder itself, or the nearest ancestor holding `.git`) is the last folder looked at, so an `obs.yaml` of an `observability/` folder above the repository is never read, outside a Git repository none is (except under `--all`, which uses the export root as the Git root when there is no `.git`, for obs.yaml, the platform of flat alert tier files and every other read of the run), and an `obs.yaml` that is a symlink to a file outside the Git root (checked after resolving every link) is not read. **Layout (ii) and a monorepo's apps keep the 0.5 behaviour:** a `<feature>/observability/` folder or an app folder with no `obs.yaml` of its own reads none (the built-in versions and thresholds) unless an enclosing folder named `observability` or the Git root holds one, never the root `observability/obs.yaml` of a sibling tree. When that root file exists and was not used, the command prints **one note on stderr** (`note: observability/obs.yaml exists but <dir>/obs.yaml does not exist, so it is not used: ...; copy observability/obs.yaml to <dir>/obs.yaml or add one`): copy the file into each app folder, or add one.
 - **A rule uid is unique in the repository.** Grafana keeps one rule per `uid` (the `metadata.name` when a rule has none), so two features shipping `errors-warning` would overwrite each other. `obs check` is the repository gate: it reads the `alerts/` folder of every observability folder of the repository and fails (exit 1) on **any** clash among them, from whichever folder it runs, with `FAIL rule <file>: [rule-id-clash] uid "<uid>" is also defined in <other file>: ...`, both files relative to the Git root. `obs alerts` and `obs test` judge the folder they are given: they fail (exit 2, the same line) only on a clash that involves one of **that folder's own rules**; a clash between two other features does not fail a third feature's `obs alerts` or `obs test` (as an invalid contract of a sibling feature does not fail another folder's `obs gen`). `--contracts none` (obs check and obs test) skips it. A repository with one observability folder prints nothing new; two rules with one uid inside one folder are still the per-folder `duplicate uid` failure of `obs alerts`.
 - **Service totals.** `obs check` prints the series and log-stream totals per contract as before. When **several contracts name the same `service:`** it adds one line, `service total (<service>, <n> contracts: <files>): worst case <S> series per landscape; log streams worst case <K> (...)`: the series are the contracts' worst cases added, the log streams are `--landscapes` times the distinct `modules:` across them (a contract with no `modules:` is one unnamed module). A contract has **no service-level budget** (budgets are per metric, concept 3.2, and a stored name is in one contract only), so the line is information: each metric is still judged on its own budget. A repository whose contracts all name different services prints no new line.
 - **Not per feature, by design.** The generated signal code of each contract is its own file in its own namespace, and `contract/events.json`, `aggregation.yaml` and `keep.yaml` are written per contract, so with one contract per feature no generated file is shared between two features. The platform renderer must collect every `keep.yaml`. The interface libraries' signal port takes one table per contract and merges them: every feature registers before any signal, equal registration is harmless and a clash is refused naming both contracts (see [`obs gen`](#obs-gen)); the real libraries' behaviour is outside this tool (see Not tested).
@@ -579,6 +581,8 @@ versions:
   alloy: v1.21.3 # reference only: no evaluator is embedded for it
   pyroscope: 2.4.3 # the sandbox image
   dashboard_schema: 42 # Grafana 13.3.0 dashboard schemaVersion
+platform: tracker # optional: names the rule uid <platform>-<service>-<slug>-<severity> of flat alert tier files
+service: zinc # optional: else the contract's service
 thresholds:
   logs: # the VictoriaLogs -search.* flags, under the names below
     max_query_len: 16KiB # -search.maxQueryLen
@@ -989,6 +993,97 @@ kept and quoted (`{"payment.provider"="stripe"}`, `by ("payment.provider")`); th
 `contract-undeclared-label` and the finding names the dotted spelling (a pod key in either spelling is
 `contract-pod-label`). Other log fields are free-form (§6): not judged.
 
+## Flat alert tier files
+
+The platform standard (`docs/standards/observability/alerts.md`, "The tier file") says every
+`alerts/<slug>/<severity>.yaml` is ONE FLAT YAML MAP; the standard's chart (`shipping.md`, "What the chart adds
+to each alert") turns it into one `GrafanaAlertRuleGroup` holding one rule. obs 0.5 refused the flat map; obs 0.6
+reads it, in every command that reads alerts (`check`, `query`, `alerts`, `test`, `look`, `live`, `sandbox`):
+the one reader, `internal/files`, builds the rule the chart renders, and every command takes it from there. The
+`GrafanaAlertRuleGroup` CR stays accepted, beside flat files in the same folder.
+
+```yaml
+title: Retry queue saturated
+datasource: metrics
+expr: webhook_retry_queue_depth{"durian.cloud.service"="zinc"} > 5000
+for: 10m
+summary: 'Retry queue at {{ $values.A.Value }}; deliveries dropping'
+description: 'Check downstream health; the queue drains only if endpoints are up.'
+panel: 2
+```
+
+What obs builds from it (the same as shipping.md's example, checked by `internal/files/flat_test.go` against that
+example's CR):
+
+| Rendered field                      | Comes from                                                                                                  |
+| ----------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| rule `uid` and group name           | `<platform>-<service>-<slug>-<severity>`: slug = the folder, severity = the file name                       |
+| `severity` label, title prefix      | the file name: `critical` 🚨, `warning` ⚠️, `info` ℹ️ in front of `title`                                 |
+| query `A`                           | `expr`, instant (metrics: `instant: true`; logs: `queryType: stats`), `relativeTimeRange: { from: 600, to: 0 }` |
+| query `A` datasource                | `datasource: metrics` or `logs` becomes the datasource uid `metrics` or `logs` (obs checks one landscape)       |
+| query `B`, `condition: B`           | the fixed math expression `is_number($A) || is_nan($A) || is_inf($A)`: any series `A` returns fires, even at 0    |
+| `for`, `noDataState`, `execErrState` | `for` from the file; `OK` and `Error` fixed                                                                  |
+| `summary`, `description`            | the same fields; `__dashboardUid__` (`<platform>-<service>-overview`) and `__panelId__` when `panel` is set    |
+| labels `platform`, `service`        | the two values below                                                                                        |
+
+Not built, because obs cannot know them: the `landscape` and `module` labels (each landscape has its own Grafana),
+`runbook_url` (the repo URL) and the generic dashboard uid used when `panel` is unset.
+
+**Where platform and service come from.** The uid needs both, and a flat file holds neither:
+
+- `service`: the `service:` key of `observability/obs.yaml` if it has one, else the `service:` of `observability/contract.yaml`.
+  Keep `service:` in obs.yaml for a folder that has no contract of its own.
+- `platform`: the `platform:` key of `observability/obs.yaml` (a new optional key, see [`obs.yaml`](#obsyaml-the-versions-and-thresholds-a-repo-targets)).
+
+Both are read with the same loader every command uses for obs.yaml (`internal/obsyaml`), so the obs.yaml that loader finds for a
+folder is the one the platform comes from.
+With one `observability/` folder grouped by feature (`observability/<feature>/contract.yaml`), a feature folder with no obs.yaml of its
+own reads the nearest enclosing `observability/obs.yaml`, so `platform:` is written once in the top file and a flat file in
+`observability/<feature>/` takes it from there (the feature's own obs.yaml wins). The full lookup, for any folder: its own obs.yaml, else the nearest enclosing folder named `observability` that holds an obs.yaml
+(`App/observability/Friend/observability` reads `App/observability/obs.yaml`), else the obs.yaml at the Git root (a standalone
+observability repository); nothing else is read, so a `<feature>/observability/` folder never reads an obs.yaml in a folder above it that is
+not named `observability`. When the file found has no `platform:`, write it there: a flat file is refused (`flat-alert-identity`) and the
+finding names that file's path (the folder's own obs.yaml when none was found).
+In short: the platform comes from the same obs.yaml obs uses for that folder: its own, the one inherited per the layout rules above, or
+the obs.yaml at the Git root of a standalone observability repository (which every folder in that repository uses, layout (ii) included).
+(tests: `internal/files/flat_inherit_test.go`, `tests/flat.sh`).
+
+A flat file with either value unknown is refused (`flat-alert-identity`) and the message says which file and key to write.
+
+**What is refused**, with the rule id in the finding (`[rule-id]`), the file, and the bad token (the standard's tier-file
+table, its structural checks, and the "no severity field" rule):
+
+| Rule id                                    | Refused                                                                                                  |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------- |
+| `flat-alert-file-name`                     | not `alerts/<slug>/critical.yaml`, `warning.yaml` or `info.yaml`                                         |
+| `flat-alert-field-missing`, `-field-type`  | a required field (`title`, `datasource`, `expr`, `for`, `summary`, `description`) missing, empty or not a string |
+| `flat-alert-field-unknown`                 | a key outside the table (`severity` gets its own message: the file name is the severity)                  |
+| `flat-alert-title-length`                  | `title` over 48 characters                                                                               |
+| `flat-alert-title-emoji`                   | `title` holds an emoji: a code point from U+1F000 up, a Basic Multilingual Plane `Emoji_Presentation` one (✅ ⭐ ❌), or any character followed by U+FE0F or U+20E3 (⚠️ ℹ️ keycaps). The chart adds the severity emoji from the file name, so it would show twice. Text symbols (`→ ↑ ▲ ™`) are fine |
+| `flat-alert-datasource`                    | `datasource` is not `metrics` or `logs`                                                                  |
+| `flat-alert-for`                           | `for` is not what Prometheus's `model.ParseDuration` accepts (Grafana reads it with that): `1d12h`, `10m`, `0`, `1y` (365d) pass; `1.5m`, `1M`, `10`, `-5m` do not |
+| `flat-alert-bool`                          | PromQL `bool` modifier in `expr`, read from the parse tree (the standard: let the comparison filter)       |
+| `flat-alert-landscape`                     | `expr` has a label matcher (metrics) or field filter (logs, also in `_stream:{...}`) on `landscape` or `durian.cloud.landscape`; read from the parsed query, so the word in a quoted message, a label value or a metric name is fine. Logs: also inside a stats conditional (`count() if ("durian.cloud.landscape":=x)`), a `filter` pipe before the stats, a nested source (`in(...)` subquery), and a `filter` after the stats on a group key the stats kept (`stats by ("durian.cloud.landscape") ... | filter "durian.cloud.landscape":=x`); a computed field of the same name (`stats count() as landscape | filter landscape:>5`) is fine |
+| `flat-alert-yaml`, `flat-alert-documents`      | a file that reads as a tier file (top-level tier keys, no `kind`) is not valid YAML, or is followed by another document (the first document decides: a tier file followed by a ConfigMap is a tier file with trailing documents); `obs live incidents` stops on it (exit 2) |
+| `flat-alert-panel`                         | `panel` is present but not an integer (`panel: null`, an empty `panel:`, a string, a float or a bool); leave the key out for none |
+| `flat-alert-identity`                      | platform or service unknown (above)                                                                      |
+| `flat-alert-uid-length`                    | the uid is over 40 characters (Grafana's limit)                                                          |
+
+`obs live incidents` also treats the sibling `alerts/<slug>/runbook.md` as the flat rule's runbook (no `alert_without_runbook`),
+and a flat file it cannot read as a rule stops it with the finding instead of skipping the file. `obs sandbox up` and `obs look`
+provision a flat rule's summary, description and panel link into Grafana.
+
+**What the landscape check covers, and what it does not.** It reads the parsed query: label matchers (metrics); field filters,
+stream selectors, `if (...)` conditions of stats functions and other pipes, `filter` pipes before the stats and nested sources
+(logs); and a `filter` after the stats on a retained group key, which it follows through `math`, `fields`/`keep`, `delete`, `sort`,
+`limit`, `rename` (the key moves) and `copy` (an overwrite by `math`, `rename` or `copy` ends the trail). It does not follow a key
+through `format`, `extract`, `unpack_*`, `replace` or a wildcard rename/copy target, does not judge `by (landscape)` grouping on its own
+(a grouping is no selector), and does not see a landscape named through a recording rule or another rule's output. A corner it misses is
+a review item, not a guarantee.
+
+Not checked here: that `panel` is a panel id of `dashboards/overview.json`, and that the set has a `runbook.md`
+(the standard's other structural checks). Tier gaps and everything else in the standard's review step stay with the reviewer.
+
 ## Migrating from 0.5 to 0.6
 
 ### Run every feature without a shell loop
@@ -1020,7 +1115,7 @@ rule-uid checks use that same scope in `--all` mode, including a complete Git-le
 single-folder commands keep their discovery behavior. Use separate `--dir` runs for
 `obs test --out`, `--steps` or `--recorded`: `--all` refuses a shared file export that would be overwritten.
 
-Every 0.5 command, flag and output stays. For the 58 cases in `tests/compat.sh` the output is byte for byte the 0.5 output, and a repository with one contract (or one contract per `<app>/observability/`) prints what it printed in 0.5, unless one of the findings below applies. New:
+Every 0.5 command, flag and output stays. For 57 of the 58 cases in `tests/compat.sh` the output is byte for byte the 0.5 output (the one that changed is `query-static` `bad-flat-alert`, now `ok-flat-alert`: a valid flat file is no longer refused), and a repository with one contract (or one contract per `<app>/observability/`) prints what it printed in 0.5, unless one of the findings below applies. New:
 
 | In 0.5 | In 0.6 |
 | ------ | ------ |
@@ -1057,6 +1152,21 @@ single-contract signal files change at registration, the default Go import and B
 per-signal types and tables retain their shapes. The other generated contract data keeps its format.
 The fresh-name forgery gap above is deliberate: lint and the metric keep-list now carry that guarantee;
 new event/span names have lint alone.
+
+Flat alert tier files and `obs live` (part D):
+
+- **A flat tier file that 0.5 refused is now read.** Any CI that relied on that refusal (a flat file making
+  `obs query --static` or `obs check` exit 1 with `want GrafanaAlertRuleGroup (this is the flat authoring form ...)`)
+  changes from exit 1 to the new result: the file is checked as the rule the chart renders, and exits 0 when it is valid.
+  A flat file with a rule broken, or with no platform or service to name its uid, is still exit 1 with a `flat-alert-*` rule id.
+- `obs.yaml` has two new optional top-level keys, `platform:` and `service:`. An obs.yaml without them reads as before.
+- A rule's `for` and `keepFiringFor`: a flat file is held to Prometheus's `model.ParseDuration` exactly (`1d12h`, `1y` = 365d; `1.5m` refused). `obs alerts` and `obs sandbox` read a CR's with that **or** Go's `time.ParseDuration` (what 0.5 accepted, e.g. `1.5m`), so no CR that passed 0.5 fails now and `for: 1d` in a CR, which 0.5 refused, is now evaluated.
+- A flat-looking tier file that is not valid YAML, or has a second document, stops `obs live incidents` with exit 2 and the file and finding (0.5 skipped unreadable files); a CR file that does not parse keeps 0.5's behaviour.
+- `tests/compat.sh` still holds 58 goldens. ONE changed: `query-static__bad-flat-alert.out` pinned the refusal, so it is
+  now `query-static__ok-flat-alert.out` (the fixture `bad-flat-alert` became `ok-flat-alert`, a valid flat fixture, regenerated from the 0.6 binary).
+  Every other golden is byte-identical to 0.5.
+- `obs live` prints `read-only: only GET to query endpoints` (0.5 said "GET and POST"; the client only ever sent GET). Its usage text says the same.
+
 
 ## Migrating from 0.4 to 0.5
 
@@ -1762,9 +1872,10 @@ not touched. obs builds with `golang/obs/go.nix`: Go 1.27.4 from the narrow `nix
   - green: `tests/fixtures/good` (a checkout service, with `contract.yaml`) and `tests/fixtures/sample-app`
     (a made-up platform's `crash-logs` and `pod-crashloop` alerts, copied and written as CRs, and a dashboard);
   - red, each naming file + rule or panel + the bad token: `bad-logsql-syntax`, `bad-metricsql-syntax`,
-    `bad-logsql-no-stats`, `bad-prom-only-function`, `bad-loki-datasource`, `bad-flat-alert`,
+    `bad-logsql-no-stats`, `bad-prom-only-function`, `bad-loki-datasource`,
     `bad-event-missing`, `bad-no-rows` (a metric the seed does not hold), `bad-drifted-field`
-    (`severity` for `severity_text`), `bad-dashboard-label`; `ok-rollup-no-window` is green with a warning.
+    (`severity` for `severity_text`), `bad-dashboard-label`; `ok-rollup-no-window` is green with a warning; `ok-flat-alert` is green (a flat metrics tier and a flat logs tier, with `obs.yaml` platform).
+    `tests/flat.sh` runs the flat fixture through `query`, `check` and `alerts`, then plants each flat-file failure.
     Each fixture's `expect` file lists what its output must contain.
 
 - `tests/check-test.sh` (run by `tests/run.sh`): `obs check` on every static fixture (same rule and token as `obs query --static`), its flags, an over-budget contract and a broken query red in one run with one summary, an
@@ -1784,7 +1895,8 @@ The harness creates fresh containers for every run: VictoriaLogs retains duplica
 
 ## obs alerts
 
-`obs alerts --dir observability` evaluates the `GrafanaAlertRuleGroup` CRs in
+`obs alerts --dir observability` evaluates the flat alert tier files (see [Flat alert tier files](#flat-alert-tier-files))
+and the `GrafanaAlertRuleGroup` CRs in
 `alerts/<slug>/<severity>.yaml` on the seed and each named incident. It prints one
 line per rule and expectation, including its file and incident window, and exits
 1 on a miss. Every rule must stay quiet on the baseline; rules omitted from an
@@ -2671,6 +2783,7 @@ Tempo: trace-to-logs 2, metric-to-traces 2, span-to-profile 2) and `TestParityPr
 
 ## Not tested
 
+- **Flat alert tier files in `obs look`, `obs live incidents` and `obs sandbox up`.** These read the folder through the same loader as `obs query`, `obs check` and `obs alerts`, so the rule they get is the one tested in `internal/files/flat_test.go` and `tests/flat.sh`; the local stack, Grafana provisioning of a flat file's rule and a live firing of one were not started here (no containers in a test). Not tested: Grafana accepting the rule built from a flat file (uids `metrics` and `logs` are the sandbox datasources' uids), `obs test` on a flat folder with incidents, and that the real chart renders exactly the rule obs builds (checked against shipping.md's example, not against a chart: the chart does not exist yet).
 - Cross-architecture byte equality of histogram `_sum` floats: arm64's fused multiply-add already made
   these differ from amd64 in 0.4. The original full byte goldens run on amd64; the portable legacy
   goldens pin counter, log and histogram bucket/count bytes on every architecture.

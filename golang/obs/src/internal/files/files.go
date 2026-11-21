@@ -68,6 +68,8 @@ type Variable struct {
 type Problem struct {
 	File string
 	Msg  string
+	// Rule is the rule id a finding carries; empty means the generic "file" rule.
+	Rule string
 }
 
 // Set is everything read from the folder.
@@ -78,6 +80,8 @@ type Set struct {
 	Problems   []Problem
 	Alerts     int    // alert files read
 	Rules      []Rule // complete alert definitions, including Grafana expressions
+
+	ident FlatIdentity // platform and service of the rule uid of a flat tier file
 }
 
 // Load reads dir. A missing dashboards/ or alerts/ folder is fine; nothing at all is not.
@@ -123,6 +127,13 @@ func Walk(root string, suffixes []string, skip func(path string) bool) ([]string
 // LoadSkip is Load whose walks of alerts/ and dashboards/ use skip (see Walk). The repository rule uid scan passes
 // the discovery's prune set, so an ignored or nested-repository copy below a folder is not read at all.
 func LoadSkip(dir string, skip func(path string) bool) (*Set, error) {
+	return LoadScoped(dir, skip, "")
+}
+
+// LoadScoped is LoadSkip for a run of --all: root is the boundary --all resolved (the export root when there is no
+// .git), so the platform and service of a flat tier file come from the same obs.yaml the scope loaded for the
+// folder. "" is the single-folder lookup (the Git root).
+func LoadScoped(dir string, skip func(path string) bool, root string) (*Set, error) {
 	st, err := os.Stat(dir)
 	if err != nil {
 		return nil, err
@@ -130,7 +141,7 @@ func LoadSkip(dir string, skip func(path string) bool) (*Set, error) {
 	if !st.IsDir() {
 		return nil, fmt.Errorf("%s: not a directory", dir)
 	}
-	s := &Set{Dir: dir}
+	s := &Set{Dir: dir, ident: resolveIdentity(dir, root)}
 	for _, sub := range []string{"alerts", "dashboards"} {
 		root := filepath.Join(dir, sub)
 		if _, err := os.Stat(root); err != nil {
@@ -149,7 +160,7 @@ func LoadSkip(dir string, skip func(path string) bool) (*Set, error) {
 			rel = filepath.ToSlash(rel)
 			b, err := os.ReadFile(p)
 			if err != nil {
-				s.Problems = append(s.Problems, Problem{rel, err.Error()})
+				s.Problems = append(s.Problems, Problem{File: rel, Msg: err.Error()})
 				continue
 			}
 			if sub == "alerts" {
@@ -173,10 +184,6 @@ type alertDoc struct {
 		Interval string      `yaml:"interval"`
 		Rules    []alertRule `yaml:"rules"`
 	} `yaml:"spec"`
-	// Keys of a platform's flat authoring form: refused with a pointer to the CR.
-	Title      string `yaml:"title"`
-	Datasource string `yaml:"datasource"`
-	Expr       string `yaml:"expr"`
 }
 
 type alertRule struct {
@@ -194,16 +201,19 @@ type alertRule struct {
 		Metric string `yaml:"metric"`
 		From   string `yaml:"from"`
 	} `yaml:"record"`
-	Data []struct {
-		RefID             string `yaml:"refId"`
-		QueryType         string `yaml:"queryType"`
-		DatasourceUID     string `yaml:"datasourceUid"`
-		RelativeTimeRange struct {
-			From int64 `yaml:"from"`
-			To   int64 `yaml:"to"`
-		} `yaml:"relativeTimeRange"`
-		Model map[string]any `yaml:"model"`
-	} `yaml:"data"`
+	Data []alertData `yaml:"data"`
+}
+
+// alertData is one query or expression of a rule.
+type alertData struct {
+	RefID             string `yaml:"refId"`
+	QueryType         string `yaml:"queryType"`
+	DatasourceUID     string `yaml:"datasourceUid"`
+	RelativeTimeRange struct {
+		From int64 `yaml:"from"`
+		To   int64 `yaml:"to"`
+	} `yaml:"relativeTimeRange"`
+	Model map[string]any `yaml:"model"`
 }
 
 // Rule is a Grafana-managed rule read by Load, shared with obs alerts. File and
@@ -211,79 +221,106 @@ type alertRule struct {
 type Rule struct {
 	File, Interval, Name string
 	Definition           alertRule
+	// Flat is true for a rule built from a flat tier file; RunbookFile is the sibling
+	// alerts/<slug>/runbook.md of such a rule when it exists (relative to the observability folder).
+	Flat        bool
+	RunbookFile string
 }
 
 func (s *Set) readAlert(rel string, b []byte) {
 	dec := yaml.NewDecoder(bytes.NewReader(b))
 	var d alertDoc
 	if err := dec.Decode(&d); err != nil {
-		s.Problems = append(s.Problems, Problem{rel, "not valid YAML: " + err.Error()})
+		// A file that reads as a flat tier file (top-level tier keys, no kind) says so with a rule id, so
+		// the commands that skip unreadable files (obs live incidents) stop on it instead.
+		rule := ""
+		if looksFlat(b) {
+			rule = "flat-alert-yaml"
+		}
+		s.Problems = append(s.Problems, Problem{File: rel, Rule: rule, Msg: "not valid YAML: " + err.Error()})
 		return
 	}
 	var extra yaml.Node
 	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
-		s.Problems = append(s.Problems, Problem{rel, "more than one YAML document: one GrafanaAlertRuleGroup CR per file"})
+		rule, msg := "", "more than one YAML document: one GrafanaAlertRuleGroup CR per file"
+		// Judge the first document by what it parsed to: a flat tier followed by another document (say a
+		// ConfigMap) is a flat tier with trailing documents, not a CR.
+		var first map[string]any
+		if yaml.NewDecoder(bytes.NewReader(b)).Decode(&first) == nil && isFlat(first) {
+			rule, msg = "flat-alert-documents", "more than one YAML document: a tier file is one flat map"
+		} else if looksFlat(b) {
+			rule, msg = "flat-alert-documents", "more than one YAML document: a tier file is one flat map"
+		}
+		s.Problems = append(s.Problems, Problem{File: rel, Rule: rule, Msg: msg})
 		return
 	}
-	if d.Kind != "GrafanaAlertRuleGroup" {
-		hint := ""
-		if d.Kind == "" && (d.Expr != "" || d.Datasource != "" || d.Title != "") {
-			hint = " (this is the flat authoring form; obs reads the GrafanaAlertRuleGroup CR a chart renders from it)"
+	if d.Kind == "" && d.APIVersion == "" {
+		var m map[string]any
+		if yaml.Unmarshal(b, &m) == nil && isFlat(m) {
+			s.readFlat(rel, m)
+			return
 		}
-		s.Problems = append(s.Problems, Problem{rel, fmt.Sprintf("kind %q: want GrafanaAlertRuleGroup%s", d.Kind, hint)})
+	}
+	if d.Kind != "GrafanaAlertRuleGroup" {
+		s.Problems = append(s.Problems, Problem{File: rel, Msg: fmt.Sprintf("kind %q: want GrafanaAlertRuleGroup", d.Kind)})
 		return
 	}
 	if len(d.Spec.Rules) == 0 {
-		s.Problems = append(s.Problems, Problem{rel, "spec.rules is empty"})
+		s.Problems = append(s.Problems, Problem{File: rel, Msg: "spec.rules is empty"})
 		return
 	}
 	for _, r := range d.Spec.Rules {
-		s.Rules = append(s.Rules, Rule{File: rel, Interval: d.Spec.Interval, Name: d.Metadata.Name, Definition: r})
-		id := r.UID
-		if id == "" {
-			id = d.Metadata.Name
+		s.addRule(rel, d.Metadata.Name, d.Spec.Interval, r)
+	}
+}
+
+// addRule records one rule of the file rel (group name) and the queries it holds.
+func (s *Set) addRule(rel, name, interval string, r alertRule) {
+	s.Rules = append(s.Rules, Rule{File: rel, Interval: interval, Name: name, Definition: r})
+	id := r.UID
+	if id == "" {
+		id = name
+	}
+	for _, q := range r.Data {
+		dsType, dsUID := "", q.DatasourceUID
+		if m, ok := q.Model["datasource"].(map[string]any); ok {
+			if t, ok := m["type"].(string); ok {
+				dsType = t
+			}
+			if u, ok := m["uid"].(string); ok && dsUID == "" {
+				dsUID = u
+			}
 		}
-		for _, q := range r.Data {
-			dsType, dsUID := "", q.DatasourceUID
-			if m, ok := q.Model["datasource"].(map[string]any); ok {
-				if t, ok := m["type"].(string); ok {
-					dsType = t
-				}
-				if u, ok := m["uid"].(string); ok && dsUID == "" {
-					dsUID = u
-				}
-			}
-			if t, ok := q.Model["type"].(string); ok && dsUID == "__expr__" {
-				dsType = "__expr__"
-				_ = t // math / reduce / threshold: Grafana expressions, nothing to parse here
-			}
-			qt := q.QueryType
-			if t, ok := q.Model["queryType"].(string); ok && t != "" {
-				qt = t
-			}
-			expr, _ := q.Model["expr"].(string)
-			if expr == "" && (dsType == "tempo" || strings.Contains(dsUID, "tempo") || strings.Contains(dsUID, "traces")) {
-				expr, _ = q.Model["query"].(string)
-			}
-			qu := Query{
-				File: rel, IsAlert: true, Expr: expr, RangeSecs: q.RelativeTimeRange.From, ToSecs: q.RelativeTimeRange.To,
-				QueryType: qt, DSType: dsType, DSUID: dsUID,
-				Model: q.Model,
-				Where: fmt.Sprintf("rule %s query %s", id, q.RefID),
-			}
-			kind, err := Classify(dsType, dsUID)
-			qu.Kind = kind
-			if err != nil {
-				qu.Problem = err.Error()
-			}
-			if kind == Other && err == nil {
-				continue // an expression: nothing to parse in this milestone
-			}
-			if expr == "" && err == nil && kind != Loki {
-				qu.Problem = "model.expr is empty"
-			}
-			s.Queries = append(s.Queries, qu)
+		if t, ok := q.Model["type"].(string); ok && dsUID == "__expr__" {
+			dsType = "__expr__"
+			_ = t // math / reduce / threshold: Grafana expressions, nothing to parse here
 		}
+		qt := q.QueryType
+		if t, ok := q.Model["queryType"].(string); ok && t != "" {
+			qt = t
+		}
+		expr, _ := q.Model["expr"].(string)
+		if expr == "" && (dsType == "tempo" || strings.Contains(dsUID, "tempo") || strings.Contains(dsUID, "traces")) {
+			expr, _ = q.Model["query"].(string)
+		}
+		qu := Query{
+			File: rel, IsAlert: true, Expr: expr, RangeSecs: q.RelativeTimeRange.From, ToSecs: q.RelativeTimeRange.To,
+			QueryType: qt, DSType: dsType, DSUID: dsUID,
+			Model: q.Model,
+			Where: fmt.Sprintf("rule %s query %s", id, q.RefID),
+		}
+		kind, err := Classify(dsType, dsUID)
+		qu.Kind = kind
+		if err != nil {
+			qu.Problem = err.Error()
+		}
+		if kind == Other && err == nil {
+			continue // an expression: nothing to parse in this milestone
+		}
+		if expr == "" && err == nil && kind != Loki {
+			qu.Problem = "model.expr is empty"
+		}
+		s.Queries = append(s.Queries, qu)
 	}
 }
 
@@ -362,7 +399,7 @@ func asString(v any) string {
 func (s *Set) readDashboard(rel string, b []byte) {
 	var d dashDoc
 	if err := json.Unmarshal(b, &d); err != nil {
-		s.Problems = append(s.Problems, Problem{rel, "not valid dashboard JSON: " + err.Error()})
+		s.Problems = append(s.Problems, Problem{File: rel, Msg: "not valid dashboard JSON: " + err.Error()})
 		return
 	}
 	dash := &Dashboard{File: rel, Title: d.Title, From: d.Time.From, To: d.Time.To}

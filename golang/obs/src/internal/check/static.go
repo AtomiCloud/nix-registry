@@ -20,7 +20,11 @@ const eventField = "durian.cloud/event"
 func Static(set *files.Set, o Options) *Report {
 	r := newReport()
 	for _, p := range set.Problems {
-		r.add(Fail, p.File, "", "file", "%s", p.Msg)
+		rule := p.Rule
+		if rule == "" {
+			rule = "file"
+		}
+		r.add(Fail, p.File, "", rule, "%s", p.Msg)
 	}
 	if !o.AllowEmpty && set.Alerts == 0 && len(set.Dashboards) == 0 && len(set.Problems) == 0 {
 		r.add(Fail, o.Dir, "", "empty", "no alerts/**/*.yaml and no dashboards/**/*.json found")

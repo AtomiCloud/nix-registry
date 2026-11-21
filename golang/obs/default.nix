@@ -14,7 +14,7 @@ let
     pname = "obs";
     inherit version;
     src = ./src;
-    vendorHash = "sha256-VXDtpfHM8n6be7mWld4GzS3T1Ndl4UMHYgMcaq/uRdk=";
+    vendorHash = "sha256-eiFYiYt6rVvd+6xT1WnM+NnMADsz5uEpDp0Gc4dHLXo=";
     env.CGO_ENABLED = "0";
     env.OBS_REQUIRE_LLVM = "1";
     nativeCheckInputs = [ nixpkgs.llvmPackages.llvm nixpkgs.git ]; # git: the tests of the git-ignored folders

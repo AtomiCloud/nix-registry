@@ -12,7 +12,7 @@ func runAlerts(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("obs alerts", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var o alerts.Options
-	fs.StringVar(&o.Dir, "dir", "observability", "observability folder containing GrafanaAlertRuleGroup CRs")
+	fs.StringVar(&o.Dir, "dir", "observability", "observability folder containing flat alert tier files (alerts/<slug>/<severity>.yaml) or GrafanaAlertRuleGroup CRs")
 	fs.StringVar(&o.SeedPath, "seed", "", "seed path (default <dir>/seed.yaml)")
 	fs.StringVar(&o.VLSettings, "vl-settings", "", "VictoriaLogs chart args YAML; overrides obs.yaml thresholds.logs (default <dir>/victorialogs-settings.yaml, else obs.yaml, else pinned defaults)")
 	fs.Int64Var(&o.Base, "base", 0, "unix seconds of the first run; the complete time line must end in the past")

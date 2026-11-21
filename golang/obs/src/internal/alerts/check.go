@@ -157,7 +157,11 @@ func run(o Options, stdout, stderr io.Writer, res *RunResult) int {
 		return 1
 	}
 	// The shared reader and static checker enforce the same language and event rules.
-	set, err := files.Load(o.Dir)
+	root := ""
+	if o.Scope != nil {
+		root = o.Scope.Root
+	}
+	set, err := files.LoadScoped(o.Dir, nil, root)
 	if err != nil {
 		fmt.Fprintln(stderr, err)
 		return 2

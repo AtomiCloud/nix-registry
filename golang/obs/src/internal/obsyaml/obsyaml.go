@@ -51,6 +51,9 @@ type File struct {
 	// observability folder's (observability/<feature> reads observability/obs.yaml).
 	Inherited bool
 	Versions  Versions // the versions the repo targets
+	// Platform and Service name the rule uid of a flat alert tier file (<platform>-<service>-<slug>-<severity>);
+	// empty when the file does not write them.
+	Platform, Service string
 	// Resolved thresholds. A nil pointer or zero value means obs.yaml does not name that
 	// group, and the consumer keeps its built-in default.
 	Logs      *vl.Limits         // thresholds.logs over the pinned VictoriaLogs defaults
@@ -89,6 +92,8 @@ type tracesRaw struct {
 }
 
 type rawFile struct {
+	Platform   string   `yaml:"platform"`
+	Service    string   `yaml:"service"`
 	Versions   Versions `yaml:"versions"`
 	Thresholds struct {
 		Logs    logsRaw `yaml:"logs"`
@@ -107,6 +112,8 @@ type rawFile struct {
 
 // schema lists every key; a nil value is a leaf.
 var schema = map[string]any{
+	// platform and service name the rule uid of a flat alert tier file: <platform>-<service>-<slug>-<severity>.
+	"platform": nil, "service": nil,
 	"versions": map[string]any{
 		"grafana": nil, "victoriametrics": nil, "victorialogs": nil, "tempo": nil,
 		"alloy": nil, "pyroscope": nil, "dashboard_schema": nil,
@@ -271,6 +278,7 @@ func Parse(path string, b []byte) (*File, error) {
 		return nil, fail(0, "%v", err)
 	}
 	f.Versions = raw.Versions
+	f.Platform, f.Service = strings.TrimSpace(raw.Platform), strings.TrimSpace(raw.Service)
 	for _, v := range []struct{ key, val string }{
 		{"versions.grafana", f.Versions.Grafana}, {"versions.victoriametrics", f.Versions.VictoriaMetrics},
 		{"versions.victorialogs", f.Versions.VictoriaLogs}, {"versions.tempo", f.Versions.Tempo},
