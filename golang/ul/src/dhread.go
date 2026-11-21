@@ -164,11 +164,23 @@ func whichPage(msg, root string, pages []string) (page string, line int, text st
 	if m == nil {
 		return "", 0, ""
 	}
+	n, _ := strconv.Atoi(m[2])
+	// The exact path of a page of the batch first: a suffix can name another page too (docs/a.dh.md
+	// is the end of docs/nested/docs/a.dh.md).
 	for _, p := range pages {
-		if m[1] == p || m[1] == filepath.Join(root, filepath.FromSlash(p)) || strings.HasSuffix(m[1], "/"+p) {
-			n, _ := strconv.Atoi(m[2])
+		if m[1] == p || m[1] == filepath.Join(root, filepath.FromSlash(p)) {
 			return p, n, m[3]
 		}
+	}
+	// A suffix is believed only when it names one page.
+	hit, hits := "", 0
+	for _, p := range pages {
+		if strings.HasSuffix(m[1], "/"+p) {
+			hit, hits = p, hits+1
+		}
+	}
+	if hits == 1 {
+		return hit, n, m[3]
 	}
 	return "", 0, ""
 }
@@ -253,8 +265,8 @@ func (r *dhReader) block(b dhBlock, to int) {
 	// An author's :::llm text is Markdown, read like any prose.
 	if b.LLMKind == "text" && b.LLM != nil {
 		body := []byte(*b.LLM)
-		from := b.Line
-		for l := b.Line; l <= to && l <= len(r.lines); l++ {
+		from := max(b.Line, 1) // a block with no line is read from the top of the page
+		for l := from; l <= to && l <= len(r.lines); l++ {
 			if strings.HasPrefix(strings.TrimSpace(r.lines[l-1]), ":::llm") {
 				from = l
 				break

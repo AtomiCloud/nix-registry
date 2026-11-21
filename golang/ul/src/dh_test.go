@@ -151,7 +151,8 @@ func TestDhRepeatedProseAndBanner(t *testing.T) {
 // What dh prints is checked: an object that is not a page, or too few or too many pages, is
 // exit 2, never a page silently cleared.
 func TestDhOutputValidated(t *testing.T) {
-	for name, rec := range map[string]string{"empty object": "{}", "no pages": "", "two pages": "{\"ast\":1,\"source\":\"x\"}{\"ast\":1,\"source\":\"x\"}", "only ast": "{\"ast\":1}", "stray bracket": "{\"ast\":1,\"source\":\"x\"}}"} {
+	good := readAll(t, filepath.Join("testdata", "dh/repeat/docs/domain/kitchen/implementation/repeat.dh.md.dhjson"))
+	for name, rec := range map[string]string{"empty object": "{}", "no pages": "", "two pages": good + good, "only ast": "{\"ast\":1}", "stray bracket": good + "}"} {
 		dir := fixture(t, "dh/repeat")
 		rp := filepath.Join(dir, "docs/domain/kitchen/implementation/repeat.dh.md.dhjson")
 		if err := os.WriteFile(rp, []byte(rec), 0o644); err != nil {
@@ -160,6 +161,10 @@ func TestDhOutputValidated(t *testing.T) {
 		code, _, errs := newEnv(t, dir).ul("check", "--root", dir, "--dh", useFakeDh(t))
 		if code != 2 || !strings.Contains(errs, "dh json") {
 			t.Errorf("%s: exit %d: %s", name, code, errs)
+		}
+		// The trailing-output cases begin with a valid page, so only the trailing check can refuse them.
+		if (name == "two pages" || name == "stray bracket") && !strings.Contains(errs, "more than the pages") {
+			t.Errorf("%s: not refused for the trailing output: %s", name, errs)
 		}
 	}
 }
@@ -257,4 +262,40 @@ func readSourceOf(t *testing.T, recording string) string {
 		t.Fatal(err)
 	}
 	return doc["source"].(string)
+}
+
+// dh names the page that failed by its exact path before any path that merely ends the same way.
+func TestDhErrorNamesExactPage(t *testing.T) {
+	pages := []string{"docs/a.dh.md", "docs/nested/docs/a.dh.md"}
+	page, line, text := whichPage("docs/nested/docs/a.dh.md:7: a fence is never closed", "/repo", pages)
+	if page != "docs/nested/docs/a.dh.md" || line != 7 || text != "a fence is never closed" {
+		t.Errorf("got %q %d %q", page, line, text)
+	}
+	// Two pages end the same way and none is the exact path: no page is blamed.
+	if page, _, _ := whichPage("/other/docs/a.dh.md:7: x", "/repo", []string{"docs/a.dh.md", "a.dh.md"}); page != "" {
+		t.Errorf("an ambiguous suffix named %q", page)
+	}
+}
+
+// A block with no line (a dh that prints none) is read, not a panic.
+func TestDhBlockWithoutLine(t *testing.T) {
+	dir := fixture(t, "dh/parts")
+	rec := filepath.Join(dir, "docs/domain/kitchen/implementation/parts.dh.md.dhjson")
+	var doc map[string]any
+	if err := jsonUnmarshal(readAll(t, rec), &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, b := range doc["blocks"].([]any) {
+		delete(b.(map[string]any), "line")
+	}
+	out, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(rec, out, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, code := checkLines(t, newEnv(t, dir), dir); code != 1 {
+		t.Fatalf("exit %d, want 1 (the avoided words are still found)", code)
+	}
 }
