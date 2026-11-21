@@ -24,6 +24,7 @@ import (
 
 	"github.com/AtomiCloud/obs/internal/alerts/gfexpr/mathexp"
 	"github.com/AtomiCloud/obs/internal/alerts/gfexpr/mathexp/parse"
+	"github.com/AtomiCloud/obs/internal/files"
 )
 
 // ---------- rule file shapes (additions to spec.go's Alert) ----------
@@ -186,10 +187,10 @@ func compileRule(a *Alert) (*cRule, error) {
 		r.missingN = int64(a.MissingSeriesEvalsToResolve)
 	}
 	var err error
-	if r.forD, err = time.ParseDuration(orDefault(a.For, "0s")); err != nil {
+	if r.forD, err = files.ParseRuleDuration(orDefault(a.For, "0s")); err != nil {
 		return nil, err
 	}
-	if r.keepD, err = time.ParseDuration(orDefault(a.KeepFiringFor, "0s")); err != nil {
+	if r.keepD, err = files.ParseRuleDuration(orDefault(a.KeepFiringFor, "0s")); err != nil {
 		return nil, err
 	}
 	if r.interval, err = time.ParseDuration(orDefault(a.Interval, "1m")); err != nil {

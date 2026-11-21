@@ -27,7 +27,7 @@ import (
 //
 // To record (needs docker and the sandbox running; see the README, "Recording the fixtures"):
 //
-//	OBS_LIVE_RECORD='metrics=http://127.0.0.1:24428,logs=http://127.0.0.1:24429,traces=http://127.0.0.1:24200,grafana=http://127.0.0.1:24000' \
+//	OBS_LIVE_RECORD='metrics=http://127.0.0.1:24001,logs=http://127.0.0.1:24002,traces=http://127.0.0.1:24003,grafana=http://127.0.0.1:24000' \
 //	  go test ./internal/live -run TestRecorded
 //
 // Without OBS_LIVE_RECORD the files are replayed and nothing touches the network.

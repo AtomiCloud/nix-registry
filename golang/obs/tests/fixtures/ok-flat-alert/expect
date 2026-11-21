@@ -1,0 +1,3 @@
+mode: static
+exit: 0
+contains: obs query

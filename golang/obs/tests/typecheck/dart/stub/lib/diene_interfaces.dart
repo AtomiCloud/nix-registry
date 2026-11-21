@@ -223,27 +223,117 @@ final class DurianSignalPort {
 
   static DurianSignalPort? _current;
 
-  /// Builds the port from the generated tables, once per process. The generated installSignals() calls
-  /// it; the lint rule forbids calling it anywhere else. Nothing guarantees installSignals() runs first,
-  /// so a second install, whichever came first, POISONS the port: it is refused and counted in
-  /// dropped.register, and from then on every signal is refused and counted in dropped.poisoned until
-  /// restart. A forged first table is never used silently. The tables are copied.
+  /// Merges a deep copy of each contract at boot, before signals flow.
   static Result<DurianSignalPort> install({
+    required String contract,
+    required String hash,
     required Map<String, DurianSignalMetricInfo> metrics,
     required Map<String, String> events,
+    Map<String, DurianSignalSpanInfo> spans = const {},
   }) {
-    final p = _current;
-    if (p != null) {
+    final p = _current ??= DurianSignalPort._({}, {});
+    Result<DurianSignalPort> refuse(String why) {
       p._poisoned = true;
       p.dropped['register'] = p.dropped['register']! + 1;
-      return const DurianSignalErr(
-        'dropped.register: the port is already installed once in this process; it is now poisoned and refuses every signal until restart',
-      );
+      return DurianSignalErr('dropped.register: $why');
     }
-    return DurianSignalOk(
-      _current = DurianSignalPort._(Map.of(metrics), Map.of(events)),
-    );
+
+    try {
+      if (p._poisoned)
+        return refuse('contract "$contract": the port is already poisoned');
+      if (p._closed)
+        return refuse('contract "$contract" registered after the first signal');
+      final copiedMetrics = metrics.map(
+        (name, row) => MapEntry(
+          name,
+          DurianSignalMetricInfo(
+            kind: row.kind,
+            unit: row.unit,
+            budget: row.budget,
+            acrossPods: row.acrossPods,
+            perPod: row.perPod,
+            labels: row.labels,
+            keys: List.unmodifiable(row.keys),
+            values: Map.unmodifiable(
+              row.values.map(
+                (k, v) => MapEntry(k, List<String>.unmodifiable(v)),
+              ),
+            ),
+            ranges: Map.unmodifiable(
+              row.ranges.map((k, v) => MapEntry(k, List<int>.unmodifiable(v))),
+            ),
+          ),
+        ),
+      );
+      final copiedEvents = Map<String, String>.unmodifiable(events);
+      final copiedSpans = spans.map(
+        (k, v) => MapEntry(
+          k,
+          DurianSignalSpanInfo(kind: v.kind, keys: List.unmodifiable(v.keys)),
+        ),
+      );
+      final fingerprint = <String, Object>{
+        'hash': hash,
+        'metrics': copiedMetrics.map(
+          (k, v) => MapEntry(k, <Object>[
+            v.kind,
+            v.unit,
+            v.budget,
+            v.acrossPods,
+            v.perPod,
+            v.labels,
+            v.keys,
+            v.values,
+            v.ranges,
+          ]),
+        ),
+        'events': copiedEvents,
+        'spans': copiedSpans.map(
+          (k, v) => MapEntry(k, <Object>[v.kind, v.keys]),
+        ),
+      };
+      final previous = p._contracts[contract];
+      if (previous != null) {
+        if (_equal(previous, fingerprint)) return DurianSignalOk(p);
+        return refuse(
+          'contract "$contract" reused with a different hash or table',
+        );
+      }
+      final names = {...metrics.keys, ...events.keys, ...spans.keys};
+      for (final name in names) {
+        final owner = p._owners[name];
+        if (owner != null)
+          return refuse(
+            'signal "$name" is owned by both contract "$owner" and contract "$contract"',
+          );
+      }
+      p._contracts[contract] = fingerprint;
+      p._metrics.addAll(copiedMetrics);
+      p._events.addAll(copiedEvents);
+      p._spans.addAll(copiedSpans);
+      for (final name in names) {
+        p._owners[name] = contract;
+      }
+      return DurianSignalOk(p);
+    } catch (_) {
+      return refuse("invalid registration table contents");
+    }
   }
+
+  static bool _equal(Object? a, Object? b) {
+    if (a is Map<Object?, Object?> && b is Map<Object?, Object?>)
+      return a.length == b.length &&
+          a.keys.every((Object? k) => b.containsKey(k) && _equal(a[k], b[k]));
+    if (a is List<Object?> && b is List<Object?>)
+      return a.length == b.length &&
+          List.generate(a.length, (i) => i).every((i) => _equal(a[i], b[i]));
+    return a == b;
+  }
+
+  final Map<String, Object> _contracts = {};
+  final Map<String, String> _owners = {};
+  final Map<String, DurianSignalSpanInfo> _spans = {};
+  bool _closed = false;
 
   final Map<String, DurianSignalMetricInfo> _metrics;
   final Map<String, String> _events;
@@ -253,6 +343,7 @@ final class DurianSignalPort {
   final Map<String, int> dropped = {
     'unknown_event': 0,
     'unknown_metric': 0,
+    'unknown_span': 0,
     'unknown_key': 0,
     'unknown_value': 0,
     'register': 0,
@@ -303,7 +394,7 @@ final class DurianSignalPort {
     if (_poisoned) {
       return _drop(
         'poisoned',
-        'metric "$name": the port is poisoned (a second install was refused); every signal is refused until restart',
+        'metric "$name": the port is poisoned (an invalid install was refused); every signal is refused until restart',
       );
     }
     final info = p._metrics[name];
@@ -327,7 +418,9 @@ final class DurianSignalPort {
     }
     final entries = labels.entries;
     final keys = entries.keys.toList();
-    if (keys.join(' ') != info.keys.join(' ')) {
+    if (keys.length != info.keys.length ||
+        !Iterable<int>.generate(keys.length)
+            .every((i) => keys[i] == info.keys[i])) {
       return p._drop(
         'unknown_key',
         'metric "$name" labels [${keys.join(' ')}] are not its generated keys [${info.keys.join(' ')}]',
@@ -351,7 +444,36 @@ final class DurianSignalPort {
         );
       }
     }
+    _closed = true;
     return const DurianSignalOk(true);
+  }
+
+  // Fixture-only assumed span recorder, matching the typed carrier's attributes.
+  static Result<bool> startSpan<A extends DurianSignalLabels>(
+    DurianSignalSpan<A> span,
+    A attrs,
+  ) {
+    final p = _current;
+    if (p == null) return const DurianSignalErr('no port installed');
+    if (p._poisoned)
+      return p._drop('poisoned', 'the port is poisoned until restart');
+    try {
+      final info = p._spans[span.name];
+      if (info == null || info.kind != span.kind)
+        return p._drop('unknown_span', 'unknown span name or kind');
+      final keys = attrs.entries.keys.toList();
+      if (keys.length != info.keys.length ||
+          !Iterable<int>.generate(keys.length)
+              .every((i) => keys[i] == info.keys[i]))
+        return p._drop(
+          'unknown_key',
+          'span attributes differ from generated keys',
+        );
+      p._closed = true;
+      return const DurianSignalOk(true);
+    } catch (_) {
+      return p._drop('guard_error', 'invalid span attributes');
+    }
   }
 
   static Result<bool> _log(String level, Event<DurianSignalLevel> event) {
@@ -360,7 +482,7 @@ final class DurianSignalPort {
     if (p._poisoned) {
       return p._drop(
         'poisoned',
-        'event "${event.name}": the port is poisoned (a second install was refused); every signal is refused until restart',
+        'event "${event.name}": the port is poisoned (an invalid install was refused); every signal is refused until restart',
       );
     }
     final want = p._events[event.name];
@@ -376,6 +498,7 @@ final class DurianSignalPort {
         'event "${event.name}" is $want in the generated event table, not $level',
       );
     }
+    p._closed = true;
     return const DurianSignalOk(true);
   }
 }

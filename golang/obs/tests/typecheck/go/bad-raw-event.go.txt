@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	obs "github.com/ProtoDurian/diene.go-interfaces/obs"
+	obs "github.com/AtomiCloud/diene.go-interfaces/obs"
 )
 
 func main() { _ = obs.Error(context.Background(), "checkout.charge.failed") }

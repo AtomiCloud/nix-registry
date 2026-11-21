@@ -1,6 +1,0 @@
-mode: static
-exit: 1
-contains: alerts/crash-logs/warning.yaml
-contains: [file]
-contains: want GrafanaAlertRuleGroup
-contains: flat authoring form

@@ -56,7 +56,7 @@ run() {
 run version
 [ "$rc" -eq 0 ] && grep -q '^obs [0-9]' "$work/out.txt" && ok "version" || bad "version: $(cat "$work/out.txt")"
 # obs's own version, set once in default.nix for the whole obs-full release (not the registry release).
-grep -qx 'obs 0.5.0' "$work/out.txt" && ok "version prints obs 0.5.0" || bad "version is not 0.5.0: $(head -1 "$work/out.txt")"
+grep -qx 'obs 0.6.0' "$work/out.txt" && ok "version prints obs 0.6.0" || bad "version is not 0.6.0: $(head -1 "$work/out.txt")"
 grep -q 'VictoriaMetrics v1.156.0' "$work/out.txt" && grep -q 'VictoriaLogs v1.54.0 (tag commit 6433dae5' "$work/out.txt" &&
   ok "version prints every engine pin" || bad "version engine pins"
 run
@@ -214,6 +214,8 @@ bash "$here/engines.sh" "$OBS" && ok "engines --check-chart (tests/engines.sh)" 
 bash "$here/obsyaml.sh" "$OBS" && ok "obs.yaml versions and thresholds (tests/obsyaml.sh)" || bad "obs.yaml versions and thresholds (tests/obsyaml.sh)"
 bash "$here/contract-source.sh" "$OBS" && ok "source: contract entries, estimate labels, keep-list (tests/contract-source.sh)" || bad "source: contract entries, estimate labels, keep-list (tests/contract-source.sh)"
 bash "$here/live.sh" "$OBS" && ok "obs live read-only commands (tests/live.sh)" || bad "obs live read-only commands (tests/live.sh)"
+bash "$here/flat.sh" "$OBS" && ok "flat alert tier files (tests/flat.sh)" || bad "flat alert tier files (tests/flat.sh)"
+bash "$here/features.sh" "$OBS" && ok "per-feature contracts: both layouts, rule uids, service totals, obs.yaml fallback (tests/features.sh)" || bad "per-feature contracts (tests/features.sh)"
 bash "$here/check-test.sh" "$OBS" && ok "obs check (limits, versions, queries), obs test (live queries, alerts, links, incidents), old commands byte-identical (tests/check-test.sh, tests/compat.sh)" || bad "obs check / obs test (tests/check-test.sh)"
 echo "obs tests: $pass passed, $fail failed"
 bash "$here/alerts.sh" "$OBS"

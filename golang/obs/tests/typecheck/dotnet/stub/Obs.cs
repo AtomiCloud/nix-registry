@@ -222,6 +222,8 @@ public readonly struct FatalLevel : IDurianSignalLevel { public static string Le
 
 /// <summary>The telemetry port, built from the generated tables (Port.Install). A refusal is an Err and a
 /// count in Dropped; it never throws and never changes the app's result.</summary>
+public sealed record DurianSignalContract(string Id, string Hash);
+
 public static class Port
 {
     private static IReadOnlyDictionary<string, DurianSignalMetricInfo> _metrics = new Dictionary<string, DurianSignalMetricInfo>();
@@ -230,12 +232,61 @@ public static class Port
     /// <summary>dropped.&lt;reason&gt;: unknown_event, unknown_metric, unknown_key, unknown_value, unset_label.</summary>
     public static Dictionary<string, int> Dropped { get; } = new();
 
-    /// <summary>Builds the port from SignalTables.Metrics and SignalTables.EventLevels.</summary>
-    public static void Install(IReadOnlyDictionary<string, DurianSignalMetricInfo> metrics, IReadOnlyDictionary<string, string> eventLevels)
+    /// <summary>Merges a deep copy per contract at boot, before signals flow.</summary>
+    private static readonly Dictionary<string, string> Contracts = new();
+    private static readonly Dictionary<string, string> Owners = new();
+    private static readonly Dictionary<string, DurianSignalSpanInfo> Spans = new();
+    private static bool _closed, _poisoned;
+
+    public static Result<bool, string> Install(DurianSignalContract contract,
+        IReadOnlyDictionary<string, DurianSignalMetricInfo> metrics,
+        IReadOnlyDictionary<string, string> eventLevels,
+        IReadOnlyDictionary<string, DurianSignalSpanInfo> spans)
     {
-        _metrics = metrics;
-        _events = eventLevels;
-        Dropped.Clear();
+        Result<bool, string> Refuse(string why) { _poisoned = true; return Drop("register", why); }
+        try
+        {
+            if (_poisoned) return Refuse($"contract {contract.Id}: the port is already poisoned");
+            if (_closed) return Refuse($"contract {contract.Id} registered after the first signal");
+            var copiedMetrics = metrics.ToDictionary(x => x.Key, x => x.Value with
+            {
+                Keys = x.Value.Keys.ToArray(),
+                Values = x.Value.Values?.ToDictionary(v => v.Key, v => v.Value.ToArray()),
+                Ranges = x.Value.Ranges?.ToDictionary(v => v.Key, v => v.Value.ToArray())
+            });
+            var copiedEvents = eventLevels.ToDictionary(x => x.Key, x => x.Value);
+            var copiedSpans = spans.ToDictionary(x => x.Key, x => x.Value with { Keys = x.Value.Keys.ToArray() });
+            var fingerprint = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                contract.Hash,
+                Metrics = copiedMetrics.OrderBy(x => x.Key, StringComparer.Ordinal).Select(x => new
+                {
+                    x.Key,
+                    x.Value.Kind,
+                    x.Value.Unit,
+                    x.Value.Budget,
+                    x.Value.AcrossPods,
+                    x.Value.PerPod,
+                    x.Value.Keys,
+                    Values = x.Value.Values?.OrderBy(v => v.Key, StringComparer.Ordinal).Select(v => new { v.Key, v.Value }),
+                    Ranges = x.Value.Ranges?.OrderBy(v => v.Key, StringComparer.Ordinal).Select(v => new { v.Key, v.Value })
+                }),
+                Events = copiedEvents.OrderBy(x => x.Key, StringComparer.Ordinal),
+                Spans = copiedSpans.OrderBy(x => x.Key, StringComparer.Ordinal)
+            });
+            if (Contracts.TryGetValue(contract.Id, out var previous))
+                return previous == fingerprint ? Result<bool, string>.Ok(true) : Refuse($"contract {contract.Id} reused with a different hash or table");
+            var names = metrics.Keys.Concat(eventLevels.Keys).Concat(spans.Keys).Distinct().ToArray();
+            foreach (var name in names) if (Owners.TryGetValue(name, out var owner))
+                return Refuse($"signal {name} is owned by both contract {owner} and contract {contract.Id}");
+            Contracts[contract.Id] = fingerprint;
+            foreach (var name in names) Owners[name] = contract.Id;
+            foreach (var row in copiedMetrics) ((Dictionary<string, DurianSignalMetricInfo>)_metrics).Add(row.Key, row.Value);
+            foreach (var row in copiedEvents) ((Dictionary<string, string>)_events).Add(row.Key, row.Value);
+            foreach (var row in copiedSpans) Spans.Add(row.Key, row.Value);
+            return Result<bool, string>.Ok(true);
+        }
+        catch (Exception) { return Refuse("invalid registration table contents"); }
     }
 
     internal static Result<bool, string> Drop(string reason, string why)
@@ -250,6 +301,7 @@ public static class Port
 
     private static Result<bool, string> Emit<L>(string kind, string? name, L labels) where L : IDurianSignalLabels
     {
+        if (_poisoned) return Drop("poisoned", "the port is poisoned until restart");
         if (name is null || labels is null) return Drop("unknown_metric", "unset signal");
         if (!_metrics.TryGetValue(name, out var info)) return Drop("unknown_metric", $"metric \"{name}\" is not in the generated metric table");
         if (info.Kind != kind) return Drop("unknown_metric", $"metric \"{name}\" is a {info.Kind} in the generated metric table, not a {kind}");
@@ -272,14 +324,31 @@ public static class Port
                 (!long.TryParse(text, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out var n) || n < range[0] || n > range[1]))
                 return Drop("unknown_value", $"metric \"{name}\" label {key} value {text} is outside {range[0]}..{range[1]}");
         }
+        _closed = true;
         return Result<bool, string>.Ok(true);
+    }
+
+    // Fixture-only assumed span recorder; production adapters may spell this differently.
+    public static Result<bool, string> StartSpan<A>(DurianSignalSpan<A> span, A attrs) where A : IDurianSignalLabels
+    {
+        if (_poisoned) return Drop("poisoned", "the port is poisoned until restart");
+        if (span is null || attrs is null || !Spans.TryGetValue(span.Name, out var info) || info.Kind != span.Kind) return Drop("unknown_span", "unknown span name or kind");
+        try
+        {
+            var keys = typeof(A).GetProperties().Select(p => p.GetCustomAttributes(typeof(DurianSignalLabelAttribute), false).OfType<DurianSignalLabelAttribute>().FirstOrDefault()?.Name ?? string.Empty);
+            if (!keys.SequenceEqual(info.Keys)) return Drop("unknown_key", "span attributes differ from generated keys");
+            _closed = true; return Result<bool, string>.Ok(true);
+        }
+        catch (Exception) { return Drop("guard_error", "invalid span attributes"); }
     }
 
     internal static Result<bool, string> LogEvent(string level, string? name)
     {
+        if (_poisoned) return Drop("poisoned", "the port is poisoned until restart");
         if (name is null) return Drop("unknown_event", "unset event");
         if (!_events.TryGetValue(name, out var want)) return Drop("unknown_event", $"event \"{name}\" is not in the generated event table");
         if (want != level) return Drop("unknown_event", $"event \"{name}\" is {want} in the generated event table, not {level}");
+        _closed = true;
         return Result<bool, string>.Ok(true);
     }
 }

@@ -1,0 +1,15 @@
+service: billing
+interval: 30s
+types:
+  provider: { kind: enum, values: [stripe, adyen] }
+metrics:
+  billing.charges: { kind: counter, budget: 2, labels: { provider: provider } }
+logs:
+  ChargeFailed: { event: billing.charge.failed, level: error }
+spans:
+  billing.provider.payment.charge.submission: { kind: internal, attributes: { provider: provider } }
+generate:
+  - { lang: go, out: gen/go/signals, package: signals }
+  - { lang: bun, out: gen/bun/src/signals }
+  - { lang: dart, out: gen/dart/lib/src/signals, package: billing_signals }
+  - { lang: dotnet, out: gen/dotnet/Signals, namespace: Billing.Signals }

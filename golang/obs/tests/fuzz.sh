@@ -94,6 +94,7 @@ for f in "$here"/fixtures/fuzz/*.yaml; do
     rm -rf "$r"
     mkdir -p "$r/observability"
     cp "$f" "$r/observability/contract.yaml"
+    cp "$here/fixtures/gen/good/"{go.mod,package.json,pubspec.yaml,Signals.csproj} "$r/"
     if timeout 60 "$OBS" gen --dir "$r/observability" --lang "$lang" >"$r/gen.txt" 2>&1; then
       if out=$(compile "$lang" "$r/gen/$lang"); then
         echo "PASS $name/$lang: generated code compiles"

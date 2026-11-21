@@ -45,14 +45,12 @@ export declare function logger(events: EventTable): Log;
 export declare function dropped(
   reason: 'unknown_event' | 'unknown_metric' | 'unknown_key' | 'unknown_value' | 'register' | 'poisoned',
 ): number;
-/**
- * Registers the generated tables, once per process: the generated signals.ts calls it when it is loaded.
- * metrics(), logger() and tracer() accept only the registered table objects. A second registration, or any
- * other table, POISONS the port: it is refused (dropped.register) and every signal is refused until
- * restart (dropped.poisoned). The guard reads a frozen deep copy taken at registration. The lint rule
- * forbids calling register outside generated files.
- */
+/** Merges a frozen deep copy per contract at boot. Duplicate names, changed ids and late
+ * registration poison the port. Equal id/hash/content is a no-op before signals flow.
+ * metrics/logger/tracer accept only registered table objects. */
 export declare function register(tables: {
+  readonly contract: string;
+  readonly hash: string;
   readonly metrics?: unknown;
   readonly events?: EventTable;
   readonly spans?: unknown;

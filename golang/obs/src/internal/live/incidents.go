@@ -579,6 +579,13 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 	if err != nil {
 		return nil, err
 	}
+	// A flat tier file that cannot be read as a rule says so (it would otherwise vanish from the
+	// report and the command exit 0). Other unreadable files keep 0.5's behavior.
+	for _, p := range set.Problems {
+		if p.Rule != "" {
+			return nil, fmt.Errorf("%s: %s", p.File, p.Text())
+		}
+	}
 	type rule struct {
 		ID, Title, File, Runbook string
 		Record                   bool
@@ -589,7 +596,11 @@ func Incidents(ctx context.Context, c *Client, t *Target, o IncidentOptions) (*I
 		if id == "" {
 			id = r.Name
 		}
-		rules = append(rules, rule{ID: id, Title: r.Definition.Title, File: r.File, Runbook: r.Definition.Annotations["runbook_url"], Record: r.Definition.Record != nil})
+		runbook := r.Definition.Annotations["runbook_url"]
+		if runbook == "" {
+			runbook = r.RunbookFile // a flat rule's sibling alerts/<slug>/runbook.md
+		}
+		rules = append(rules, rule{ID: id, Title: r.Definition.Title, File: r.File, Runbook: runbook, Record: r.Definition.Record != nil})
 	}
 	incs, err := readIncidents(o.Dir)
 	if err != nil {

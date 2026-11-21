@@ -9,12 +9,19 @@ import type { Event as DurianSignalEvent } from '@atomicloud/diene.interfaces';
 import type { Bounded as DurianSignalBounded } from '@atomicloud/diene.interfaces';
 
 // Label value types.
+/** @public */
 export type Provider = 'stripe' | 'adyen' | 'paypal';
+/** @public */
 export type Outcome = 'ok' | 'declined' | 'error';
+/** @public */
 export type Shard = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 14 | 15;
+/** @public */
 export type Sequence = DurianSignalBounded<'Sequence'>;
+/** @public */
 export const SequenceSpec = { name: 'Sequence', min: 0, max: 9999 } as const;
+/** @public */
 export type Lane = 1 | 2 | 3;
+/** @public */
 export type Hour =
   | 0
   | 1
@@ -40,26 +47,40 @@ export type Hour =
   | 21
   | 22
   | 23;
+/** @public */
 export type Day = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+/** @public */
 export type BillingDay = string & { readonly __durianDate: 'BillingDay' };
+/** @public */
 export const BillingDaySpec = { name: 'BillingDay', windowDays: 30 } as const;
+/** @public */
 export type UserId = string;
+/** @public */
 export type OrderId = string;
 
 // Metrics: one label type per metric, the name -> labels map and the allowed-key table.
+/** @public */
 export type CheckoutChargesLabels = {
   provider: Provider;
   outcome: Outcome;
   shard: Shard;
   hour: Hour;
 };
+/** @public */
 export type CheckoutChargeDurationLabels = { provider: Provider; outcome: Outcome };
+/** @public */
 export type CheckoutInvoicesLabels = { billing_day: BillingDay; provider: Provider };
+/** @public */
 export type CheckoutQueueDepthLabels = { lane: Lane };
+/** @public */
 export type CheckoutWorkerLagLabels = Record<string, never>;
+/** @public */
 export type CheckoutConfigGenerationLabels = Record<string, never>;
+/** @public */
 export type CheckoutCacheEntriesLabels = { day: Day };
+/** @public */
 export type CheckoutRuntimeMemoryLabels = Record<string, never>;
+/** @public */
 export type MetricLabels = {
   'checkout.charges': CheckoutChargesLabels;
   'checkout.charge.duration': CheckoutChargeDurationLabels;
@@ -70,6 +91,7 @@ export type MetricLabels = {
   'checkout.cache.entries': CheckoutCacheEntriesLabels;
   'checkout.runtime.memory': CheckoutRuntimeMemoryLabels;
 };
+/** @public */
 export const metricTable = {
   'checkout.charges': {
     kind: 'counter',
@@ -95,38 +117,52 @@ export const metricTable = {
 } as const;
 
 // Metric name carriers (keys of MetricLabels).
+/** @public */
 export const CheckoutCharges = 'checkout.charges' as const;
+/** @public */
 export const CheckoutChargeDuration = 'checkout.charge.duration' as const;
+/** @public */
 export const CheckoutInvoices = 'checkout.invoices' as const;
+/** @public */
 export const CheckoutQueueDepth = 'checkout.queue.depth' as const;
+/** @public */
 export const CheckoutWorkerLag = 'checkout.worker.lag' as const;
+/** @public */
 export const CheckoutConfigGeneration = 'checkout.config.generation' as const;
+/** @public */
 export const CheckoutCacheEntries = 'checkout.cache.entries' as const;
+/** @public */
 export const CheckoutRuntimeMemory = 'checkout.runtime.memory' as const;
 
 // Log events: a name and the level it fixes. Fields are free-form.
+/** @public */
 export const ChargeSucceeded = {
   name: 'checkout.charge.succeeded',
   level: 'info',
 } as const satisfies DurianSignalEvent<'info'>;
+/** @public */
 export const ChargeDeclined = {
   name: 'checkout.charge.declined',
   level: 'warn',
 } as const satisfies DurianSignalEvent<'warn'>;
+/** @public */
 export const ChargeFailed = {
   name: 'checkout.charge.failed',
   level: 'error',
 } as const satisfies DurianSignalEvent<'error'>;
+/** @public */
 export const WorkerStarted = {
   name: 'checkout.worker.started',
   level: 'debug',
 } as const satisfies DurianSignalEvent<'debug'>;
+/** @public */
 export const eventNames = [
   'checkout.charge.succeeded',
   'checkout.charge.declined',
   'checkout.charge.failed',
   'checkout.worker.started',
 ] as const;
+/** @public */
 export const eventTable = {
   'checkout.charge.succeeded': 'info',
   'checkout.charge.declined': 'warn',
@@ -135,19 +171,24 @@ export const eventTable = {
 } as const;
 
 // Spans: attribute types are `type` aliases (an interface does not fit the Tracer constraint).
+/** @public */
 export type CheckoutChargeAttrs = { user_id?: UserId; provider?: Provider; shard?: Shard };
+/** @public */
 export type CheckoutProviderCallAttrs = {
   provider?: Provider;
   order_id?: OrderId;
   lane?: Lane;
   hour?: Hour;
 };
+/** @public */
 export type CheckoutQueueConsumeAttrs = { order_id?: OrderId };
+/** @public */
 export type SpanAttrs = {
   'checkout.charge': CheckoutChargeAttrs;
   'checkout.provider.call': CheckoutProviderCallAttrs;
   'checkout.queue.consume': CheckoutQueueConsumeAttrs;
 };
+/** @public */
 export const spanTable = {
   'checkout.charge': { kind: 'internal', keys: ['user_id', 'provider', 'shard'] },
   'checkout.provider.call': { kind: 'client', keys: ['provider', 'order_id', 'lane', 'hour'] },
@@ -155,10 +196,19 @@ export const spanTable = {
 } as const;
 
 // Span name carriers (keys of SpanAttrs).
+/** @public */
 export const CheckoutCharge = 'checkout.charge' as const;
+/** @public */
 export const CheckoutProviderCall = 'checkout.provider.call' as const;
+/** @public */
 export const CheckoutQueueConsume = 'checkout.queue.consume' as const;
 
-// Registers the tables with the port when this module loads, once per process. Any competing
-// registration, or a table that is not one of these, poisons the port until restart.
-durianSignalRegister({ metrics: metricTable, events: eventTable, spans: spanTable });
+// Merges this contract's tables at boot; duplicate names, changed contracts and late
+// registration poison the port until restart.
+durianSignalRegister({
+  contract: '@example/checkout:observability/contract.yaml',
+  hash: 'sha256:9129ac662e5875890cc17bf5204b61c434716b9df86e6a05575befa205924c2d',
+  metrics: metricTable,
+  events: eventTable,
+  spans: spanTable,
+});

@@ -2,7 +2,7 @@ package main
 
 import (
 	"example.com/app/signals"
-	obs "github.com/ProtoDurian/diene.go-interfaces/obs"
+	obs "github.com/AtomiCloud/diene.go-interfaces/obs"
 )
 
 var _ obs.Event[obs.InfoLevel] = signals.ChargeFailed
