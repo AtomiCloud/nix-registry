@@ -986,8 +986,9 @@ Both are read with the same loader every command uses for obs.yaml (`internal/ob
 folder is the one the platform comes from.
 With one `observability/` folder grouped by feature (`observability/<feature>/contract.yaml`), a feature folder with no obs.yaml of its
 own reads the nearest enclosing `observability/obs.yaml`, so `platform:` is written once in the top file and a flat file in
-`observability/<feature>/` takes it from there (the feature's own obs.yaml wins). With `<feature>/observability/` there is no
-fallback to a folder above: write `platform:` in that folder's obs.yaml, or a flat file there is refused (`flat-alert-identity`).
+`observability/<feature>/` takes it from there (the feature's own obs.yaml wins). With `<feature>/observability/` obs reads no obs.yaml above that folder, except the one at the Git root (a standalone
+observability repository), which every folder in it reads: write `platform:` in that folder's obs.yaml, or a flat file there is refused
+(`flat-alert-identity`, which names the obs.yaml path to write).
 In short: the platform comes from the same obs.yaml obs uses for that folder: its own, the one inherited per the layout rules above, or
 the obs.yaml at the Git root of a standalone observability repository (which every folder in that repository uses, layout (ii) included).
 (tests: `internal/files/flat_inherit_test.go`, `tests/flat.sh`).

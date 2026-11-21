@@ -32,6 +32,11 @@ type FlatIdentity struct {
 	Platform, Service string
 	// PlatformFrom and ServiceFrom say which file the value was read from ("" when unset).
 	PlatformFrom, ServiceFrom string
+	// ObsPath is the obs.yaml to write platform (and service) in: the one obs reads for the folder (its own, an
+	// inherited one or the Git-root one), else the folder's own.
+	ObsPath string
+	// ContractPath is the contract the service falls back to.
+	ContractPath string
 }
 
 // flatFields are the keys of the standard's table: the only keys a tier file may hold.
@@ -184,9 +189,10 @@ func isFlat(m map[string]any) bool {
 // `service:`, the contract's `service:` (<dir>/contract.yaml) is used. A missing, unreadable or
 // invalid file is no value; the loader's own error is reported by the command that loads it.
 func resolveIdentity(dir string) FlatIdentity {
-	var id FlatIdentity
+	id := FlatIdentity{ObsPath: filepath.Join(dir, obsyaml.FileName), ContractPath: filepath.Join(dir, "contract.yaml")}
 	f, _ := obsyaml.Load(dir)
 	if f != nil {
+		id.ObsPath = f.Path
 		if f.Platform != "" {
 			id.Platform, id.PlatformFrom = f.Platform, f.Path+" platform"
 		}
@@ -299,11 +305,11 @@ func (s *Set) readFlat(rel string, m map[string]any) {
 	id := s.ident
 	if id.Platform == "" || id.Service == "" {
 		missing := "platform is"
-		fix := "`platform:` in <observability>/obs.yaml"
+		fix := "`platform:` in " + id.ObsPath
 		if id.Platform != "" {
-			missing, fix = "service is", "the contract's `service:` (<observability>/contract.yaml) or `service:` in <observability>/obs.yaml"
+			missing, fix = "service is", "the contract's `service:` in "+id.ContractPath+" or `service:` in "+id.ObsPath
 		} else if id.Service == "" {
-			missing, fix = "platform and service are", "`platform:` in <observability>/obs.yaml and the contract's `service:` (or `service:` in obs.yaml)"
+			missing, fix = "platform and service are", "`platform:` in "+id.ObsPath+" and the contract's `service:` in "+id.ContractPath+" (or `service:` in obs.yaml)"
 		}
 		s.flatProblem(rel, "flat-alert-identity", "the rule uid is <platform>-<service>-<slug>-<severity>, but the %s not known: write %s", missing, fix)
 	}

@@ -9,7 +9,8 @@ import (
 
 // Where platform comes from for a flat tier file follows obs.yaml's own lookup (obsyaml.Load):
 // layout (i), observability/<feature>/, reads the nearest enclosing observability/obs.yaml;
-// layout (ii), <feature>/observability/, never falls back to a folder above it.
+// layout (ii), <feature>/observability/, never reads an obs.yaml above it, EXCEPT the obs.yaml at the Git root
+// (a standalone observability repository), which every folder in the repository reads.
 func TestFlatPlatformInheritedInLayoutOne(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, ".git/HEAD", "ref")
@@ -35,7 +36,10 @@ func TestFlatPlatformInheritedInLayoutOne(t *testing.T) {
 func TestFlatPlatformMissingInLayoutTwoNamesWhereToWriteIt(t *testing.T) {
 	root := t.TempDir()
 	write(t, root, ".git/HEAD", "ref")
-	// a decoy above: layout (ii) never reads it
+	// decoys ON the path above the feature: layout (ii) never reads them (an ancestor not named observability,
+	// and a root observability/ folder that is not an ancestor)
+	write(t, root, "App/obs.yaml", "platform: tracker\n")
+	write(t, root, "App/Friend/obs.yaml", "platform: tracker\n")
 	write(t, root, "observability/obs.yaml", "platform: tracker\n")
 	feature := filepath.Join(root, "App", "Friend", "observability")
 	write(t, feature, "contract.yaml", "service: zinc\n")
@@ -45,7 +49,7 @@ func TestFlatPlatformMissingInLayoutTwoNamesWhereToWriteIt(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(s.Rules) != 0 || len(s.Problems) != 1 || s.Problems[0].Rule != "flat-alert-identity" ||
-		!strings.Contains(s.Problems[0].Msg, "`platform:` in <observability>/obs.yaml") || s.Problems[0].File != "alerts/q/critical.yaml" {
+		!strings.Contains(s.Problems[0].Msg, "`platform:` in "+filepath.Join(feature, "obs.yaml")) || s.Problems[0].File != "alerts/q/critical.yaml" {
 		t.Fatalf("layout (ii) never falls back: %+v %+v", s.Rules, s.Problems)
 	}
 	// writing it where the message says makes the rule build

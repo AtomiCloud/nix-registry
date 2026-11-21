@@ -228,7 +228,7 @@ func TestFlatIdentitySources(t *testing.T) {
 		t.Fatalf("service from the contract: %+v %v", s.Rules, s.Problems)
 	}
 	for name, c := range map[string]struct{ obs, contract, token string }{
-		"no platform":          {"", "service: zinc\n", "`platform:` in <observability>/obs.yaml"},
+		"no platform":          {"", "service: zinc\n", "`platform:` in /"},
 		"no service":           {"platform: tracker\n", "", "the contract's `service:`"},
 		"no platform, service": {"", "", "platform and service"},
 	} {

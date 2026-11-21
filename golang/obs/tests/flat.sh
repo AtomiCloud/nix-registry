@@ -143,13 +143,15 @@ expect "layout (i): platform from the top observability/obs.yaml" 0 "obs query -
 rm -rf "${work:?}/lay2"
 mkdir -p "$work/lay2/.git" "$work/lay2/observability" "$work/lay2/Checkout/observability"
 echo ref >"$work/lay2/.git/HEAD"
-echo "platform: payments" >"$work/lay2/observability/obs.yaml" # a decoy above: never read
+# decoys ON the path above the feature: layout (ii) never reads them
+echo "platform: payments" >"$work/lay2/Checkout/obs.yaml"
+echo "platform: payments" >"$work/lay2/observability/obs.yaml"
 cp "$fx/ok-flat-alert/observability/contract.yaml" "$work/lay2/Checkout/observability/contract.yaml"
 cp -R "$fx/ok-flat-alert/observability/alerts" "$work/lay2/Checkout/observability/alerts"
 chmod -R u+w "$work/lay2"
 run query --static --dir "$work/lay2/Checkout/observability" --seed "$seed" --base "$base"
 expect "layout (ii): no fallback, flat-alert-identity names where to write platform" 1 "FAIL $crit" "[flat-alert-identity]" \
-  "in <observability>/obs.yaml" ": FAILED:"
+  "in $work/lay2/Checkout/observability/obs.yaml" ": FAILED:"
 echo "platform: payments" >"$work/lay2/Checkout/observability/obs.yaml"
 run query --static --dir "$work/lay2/Checkout/observability" --seed "$seed" --base "$base"
 expect "layout (ii): platform written in the feature's own obs.yaml" 0 "obs query --static: ok: 2 queries"
