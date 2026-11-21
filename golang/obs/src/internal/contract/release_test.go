@@ -39,3 +39,18 @@ func TestReleaseScopeUnreadablePayloadEntry(t *testing.T) {
 		}
 	}
 }
+
+func TestReleaseProjectMarkerKeepsSymlinkBehavior(t *testing.T) {
+	root := t.TempDir()
+	folder := filepath.Join(root, "App", "observability")
+	if err := os.MkdirAll(folder, 0755); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(root, "solution-target"), "solution")
+	if err := os.Symlink("solution-target", filepath.Join(root, "Shop.sln")); err != nil {
+		t.Fatal(err)
+	}
+	if got := ProjectRoot(folder); got != root {
+		t.Fatalf("valid solution symlink stopped being a marker: got %s want %s", got, root)
+	}
+}

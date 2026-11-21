@@ -146,7 +146,7 @@ func projectMarker(dir string) bool {
 	entries, _ := os.ReadDir(dir)
 	for _, entry := range entries {
 		if strings.HasSuffix(entry.Name(), ".sln") || strings.HasSuffix(entry.Name(), ".slnx") || strings.HasSuffix(entry.Name(), ".csproj") {
-			if st, err := entry.Info(); err == nil && st.Mode().IsRegular() {
+			if st, err := os.Stat(filepath.Join(dir, entry.Name())); err == nil && st.Mode().IsRegular() {
 				return true
 			}
 		}
