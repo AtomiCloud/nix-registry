@@ -863,7 +863,10 @@ In a Git repository `out:` may point anywhere under the Git root (for example
 `../shared/bun`); headers name the contract's repository-relative path and the orphan walk starts at the
 Git root. An `out:` that leaves the Git root, or is absolute, is refused before anything is written; the
 check is made on the written path and on its resolved path, so a symlink in `out:` cannot lead outside.
-With no `.git`, `out:` may not use `..` or a symlink that leads out of that output base. Headers use the
+With no `.git`, single-folder mode refuses `..` and a symlink that leads out of that output base.
+The `--all` modes instead bound both written and resolved output paths to their fixed repository/export
+scope; `out:` still uses the per-layout base above, and `..` is allowed while staying inside that scope.
+Single-folder headers use the
 topmost ancestor below the home directory containing a project marker (`.sln`, `.slnx`, `.csproj`,
 `flake.nix`, `go.work`, `go.mod`, `package.json`, `pubspec.yaml`),
 or the observability project's base when there is no marker. Feature paths stay distinct, and a complete
@@ -1004,10 +1007,12 @@ Their summary names the folder. At least one contract is still required.
 Failures retain their diagnostics and do not prevent the remaining folders from running. Exit 0 means
 every folder passed, 1 means a check failed, and 2 means an input or enumeration error. No contracts
 found is an error, never a successful zero-check run. The CI static-check recipe is `obs check --all`.
-Run `--all` from the repository root, including inside a Docker context or Git-less export. Outside
-Git the current directory is the export root; it is resolved once and passed to every child scan,
-header and identity calculation, without re-inferring a root from each module. In Git, `--dir` chooses
-the repository. Discovery and each folder's loads share the fixture/dependency, Git-ignore,
+Run `--all` from the repository root, including inside a Docker context or Git-less export. The start
+folder is the current directory unless `--dir` is explicitly supplied; the default `observability/`
+path cannot select a nested repository or submodule, which remains a boundary. Outside
+Git the start folder is the export root; it is resolved once and passed to every child scan,
+header, identity calculation and enclosing `observability/obs.yaml` lookup, without re-inferring a root
+from each module. Explicit `--dir` chooses the repository/export root. Discovery and each folder's loads share the fixture/dependency, Git-ignore,
 nested-repository and chart-copy skips: ignored contract files, alert folders and dashboards do not
 become candidates or get read through a shared folder. Existing options are forwarded to each run.
 Cross-contract metric-name, query and

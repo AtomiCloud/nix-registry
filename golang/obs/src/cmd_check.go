@@ -59,7 +59,7 @@ func runCheckScope(args []string, stdout, stderr io.Writer, scope *contract.Scop
 		fmt.Fprintf(stderr, "obs check: --event-rule %q: want auto, on or off\n", *eventRule)
 		return 2
 	}
-	of, ok := loadObsYaml(*dir, "obs check", stderr)
+	of, ok := loadObsYaml(*dir, "obs check", stderr, scope)
 	if !ok {
 		return 2
 	}

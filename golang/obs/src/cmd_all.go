@@ -26,14 +26,19 @@ func runAll(cmd string, fs *flag.FlagSet, dir string, stdout, stderr io.Writer, 
 			return 2
 		}
 	}
-	root := gen.GitRoot(dir)
-	if root == "" {
-		var err error
-		root, err = os.Getwd()
-		if err != nil {
-			fmt.Fprintf(stderr, "%s --all: %v\n", cmd, err)
-			return 2
+	start, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(stderr, "%s --all: %v\n", cmd, err)
+		return 2
+	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "dir" {
+			start = dir
 		}
+	})
+	root := gen.GitRoot(start)
+	if root == "" {
+		root = start
 	}
 	scope, err := contract.NewScope(root)
 	if err != nil {

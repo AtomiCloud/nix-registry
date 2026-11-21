@@ -168,7 +168,7 @@ func TestAllCommandsVisitEveryContract(t *testing.T) {
 			}
 		}
 		for _, args := range [][]string{{"gen", "--all"}, {"gen", "--check", "--all"}, {"check", "--all"}, {"test", "--all"}} {
-			args = append(args, "--dir", filepath.Join(root, "observability"))
+			args = append(args, "--dir", root)
 			rc, output := obs(args...)
 			if rc != 0 || !strings.Contains(output, "observability/orders/contract.yaml") || !strings.Contains(output, "observability/billing/contract.yaml") {
 				t.Errorf("git=%v %v must visit both contracts: rc=%d %s", git, args, rc, output)

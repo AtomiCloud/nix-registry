@@ -76,6 +76,7 @@ func (s *Scope) Contracts() ([]string, error) { return discoverAt(s.Root, s.Root
 // as contract discovery. It never probes ignored child paths with os.Stat.
 func (s *Scope) Folders() ([]string, error) {
 	seen := map[string]bool{}
+	contracts, payloads := map[string]bool{}, map[string]bool{}
 	rootObs := rootIsObservability(s.Root, s)
 	err := filepath.WalkDir(s.Root, func(file string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -87,18 +88,22 @@ func (s *Scope) Folders() ([]string, error) {
 			}
 			if entry.Name() == "alerts" || entry.Name() == "dashboards" {
 				folder := filepath.Dir(file)
-				if belowObservability(s.Root, folder, rootObs, true) {
-					seen[folder] = true
-				}
+				payloads[folder] = true
 			}
 		} else if entry.Name() == "contract.yaml" && entry.Type().IsRegular() && !s.Skip.w.ignored[file] {
 			folder := filepath.Dir(file)
 			if belowObservability(s.Root, folder, rootObs, true) {
 				seen[folder] = true
+				contracts[folder] = true
 			}
 		}
 		return nil
 	})
+	for folder := range payloads {
+		if belowObservability(s.Root, folder, rootObs, contracts[folder]) {
+			seen[folder] = true
+		}
+	}
 	var folders []string
 	for folder := range seen {
 		folders = append(folders, folder)
