@@ -63,6 +63,36 @@ else
   echo "FAIL wrong assembly red without the constructor diagnostic: $out"
   fail=1
 fi
+# Directory.Build.props is imported before the SDK adds its default Compile
+# items. The same Remove works in Directory.Build.targets, after those items.
+cat >"$work/wrong-assembly/Directory.Build.props" <<'XML'
+<Project><ItemGroup><Compile Remove="Signals.g.cs" /></ItemGroup></Project>
+XML
+if items=$("$DOTNET" msbuild "$work/wrong-assembly/App.csproj" -getItem:Compile -nologo) &&
+  grep -Eq '"Identity"[[:space:]]*:[[:space:]]*"Signals[.]g[.]cs"' <<<"$items"; then
+  if out=$(build "$work/wrong-assembly/App.csproj"); then
+    echo "FAIL props Remove unexpectedly excluded generated carriers from App"
+    fail=1
+  elif grep -q 'error CS1729' <<<"$out"; then
+    echo "PASS props Remove precedes SDK glob: Signals.g.cs remains in Compile and App is refused (CS1729)"
+  else
+    echo "FAIL props assembly control lacks constructor diagnostic: $out"
+    fail=1
+  fi
+else
+  echo "FAIL props Remove did not retain the SDK Compile item: ${items:-}"
+  fail=1
+fi
+mv "$work/wrong-assembly/Directory.Build.props" "$work/wrong-assembly/Directory.Build.targets"
+if items=$("$DOTNET" msbuild "$work/wrong-assembly/App.csproj" -getItem:Compile -nologo) &&
+  grep -q '"Compile"' <<<"$items" &&
+  ! grep -Eq '"Identity"[[:space:]]*:[[:space:]]*"Signals[.]g[.]cs"' <<<"$items" &&
+  out=$(build "$work/wrong-assembly/App.csproj"); then
+  echo "PASS targets Remove follows SDK glob: Signals.g.cs is excluded from Compile and App builds"
+else
+  echo "FAIL targets Remove did not exclude generated file: ${items:-} ${out:-}"
+  fail=1
+fi
 d="$work/good"
 cat >"$d/App/App.csproj" <<'XML'
 <Project Sdk="Microsoft.NET.Sdk">

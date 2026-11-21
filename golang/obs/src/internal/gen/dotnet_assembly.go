@@ -71,20 +71,26 @@ func checkDotnetConsumer(file, generated, scope string, target contract.Target) 
 	if err := xml.Unmarshal(body, &project); err != nil {
 		return fmt.Errorf("generate dotnet project %s: %w", contract.RelPath(file), err)
 	}
-	props, err := dotnetBuildProps(file, scope)
+	props, err := dotnetBuildImport(file, scope, "Directory.Build.props")
+	if err != nil {
+		return err
+	}
+	targets, err := dotnetBuildImport(file, scope, "Directory.Build.targets")
 	if err != nil {
 		return err
 	}
 	project.Properties = append(props.Properties, project.Properties...)
-	project.Items = append(props.Items, project.Items...)
+	beforeTargets := len(project.Properties)
+	project.Properties = append(project.Properties, targets.Properties...)
 	rel, err := filepath.Rel(filepath.Dir(file), generated)
 	if err != nil {
 		return err
 	}
 	name := strings.TrimSuffix(filepath.Base(file), ".csproj")
-	compiles := (project.SDK != "" || len(project.SDKs) > 0) && within(filepath.Dir(file), generated)
+	defaultCompiles := (project.SDK != "" || len(project.SDKs) > 0) && within(filepath.Dir(file), generated)
+	compiles := false
 	uncertainName := false
-	for _, props := range project.Properties {
+	for index, props := range project.Properties {
 		if conditionFalse(props.Condition) {
 			continue
 		}
@@ -94,29 +100,38 @@ func checkDotnetConsumer(file, generated, scope string, target contract.Target) 
 			}
 			continue
 		}
-		if strings.EqualFold(strings.TrimSpace(props.DefaultItems), "false") || strings.EqualFold(strings.TrimSpace(props.DefaultCompile), "false") {
-			compiles = false
+		if index < beforeTargets && (strings.EqualFold(strings.TrimSpace(props.DefaultItems), "false") || strings.EqualFold(strings.TrimSpace(props.DefaultCompile), "false")) {
+			defaultCompiles = false
 		}
 		if value := strings.TrimSpace(props.AssemblyName); value != "" {
 			name = value
 		}
 	}
-	for _, group := range project.Items {
-		if conditionFalse(group.Condition) {
-			continue
-		}
-		for _, item := range group.Compile {
-			if conditionFalse(item.Condition) {
+	applyItems := func(part dotnetProject) {
+		for _, group := range part.Items {
+			if conditionFalse(group.Condition) {
 				continue
 			}
-			if msbuildMatch(item.Include, rel) && !msbuildMatch(item.Exclude, rel) {
-				compiles = true
-			}
-			if conditionTrue(group.Condition) && conditionTrue(item.Condition) && msbuildMatch(item.Remove, rel) {
-				compiles = false
+			for _, item := range group.Compile {
+				if conditionFalse(item.Condition) {
+					continue
+				}
+				if msbuildMatch(item.Include, rel) && !msbuildMatch(item.Exclude, rel) {
+					compiles = true
+				}
+				if conditionTrue(group.Condition) && conditionTrue(item.Condition) && msbuildMatch(item.Remove, rel) {
+					compiles = false
+				}
 			}
 		}
 	}
+	// Props item operations precede the SDK's default Compile glob. A Remove
+	// there cannot remove an item that the SDK has not added yet. Project and
+	// Directory.Build.targets operations run after those defaults.
+	applyItems(props)
+	compiles = compiles || defaultCompiles
+	applyItems(project)
+	applyItems(targets)
 	if !compiles {
 		return nil
 	}
@@ -129,21 +144,21 @@ func checkDotnetConsumer(file, generated, scope string, target contract.Target) 
 	return fmt.Errorf("generate dotnet out: %q: project %s may compile Signals.g.cs with AssemblyName %q; internal carrier constructors require assembly name Signals; compile generated files in a Signals project (exclude them from the app and reference that project)", target.Out, contract.RelPath(file), name)
 }
 
-// MSBuild automatically imports the nearest Directory.Build.props. Literal
+// MSBuild automatically imports the nearest Directory.Build.props/targets. Literal
 // compile items there are relative to the importing project, as in MSBuild.
-func dotnetBuildProps(project, scope string) (dotnetProject, error) {
+func dotnetBuildImport(project, scope, name string) (dotnetProject, error) {
 	var props dotnetProject
 	for dir := filepath.Dir(project); within(scope, dir); dir = filepath.Dir(dir) {
-		file := filepath.Join(dir, "Directory.Build.props")
+		file := filepath.Join(dir, name)
 		body, err := os.ReadFile(file)
 		if err == nil {
 			if err := xml.Unmarshal(body, &props); err != nil {
-				return props, fmt.Errorf("generate dotnet props %s: %w", contract.RelPath(file), err)
+				return props, fmt.Errorf("generate dotnet import %s: %w", contract.RelPath(file), err)
 			}
 			return props, nil
 		}
 		if !os.IsNotExist(err) {
-			return props, fmt.Errorf("generate dotnet props %s: %w", contract.RelPath(file), err)
+			return props, fmt.Errorf("generate dotnet import %s: %w", contract.RelPath(file), err)
 		}
 		if dir == scope || filepath.Dir(dir) == dir {
 			break

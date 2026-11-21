@@ -912,8 +912,11 @@ The app's project removes `Modules/*/Signals/*.g.cs` from its own `Compile` item
 Signals project. `obs gen`/`obs check` report `[generate-assembly]` when a project in repository/project
 scope may compile the file with another assembly name: SDK defaults under that project and literal
 `Compile Include` entries in other projects are checked, independently of the package-identity manifest.
-A matching unconditional `Compile Remove` is honored, including in the nearest `Directory.Build.props`
-between the project and the scope root. The static check reads SDK defaults and literal
+A matching unconditional `Compile Remove` is honored in the project or in the nearest
+`Directory.Build.targets` between the project and the scope root. A `Remove` in `Directory.Build.props`
+runs before the SDK adds its default `Compile` items and does not exclude those files; put the removal
+in the `.csproj` or `Directory.Build.targets`. Real MSBuild item-list and compiler controls test both orders.
+The static check reads SDK defaults and literal
 `Compile Include`/`Remove`, not the full MSBuild import graph. A computed
 or conditional assembly name that cannot be verified requires a literal `AssemblyName` of `Signals`.
 Package identity still comes from the nearest manifest at `out:`; this may be the app project even
@@ -2668,7 +2671,7 @@ source) where its section says so.
 **Commands and builds**
 
 - **Knip itself on generated Bun output.** The generator test scans every export for knip's `@public` tag; it does not run the knip CLI against an application.
-- **Full MSBuild evaluation for the Signals assembly check.** Compiler fixtures prove the `Signals` assembly succeeds and an app assembly fails. The static project check covers SDK defaults, literal compile items and the nearest Directory.Build.props, not arbitrary additional imports, conditions or computed properties.
+- **Full MSBuild evaluation for the Signals assembly check.** Compiler fixtures prove the `Signals` assembly succeeds and an app assembly fails, including props/targets removal order. The static project check covers SDK defaults, literal compile items and the nearest Directory.Build.props/targets, not arbitrary additional imports, conditions or computed properties.
 
 - **`obs live` on dev, stage and prod.** No access to any of them; only the local sandbox was read for real (and recorded). The edge cases (two landscapes, a label outside the type, a failing query, an alert that fired before the window, redirects) are tested on hand-written payloads in the shapes the sandbox recorded. Not run against a real remote store: auth headers from the environment on a real gateway, and a very large metrics store (the points/min queries are one `count_over_time` per stored metric name and the series read is one `/api/v1/series` call; a store with more series than its `-search.maxSeries` answers an error, which obs reports as exit 2).
 - **`obs live incidents`: what the recording does not hold.** The recorded Grafana state history holds a real Normal -> Pending and Normal -> Alerting change; its tag-only payload now proves a firing observation, with unknown spans. Optional lossless label maps, Alerting -> Normal, Recovering, overlapping instances, absent transitions, title/ID collisions, future windows and capped responses are tested on synthetic payloads. There is no current-state GET in the command or the incident recording. The `ALERTS` grouped list and raw range-selector path (a vmalert-style ruler) are tested on fake stores only, including bounded per-window reads, responses exceeding 64 MiB, merged chunk evidence and a carried-forward evaluation point that must not count as firing inside a later window.

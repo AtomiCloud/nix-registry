@@ -83,16 +83,27 @@ func TestAdditionalSourceExportMarkers(t *testing.T) {
 	}
 }
 
-func TestDotnetDirectoryBuildPropsRemove(t *testing.T) {
+func TestDotnetBuildImportOrder(t *testing.T) {
 	root := repo(t, map[string]string{
-		"Directory.Build.props":                          `<Project><ItemGroup><Compile Remove="Modules/*/Signals/*.g.cs" /></ItemGroup></Project>`,
 		"App/App.csproj":                                 `<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><AssemblyName>App</AssemblyName></PropertyGroup></Project>`,
 		"Signals/Signals.csproj":                         `<Project Sdk="Microsoft.NET.Sdk"><ItemGroup><Compile Include="../App/Modules/*/Signals/*.g.cs" /></ItemGroup></Project>`,
 		"App/Modules/Orders/observability/contract.yaml": "service: shop\ngenerate: [{lang: dotnet, out: Signals}]\n",
 	})
-	for _, cmd := range []string{"gen", "check"} {
-		if rc, output := obs(cmd, "--dir", filepath.Join(root, "App/Modules/Orders/observability")); rc != 0 {
-			t.Errorf("%s must honor imported literal Compile Remove: rc=%d %s", cmd, rc, output)
+	for _, extension := range []string{"props", "targets"} {
+		file := "Directory.Build." + extension
+		gen2Write(t, root, file, `<Project><ItemGroup><Compile Remove="Modules/*/Signals/*.g.cs" /></ItemGroup></Project>`)
+		for _, cmd := range []string{"gen", "check"} {
+			rc, output := obs(cmd, "--dir", filepath.Join(root, "App/Modules/Orders/observability"))
+			if extension == "props" {
+				if rc == 0 || !strings.Contains(output, "[generate-assembly]") || !strings.Contains(output, "App/App.csproj") {
+					t.Errorf("%s: props Remove precedes SDK Compile glob: rc=%d %s", cmd, rc, output)
+				}
+			} else if rc != 0 {
+				t.Errorf("%s: targets Remove must exclude SDK item: rc=%d %s", cmd, rc, output)
+			}
+		}
+		if err := os.Remove(filepath.Join(root, file)); err != nil {
+			t.Fatal(err)
 		}
 	}
 }
