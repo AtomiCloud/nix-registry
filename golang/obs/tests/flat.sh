@@ -181,9 +181,49 @@ for v in git nogit; do
     mkdir "$work/all-$v/.git"
     echo ref >"$work/all-$v/.git/HEAD"
   fi
-  (cd "$work/all-$v" && run check --all)
+  cd "$work/all-$v"
+  run check --all
+  cd "$here"
   expect "check --all ($v): flat identity from the scope's obs.yaml" 0 "observability/checkout/contract.yaml: ok"
+  # obs test --all loads the project (alerts/project.go) and re-reads the folder (alerts/check.go) with the same scope.
+  cd "$work/all-$v"
+  run test --all --seed "$seed" --base "$base"
+  cd "$here"
+  expect "test --all ($v): flat identity from the scope's obs.yaml" 0 "obs test --all: observability/checkout/contract.yaml: ok"
 done
+
+# two features of one service ship the same flat uid (platform-service-slug-severity): the repository scan of a
+# git-less export reads their platform through the scope root too (internal/ruleids), so the clash is found.
+rm -rf "${work:?}/all-clash"
+mkdir -p "$work/all-clash/observability/checkout" "$work/all-clash/observability/billing/alerts/charge-errors"
+echo "platform: payments" >"$work/all-clash/observability/obs.yaml"
+cp "$fx/ok-flat-alert/observability/contract.yaml" "$work/all-clash/observability/checkout/contract.yaml"
+cp -R "$fx/ok-flat-alert/observability/alerts" "$work/all-clash/observability/checkout/alerts"
+cat >"$work/all-clash/observability/billing/contract.yaml" <<'YAML'
+service: checkout
+
+types:
+  outcome: { kind: enum, values: [success, error] }
+
+metrics:
+  checkout.refunds:
+    kind: counter
+    budget: 10
+    labels: { outcome: outcome }
+YAML
+cat >"$work/all-clash/observability/billing/alerts/charge-errors/critical.yaml" <<'YAML'
+title: Refund errors high
+datasource: metrics
+expr: 'sum(rate(checkout_refunds_total{outcome="error"}[5m])) > 1000'
+for: 5m
+summary: 'Refunds failing'
+description: 'Check the payment provider.'
+YAML
+chmod -R u+w "$work/all-clash"
+cd "$work/all-clash"
+run check --all
+cd "$here"
+expect "check --all (no .git): two features sharing one flat uid clash" 1 '[rule-id-clash] uid "payments-checkout-charge-errors-critical"'
 
 # for: 1d is a duration for every command: the flat check and obs alerts judge it the same way
 fresh for1d
