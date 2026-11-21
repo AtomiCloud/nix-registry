@@ -126,9 +126,12 @@ func discoverAt(abs, root string, includeOwn bool, scopes ...*Scope) ([]string, 
 			return nil
 		}
 		if d.Name() == "contract.yaml" && belowObservability(root, filepath.Dir(p), rootObs, true) {
-			regular, err := contractEntry(root, p, d)
-			if err != nil {
-				return err
+			regular := d.Type().IsRegular()
+			if scope != nil {
+				regular, err = contractEntry(root, p, d)
+				if err != nil {
+					return err
+				}
 			}
 			if regular && (includeOwn || (p != own && !sameInfo(ownInfo, p))) {
 				out = append(out, p)

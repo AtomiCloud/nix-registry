@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/AtomiCloud/obs/internal/testfix"
 )
 
 func writeRepoFile(t *testing.T, p, body string) {
@@ -35,8 +37,8 @@ func TestSelectedFoldersIgnoredCopyIsNotARepoClash(t *testing.T) {
 		t.Skip("git is not installed")
 	}
 	root := t.TempDir()
-	cmd := exec.Command("git", "-C", root, "init", "-q")
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
+	cmd := testfix.Git(root, "init", "-q")
+	cmd.Env = append(cmd.Env, "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_SYSTEM=/dev/null")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}

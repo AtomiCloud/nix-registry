@@ -4,6 +4,7 @@
 #   features.sh <obs>
 # Every claim: the baseline is green and the planted failure is red; the red output names the file, the rule and the token.
 set -euo pipefail
+unset GIT_DIR GIT_INDEX_FILE GIT_WORK_TREE
 OBS=$(realpath "$(command -v "$1")")
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
 work=$(mktemp -d)

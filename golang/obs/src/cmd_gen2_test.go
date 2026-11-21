@@ -189,8 +189,7 @@ func TestAllCommandsVisitEveryContract(t *testing.T) {
 }
 
 func TestAllCommandsUseDiscoverySkips(t *testing.T) {
-	git, err := exec.LookPath("git")
-	if err != nil {
+	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")
 	}
 	root := repo(t, map[string]string{
@@ -198,9 +197,7 @@ func TestAllCommandsUseDiscoverySkips(t *testing.T) {
 		"observability/one/contract.yaml": "service: shop\n",
 		"charts/app/Chart.yaml":           "apiVersion: v2\nname: app\nversion: 1.0.0\n",
 	})
-	if output, err := exec.Command(git, "init", "-q", root).CombinedOutput(); err != nil {
-		t.Fatalf("git init: %v %s", err, output)
-	}
+	releaseGit(t, root, "init", "-q")
 	for _, folder := range []string{"vendor", "node_modules", "fixtures", "testdata", "build", "nested", "charts/app/files", "charts/app/templates"} {
 		gen2Write(t, root, folder+"/observability/contract.yaml", "service: [broken]\n")
 	}

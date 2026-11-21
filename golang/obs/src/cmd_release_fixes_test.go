@@ -3,16 +3,17 @@ package main
 import (
 	"bytes"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/AtomiCloud/obs/internal/testfix"
 )
 
 func releaseGit(t *testing.T, root string, args ...string) {
 	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", root}, args...)...)
+	cmd := testfix.Git(root, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v %s", args, err, out)
 	}
