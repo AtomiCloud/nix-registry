@@ -82,14 +82,14 @@ func (s *Seg) hitLine(from int, m string, off int) int {
 	k := countWord(strings.ToLower(s.Text[:off]), m)
 	seen := 0
 	for l := from; l <= s.to && l <= len(s.src); l++ {
-		n := countWord(codeSpanRe.ReplaceAllString(strings.ToLower(s.src[l-1]), " "), m)
+		n := countWord(visible(s.src[l-1]), m)
 		if k < seen+n {
 			return l
 		}
 		seen += n
 	}
 	for l := from; l <= s.to && l <= len(s.src); l++ {
-		if containsWord(codeSpanRe.ReplaceAllString(strings.ToLower(s.src[l-1]), " "), m) {
+		if containsWord(visible(s.src[l-1]), m) {
 			return l
 		}
 	}
@@ -152,6 +152,16 @@ func (sb *segBuilder) lastLine() int {
 }
 
 var codeSpanRe = regexp.MustCompile("`[^`\n]*`")
+
+// linkTargetRe finds what a reader never reads of a link: the (target) of [text](target) and an
+// autolink <https://...>.
+var linkTargetRe = regexp.MustCompile(`\]\([^)]*\)|<[a-zA-Z][a-zA-Z0-9+.-]*:[^>\s]*>`)
+
+// visible is a source line as lower case with the code spans and link targets left out, the text the
+// scanner matches.
+func visible(line string) string {
+	return linkTargetRe.ReplaceAllString(codeSpanRe.ReplaceAllString(strings.ToLower(line), " "), "] ")
+}
 
 // countWord is how many times line holds m as a whole word, not counting overlaps.
 func countWord(line, m string) int {

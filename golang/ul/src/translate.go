@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path"
 	"strings"
+	"unicode"
 )
 
 // "UL words translated" (design §11.7). For each translation under docs/i18n/, ul looks at the
@@ -80,6 +81,9 @@ func hasTerm(text, term string) bool {
 	if term == "" {
 		return false
 	}
+	if unspaced(term) {
+		return strings.Contains(text, term) // no spaces between words in this script: no word edge to find
+	}
 	for i := 0; i < len(text); {
 		j := strings.Index(text[i:], term)
 		if j < 0 {
@@ -97,6 +101,17 @@ func hasTerm(text, term string) bool {
 			}
 		}
 		i = a + 1
+	}
+	return false
+}
+
+// unspaced reports whether term is written in a script that puts no spaces between words (Chinese,
+// Japanese, Thai and the like), where the letters on either side of a term are other words.
+func unspaced(term string) bool {
+	for _, r := range term {
+		if unicode.In(r, unicode.Han, unicode.Hiragana, unicode.Katakana, unicode.Thai, unicode.Lao, unicode.Khmer, unicode.Myanmar, unicode.Tibetan) {
+			return true
+		}
 	}
 	return false
 }

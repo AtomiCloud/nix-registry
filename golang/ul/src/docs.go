@@ -358,6 +358,10 @@ func (l *loaded) conceptProblems(f *Final, pages []*page) []Problem {
 				probs = append(probs, Problem{Code: "UL408", File: p.rel, Line: max(p.conceptLine, 1), Message: fmt.Sprintf("concept %q must be a word of its context, but %s has no namespace", p.concept, ulFile)})
 			case f.nsNames[ns.Namespace][fold(p.concept)] == nil:
 				probs = append(probs, Problem{Code: "UL408", File: p.rel, Line: max(p.conceptLine, 1), Message: fmt.Sprintf("concept %q is not a word or alias of %s", p.concept, ns.Namespace)})
+			default:
+				// the word UL408 resolved counts for UL409 whether or not the page lists the namespace
+				fe := f.nsNames[ns.Namespace][fold(p.concept)]
+				byEntry[fe.ID] = append(byEntry[fe.ID], holder{p, fold(p.concept)})
 			}
 		}
 		// Every listed namespace that has the name counts, so the order of the list changes nothing.

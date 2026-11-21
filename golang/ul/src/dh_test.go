@@ -295,8 +295,24 @@ func TestDhBlockWithoutLine(t *testing.T) {
 	if err := os.WriteFile(rec, out, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, code := checkLines(t, newEnv(t, dir), dir); code != 1 {
-		t.Fatalf("exit %d, want 1 (the avoided words are still found)", code)
+	probs, _, code := checkLines(t, newEnv(t, dir), dir)
+	if code != 1 {
+		t.Fatalf("exit %d, want 1", code)
+	}
+	// The prose is still read: the avoided words are found and no block is refused (UL410).
+	var avoided int
+	for _, p := range probs {
+		if strings.HasSuffix(p, ": UL410") {
+			t.Errorf("a block with no line was refused: %s", p)
+		}
+		if strings.HasSuffix(p, ": UL403") {
+			avoided++
+		}
+	}
+	// With no line to go by the hits land on whatever line the reader can name, so only that they are
+	// found is asserted, not where.
+	if avoided == 0 {
+		t.Errorf("no avoided word found in blocks with no line: %v", probs)
 	}
 }
 

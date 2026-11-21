@@ -656,3 +656,36 @@ func TestEnglishNameIsAWord(t *testing.T) {
 		}
 	}
 }
+
+// UL409 counts the word UL408 resolves for a context page, whether or not the page lists the
+// namespace: two such pages for one word are two pages for it.
+func TestConceptDuplicateWithoutListedNamespace(t *testing.T) {
+	dir := cleanWith(t, map[string]string{
+		"docs/domain/kitchen/model/o1.md": "---\ntitle: O1\nconcept: Oven\nnamespaces: []\n---\n\nA box.\n",
+		"docs/domain/kitchen/model/o2.md": "---\ntitle: O2\nconcept: Oven\nnamespaces: []\n---\n\nAnother box.\n",
+	})
+	code, out, _ := docsCheck(t, dir)
+	if code != 1 || strings.Count(out, "UL409") != 1 || strings.Contains(out, "UL408") {
+		t.Fatalf("exit %d\n%s", code, out)
+	}
+}
+
+// A fixed term in a script written without spaces (Chinese here) is found between other
+// characters, while a Latin term is still a word of its own.
+func TestFixedTermUnspacedScript(t *testing.T) {
+	for _, c := range []struct {
+		body string
+		ok   bool
+	}{
+		{"使用烤箱加热。", true}, {"烤箱", true}, {"使用加热。", false},
+	} {
+		dir := cleanWith(t, map[string]string{
+			"docs/o.md":         "---\ntitle: O\n" + kitchenNSLine + "\n---\n\nThe Oven.\n",
+			"docs/i18n/zh/o.md": "---\ntitle: O\ntranslation:\n  lang: zh-Hans\n  source: ../../o.md\n---\n\n" + c.body + "\n",
+		})
+		code, out, errs := docsCheck(t, dir)
+		if c.ok && code != 0 || !c.ok && (code != 1 || !strings.Contains(out, "docs/i18n/zh/o.md:3: UL502")) {
+			t.Errorf("%q: exit %d\n%s%s", c.body, code, out, errs)
+		}
+	}
+}

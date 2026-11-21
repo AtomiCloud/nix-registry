@@ -47,6 +47,10 @@ func TestMermaidLabels(t *testing.T) {
 		{"flow", "%%{init: {\"x\": 1}}%%\ngraph LR\n  person[\"user or author\"]\n  a[Plain label] -->|edge text| b((Round))\n  b --> c{Decide?}\n  classDef x fill:#fff\n  style a fill:#f00\n  subgraph s1 [Group title]\n    d\n  end\n  e -- long edge --> f\n", "user or author | Plain label | Round | edge text | Decide? | Group title | long edge"},
 		{"seq", "sequenceDiagram\n  participant A as Alice the cook\n  A->>B: Hello there\n  Note over A,B: A note text\n", "Alice the cook | Hello there | A note text"},
 		{"state", "stateDiagram-v2\n  [*] --> Still\n  Still --> Moving : go now\n  Moving : the moving state\n", "go now | the moving state"},
+		{"comment line", "sequenceDiagram\n  %% note; A->>B: griddle\n  A->>B: Hi\n", "Hi"},
+		{"front matter", "---\ntitle: Kitchen map\nconfig:\n  theme: dark\n---\nflowchart LR\n  A[Pan] --> B[Oven]\n", "Kitchen map | Pan | Oven"},
+		{"entity semicolon", "sequenceDiagram\n  A->>B: Ready#59; use the pan\n", "Ready; use the pan"},
+		{"two statements", "flowchart LR\n  A[One]; B[Two]\n", "One | Two"},
 		{"pie", "pie title Pets\n  \"Dogs\" : 386\n", "Pets | Dogs"},
 		{"pie showData", "pie showData title Pets and cats\n  \"Dogs\" : 386\n", "Pets and cats | Dogs"},
 		{"pie quoted title", "pie title \"Pets\"\n  \"Dogs\" : 386\n", "Pets | Dogs"},
@@ -77,6 +81,8 @@ func TestEscapedAmpersandIsNotAnEntity(t *testing.T) {
 		`\\&#105;`:        `\i`,
 		`&nosuchentity;`:  `&nosuchentity;`,
 		`AT&T and a &lt;`: `AT&T and a <`,
+		`&notgriddle;`:    `&notgriddle;`,
+		`&not; &notin;`:   `¬ ∉`,
 	} {
 		if got := unescapeMd(in); got != want {
 			t.Errorf("unescapeMd(%q) = %q, want %q", in, got, want)

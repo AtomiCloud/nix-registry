@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
@@ -131,7 +132,13 @@ func unescapeMd(s string) string {
 		if m[0] == '\\' {
 			return m[1:]
 		}
-		return html.UnescapeString(m)
+		d := html.UnescapeString(m)
+		// A reference decodes to one or two characters. A longer result is a prefix decoded out of an
+		// unknown name (&notgriddle; is not &not plus griddle;), which CommonMark leaves as written.
+		if utf8.RuneCountInString(d) > 2 {
+			return m
+		}
+		return d
 	})
 }
 

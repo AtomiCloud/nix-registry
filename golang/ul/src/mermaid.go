@@ -1,8 +1,10 @@
 package main
 
 import (
+	"html"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // mermaidSegs returns the labels a reader sees in a mermaid diagram: node and edge labels,
@@ -14,11 +16,33 @@ func mermaidSegs(src string, first int) []Seg {
 	kind := ""
 	var out []Seg
 	add := func(label string, line int) {
-		if label = strings.TrimSpace(label); label != "" {
+		if label = strings.TrimSpace(decodeMermaidEntities(label)); label != "" {
 			out = append(out, plainSeg(label, line))
 		}
 	}
-	for i, whole := range lines {
+	// A YAML preamble (--- ... ---) comes before the diagram header: only its title is read.
+	start := 0
+	for start < len(lines) && strings.TrimSpace(lines[start]) == "" {
+		start++
+	}
+	if start < len(lines) && strings.TrimSpace(lines[start]) == "---" {
+		for e := start + 1; e < len(lines); e++ {
+			if strings.TrimSpace(lines[e]) == "---" {
+				for k := start + 1; k < e; k++ {
+					if m := fmTitleRe.FindStringSubmatch(lines[k]); m != nil {
+						add(strings.Trim(strings.TrimSpace(m[1]), "\"'"), first+k)
+					}
+				}
+				start = e + 1
+				break
+			}
+		}
+	}
+	for i := start; i < len(lines); i++ {
+		whole := lines[i]
+		if strings.HasPrefix(strings.TrimSpace(whole), "%%") {
+			continue // a comment line holds no statement, whatever follows a semicolon
+		}
 		for _, raw := range splitStatements(whole) {
 			line := first + i
 			t := strings.TrimSpace(raw)
@@ -130,6 +154,9 @@ func diagramKind(first string) string {
 
 var (
 	quotedRe      = regexp.MustCompile(`"([^"]*)"`)
+	fmTitleRe     = regexp.MustCompile(`^\s*title\s*:\s*(.+?)\s*$`)
+	entityRe      = regexp.MustCompile(`#([A-Za-z][A-Za-z0-9]*|[0-9]{1,7});`)
+	entityEndRe   = regexp.MustCompile(`#[A-Za-z0-9]+$`)
 	pieTitleRe    = regexp.MustCompile(`(?i)^pie\b.*?\btitle\s+(.+)$`)
 	nodeMetaRe    = regexp.MustCompile(`@\{[^}]*\}`)
 	titleRe       = regexp.MustCompile(`(?i)^\s*(title|section|accTitle|accDescr)\s*:?\s+(.+)$`)
@@ -178,8 +205,23 @@ func metaLabels(block string) []string {
 	return out
 }
 
+// decodeMermaidEntities turns mermaid's entity codes (#59; #quot; #9829;) into the characters a
+// reader sees.
+func decodeMermaidEntities(s string) string {
+	return entityRe.ReplaceAllStringFunc(s, func(m string) string {
+		name := m[1 : len(m)-1]
+		if name[0] >= '0' && name[0] <= '9' {
+			return html.UnescapeString("&#" + name + ";")
+		}
+		if d := html.UnescapeString("&" + name + ";"); d != "&"+name+";" && utf8.RuneCountInString(d) <= 2 {
+			return d
+		}
+		return m
+	})
+}
+
 // splitStatements splits a line at the semicolons outside double quotes: mermaid allows several
-// statements on one line.
+// statements on one line. A semicolon that ends an entity code (#59;) is not a separator.
 func splitStatements(line string) []string {
 	var out []string
 	inQuote, start := false, 0
@@ -188,6 +230,9 @@ func splitStatements(line string) []string {
 		case r == '"':
 			inQuote = !inQuote
 		case r == ';' && !inQuote:
+			if entityEndRe.MatchString(line[start:i]) {
+				continue
+			}
 			out = append(out, line[start:i])
 			start = i + 1
 		}
