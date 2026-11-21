@@ -111,6 +111,9 @@ func owningProject(root string, target contract.Target) (string, error) {
 	if dir != "" {
 		return dir, nil
 	}
+	if target.Scope != nil {
+		return resolvedPath(target.Scope.Root)
+	}
 	if git := GitRoot(root); git != "" {
 		return resolvedPath(git)
 	}
@@ -137,7 +140,7 @@ func packageManifest(root string, target contract.Target) (string, string, error
 	if err != nil {
 		return fail(err)
 	}
-	boundary := GitRoot(root)
+	boundary := targetScopeRoot(root, target)
 	home := ""
 	if boundary == "" {
 		home = contract.HomeBoundary(start)
@@ -196,7 +199,7 @@ func packageManifest(root string, target contract.Target) (string, string, error
 // RegistrationIdentity uses the owning manifest folder with or without Git.
 // An explicit package_id changes the identity value, not its project boundary.
 func RegistrationIdentity(obsDir string, target contract.Target) (string, error) {
-	root := Root(obsDir)
+	root := Root(obsDir, target.Scope)
 	id, base, err := packageIdentityLocation(root, target)
 	if err != nil {
 		return "", err
@@ -214,4 +217,11 @@ func RegistrationIdentity(obsDir string, target contract.Target) (string, error)
 		return "", err
 	}
 	return id + ":" + filepath.ToSlash(relative), nil
+}
+
+func targetScopeRoot(root string, target contract.Target) string {
+	if target.Scope != nil {
+		return target.Scope.Root
+	}
+	return GitRoot(root)
 }

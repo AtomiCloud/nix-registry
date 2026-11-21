@@ -35,4 +35,4 @@ func RelPath(name string) string {
 }
 
 // Rel is RelPath of the contract's own file.
-func (c *Contract) Rel() string { return RelPath(c.File) }
+func (c *Contract) Rel() string { return c.Scope.Rel(c.File) }

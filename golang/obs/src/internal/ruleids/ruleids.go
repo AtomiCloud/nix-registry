@@ -53,11 +53,26 @@ func OthersSkip(dir string) ([]Rule, *contract.RepoSkip, error) {
 
 // OthersScopeSkip extends the same uid check to source exports in --all mode.
 func OthersScopeSkip(dir string, project bool) ([]Rule, *contract.RepoSkip, error) {
+	return othersScope(dir, project, nil)
+}
+
+func OthersInScope(dir string, scope *contract.Scope) ([]Rule, *contract.RepoSkip, error) {
+	return othersScope(dir, false, scope)
+}
+
+func othersScope(dir string, project bool, scope *contract.Scope) ([]Rule, *contract.RepoSkip, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, nil, err
 	}
-	folders, skip, err := contract.FoldersScopeSkip(abs, project)
+	var folders []string
+	var skip *contract.RepoSkip
+	if scope != nil {
+		folders, err = scope.Folders()
+		skip = scope.Skip
+	} else {
+		folders, skip, err = contract.FoldersScopeSkip(abs, project)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -66,7 +81,7 @@ func OthersScopeSkip(dir string, project bool) ([]Rule, *contract.RepoSkip, erro
 		if f == abs || contract.SameFile(f, abs) { // a symlinked --dir is the same folder as its target
 			continue
 		}
-		rs, err := read(f, skip)
+		rs, err := read(f, skip, scope)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -84,11 +99,26 @@ func All(dir string) ([]Clash, error) {
 
 // AllScope uses the same project boundary as repository-wide commands.
 func AllScope(dir string, project bool) ([]Clash, error) {
+	return allScope(dir, project, nil)
+}
+
+func AllInScope(dir string, scope *contract.Scope) ([]Clash, error) {
+	return allScope(dir, false, scope)
+}
+
+func allScope(dir string, project bool, scope *contract.Scope) ([]Clash, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
 	}
-	folders, skip, err := contract.FoldersScopeSkip(abs, project)
+	var folders []string
+	var skip *contract.RepoSkip
+	if scope != nil {
+		folders, err = scope.Folders()
+		skip = scope.Skip
+	} else {
+		folders, skip, err = contract.FoldersScopeSkip(abs, project)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +127,7 @@ func AllScope(dir string, project bool) ([]Clash, error) {
 	}
 	var all []Rule
 	for _, f := range folders {
-		rs, err := read(f, skip)
+		rs, err := read(f, skip, scope)
 		if err != nil {
 			return nil, err
 		}
@@ -133,7 +163,11 @@ func Find(rules []Rule, mine map[string]bool) []Clash {
 // read is the rules of one observability folder, files named relative to the Git root. A rule file below a folder
 // the discovery walk prunes (git-ignored, a nested repository, a chart's copy) is not a definition of its uid: the
 // folder's alerts/ is read with the same rule as the folders themselves.
-func read(folder string, skip *contract.RepoSkip) ([]Rule, error) {
+func read(folder string, skip *contract.RepoSkip, scopes ...*contract.Scope) ([]Rule, error) {
+	var scope *contract.Scope
+	if len(scopes) > 0 {
+		scope = scopes[0]
+	}
 	set, err := files.LoadSkip(folder, func(p string) bool { return skip.Skips(folder, p) }) // pruned before it is read
 	if err != nil {
 		return nil, err
@@ -144,7 +178,7 @@ func read(folder string, skip *contract.RepoSkip) ([]Rule, error) {
 		if id == "" {
 			continue // a rule with no uid and no name is that folder's own failure
 		}
-		out = append(out, Rule{ID: id, File: contract.RelPath(filepath.Join(folder, r.File))})
+		out = append(out, Rule{ID: id, File: scope.Rel(filepath.Join(folder, r.File))})
 	}
 	return out, nil
 }

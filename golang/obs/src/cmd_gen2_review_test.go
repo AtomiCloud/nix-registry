@@ -9,6 +9,7 @@ import (
 
 func TestAllGenerationGoWorkspaceExport(t *testing.T) {
 	root := repo(t, map[string]string{"go.work": "go 1.27.4\nuse (\n./apps/orders\n./apps/billing\n)\n"})
+	t.Chdir(root)
 	for _, feature := range []string{"orders", "billing"} {
 		gen2Write(t, root, "apps/"+feature+"/go.mod", "module example.com/"+feature+"\ngo 1.27.4\n")
 		gen2Write(t, root, "apps/"+feature+"/observability/contract.yaml", "service: shop\nlogs: {Failed: {event: "+feature+".failed, level: error}}\ngenerate: [{lang: go, out: gen}]\n")
@@ -34,6 +35,7 @@ func TestAdditionalSourceExportMarkers(t *testing.T) {
 	for _, marker := range []string{"Shop.slnx", "flake.nix"} {
 		t.Run(marker, func(t *testing.T) {
 			root := repo(t, map[string]string{marker: ""})
+			t.Chdir(root)
 			lang := "go"
 			for _, feature := range []string{"orders", "billing"} {
 				if marker == "Shop.slnx" {
@@ -110,6 +112,7 @@ func TestDotnetBuildImportOrder(t *testing.T) {
 
 func TestAllCheckSourceExportRetainsCrossContractChecks(t *testing.T) {
 	root := repo(t, map[string]string{"package.json": `{"name":"shop"}`})
+	t.Chdir(root)
 	for _, feature := range []string{"one", "two"} {
 		gen2Write(t, root, "observability/"+feature+"/contract.yaml", "service: shop\nmetrics: {shop.requests: {kind: counter}}\n")
 	}
@@ -175,6 +178,7 @@ func TestAllChecksIncludeContractlessObservabilityFolders(t *testing.T) {
 				"observability/feature/seed.yaml":     seedDoc,
 				"observability/shared/seed.yaml":      seedDoc,
 			})
+			t.Chdir(root)
 			folder := filepath.Join(root, "observability/shared", kind)
 			if err := os.MkdirAll(folder, 0755); err != nil {
 				t.Fatal(err)

@@ -93,6 +93,26 @@ else
   echo "FAIL targets Remove did not exclude generated file: ${items:-} ${out:-}"
   fail=1
 fi
+mv "$work/wrong-assembly/Directory.Build.targets" "$work/wrong-assembly/inactive.targets"
+cat >"$work/wrong-assembly/Directory.Build.props" <<'XML'
+<Project><PropertyGroup><EnableDefaultItems>false</EnableDefaultItems><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup></Project>
+XML
+sed -i 's|<Nullable>enable</Nullable>|<Nullable>enable</Nullable><EnableDefaultItems>true</EnableDefaultItems><EnableDefaultCompileItems>true</EnableDefaultCompileItems>|' "$work/wrong-assembly/App.csproj"
+if items=$("$DOTNET" msbuild "$work/wrong-assembly/App.csproj" -getItem:Compile -nologo) &&
+  grep -Eq '"Identity"[[:space:]]*:[[:space:]]*"Signals[.]g[.]cs"' <<<"$items"; then
+  if out=$(build "$work/wrong-assembly/App.csproj"); then
+    echo "FAIL default-item properties latched false; App must compile generated carriers and fail"
+    fail=1
+  elif grep -q 'error CS1729' <<<"$out"; then
+    echo "PASS project true overrides props false: SDK Compile includes Signals.g.cs and App is refused (CS1729)"
+  else
+    echo "FAIL property-order control lacks constructor diagnostic: $out"
+    fail=1
+  fi
+else
+  echo "FAIL project true did not restore default Compile items: ${items:-}"
+  fail=1
+fi
 d="$work/good"
 cat >"$d/App/App.csproj" <<'XML'
 <Project Sdk="Microsoft.NET.Sdk">

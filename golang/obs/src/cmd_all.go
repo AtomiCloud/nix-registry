@@ -5,14 +5,17 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 
 	"github.com/AtomiCloud/obs/internal/contract"
+	"github.com/AtomiCloud/obs/internal/files"
+	"github.com/AtomiCloud/obs/internal/gen"
 )
 
 // runAll reuses each command with its original options, changing only --dir.
 // Success is one summary per contract; failures keep their detailed diagnostics.
-func runAll(cmd string, fs *flag.FlagSet, dir string, stdout, stderr io.Writer, runner func([]string, io.Writer, io.Writer) int) int {
+func runAll(cmd string, fs *flag.FlagSet, dir string, stdout, stderr io.Writer, runner func([]string, io.Writer, io.Writer, *contract.Scope) int) int {
 	if fs.NArg() != 0 {
 		fmt.Fprintf(stderr, "%s --all: unexpected argument %q\n", cmd, fs.Arg(0))
 		return 2
@@ -23,7 +26,21 @@ func runAll(cmd string, fs *flag.FlagSet, dir string, stdout, stderr io.Writer, 
 			return 2
 		}
 	}
-	paths, err := contract.DiscoverAll(dir)
+	root := gen.GitRoot(dir)
+	if root == "" {
+		var err error
+		root, err = os.Getwd()
+		if err != nil {
+			fmt.Fprintf(stderr, "%s --all: %v\n", cmd, err)
+			return 2
+		}
+	}
+	scope, err := contract.NewScope(root)
+	if err != nil {
+		fmt.Fprintf(stderr, "%s --all: %v\n", cmd, err)
+		return 2
+	}
+	paths, err := scope.Contracts()
 	if err != nil {
 		fmt.Fprintf(stderr, "%s --all: %v\n", cmd, err)
 		return 2
@@ -37,7 +54,7 @@ func runAll(cmd string, fs *flag.FlagSet, dir string, stdout, stderr io.Writer, 
 		folders = append(folders, filepath.Dir(file))
 	}
 	if cmd == "obs check" || cmd == "obs test" {
-		folders, _, err = contract.FoldersScopeSkip(dir, true)
+		folders, err = scope.Folders()
 		if err != nil {
 			fmt.Fprintf(stderr, "%s --all: %v\n", cmd, err)
 			return 2
@@ -53,7 +70,7 @@ func runAll(cmd string, fs *flag.FlagSet, dir string, stdout, stderr io.Writer, 
 	for _, folder := range folders {
 		var out, errb bytes.Buffer
 		selected := append(append([]string(nil), args...), "--dir="+folder)
-		rc := runner(selected, &out, &errb)
+		rc := runner(selected, &out, &errb, scope)
 		status := "ok"
 		if rc != 0 {
 			status = "FAILED"
@@ -66,14 +83,21 @@ func runAll(cmd string, fs *flag.FlagSet, dir string, stdout, stderr io.Writer, 
 			_, _ = stdout.Write(out.Bytes())
 			_, _ = stderr.Write(errb.Bytes())
 		}
-		label := contract.RelPath(folder) + "/"
+		label := scope.Rel(folder) + "/"
 		for _, file := range paths {
 			if filepath.Dir(file) == folder {
-				label = contract.RelPath(file)
+				label = scope.Rel(file)
 				break
 			}
 		}
 		fmt.Fprintf(stdout, "%s --all: %s: %s\n", cmd, label, status)
 	}
 	return result
+}
+
+func loadScopedFiles(dir string, scope *contract.Scope) (*files.Set, error) {
+	if scope == nil {
+		return files.Load(dir)
+	}
+	return files.LoadSkip(dir, func(file string) bool { return scope.Skips(dir, file) })
 }

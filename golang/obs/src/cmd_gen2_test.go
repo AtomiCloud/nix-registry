@@ -156,6 +156,7 @@ func TestGenerationMultipleProjectsErrorWrap(t *testing.T) {
 
 func TestAllCommandsVisitEveryContract(t *testing.T) {
 	root := repo(t, map[string]string{"package.json": `{"name":"shop"}`})
+	t.Chdir(root)
 	for _, feature := range []string{"orders", "billing"} {
 		gen2Write(t, root, "observability/"+feature+"/contract.yaml", "service: checkout\nlogs: {Failed: {event: "+feature+".failed, level: error}}\ngenerate: [{lang: bun, out: gen/"+feature+"}]\n")
 		gen2Write(t, root, "observability/"+feature+"/seed.yaml", seedDoc)
@@ -238,6 +239,7 @@ func TestAllGenerationInStandaloneObservabilityRepo(t *testing.T) {
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	t.Chdir(root)
 	for _, git := range []bool{true, false} {
 		if !git {
 			if err := os.RemoveAll(filepath.Join(root, ".git")); err != nil {

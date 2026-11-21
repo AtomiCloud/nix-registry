@@ -43,12 +43,12 @@ func checkDotnetAssembly(root string, target contract.Target) error {
 	if _, err := os.Stat(root); os.IsNotExist(err) {
 		return nil
 	}
-	projects, err := contract.ProjectFiles(root, ".csproj")
+	projects, err := contract.ProjectFiles(root, ".csproj", target.Scope)
 	if err != nil {
 		return err
 	}
 	generated := filepath.Join(root, filepath.FromSlash(target.Out), "Signals.g.cs")
-	scope := GitRoot(root)
+	scope := targetScopeRoot(root, target)
 	if scope == "" {
 		scope = contract.ProjectRoot(root)
 	}
@@ -69,18 +69,17 @@ func checkDotnetConsumer(file, generated, scope string, target contract.Target) 
 		return fmt.Errorf("generate dotnet project %s: %w", file, err)
 	}
 	if err := xml.Unmarshal(body, &project); err != nil {
-		return fmt.Errorf("generate dotnet project %s: %w", contract.RelPath(file), err)
+		return fmt.Errorf("generate dotnet project %s: %w", target.Scope.Rel(file), err)
 	}
-	props, err := dotnetBuildImport(file, scope, "Directory.Build.props")
+	props, err := dotnetBuildImport(file, scope, "Directory.Build.props", target.Scope)
 	if err != nil {
 		return err
 	}
-	targets, err := dotnetBuildImport(file, scope, "Directory.Build.targets")
+	targets, err := dotnetBuildImport(file, scope, "Directory.Build.targets", target.Scope)
 	if err != nil {
 		return err
 	}
 	project.Properties = append(props.Properties, project.Properties...)
-	beforeTargets := len(project.Properties)
 	project.Properties = append(project.Properties, targets.Properties...)
 	rel, err := filepath.Rel(filepath.Dir(file), generated)
 	if err != nil {
@@ -88,9 +87,10 @@ func checkDotnetConsumer(file, generated, scope string, target contract.Target) 
 	}
 	name := strings.TrimSuffix(filepath.Base(file), ".csproj")
 	defaultCompiles := (project.SDK != "" || len(project.SDKs) > 0) && within(filepath.Dir(file), generated)
+	defaultItems, defaultCompileItems := true, true
 	compiles := false
 	uncertainName := false
-	for index, props := range project.Properties {
+	for _, props := range project.Properties {
 		if conditionFalse(props.Condition) {
 			continue
 		}
@@ -100,13 +100,22 @@ func checkDotnetConsumer(file, generated, scope string, target contract.Target) 
 			}
 			continue
 		}
-		if index < beforeTargets && (strings.EqualFold(strings.TrimSpace(props.DefaultItems), "false") || strings.EqualFold(strings.TrimSpace(props.DefaultCompile), "false")) {
-			defaultCompiles = false
+		for _, value := range []struct {
+			text string
+			to   *bool
+		}{{props.DefaultItems, &defaultItems}, {props.DefaultCompile, &defaultCompileItems}} {
+			switch strings.ToLower(strings.TrimSpace(value.text)) {
+			case "true":
+				*value.to = true
+			case "false":
+				*value.to = false
+			}
 		}
 		if value := strings.TrimSpace(props.AssemblyName); value != "" {
 			name = value
 		}
 	}
+	defaultCompiles = defaultCompiles && defaultItems && defaultCompileItems
 	applyItems := func(part dotnetProject) {
 		for _, group := range part.Items {
 			if conditionFalse(group.Condition) {
@@ -136,29 +145,29 @@ func checkDotnetConsumer(file, generated, scope string, target contract.Target) 
 		return nil
 	}
 	if uncertainName || literalMSBuild(name) == "" {
-		return fmt.Errorf("generate dotnet out: %q: project %s has a computed or conditional AssemblyName %q; cannot verify the required Signals assembly without evaluating MSBuild; use a literal AssemblyName Signals", target.Out, contract.RelPath(file), name)
+		return fmt.Errorf("generate dotnet out: %q: project %s has a computed or conditional AssemblyName %q; cannot verify the required Signals assembly without evaluating MSBuild; use a literal AssemblyName Signals", target.Out, target.Scope.Rel(file), name)
 	}
 	if name == "Signals" {
 		return nil
 	}
-	return fmt.Errorf("generate dotnet out: %q: project %s may compile Signals.g.cs with AssemblyName %q; internal carrier constructors require assembly name Signals; compile generated files in a Signals project (exclude them from the app and reference that project)", target.Out, contract.RelPath(file), name)
+	return fmt.Errorf("generate dotnet out: %q: project %s may compile Signals.g.cs with AssemblyName %q; internal carrier constructors require assembly name Signals; compile generated files in a Signals project (exclude them from the app and reference that project)", target.Out, target.Scope.Rel(file), name)
 }
 
 // MSBuild automatically imports the nearest Directory.Build.props/targets. Literal
 // compile items there are relative to the importing project, as in MSBuild.
-func dotnetBuildImport(project, scope, name string) (dotnetProject, error) {
+func dotnetBuildImport(project, scope, name string, source *contract.Scope) (dotnetProject, error) {
 	var props dotnetProject
 	for dir := filepath.Dir(project); within(scope, dir); dir = filepath.Dir(dir) {
 		file := filepath.Join(dir, name)
 		body, err := os.ReadFile(file)
 		if err == nil {
 			if err := xml.Unmarshal(body, &props); err != nil {
-				return props, fmt.Errorf("generate dotnet import %s: %w", contract.RelPath(file), err)
+				return props, fmt.Errorf("generate dotnet import %s: %w", source.Rel(file), err)
 			}
 			return props, nil
 		}
 		if !os.IsNotExist(err) {
-			return props, fmt.Errorf("generate dotnet import %s: %w", contract.RelPath(file), err)
+			return props, fmt.Errorf("generate dotnet import %s: %w", source.Rel(file), err)
 		}
 		if dir == scope || filepath.Dir(dir) == dir {
 			break

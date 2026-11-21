@@ -52,6 +52,7 @@ type Query struct {
 }
 
 type Project struct {
+	Scope           *contract.Scope
 	Dir             string
 	Seed            seed.Seed
 	Incidents       []Incident
@@ -61,7 +62,11 @@ type Project struct {
 }
 
 func loadProject(dir, seedPath string, allowEmptyExpect bool) (*Project, error) {
-	set, err := files.Load(dir)
+	return loadProjectScope(dir, seedPath, allowEmptyExpect, nil)
+}
+
+func loadProjectScope(dir, seedPath string, allowEmptyExpect bool, scope *contract.Scope) (*Project, error) {
+	set, err := files.LoadSkip(dir, func(file string) bool { return scope.Skips(dir, file) })
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +91,7 @@ func loadProject(dir, seedPath string, allowEmptyExpect bool) (*Project, error) 
 	if err != nil {
 		return nil, err
 	}
-	p := &Project{Dir: dir, Seed: *sd, Incidents: incs, Files: map[string][]byte{}, Gap: 30 * time.Minute}
+	p := &Project{Dir: dir, Scope: scope, Seed: *sd, Incidents: incs, Files: map[string][]byte{}, Gap: 30 * time.Minute}
 	p.Files["seed.yaml"], err = os.ReadFile(seedPath)
 	if err != nil {
 		return nil, err
@@ -312,11 +317,11 @@ func ptrs(is []Incident) []*Incident {
 // observability folder, or a folder outside any Git repository, has nothing to compare with. The error names
 // both alert files (relative to the Git root), one clash a line.
 func RepoRuleIDs(p *Project) error {
-	return repoRuleIDs(p, false)
+	return repoRuleIDs(p, nil)
 }
 
-func repoRuleIDs(p *Project, projectScope bool) error {
-	others, skip, err := ruleids.OthersScopeSkip(p.Dir, projectScope)
+func repoRuleIDs(p *Project, scope *contract.Scope) error {
+	others, skip, err := ruleids.OthersInScope(p.Dir, scope)
 	if err != nil {
 		return err
 	}
@@ -333,7 +338,7 @@ func repoRuleIDs(p *Project, projectScope bool) error {
 		if skip.Skips(absDir, filepath.Join(absDir, a.File)) {
 			continue // an ignored or nested-repository copy inside this folder: not a definition (the local parser is unchanged)
 		}
-		file := contract.RelPath(filepath.Join(p.Dir, a.File))
+		file := scope.Rel(filepath.Join(p.Dir, a.File))
 		mine = append(mine, ruleids.Rule{ID: a.ID, File: file})
 		mineFiles[file] = true
 	}

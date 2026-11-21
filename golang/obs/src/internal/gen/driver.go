@@ -34,15 +34,15 @@ const (
 const EventField = "durian.cloud/event"
 
 // Root is the output base shared by both supported observability layouts.
-func Root(obsDir string) string {
-	return contract.OutputBase(obsDir)
+func Root(obsDir string, scopes ...*contract.Scope) string {
+	return contract.OutputBase(obsDir, scopes...)
 }
 
 // Plan returns every file `obs gen` writes for a valid contract: the contract files and one
 // set per `generate:` target (all of them when langs is empty, else only those languages).
 // The result is sorted by path; two targets that write the same path are an error.
 func Plan(c *contract.Contract, obsDir string, langs []string) ([]Output, error) {
-	root := Root(obsDir)
+	root := Root(obsDir, c.Scope)
 	abs, _ := filepath.Abs(obsDir)
 	rel, err := filepath.Rel(root, abs)
 	if err != nil {
@@ -67,7 +67,8 @@ func Plan(c *contract.Contract, obsDir string, langs []string) ([]Output, error)
 	for _, l := range langs {
 		want[l] = true
 	}
-	git := GitRoot(root)
+	git := ""
+	if c.Scope != nil { git = c.Scope.Root } else { git=GitRoot(root) }
 	for _, t := range c.Generate {
 		if len(want) > 0 && !want[t.Lang] {
 			continue
@@ -259,12 +260,20 @@ func Check(root string, outs []Output, c *contract.Contract, langs ...string) ([
 	contractPath := ContractPath(c)
 	extensions := map[string]string{".go": "go", ".cs": "dotnet", ".dart": "dart", ".ts": "bun", ".yaml": ""}
 	walkRoot := root
-	if git := GitRoot(root); git != "" {
+	if c.Scope != nil {
+		walkRoot = c.Scope.Root
+	} else if git := GitRoot(root); git != "" {
 		walkRoot = git
 	}
 	err = filepath.WalkDir(walkRoot, func(p string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
+		}
+		if c.Scope.Skips(walkRoot, p) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		if entry.IsDir() {
 			if p != walkRoot {

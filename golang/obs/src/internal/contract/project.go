@@ -11,14 +11,19 @@ import (
 // OutputBase is the folder holding the nearest observability/ ancestor. Both
 // feature/observability and observability/feature resolve from that same rule.
 // A standalone observability repository resolves outputs from its own root.
-func OutputBase(dir string) string {
+func OutputBase(dir string, scopes ...*Scope) string {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		abs = dir
 	}
-	boundary := gitRoot(abs)
-	if boundary == "" {
-		boundary = ProjectRoot(abs)
+	boundary := ""
+	if len(scopes) > 0 && scopes[0] != nil {
+		boundary = scopes[0].Root
+	} else {
+		boundary = gitRoot(abs)
+		if boundary == "" {
+			boundary = ProjectRoot(abs)
+		}
 	}
 	for folder := abs; ; folder = filepath.Dir(folder) {
 		if folder == boundary {
@@ -31,7 +36,7 @@ func OutputBase(dir string) string {
 			break
 		}
 	}
-	if rootIsObservability(boundary) {
+	if rootIsObservability(boundary,scopes...) {
 		return boundary
 	}
 	return filepath.Dir(abs)
@@ -39,16 +44,23 @@ func OutputBase(dir string) string {
 
 // ProjectFiles finds source project files using the repository discovery skips.
 // It does not require an observability folder around the project itself.
-func ProjectFiles(dir, suffix string) ([]string, error) {
+func ProjectFiles(dir, suffix string, scopes ...*Scope) ([]string, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
 	}
-	root := gitRoot(abs)
-	if root == "" {
-		root = ProjectRoot(abs)
+	root := ""
+	var skip *walkSkip
+	if len(scopes) > 0 && scopes[0] != nil {
+		root = scopes[0].Root
+		skip = scopes[0].Skip.w
+	} else {
+		root = gitRoot(abs)
+		if root == "" {
+			root = ProjectRoot(abs)
+		}
+		skip = newWalkSkip(root, abs)
 	}
-	skip := newWalkSkip(root, abs)
 	var files []string
 	err = filepath.WalkDir(root, func(file string, entry fs.DirEntry, err error) error {
 		if err != nil {

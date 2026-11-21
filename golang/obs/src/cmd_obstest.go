@@ -26,10 +26,10 @@ import (
 // Exit 0 when every part passes, 1 when a part failed, 2 on a usage or input error. The old commands
 // stay (their output is unchanged); this is their grouped form.
 func runTest(args []string, stdout, stderr io.Writer) int {
-	return runTestScope(args, stdout, stderr, false)
+	return runTestScope(args, stdout, stderr, nil)
 }
 
-func runTestScope(args []string, stdout, stderr io.Writer, projectScope bool) int {
+func runTestScope(args []string, stdout, stderr io.Writer, scope *contract.Scope) int {
 	fs := flag.NewFlagSet("obs test", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	all := fs.Bool("all", false, "run once per discovered contract, using repository discovery skips")
@@ -49,9 +49,7 @@ func runTestScope(args []string, stdout, stderr io.Writer, projectScope bool) in
 		return 2
 	}
 	if *all {
-		return runAll("obs test", fs, *dir, stdout, stderr, func(args []string, out, err io.Writer) int {
-			return runTestScope(args, out, err, true)
-		})
+		return runAll("obs test", fs, *dir, stdout, stderr, runTestScope)
 	}
 	if fs.NArg() != 0 || *workers < 0 {
 		fmt.Fprintln(stderr, "obs test: unexpected argument or negative --workers")
@@ -74,7 +72,7 @@ func runTestScope(args []string, stdout, stderr io.Writer, projectScope bool) in
 	if rc := gateObsYaml(of, "obs test", stdout); rc != 0 {
 		return rc
 	}
-	set, err := files.Load(*dir)
+	set, err := loadScopedFiles(*dir, scope)
 	if err != nil {
 		fmt.Fprintf(stderr, "obs test: %v\n", err)
 		return 2
@@ -101,7 +99,7 @@ func runTestScope(args []string, stdout, stderr io.Writer, projectScope bool) in
 	}
 
 	// 1. queries: obs query --live
-	co := check.Options{Dir: *dir, SeedPath: *seedPath, VLSettings: *vlSettings, TempoConfig: *tempoConfig, Base: *base, Names: *names, EventRule: *eventRule, Obs: of, Out: stdout, NoOtherContracts: *contracts == "none", ProjectScope: projectScope, AllowEmpty: true}
+	co := check.Options{Dir: *dir, SeedPath: *seedPath, VLSettings: *vlSettings, TempoConfig: *tempoConfig, Base: *base, Names: *names, EventRule: *eventRule, Obs: of, Out: stdout, NoOtherContracts: *contracts == "none", Scope: scope, AllowEmpty: true}
 	rep, err := queryReport(set, co, true)
 	if err != nil {
 		fmt.Fprintf(stderr, "obs test: queries: %v\n", err)
@@ -122,7 +120,7 @@ func runTestScope(args []string, stdout, stderr io.Writer, projectScope bool) in
 		fmt.Fprintf(stdout, "note: no alert rules under %s/alerts: obs alerts has nothing to run\n", *dir)
 		part("alerts", "0 alerts", 0)
 	} else {
-		ao := alerts.Options{Dir: *dir, SeedPath: *seedPath, Out: *out, Steps: *steps, Recorded: *recorded, VLSettings: *vlSettings, TempoConfig: *tempoConfig, Obs: of, Base: *base, Workers: *workers, EventRule: *eventRule, AllowEmptyExpect: true, NoOtherContracts: *contracts == "none", ProjectScope: projectScope}
+		ao := alerts.Options{Dir: *dir, SeedPath: *seedPath, Out: *out, Steps: *steps, Recorded: *recorded, VLSettings: *vlSettings, TempoConfig: *tempoConfig, Obs: of, Base: *base, Workers: *workers, EventRule: *eventRule, AllowEmptyExpect: true, NoOtherContracts: *contracts == "none", Scope: scope}
 		var rc int
 		res, rc = alerts.CheckResult(ao, stdout, stderr)
 		total := "the run stopped before its verdicts"
@@ -136,7 +134,7 @@ func runTestScope(args []string, stdout, stderr io.Writer, projectScope bool) in
 	// declares no spans AND no query is TraceQL. A contract that declares spans (or a TraceQL query) with a seed
 	// that has no traces is a real finding of obs links, so obs test runs it.
 	sd, serr := seed.Load(sp)
-	if serr == nil && sd.Traces.IsZero() && !tracesExpected(set, *dir) {
+	if serr == nil && sd.Traces.IsZero() && !tracesExpectedScope(set, *dir, scope) {
 		lines = append(lines, "obs test: links: skipped: the seed has no traces and nothing declares or queries any (no contract span, no TraceQL query), so there is no trace, log or profile link to follow")
 	} else {
 		lr, seedFile, rc := linksReport(*dir, *seedPath, *base, stderr)
@@ -187,16 +185,23 @@ func runTestScope(args []string, stdout, stderr io.Writer, projectScope bool) in
 // tracesExpected is true when the folder declares spans in contract.yaml or has a TraceQL query, so a seed
 // without traces cannot be skipped over. A contract that cannot be read counts as expecting them (obs links then says why).
 func tracesExpected(set *files.Set, dir string) bool {
+	return tracesExpectedScope(set, dir, nil)
+}
+
+func tracesExpectedScope(set *files.Set, dir string, scope *contract.Scope) bool {
 	for _, q := range set.Queries {
 		if q.Kind == files.Traces {
 			return true
 		}
 	}
 	cpath := filepath.Join(dir, "contract.yaml")
+	if scope.Skips(dir, cpath) {
+		return false
+	}
 	if _, err := os.Stat(cpath); err != nil {
 		return !os.IsNotExist(err)
 	}
-	c, err := contract.Load(cpath)
+	c, err := contract.LoadInScope(cpath, scope)
 	return err != nil || len(c.SpanOrder) > 0
 }
 

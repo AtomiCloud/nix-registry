@@ -868,6 +868,8 @@ topmost ancestor below the home directory containing a project marker (`.sln`, `
 `flake.nix`, `go.work`, `go.mod`, `package.json`, `pubspec.yaml`),
 or the observability project's base when there is no marker. Feature paths stay distinct, and a complete
 source export with its project marker can run `obs gen --check` or regenerate without an empty `.git` workaround.
+The `--all` modes instead fix the source-export root to the current directory once for every child,
+including headers and identity fallback, so independent modules need no shared root marker.
 A Docker build context must be the repository root for `obs gen --check` to match the checkout.
 Each generated-file destination must be a regular file or absent. A symlink at the file itself,
 including a dangling symlink, is refused before any file is written. Directory aliases are allowed
@@ -916,8 +918,9 @@ A matching unconditional `Compile Remove` is honored in the project or in the ne
 `Directory.Build.targets` between the project and the scope root. A `Remove` in `Directory.Build.props`
 runs before the SDK adds its default `Compile` items and does not exclude those files; put the removal
 in the `.csproj` or `Directory.Build.targets`. Real MSBuild item-list and compiler controls test both orders.
-The static check reads SDK defaults and literal
-`Compile Include`/`Remove`, not the full MSBuild import graph. A computed
+obs reads literal properties and Compile items in `.csproj`, `Directory.Build.props` and
+`Directory.Build.targets` in MSBuild order; Conditions, imports and other targets are not evaluated
+(the .NET Nix suite compares with real MSBuild). A computed
 or conditional assembly name that cannot be verified requires a literal `AssemblyName` of `Signals`.
 Package identity still comes from the nearest manifest at `out:`; this may be the app project even
 when the separate Signals project compiles the file. Use `package_id:` to pin identity if needed.
@@ -1001,9 +1004,13 @@ Their summary names the folder. At least one contract is still required.
 Failures retain their diagnostics and do not prevent the remaining folders from running. Exit 0 means
 every folder passed, 1 means a check failed, and 2 means an input or enumeration error. No contracts
 found is an error, never a successful zero-check run. The CI static-check recipe is `obs check --all`.
-Discovery shares the normal fixture/dependency, Git-ignore, nested-repository and chart-copy skips;
-outside Git it scans the topmost project folder described above. `--dir` chooses the repository/project
-to enumerate, and existing options are forwarded to each run. Cross-contract metric-name, query and
+Run `--all` from the repository root, including inside a Docker context or Git-less export. Outside
+Git the current directory is the export root; it is resolved once and passed to every child scan,
+header and identity calculation, without re-inferring a root from each module. In Git, `--dir` chooses
+the repository. Discovery and each folder's loads share the fixture/dependency, Git-ignore,
+nested-repository and chart-copy skips: ignored contract files, alert folders and dashboards do not
+become candidates or get read through a shared folder. Existing options are forwarded to each run.
+Cross-contract metric-name, query and
 rule-uid checks use that same scope in `--all` mode, including a complete Git-less export. The existing
 single-folder commands keep their discovery behavior. Use separate `--dir` runs for
 `obs test --out`, `--steps` or `--recorded`: `--all` refuses a shared file export that would be overwritten.

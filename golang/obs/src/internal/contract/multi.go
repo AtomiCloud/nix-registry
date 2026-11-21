@@ -76,14 +76,21 @@ func DiscoverScope(dir string, project bool) ([]string, error) {
 	return Discover(dir)
 }
 
-func discoverAt(abs, root string, includeOwn bool) ([]string, error) {
+func discoverAt(abs, root string, includeOwn bool, scopes ...*Scope) ([]string, error) {
 	if inTestDir(root, abs) {
 		return nil, nil
 	}
 	own := filepath.Join(abs, "contract.yaml")
 	ownInfo, _ := os.Stat(own)
-	rootObs := rootIsObservability(root)
-	skip := newWalkSkip(root, abs)
+	var scope *Scope
+	var skip *walkSkip
+	if len(scopes) > 0 && scopes[0] != nil {
+		scope = scopes[0]
+		skip = scope.Skip.w
+	} else {
+		skip = newWalkSkip(root, abs)
+	}
+	rootObs := rootIsObservability(root, scope)
 	var out []string
 	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
@@ -182,9 +189,16 @@ func hasGit(p string) bool {
 // may be called anything): an obs.yaml, or a contract.yaml that reads as an obs contract (a service: and one of
 // the obs sections metrics:, logs:, spans:, platform_metrics:). A contract.yaml of something else (an OpenAPI
 // file, a package manifest) leaves the repository an ordinary one.
-func rootIsObservability(root string) bool {
-	if st, err := os.Stat(filepath.Join(root, "obs.yaml")); err == nil && st.Mode().IsRegular() {
+func rootIsObservability(root string, scopes ...*Scope) bool {
+	var scope *Scope
+	if len(scopes) > 0 {
+		scope = scopes[0]
+	}
+	if st, err := os.Stat(filepath.Join(root, "obs.yaml")); err == nil && st.Mode().IsRegular() && !scope.Skips(root, filepath.Join(root, "obs.yaml")) {
 		return true
+	}
+	if scope.Skips(root, filepath.Join(root, "contract.yaml")) {
+		return false
 	}
 	b, err := os.ReadFile(filepath.Join(root, "contract.yaml"))
 	if err != nil {

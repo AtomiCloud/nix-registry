@@ -10,6 +10,9 @@ import (
 // export instead uses its topmost ancestor containing any project marker.
 func TargetContractPaths(c *contract.Contract) ([]string, error) {
 	dir := filepath.Dir(c.File)
+	if c.Scope != nil {
+		return contract.DiscoverInScope(dir, c.Scope)
+	}
 	if GitRoot(dir) != "" {
 		return contract.Discover(dir)
 	}
@@ -24,7 +27,7 @@ func ValidGenerateConfig(c *contract.Contract) bool {
 
 func generateConfigIssues(c *contract.Contract) []string {
 	var issues []string
-	root := Root(filepath.Dir(c.File))
+	root := Root(filepath.Dir(c.File), c.Scope)
 	for _, target := range c.Generate {
 		if err := checkDotnetAssembly(root, target); err != nil {
 			issues = append(issues, err.Error())
@@ -32,7 +35,7 @@ func generateConfigIssues(c *contract.Contract) []string {
 		if err := CheckInterfaces(target.Lang, target.Interfaces); err != nil {
 			issues = append(issues, err.Error())
 		}
-		if err := checkOut(root, GitRoot(root), target.Lang, target.Out); err != nil {
+		if err := checkOut(root, targetScopeRoot(root, target), target.Lang, target.Out); err != nil {
 			issues = append(issues, err.Error())
 		}
 		if target.Lang == "dotnet" && target.Module != "" {
@@ -48,7 +51,12 @@ func generateConfigIssues(c *contract.Contract) []string {
 func targetContractNames(cs []*contract.Contract) map[*contract.Contract]string {
 	shared := ""
 	for _, c := range cs {
-		root := GitRoot(filepath.Dir(c.File))
+		root := ""
+		if c.Scope != nil {
+			root = c.Scope.Root
+		} else {
+			root=GitRoot(filepath.Dir(c.File))
+		}
 		if root == "" {
 			root = topmostProjectRoot(filepath.Dir(c.File))
 		}
