@@ -36,16 +36,47 @@ func Discover(dir string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("contract discovery: %w", err)
 	}
-	own := filepath.Join(abs, "contract.yaml")
-	ownInfo, _ := os.Stat(own) // a symlinked --dir spells its own contract another way: compare the file, not the path
 	root := gitRoot(abs)
-	if root == "" || inTestDir(root, abs) {
+	if root == "" {
 		return nil, nil
 	}
+	return discoverAt(abs, root, false)
+}
+
+// DiscoverAll enumerates every contract, including dir itself, using the same
+// pruning rules as Discover. A source export uses its topmost project boundary.
+func DiscoverAll(dir string) ([]string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, fmt.Errorf("contract discovery: %w", err)
+	}
+	root := gitRoot(abs)
+	if root == "" {
+		root = ProjectRoot(abs)
+	}
+	return discoverAt(abs, root, true)
+}
+
+// DiscoverProject is the source-export equivalent of Discover for generator
+// scope checks. General single-folder query discovery keeps its Git semantics.
+func DiscoverProject(dir string) ([]string, error) {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, fmt.Errorf("contract discovery: %w", err)
+	}
+	return discoverAt(abs, ProjectRoot(abs), false)
+}
+
+func discoverAt(abs, root string, includeOwn bool) ([]string, error) {
+	if inTestDir(root, abs) {
+		return nil, nil
+	}
+	own := filepath.Join(abs, "contract.yaml")
+	ownInfo, _ := os.Stat(own)
 	rootObs := rootIsObservability(root)
 	skip := newWalkSkip(root, abs)
 	var out []string
-	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			cause := err
 			var pe *fs.PathError
@@ -64,7 +95,7 @@ func Discover(dir string) ([]string, error) {
 			}
 			return nil
 		}
-		if d.Name() == "contract.yaml" && p != own && d.Type().IsRegular() && !sameInfo(ownInfo, p) && !skip.ignored[p] && belowObservability(root, filepath.Dir(p), rootObs, true) {
+		if d.Name() == "contract.yaml" && d.Type().IsRegular() && (includeOwn || (p != own && !sameInfo(ownInfo, p))) && !skip.ignored[p] && belowObservability(root, filepath.Dir(p), rootObs, true) {
 			out = append(out, p)
 		}
 		return nil

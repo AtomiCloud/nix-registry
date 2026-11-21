@@ -27,6 +27,7 @@ import (
 func runCheck(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("obs check", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	all := fs.Bool("all", false, "run once per discovered contract, using repository discovery skips")
 	dir := fs.String("dir", "observability", "the observability folder (holds contract.yaml)")
 	pods := fs.Int("pods", 1, "pods per landscape, for the worst case x pods line (from the landscape config)")
 	landscapes := fs.Int("landscapes", 1, "landscapes that share the log store, for the stream count")
@@ -37,6 +38,9 @@ func runCheck(args []string, stdout, stderr io.Writer) int {
 	tempoConfig := fs.String("tempo-config", "", "Tempo config file whose query_frontend end cutoff and metrics limits trace panels run under; overrides obs.yaml thresholds.traces (default Tempo 3.1.1: 30s, 24h, 10000)")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if *all {
+		return runAll("obs check", fs, *dir, stdout, stderr, runCheck)
 	}
 	if *pods < 1 || *landscapes < 1 {
 		fmt.Fprintln(stderr, "obs check: --pods and --landscapes must be at least 1")

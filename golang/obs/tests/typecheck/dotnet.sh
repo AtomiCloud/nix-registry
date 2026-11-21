@@ -44,6 +44,25 @@ XML
     fail=1
   fi
 done
+# The generated file relies on internal carrier constructors. A correctly named
+# Signals assembly compiled above; compiling the same file in App must stay red.
+mkdir -p "$work/wrong-assembly"
+cp "$here/fixtures/gen/good/gen/dotnet/Signals/Signals.g.cs" "$work/wrong-assembly/Signals.g.cs"
+cat >"$work/wrong-assembly/App.csproj" <<'XML'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>App</AssemblyName><Nullable>enable</Nullable></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../good/interfaces-stub/Obs.csproj" /></ItemGroup>
+</Project>
+XML
+if out=$(build "$work/wrong-assembly/App.csproj"); then
+  echo "FAIL generated carriers compiled inside App; constructors must remain internal to Signals"
+  fail=1
+elif grep -q 'error CS1729' <<<"$out"; then
+  echo "PASS App assembly is refused (CS1729); the same generated file compiles in Signals"
+else
+  echo "FAIL wrong assembly red without the constructor diagnostic: $out"
+  fail=1
+fi
 d="$work/good"
 cat >"$d/App/App.csproj" <<'XML'
 <Project Sdk="Microsoft.NET.Sdk">

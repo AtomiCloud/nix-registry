@@ -156,6 +156,10 @@ func TargetClashesForLanguages(cs []*contract.Contract, primary *contract.Contra
 				continue
 			}
 			current := owner{names[c], target.Lang, c}
+			if err := checkDotnetAssembly(Root(filepath.Dir(c.File)), target); err != nil {
+				issues = append(issues, fmt.Sprintf("[generate-assembly] contract %s: %v", current.file, err))
+				continue
+			}
 			if err := CheckInterfaces(target.Lang, target.Interfaces); err != nil {
 				issues = append(issues, fmt.Sprintf("[generate-interfaces] contract %s: %v", current.file, err))
 				continue

@@ -33,13 +33,9 @@ const (
 // EventField is the log field that carries the event name (concept 3.3).
 const EventField = "durian.cloud/event"
 
-// Root is the repo root for an observability folder: the folder that holds it.
+// Root is the output base shared by both supported observability layouts.
 func Root(obsDir string) string {
-	abs, err := filepath.Abs(obsDir)
-	if err != nil {
-		abs = obsDir
-	}
-	return filepath.Dir(abs)
+	return contract.OutputBase(obsDir)
 }
 
 // Plan returns every file `obs gen` writes for a valid contract: the contract files and one
@@ -77,6 +73,9 @@ func Plan(c *contract.Contract, obsDir string, langs []string) ([]Output, error)
 			continue
 		}
 		if err := checkOut(root, git, t.Lang, t.Out); err != nil {
+			return nil, err
+		}
+		if err := checkDotnetAssembly(root, t); err != nil {
 			return nil, err
 		}
 		contractID, err := RegistrationIdentity(obsDir, t)

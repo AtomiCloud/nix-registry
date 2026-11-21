@@ -36,11 +36,20 @@ func loadContract(dir, cmd string, stdout, stderr io.Writer) (c *contract.Contra
 func runGen(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("obs gen", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	all := fs.Bool("all", false, "run once per discovered contract, using repository discovery skips")
 	dir := fs.String("dir", "observability", "the observability folder (holds contract.yaml)")
 	check := fs.Bool("check", false, "regenerate into a temp dir and diff with the committed files; fail on a hand edit or a stale generate")
 	langs := fs.String("lang", "", "comma-separated languages to generate (default: every `generate:` target of the contract)")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if *all {
+		return runAll(func() string {
+			if *check {
+				return "obs gen --check"
+			}
+			return "obs gen"
+		}(), fs, *dir, stdout, stderr, runGen)
 	}
 	cmd := "obs gen"
 	if *check {

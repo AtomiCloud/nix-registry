@@ -28,6 +28,7 @@ import (
 func runTest(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("obs test", flag.ContinueOnError)
 	fs.SetOutput(stderr)
+	all := fs.Bool("all", false, "run once per discovered contract, using repository discovery skips")
 	dir := fs.String("dir", "observability", "the observability folder")
 	seedPath := fs.String("seed", "", "seed file (default <dir>/seed.yaml)")
 	base := fs.Int64("base", 0, "unix seconds of the seed's start (default: ends in the past)")
@@ -42,6 +43,9 @@ func runTest(args []string, stdout, stderr io.Writer) int {
 	recorded := fs.String("recorded", "", "write recording-rule samples as JSON (as obs alerts --recorded)")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if *all {
+		return runAll("obs test", fs, *dir, stdout, stderr, runTest)
 	}
 	if fs.NArg() != 0 || *workers < 0 {
 		fmt.Fprintln(stderr, "obs test: unexpected argument or negative --workers")
