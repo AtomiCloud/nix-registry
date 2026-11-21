@@ -209,10 +209,14 @@ func (mc *metricChecker) walk(e metricsql.Expr) labelScope {
 		}
 		mc.grouping(t.Modifier.Args, sc)
 	case *metricsql.BinaryOpExpr:
-		sc.merge(mc.walk(t.Left))
-		sc.merge(mc.walk(t.Right))
+		left, right := mc.walk(t.Left), mc.walk(t.Right)
+		sc.merge(left)
+		sc.merge(right)
 		mc.grouping(t.GroupModifier.Args, sc)
 		mc.grouping(t.JoinModifier.Args, sc)
+		if strings.EqualFold(t.Op, "unless") {
+			return left
+		}
 	}
 	return sc
 }

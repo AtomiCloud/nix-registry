@@ -13,16 +13,24 @@ import (
 	"github.com/AtomiCloud/obs/internal/contract"
 )
 
-type Orphan struct{ File, Contract string }
+type Orphan struct{ File, Contract, Unresolved string }
 
 var ownerHash = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
 // MissingOwners only recognizes complete generated headers. Discovery's scope
 // also fences cleanup, so ignored copies and nested repositories are untouched.
-func MissingOwners(scope *contract.Scope, contracts []string) ([]Orphan, error) {
+func MissingOwners(scope *contract.Scope, contracts []string, langs ...string) ([]Orphan, error) {
 	owners := map[string]bool{}
 	for _, file := range contracts {
 		owners[scope.Rel(file)] = true
+	}
+	selected := map[string]bool{}
+	for _, lang := range langs {
+		for _, name := range strings.Split(lang, ",") {
+			if name = strings.TrimSpace(name); name != "" {
+				selected[name] = true
+			}
+		}
 	}
 	var out []Orphan
 	err := filepath.WalkDir(scope.Root, func(file string, entry fs.DirEntry, err error) error {
@@ -46,6 +54,12 @@ func MissingOwners(scope *contract.Scope, contracts []string) ([]Orphan, error) 
 		}
 		if !entry.Type().IsRegular() {
 			return nil
+		}
+		if len(selected) > 0 {
+			language := map[string]string{".go": "go", ".ts": "bun", ".cs": "dotnet", ".dart": "dart"}[filepath.Ext(file)]
+			if filepath.Ext(file) != ".yaml" && !selected[language] {
+				return nil
+			}
 		}
 		// Read only the header, never a potentially large payload.
 		f, err := os.Open(file)
@@ -80,10 +94,53 @@ func MissingOwners(scope *contract.Scope, contracts []string) ([]Orphan, error) 
 		if !ownerHash.MatchString(hash) || path.IsAbs(owner) || owner != path.Clean(owner) || owner == ".." || strings.HasPrefix(owner, "../") || strings.Contains(owner, "\\") || path.Base(owner) != "contract.yaml" {
 			return nil
 		}
-		if !owners[owner] {
-			out = append(out, Orphan{file, owner})
+		if owners[owner] {
+			return nil
+		} // Positive ownership of a current --all header.
+		gone, reason := missingHeaderOwner(file, owner)
+		if gone || reason != "" {
+			out = append(out, Orphan{File: file, Contract: owner, Unresolved: reason})
 		}
 		return nil
 	})
 	return out, err
+}
+
+// Resolve historical single-folder headers from the generated file's ancestry,
+// never from the current --all selection. Existing owner candidates are positive
+// evidence only: they can prevent deletion, never prove that an owner is gone.
+func missingHeaderOwner(file, owner string) (bool, string) {
+	dir := filepath.Dir(file)
+	base := GitRoot(dir)
+	git := base != ""
+	if !git {
+		base = contract.MarkedProjectRoot(dir)
+	}
+	if base == "" {
+		return false, "cannot resolve header owner base: no Git root or project marker"
+	}
+	candidate := filepath.Join(base, filepath.FromSlash(owner))
+	if _, err := os.Lstat(candidate); err == nil {
+		return false, ""
+	} else if !os.IsNotExist(err) {
+		return false, fmt.Sprintf("cannot resolve header owner %s: %v", candidate, err)
+	}
+	if !git {
+		// Older --all headers may use an enclosing export boundary without a
+		// marker. Its presence is never used as evidence for deleting a file.
+		for ancestor := dir; ; ancestor = filepath.Dir(ancestor) {
+			other := filepath.Join(ancestor, filepath.FromSlash(owner))
+			if other != candidate {
+				if _, err := os.Lstat(other); err == nil {
+					return false, fmt.Sprintf("header owner base is uncertain: %s is absent, but %s exists", candidate, other)
+				} else if !os.IsNotExist(err) {
+					return false, fmt.Sprintf("cannot resolve header owner %s: %v", other, err)
+				}
+			}
+			if filepath.Dir(ancestor) == ancestor {
+				break
+			}
+		}
+	}
+	return true, ""
 }

@@ -86,6 +86,15 @@ func ProjectRoot(dir string) string {
 	return projectRoot(dir, home)
 }
 
+// MarkedProjectRoot is the topmost actual project marker, with no layout fallback.
+func MarkedProjectRoot(dir string) string {
+	root := ProjectRoot(dir)
+	if projectMarker(root) {
+		return root
+	}
+	return ""
+}
+
 func projectRoot(dir, home string) string {
 	if home != "" {
 		home = filepath.Clean(home)

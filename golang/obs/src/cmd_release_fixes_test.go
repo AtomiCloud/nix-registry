@@ -160,3 +160,138 @@ func TestReleasePayloadFoldersNeverBecomeCandidates(t *testing.T) {
 		}
 	}
 }
+
+func TestReviewOrphanLanguageAndOwnerForms(t *testing.T) {
+	root := repo(t, map[string]string{
+		"apps/shop/go.mod":                      "module example.com/shop\ngo 1.27.4\n",
+		"apps/shop/package.json":                `{"name":"shop"}`,
+		"apps/shop/observability/contract.yaml": "service: shop\nlogs: {Failed: {event: shop.failed, level: error}}\ngenerate: [{lang: go, out: gen/go}, {lang: bun, out: gen/bun}]\n",
+	})
+	if err := os.RemoveAll(filepath.Join(root, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	if rc, out := obs("gen", "--dir", "apps/shop/observability"); rc != 0 {
+		t.Fatal(out)
+	}
+	bun := filepath.Join(root, "apps/shop/gen/bun/signals.ts")
+	before, err := os.ReadFile(bun)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rc, out := obs("gen", "--all", "--lang=go"); rc != 0 {
+		t.Fatalf("language-filtered export generation failed: rc=%d %s", rc, out)
+	}
+	if after, err := os.ReadFile(bun); err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("unselected live Bun output deleted or changed: %v", err)
+	}
+	// A live owner remains live after changing invocation boundaries.
+	gen2Write(t, root, "apps/shop/legacy/signals.ts", string(before))
+	if rc, out := obs("gen", "--all"); rc != 0 || strings.Contains(out, "[gen-orphan]") {
+		t.Fatalf("live owner must not be an orphan: rc=%d %s", rc, out)
+	}
+	if after, err := os.ReadFile(filepath.Join(root, "apps/shop/legacy/signals.ts")); err != nil || !bytes.Equal(before, after) {
+		t.Fatalf("ambiguous live-owner alias deleted: %v", err)
+	}
+	if rc, out := obs("gen", "--check", "--all"); rc != 0 || strings.Contains(out, "[gen-orphan]") {
+		t.Fatalf("check must keep the live owner: rc=%d %s", rc, out)
+	}
+}
+
+func TestReviewUndiscoveredLiveOwnerKept(t *testing.T) {
+	root := repo(t, map[string]string{"go.mod": "module example.com/shop\ngo 1.27.4\n", "observability/current/contract.yaml": "service: current\n", "ops/telemetry/contract.yaml": "service: telemetry\ngenerate: [{lang: go, out: gen/telemetry}]\n"})
+	t.Chdir(root)
+	if rc, out := obs("gen", "--dir", "ops/telemetry"); rc != 0 {
+		t.Fatal(out)
+	}
+	file := filepath.Join(root, "ops/gen/telemetry/signals.go")
+	before, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"gen", "--all"}, {"gen", "--check", "--all"}} {
+		if rc, out := obs(args...); rc != 0 || strings.Contains(out, "[gen-orphan]") {
+			t.Fatalf("live owner outside discovery was refused: %v rc=%d %s", args, rc, out)
+		}
+		if after, err := os.ReadFile(file); err != nil || !bytes.Equal(before, after) {
+			t.Fatalf("live owner output changed or deleted: %v", err)
+		}
+	}
+}
+
+func TestReviewExportSubdirectoryKeepsLiveOwners(t *testing.T) {
+	root := repo(t, map[string]string{"go.mod": "module example.com/shop\ngo 1.27.4\n", "package.json": `{"name":"shop"}`, "apps/a/observability/contract.yaml": "service: shop\ngenerate: [{lang: go, out: gen/go, package_id: shop}, {lang: bun, out: gen/bun, package_id: shop}]\n"})
+	if err := os.RemoveAll(filepath.Join(root, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	if rc, out := obs("gen", "--dir", "apps/a/observability"); rc != 0 {
+		t.Fatal(out)
+	}
+	t.Chdir(filepath.Join(root, "apps"))
+	if rc, out := obs("gen", "--all"); rc != 0 || strings.Contains(out, "deleted") || strings.Contains(out, "[gen-orphan]") {
+		t.Fatalf("subdirectory became the wrong owner base: rc=%d %s", rc, out)
+	}
+	if rc, out := obs("gen", "--check", "--all"); rc != 0 || strings.Contains(out, "[gen-orphan]") {
+		t.Fatalf("subdirectory check has false orphans: rc=%d %s", rc, out)
+	}
+}
+
+func TestReviewLastFeatureCleanupSucceeds(t *testing.T) {
+	root := repo(t, map[string]string{"go.mod": "module example.com/shop\ngo 1.27.4\n", "observability/orders/contract.yaml": "service: shop\ngenerate: [{lang: go, out: gen/orders}]\n"})
+	t.Chdir(root)
+	if rc, out := obs("gen", "--all"); rc != 0 {
+		t.Fatal(out)
+	}
+	if err := os.RemoveAll(filepath.Join(root, "observability/orders")); err != nil {
+		t.Fatal(err)
+	}
+	if rc, out := obs("gen", "--all"); rc != 0 || !strings.Contains(out, "deleted gen/orders/signals.go") {
+		t.Fatalf("cleanup-only must succeed: rc=%d %s", rc, out)
+	}
+	if rc, out := obs("gen", "--all"); rc != 2 || !strings.Contains(out, "no contracts found") {
+		t.Fatalf("empty no-op must remain an error: rc=%d %s", rc, out)
+	}
+}
+
+func TestReviewRootContractEntryErrors(t *testing.T) {
+	for _, target := range []string{"missing", "contract.yaml"} {
+		root := repo(t, map[string]string{"observability/orders/contract.yaml": "service: shop\n", "observability/orders/seed.yaml": releaseSeed})
+		t.Chdir(root)
+		for _, cmd := range []string{"gen", "check", "test"} {
+			if rc, out := obs(cmd, "--all"); rc != 0 {
+				t.Fatalf("baseline %s: %s", cmd, out)
+			}
+		}
+		if err := os.Symlink(target, filepath.Join(root, "contract.yaml")); err != nil {
+			t.Fatal(err)
+		}
+		for _, cmd := range []string{"gen", "check", "test"} {
+			if rc, out := obs(cmd, "--all"); rc != 2 || !strings.Contains(out, filepath.Join(root, "contract.yaml")) {
+				t.Errorf("root link silently skipped by %s: rc=%d %s", cmd, rc, out)
+			}
+		}
+	}
+}
+
+func TestReviewUnresolvableOwnerIsNeverDeleted(t *testing.T) {
+	root := repo(t, map[string]string{"observability/current/contract.yaml": "service: current\n"})
+	if err := os.RemoveAll(filepath.Join(root, ".git")); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(root)
+	header := "// Code generated by obs gen. DO NOT EDIT.\n// contract: observability/missing/contract.yaml\n// contract-hash: sha256:" + strings.Repeat("0", 64) + "\n"
+	gen2Write(t, root, "gen/unknown.ts", header)
+	if rc, out := obs("gen", "--all"); rc != 0 || !strings.Contains(out, "[gen-orphan]") || !strings.Contains(out, "cannot resolve") {
+		t.Fatalf("unresolvable owner must be reported: rc=%d %s", rc, out)
+	}
+	if after, err := os.ReadFile(filepath.Join(root, "gen/unknown.ts")); err != nil || string(after) != header {
+		t.Fatalf("unresolvable file deleted or changed: %v", err)
+	}
+	if rc, out := obs("gen", "--check", "--all"); rc != 1 || !strings.Contains(out, "[gen-orphan]") {
+		t.Fatalf("check must refuse unresolved owner: rc=%d %s", rc, out)
+	}
+	if rc, out := obs("gen", "--check", "--all", "--lang=go"); rc != 0 || strings.Contains(out, "[gen-orphan]") {
+		t.Fatalf("unselected unresolved language must be left out: rc=%d %s", rc, out)
+	}
+}
